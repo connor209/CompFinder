@@ -1,0 +1,352 @@
+"use client";
+
+import { useState, useRef } from "react";
+import CompFinderPricing from "@/lib/pricing.js";
+
+const settings = CompFinderPricing.DEFAULT_SETTINGS;
+
+function pounds(pence) {
+  return pence == null ? "—" : CompFinderPricing.toPoundsStr(pence);
+}
+function fmtDate(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { year: "2-digit", month: "short", day: "numeric" });
+}
+function median(nums) {
+  if (!nums.length) return null;
+  const s = [...nums].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+
+/** Inline SVG price-trend chart, drawn from real sold dates + prices. */
+function TrendChart({ points, medianPence }) {
+  const pts = points.filter((p) => p.t).sort((a, b) => a.t - b.t);
+  if (pts.length < 2) {
+    return <p className="dd-empty">Not enough dated sales to chart a trend yet.</p>;
+  }
+  const W = 640, H = 200, padT = 14, padB = 10, padX = 8;
+  const times = pts.map((p) => p.t), vals = pts.map((p) => p.v);
+  const tMin = Math.min(...times), tMax = Math.max(...times);
+  const vMinRaw = Math.min(...vals, medianPence ?? Infinity);
+  const vMaxRaw = Math.max(...vals, medianPence ?? -Infinity);
+  const pad = (vMaxRaw - vMinRaw) * 0.15 || vMaxRaw * 0.1 || 100;
+  const vMin = vMinRaw - pad, vMax = vMaxRaw + pad;
+  const x = (t) => padX + (tMax === tMin ? 0.5 : (t - tMin) / (tMax - tMin)) * (W - 2 * padX);
+  const y = (v) => padT + (vMax - v) / (vMax - vMin) * (H - padT - padB);
+  const line = pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + " " + y(p.v).toFixed(1)).join(" ");
+  const area = `${line} L ${x(pts[pts.length - 1].t).toFixed(1)} ${H - padB} L ${x(pts[0].t).toFixed(1)} ${H - padB} Z`;
+
+  return (
+    <svg className="trend" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Sold price trend">
+      <defs>
+        <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.22" />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {medianPence != null && (
+        <line x1={padX} x2={W - padX} y1={y(medianPence)} y2={y(medianPence)} stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.5" strokeDasharray="4 4" />
+      )}
+      <path d={area} fill="url(#tg)" />
+      <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+      {pts.map((p, i) => (
+        <circle key={i} cx={x(p.t)} cy={y(p.v)} r="2.6" fill="var(--surface)" stroke="var(--accent)" strokeWidth="1.6" />
+      ))}
+    </svg>
+  );
+}
+
+export default function QuickSearch() {
+  const [q, setQ] = useState("");
+  const [sugs, setSugs] = useState([]);
+  const [openSug, setOpenSug] = useState(false);
+  const [activeSug, setActiveSug] = useState(-1);
+  const [scope, setScope] = useState("uk");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [data, setData] = useState(null);
+  const debounceRef = useRef(null);
+
+  function onInput(v) {
+    setQ(v);
+    setActiveSug(-1);
+    clearTimeout(debounceRef.current);
+    if (v.trim().length < 2) {
+      setSugs([]);
+      setOpenSug(false);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/cards/search?q=${encodeURIComponent(v.trim())}`).then((r) => r.json());
+        if (res.ok) {
+          setSugs(res.cards || []);
+          setOpenSug((res.cards || []).length > 0);
+        }
+      } catch {
+        /* typeahead is best-effort */
+      }
+    }, 250);
+  }
+
+  function onKeyDown(e) {
+    if (openSug && sugs.length) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setActiveSug((i) => (i + 1) % sugs.length); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setActiveSug((i) => (i - 1 + sugs.length) % sugs.length); return; }
+      if (e.key === "Escape") { setOpenSug(false); return; }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (activeSug >= 0) pickSug(sugs[activeSug]);
+        else runFromText();
+        return;
+      }
+    } else if (e.key === "Enter") {
+      runFromText();
+    }
+  }
+
+  function pickSug(card) {
+    setQ(`${card.name} ${card.number}`.trim());
+    setOpenSug(false);
+    runDeepDive(card);
+  }
+
+  async function runFromText() {
+    const text = q.trim();
+    if (!text) return;
+    setOpenSug(false);
+    const m = text.match(/\b([A-Za-z]{0,3}\d{1,4}\s*\/\s*[A-Za-z]{0,3}\d{1,4})\b/);
+    const number = m ? m[1].replace(/\s+/g, "") : "";
+    const name = m ? text.slice(0, m.index).trim() : text;
+    let card = { name, number, set: "", series: "", rarity: "", image: null };
+    try {
+      const lk = await fetch(`/api/cards/lookup?name=${encodeURIComponent(name)}&number=${encodeURIComponent(number)}`).then((r) => r.json());
+      if (lk.ok && lk.card) card = lk.card;
+    } catch {
+      /* fall back to what we parsed */
+    }
+    runDeepDive(card);
+  }
+
+  async function runDeepDive(card) {
+    setLoading(true);
+    setError("");
+    setData(null);
+    setScope("uk");
+    const query = `${card.name} ${card.number}`.trim();
+    const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
+    // Pull the broadest set (UK + worldwide) so we can split it locally; the
+    // recommend() call still UK-filters for the headline price.
+    const options = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
+    try {
+      const soldRes = await fetch("/api/soldcomps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, options })
+      }).then((r) => r.json());
+      if (!soldRes.ok) throw new Error(soldRes.error || "Pricing request failed.");
+      const comps = soldRes.comps || [];
+      const rec = CompFinderPricing.recommend(comps, settings, nameTokens, "sold", card.number || null, card.set || null);
+
+      let active = null;
+      try {
+        const actRes = await fetch("/api/soldcomps", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query, options: { ...options, sold: false } })
+        }).then((r) => r.json());
+        if (actRes.ok) {
+          active = CompFinderPricing.recommend(actRes.comps || [], settings, nameTokens, "active", card.number || null, card.set || null);
+        }
+      } catch {
+        /* active listings are a bonus */
+      }
+
+      setData({ card, rec, comps, active });
+    } catch (err) {
+      setError(err.message || "Something went wrong pricing that card.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ---- derived view data ----
+  let view = null;
+  if (data) {
+    const { card, rec, comps, active } = data;
+    const used = rec.included || [];
+    const totals = used.map((c) => c.totalPence);
+    const med = totals.length ? Math.round(median(totals)) : null;
+    const lo = totals.length ? Math.min(...totals) : null;
+    const hi = totals.length ? Math.max(...totals) : null;
+    const withDates = used
+      .filter((c) => c._source && c._source.endedAt)
+      .map((c) => ({ t: new Date(c._source.endedAt).getTime(), v: c.totalPence }))
+      .filter((p) => !Number.isNaN(p.t));
+    const lastSold = withDates.length ? withDates.slice().sort((a, b) => b.t - a.t)[0].v : null;
+
+    const salesAll = comps
+      .map((c) => ({
+        price: c.itemPricePence,
+        t: c._source && c._source.endedAt ? new Date(c._source.endedAt).getTime() : 0,
+        date: c._source && c._source.endedAt,
+        title: c.title,
+        url: c._source && c._source.url,
+        loc: c.itemLocation
+      }))
+      .sort((a, b) => b.t - a.t);
+    const sales = (scope === "uk" ? salesAll.filter((s) => !s.loc) : salesAll).slice(0, 12);
+
+    const confClass = `conf-badge conf-${(rec.confidence || "low").toLowerCase()}`;
+    const activePrice = active && active.finalPence != null ? active.finalPence : null;
+    view = { card, rec, med, lo, hi, lastSold, withDates, sales, salesAll, confClass, activePrice, active, usedCount: used.length };
+  }
+
+  return (
+    <>
+      <div className="dd-search">
+        <div className="dd-combo">
+          <div className="dd-inp">
+            <span className="mag" aria-hidden="true">🔍</span>
+            <input
+              value={q}
+              onChange={(e) => onInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              onFocus={() => sugs.length && setOpenSug(true)}
+              onBlur={() => setTimeout(() => setOpenSug(false), 150)}
+              placeholder="Search a card — e.g. Charizard 4/102"
+              role="combobox"
+              aria-expanded={openSug}
+              aria-controls="dd-suggest"
+              autoComplete="off"
+              aria-label="Search a card"
+            />
+          </div>
+          <div className={`suggest${openSug ? " open" : ""}`} id="dd-suggest" role="listbox">
+            {sugs.map((c, i) => (
+              <div
+                key={c.id || i}
+                className="sugg"
+                role="option"
+                aria-selected={i === activeSug}
+                onMouseDown={(e) => { e.preventDefault(); pickSug(c); }}
+              >
+                {c.image ? <img className="sw" src={c.image} alt="" loading="lazy" /> : <span className="sw" />}
+                <span>
+                  <div className="nm">{c.name}</div>
+                  <div className="mt">{c.set}{c.rarity ? ` · ${c.rarity}` : ""}</div>
+                </span>
+                <span className="no">{c.number}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <button className="btn btn-primary" onClick={runFromText} disabled={loading}>Search</button>
+      </div>
+
+      {loading && <div className="panel"><span className="spinner" /> &nbsp;Pricing from recent sold listings…</div>}
+      {error && !loading && <div className="panel compfinder-error">{error}</div>}
+
+      {!data && !loading && !error && (
+        <div className="panel">
+          <div className="eyebrow">Quick Search</div>
+          <p className="hint">Search a single card for a full deep dive — recommended price, a price-trend chart from recent sales, UK vs worldwide sold listings, and current asking prices. Start typing above and pick a card.</p>
+        </div>
+      )}
+
+      {view && !loading && (
+        <>
+          <div className="dd-hero">
+            <div className="dd-card">
+              {view.card.image ? <img src={view.card.image} alt={view.card.name} /> : <span className="ph" aria-hidden="true">🎴</span>}
+            </div>
+            <div className="dd-meta">
+              <span className="dd-set">
+                {view.card.set || "Set unknown"}
+                {view.card.rarity ? <><span aria-hidden="true">·</span> <span className="rarity">{view.card.rarity}</span></> : null}
+              </span>
+              <h2 className="dd-title">{view.card.name}</h2>
+              <div className="dd-nums">
+                {view.card.number ? <span className="badge2"># {view.card.number}</span> : null}
+                {view.card.series ? <span className="badge2">{view.card.series}</span> : null}
+              </div>
+              <div className="dd-headline">
+                <div className="dd-price"><span className="cur">£</span>{view.rec.finalPence != null ? (view.rec.finalPence / 100).toFixed(2) : "—"}</div>
+                <span className={view.confClass}>{view.rec.confidence} confidence</span>
+              </div>
+              <p className="dd-sub">
+                {view.usedCount > 0
+                  ? `Recency-weighted from ${view.usedCount} UK sold comp(s) over the last 90 days${view.med != null ? ` · median ${pounds(view.med)}` : ""}.`
+                  : "No UK sold comps in the last 90 days — try the worldwide view below, or the active-listings read."}
+                {view.activePrice != null ? ` Currently listed around ${pounds(view.activePrice)} asking.` : ""}
+              </p>
+            </div>
+          </div>
+
+          <div className="stat-row">
+            <div className="stat"><div className="k">Median (90d)</div><div className="v">{pounds(view.med)}</div></div>
+            <div className="stat"><div className="k">Range</div><div className="v">{view.lo != null ? `${(view.lo / 100).toFixed(0) === (view.hi / 100).toFixed(0) ? pounds(view.lo) : `${pounds(view.lo)}–${pounds(view.hi)}`}` : "—"}</div></div>
+            <div className="stat"><div className="k">Last sold</div><div className="v">{pounds(view.lastSold)}</div></div>
+            <div className="stat"><div className="k">Sold comps</div><div className="v">{view.usedCount}</div></div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-head"><h3>Price trend</h3></div>
+            <TrendChart points={view.withDates} medianPence={view.med} />
+            {view.withDates.length >= 2 && (
+              <div className="trend-legend">
+                <span className="lg-line"><i></i>Sold price</span>
+                {view.med != null && <span className="lg-med"><i></i>Median {pounds(view.med)}</span>}
+                <span className="lg-dot"><b></b>Individual sales</span>
+              </div>
+            )}
+          </div>
+
+          <div className="panel">
+            <div className="panel-head">
+              <h3>Recent sales</h3>
+              <div className="scope" role="group" aria-label="Location">
+                <button aria-pressed={scope === "uk"} onClick={() => setScope("uk")}>🇬🇧 UK</button>
+                <button aria-pressed={scope === "ww"} onClick={() => setScope("ww")}>🌍 Worldwide</button>
+              </div>
+            </div>
+            {view.sales.length === 0 ? (
+              <p className="dd-empty">No {scope === "uk" ? "UK" : ""} sold listings in this window.</p>
+            ) : (
+              <div className="sales">
+                {view.sales.map((s, i) => (
+                  <div className="sale" key={i}>
+                    <span className="sp">{pounds(s.price)}</span>
+                    <span className="sd">{fmtDate(s.date)}</span>
+                    <span className="st">{s.url ? <a href={s.url} target="_blank" rel="noopener noreferrer">{s.title}</a> : s.title}</span>
+                    <span className="loc">{s.loc ? s.loc : "🇬🇧 UK"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="panel">
+            <div className="panel-head"><h3>Active listings</h3><span className="badge2">market read</span></div>
+            {view.active && view.active.included && view.active.included.length > 0 ? (
+              <p className="hint" style={{ marginTop: 0 }}>
+                Currently listed at a median <b>{pounds(view.active.finalPence)}</b> asking ({view.active.included.length} listing(s))
+                {view.rec.finalPence != null && view.active.finalPence != null
+                  ? view.active.finalPence > view.rec.finalPence * 1.1
+                    ? " — sellers asking above recent sold, a sign demand may be firming."
+                    : view.active.finalPence < view.rec.finalPence * 0.95
+                      ? " — asking at or below recent sold, market may be softening."
+                      : " — roughly in line with recent sold."
+                  : "."}
+              </p>
+            ) : (
+              <p className="dd-empty">No active listings found for this card.</p>
+            )}
+          </div>
+        </>
+      )}
+    </>
+  );
+}

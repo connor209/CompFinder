@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
+import QuickSearch from "./QuickSearch";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 
@@ -72,6 +73,7 @@ export default function Panel() {
   const [running, setRunning] = useState(false);
   const [identifying, setIdentifying] = useState(false);
   const [budget, setBudget] = useState({ count: 0 });
+  const [stream, setStream] = useState("single");
 
   // Search filters
   const [ebaySite, setEbaySite] = useState("ebay.co.uk");
@@ -464,6 +466,15 @@ export default function Panel() {
         </div>
       </header>
 
+      <div className="stream" role="group" aria-label="Search mode">
+        <button aria-pressed={stream === "single"} onClick={() => setStream("single")}>🔍 Quick Search</button>
+        <button aria-pressed={stream === "batch"} onClick={() => setStream("batch")}>☰ Batch</button>
+      </div>
+
+      {stream === "single" ? (
+        <QuickSearch />
+      ) : (
+        <>
       <div className="status-strip">
         <span className="chip">{`SoldComps: ${budget.count} this month (local estimate)`}</span>
       </div>
@@ -628,6 +639,8 @@ export default function Panel() {
           </table>
         </div>
       </section>
+        </>
+      )}
     </div>
   );
 }
