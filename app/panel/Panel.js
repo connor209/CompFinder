@@ -487,6 +487,7 @@ function countReasons(rec) {
 }
 
 function ResultRow({ r, showCurrentPrice }) {
+  const [open, setOpen] = useState(false);
   if (!r.rec) {
     return (
       <tr>
@@ -512,11 +513,122 @@ function ResultRow({ r, showCurrentPrice }) {
     if (rec.finalPence != null && Math.abs(rec.finalPence - currentPence) >= 300) rowClass = "compfinder-big-delta";
   }
 
+  const hasComps = rec.included.length + rec.excluded.length > 0;
+
   return (
-    <tr className={rowClass}>
-      <td>{r.sku}</td><td>{r.title}</td><td>{r.query}</td><td>{compsCell}</td>
-      <td><span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span></td>
-      <td>{currentCell}</td><td>{priceStr}</td><td>{rec.note}</td>
-    </tr>
+    <>
+      <tr className={rowClass}>
+        <td>{r.sku}</td><td>{r.title}</td><td>{r.query}</td>
+        <td>
+          {hasComps ? (
+            <button type="button" className="comps-toggle" onClick={() => setOpen((o) => !o)}>
+              <span className="comps-toggle-caret">{open ? "▾" : "▸"}</span> {compsCell}
+            </button>
+          ) : (
+            compsCell
+          )}
+        </td>
+        <td><span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span></td>
+        <td>{currentCell}</td><td>{priceStr}</td><td>{rec.note}</td>
+      </tr>
+      {open && hasComps && (
+        <tr className="comps-detail-row">
+          <td colSpan={8}><CompsDetail rec={rec} /></td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+const EXCLUSION_LABELS = {
+  nameMismatch: "Different card — name didn't match",
+  variantMismatch: "Reverse-holo variant mismatch",
+  graded: "Graded card",
+  multiCardLot: "Multi-card lot",
+  nonUkLocation: "Non-UK seller location",
+  setMismatch: "Different set",
+  priceOutlier: "Price outlier",
+  highPostage: "High postage",
+  catalogMismatch: "Different product (eBay catalog match)"
+};
+
+function exclusionLabel(reason) {
+  if (!reason) return "—";
+  if (EXCLUSION_LABELS[reason]) return EXCLUSION_LABELS[reason];
+  // Fallback for keyword-category codes from settings.excludeKeywords —
+  // prettify the camelCase/slug into something readable.
+  return reason.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+}
+
+function compPriceStr(c) {
+  const item = c.itemPricePence != null ? `£${(c.itemPricePence / 100).toFixed(2)}` : "—";
+  const post = c.postagePence ? ` +£${(c.postagePence / 100).toFixed(2)} post` : "";
+  return item + post;
+}
+
+function LocationCell({ loc }) {
+  // A null/empty location is the app's signal for "UK-domestic" (see
+  // splitByNonUkLocation in lib/pricing.js), and any populated value is
+  // treated as non-UK. Spelling both out makes it obvious at a glance
+  // whether a comp was kept as UK or flagged as foreign — the exact thing
+  // to eyeball when a known UK sale seems to have been wrongly dropped.
+  if (loc) return <span className="loc-flag">{loc}</span>;
+  return <span className="loc-uk">UK / domestic</span>;
+}
+
+function CompsDetail({ rec }) {
+  const used = rec.included || [];
+  const dropped = rec.excluded || [];
+  return (
+    <div className="comps-detail">
+      <div className="comps-detail-group">
+        <span className="eyebrow eyebrow-small">Comps used ({used.length})</span>
+        {used.length === 0 ? (
+          <p className="hint hint-small">None — no comp survived the filters.</p>
+        ) : (
+          <div className="comps-mini-wrap">
+            <table className="comps-mini">
+              <thead>
+                <tr><th>Price</th><th>Location</th><th>Listing title</th></tr>
+              </thead>
+              <tbody>
+                {used.map((c, i) => (
+                  <tr key={i}>
+                    <td>{compPriceStr(c)}</td>
+                    <td><LocationCell loc={c.itemLocation} /></td>
+                    <td>{c.title}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="comps-detail-group">
+        <span className="eyebrow eyebrow-small">Comps excluded ({dropped.length})</span>
+        {dropped.length === 0 ? (
+          <p className="hint hint-small">None.</p>
+        ) : (
+          <div className="comps-mini-wrap">
+            <table className="comps-mini">
+              <thead>
+                <tr><th>Price</th><th>Why excluded</th><th>Location</th><th>Listing title</th></tr>
+              </thead>
+              <tbody>
+                {dropped.map((c, i) => (
+                  <tr key={i}>
+                    <td>{compPriceStr(c)}</td>
+                    <td>{exclusionLabel(c.exclusionReason)}</td>
+                    <td><LocationCell loc={c.itemLocation} /></td>
+                    <td>{c.title}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
