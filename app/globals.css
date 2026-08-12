@@ -204,6 +204,14 @@ a { color:var(--accent-2); }
 .mine-note-ok { color:var(--conf-high); }
 .mine-note-err { color:var(--warn-ink); }
 
+/* Legal / privacy prose */
+.legal { line-height:1.6; color:var(--ink-soft); }
+.legal p { margin:0 0 14px; font-size:14.5px; }
+.legal h2 { font-size:16px; font-weight:700; color:var(--ink); margin:22px 0 8px; }
+.legal ul { margin:0 0 14px; padding-left:20px; }
+.legal li { margin:0 0 7px; font-size:14.5px; }
+.legal strong { color:var(--ink); font-weight:650; }
+
 /* My listings (inventory) */
 .inv-bar { display:flex; gap:12px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin:0 0 16px; }
 .inv-inp { position:relative; flex:1; min-width:220px; display:flex; align-items:center; }
