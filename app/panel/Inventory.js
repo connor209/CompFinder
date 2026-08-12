@@ -58,11 +58,24 @@ export default function Inventory() {
 
   async function loadListings() {
     const supabase = createClient();
-    const { data } = await supabase
-      .from("ebay_listings")
-      .select("ebay_item_id,title,price_value,price_currency,quantity,image_url,url,synced_at")
-      .order("title", { ascending: true });
-    setListings(data || []);
+    // Supabase/PostgREST caps a single select at 1000 rows, so page through
+    // with .range() until a short page comes back — otherwise big inventories
+    // would silently stop at 1000.
+    const pageSize = 1000;
+    let from = 0;
+    let all = [];
+    for (;;) {
+      const { data, error } = await supabase
+        .from("ebay_listings")
+        .select("ebay_item_id,title,price_value,price_currency,quantity,image_url,url,synced_at")
+        .order("title", { ascending: true })
+        .range(from, from + pageSize - 1);
+      if (error || !data || data.length === 0) break;
+      all = all.concat(data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+    setListings(all);
   }
 
   useEffect(() => {
