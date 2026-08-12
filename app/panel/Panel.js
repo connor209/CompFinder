@@ -242,10 +242,49 @@ export default function Panel() {
     }
 
     setRunning(false);
+    saveHistory(collected);
     const failedCount = collected.filter((r) => r.failed).length;
     if (!stoppedEarly) {
       setStatus(`Done — ${collected.length} of ${items.length} item(s) processed` + (failedCount ? `, ${failedCount} failed.` : "."));
       setStatusIsError(false);
+    }
+  }
+
+  /** Persist every priced item from a finished batch to the user's history.
+   *  Fire-and-forget: history is a convenience, so a save failure is logged
+   *  but never interrupts pricing or surfaces as a scary error. Only items
+   *  that actually produced a recommendation are stored — pure failures
+   *  (no rec) aren't worth keeping. RLS ties each row to the signed-in user. */
+  async function saveHistory(rows) {
+    const priced = rows.filter((r) => r.rec);
+    if (priced.length === 0) return;
+    try {
+      const supabase = createClient();
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const records = priced.map((r) => ({
+        user_id: user.id,
+        title: r.title,
+        sku: r.sku || null,
+        query: r.query,
+        ebay_site: ebaySite,
+        data_source: r.rec.dataSource,
+        confidence: r.rec.confidence,
+        recommended_pence: r.rec.finalPence ?? null,
+        current_pence:
+          r.csvItem && r.csvItem.startPrice ? Math.round(parseFloat(r.csvItem.startPrice) * 100) : null,
+        comps_used: r.rec.included.length,
+        comps_excluded: r.rec.excluded.length,
+        note: r.rec.note || null
+      }));
+
+      const { error } = await supabase.from("price_checks").insert(records);
+      if (error) console.warn("Could not save price history:", error.message);
+    } catch (err) {
+      console.warn("Could not save price history:", err.message);
     }
   }
 
@@ -306,6 +345,7 @@ export default function Panel() {
           <h1>Comp&nbsp;Finder</h1>
         </div>
         <div className="topbar-actions">
+          <a href="/history">History</a>
           <a href="/settings">Settings</a>
           <button className="btn btn-ghost" onClick={handleSignOut}>Sign out</button>
         </div>

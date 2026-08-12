@@ -2,9 +2,9 @@
 --
 -- Deliberately minimal, matching the "just account + settings" decision:
 -- one row per user, holding their SoldComps API key and preferences —
--- the same data chrome.storage held in the extension version. Batch
--- history isn't stored here on purpose; add a separate table for it later
--- if that's ever actually wanted, no reason to build it before then.
+-- the same data chrome.storage held in the extension version. A separate
+-- price_checks table (further down) keeps a per-user history of everything
+-- they've priced.
 --
 -- Run this once in the Supabase SQL editor (Dashboard → SQL Editor → New
 -- query) after creating the project.
@@ -62,3 +62,50 @@ $$ language plpgsql;
 create trigger on_profile_updated
   before update on public.profiles
   for each row execute procedure public.handle_updated_at();
+
+-- ---------------------------------------------------------------------------
+-- price_checks — a per-user history of every item priced in the panel.
+--
+-- One row per priced item (the panel bulk-inserts a batch when it finishes).
+-- Deliberately stores the flat, already-computed result the results table
+-- shows — title, query, recommended price, confidence, etc. — rather than
+-- the raw comps, so the History page is a plain SELECT with no re-computation.
+-- Rows are tiny (a few hundred bytes), so even heavy daily use stays well
+-- within the free tier.
+-- ---------------------------------------------------------------------------
+create table public.price_checks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  title text not null,
+  sku text,
+  query text,
+  ebay_site text,
+  data_source text,           -- 'sold' | 'active'
+  confidence text,            -- 'High' | 'Medium' | 'Low'
+  recommended_pence integer,  -- null when no price could be recommended
+  current_pence integer,      -- from the CSV's start price, when present
+  comps_used integer,
+  comps_excluded integer,
+  note text
+);
+
+-- History is almost always read "my rows, newest first", so index for that.
+create index price_checks_user_created_idx
+  on public.price_checks (user_id, created_at desc);
+
+-- Same row-level security guarantee as profiles: a user can only ever see,
+-- add to, or clear their own history — never anyone else's.
+alter table public.price_checks enable row level security;
+
+create policy "Users can view their own price checks"
+  on public.price_checks for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert their own price checks"
+  on public.price_checks for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can delete their own price checks"
+  on public.price_checks for delete
+  using (auth.uid() = user_id);

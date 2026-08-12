@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 
-const PROTECTED_PATHS = ["/panel", "/settings"];
+const PROTECTED_PATHS = ["/panel", "/settings", "/history"];
 
 export async function middleware(request) {
   let response = NextResponse.next({ request });
