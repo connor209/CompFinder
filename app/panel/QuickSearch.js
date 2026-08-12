@@ -147,6 +147,7 @@ export default function QuickSearch() {
   const [openSug, setOpenSug] = useState(false);
   const [activeSug, setActiveSug] = useState(-1);
   const [scope, setScope] = useState("uk");
+  const [language, setLanguage] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
@@ -226,13 +227,16 @@ export default function QuickSearch() {
     runDeepDive(card);
   }
 
-  async function runDeepDive(card) {
+  async function runDeepDive(card, lang = language) {
     setLoading(true);
     setError("");
     setData(null);
     setScope("uk");
     setActiveState({ loading: true, rec: null });
-    const query = `${card.name} ${card.number}`.trim();
+    // Non-English prints number differently, so drop the English collector
+    // number and lean on name + language instead.
+    const numberPart = lang ? "" : card.number || "";
+    const query = `${card.name} ${numberPart} ${lang}`.replace(/\s+/g, " ").trim();
     const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
     const options = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
     const post = (body) =>
@@ -354,6 +358,29 @@ export default function QuickSearch() {
         <button className="btn btn-primary" onClick={runFromText} disabled={loading}>Search</button>
       </div>
 
+      <div className="lang-row">
+        <span className="lang-label">Language</span>
+        <div className="pills" role="group" aria-label="Card language">
+          {[
+            { v: "", l: "English" },
+            { v: "Japanese", l: "Japanese" },
+            { v: "Korean", l: "Korean" },
+            { v: "Chinese", l: "Chinese" }
+          ].map((opt) => (
+            <button
+              key={opt.l}
+              aria-pressed={language === opt.v}
+              onClick={() => {
+                setLanguage(opt.v);
+                if (data) runDeepDive(data.card, opt.v);
+              }}
+            >
+              {opt.l}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {loading && <div className="panel"><span className="spinner" /> &nbsp;Pricing from recent sold listings…</div>}
       {error && !loading && <div className="panel compfinder-error">{error}</div>}
 
@@ -377,6 +404,7 @@ export default function QuickSearch() {
               </span>
               <h2 className="dd-title">{view.card.name}</h2>
               <div className="dd-nums">
+                {language ? <span className="badge2 badge-lang">{language}</span> : null}
                 {view.card.number ? <span className="badge2"># {view.card.number}</span> : null}
                 {view.card.series ? <span className="badge2">{view.card.series}</span> : null}
               </div>
