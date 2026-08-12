@@ -477,3 +477,6 @@ body {
 .comps-mini tr:last-child td { border-bottom: none; }
 .loc-flag { color: var(--conf-low); font-weight: 600; }
 .loc-uk { color: var(--ink-soft); }
+
+.comps-mini a { color: var(--accent); text-decoration: none; }
+.comps-mini a:hover { text-decoration: underline; }

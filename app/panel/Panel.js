@@ -81,6 +81,11 @@ export default function Panel() {
   const [maxPrice, setMaxPrice] = useState("");
   const [includeCondition, setIncludeCondition] = useState(false);
   const [useFullTitle, setUseFullTitle] = useState(false);
+  const [fetchActiveAlways, setFetchActiveAlways] = useState(false);
+
+  // Active (asking-price) listings fetched on demand, keyed by the row's
+  // index in `results`: { loading } | { rec } | { error }.
+  const [activeByIndex, setActiveByIndex] = useState({});
 
   // Results filters
   const [resultsSearch, setResultsSearch] = useState("");
@@ -166,6 +171,7 @@ export default function Panel() {
 
     setRunning(true);
     setResults([]);
+    setActiveByIndex({});
     let consecutiveFailures = 0;
     let stoppedEarly = false;
     let stopReason = "";
@@ -236,7 +242,7 @@ export default function Panel() {
         }
       }
 
-      collected.push({ title, sku, query, csvItem, rec });
+      collected.push({ title, sku, query, csvItem, rec, nameTokens, set, cardNumber });
       setResults([...collected]);
 
       if (i < items.length - 1) await new Promise((r) => setTimeout(r, Math.min(settings.interItemDelayMs, 1200)));
@@ -248,6 +254,46 @@ export default function Panel() {
     if (!stoppedEarly) {
       setStatus(`Done — ${collected.length} of ${items.length} item(s) processed` + (failedCount ? `, ${failedCount} failed.` : "."));
       setStatusIsError(false);
+    }
+
+    // Opt-in: fetch active (asking-price) listings for every priced item too.
+    // Off by default because it's a second API call per item (~2× quota).
+    if (fetchActiveAlways && !stoppedEarly) {
+      for (let i = 0; i < collected.length; i++) {
+        if (collected[i].rec) await fetchActiveFor(collected[i], i);
+      }
+    }
+  }
+
+  /** Fetch active (asking-price) listings for one already-priced item and
+   *  stash the result under its row index. Used both by the per-row "Check
+   *  active" button and the batch-wide toggle. Runs the same recommend()
+   *  pipeline in active mode so the asking-price figure is filtered the same
+   *  way the sold figure was. Each call spends one SoldComps request. */
+  async function fetchActiveFor(result, index) {
+    if (!result || !result.rec) return;
+    setActiveByIndex((m) => ({ ...m, [index]: { loading: true } }));
+    const activeOptions = {
+      ebaySite,
+      itemLocation,
+      itemCondition,
+      minPrice: minPrice || null,
+      maxPrice: maxPrice || null,
+      sold: false
+    };
+    try {
+      const activeResult = await fetchSoldCompsWithRetry(result.query, activeOptions);
+      const activeRec = CompFinderPricing.recommend(
+        activeResult.comps,
+        settings,
+        result.nameTokens || null,
+        "active",
+        result.cardNumber || null,
+        result.set || null
+      );
+      setActiveByIndex((m) => ({ ...m, [index]: { loading: false, rec: activeRec } }));
+    } catch (err) {
+      setActiveByIndex((m) => ({ ...m, [index]: { loading: false, error: err.message } }));
     }
   }
 
@@ -328,15 +374,17 @@ export default function Panel() {
   // effect as the extension's dataset-attribute toggling, simpler here
   // since React already re-renders on state change.
   const reasonOptions = [...new Set(results.flatMap((r) => (r.rec ? Object.keys(countReasons(r.rec)) : [])))];
-  const filteredResults = results.filter((r) => {
-    const searchText = `${r.sku} ${r.title} ${r.query}`.toLowerCase();
-    const matchesSearch = !resultsSearch || searchText.includes(resultsSearch.toLowerCase());
-    const confidence = r.rec ? r.rec.confidence : "Low";
-    const matchesConfidence = !confidenceFilter || confidence === confidenceFilter;
-    const reasons = r.rec ? Object.keys(countReasons(r.rec)) : [];
-    const matchesReason = !reasonFilter || reasons.includes(reasonFilter);
-    return matchesSearch && matchesConfidence && matchesReason;
-  });
+  const filteredResults = results
+    .map((r, origIndex) => ({ r, origIndex }))
+    .filter(({ r }) => {
+      const searchText = `${r.sku} ${r.title} ${r.query}`.toLowerCase();
+      const matchesSearch = !resultsSearch || searchText.includes(resultsSearch.toLowerCase());
+      const confidence = r.rec ? r.rec.confidence : "Low";
+      const matchesConfidence = !confidenceFilter || confidence === confidenceFilter;
+      const reasons = r.rec ? Object.keys(countReasons(r.rec)) : [];
+      const matchesReason = !reasonFilter || reasons.includes(reasonFilter);
+      return matchesSearch && matchesConfidence && matchesReason;
+    });
 
   return (
     <div id="app">
@@ -428,6 +476,11 @@ export default function Panel() {
             <input type="checkbox" checked={useFullTitle} onChange={(e) => setUseFullTitle(e.target.checked)} />
             <span>Search using the full original title, not the condensed version</span>
           </label>
+
+          <label className="checkbox-field">
+            <input type="checkbox" checked={fetchActiveAlways} onChange={(e) => setFetchActiveAlways(e.target.checked)} />
+            <span>Also fetch active (asking-price) listings for every item — uses ≈2× your SoldComps quota</span>
+          </label>
         </div>
 
         <div className="row">
@@ -478,11 +531,19 @@ export default function Panel() {
             <thead>
               <tr>
                 <th>SKU</th><th>Title</th><th>Query used</th><th>Comps</th>
-                <th>Confidence</th><th>Current</th><th>Recommended</th><th>Note</th>
+                <th>Confidence</th><th>Current</th><th>Recommended</th><th>Active</th><th>Note</th>
               </tr>
             </thead>
             <tbody>
-              {filteredResults.map((r, i) => <ResultRow key={i} r={r} showCurrentPrice={showCurrentPrice} />)}
+              {filteredResults.map(({ r, origIndex }) => (
+                <ResultRow
+                  key={origIndex}
+                  r={r}
+                  showCurrentPrice={showCurrentPrice}
+                  active={activeByIndex[origIndex]}
+                  onCheckActive={() => fetchActiveFor(r, origIndex)}
+                />
+              ))}
             </tbody>
           </table>
         </div>
@@ -497,14 +558,14 @@ function countReasons(rec) {
   return counts;
 }
 
-function ResultRow({ r, showCurrentPrice }) {
+function ResultRow({ r, showCurrentPrice, active, onCheckActive }) {
   const [open, setOpen] = useState(false);
   if (!r.rec) {
     return (
       <tr>
         <td>{r.sku}</td><td>{r.title}</td><td>{r.query}</td><td>—</td>
         <td><span className="conf-badge conf-low">Skipped</span></td>
-        <td>—</td><td>—</td><td>{r.failed}</td>
+        <td>—</td><td>—</td><td>—</td><td>{r.failed}</td>
       </tr>
     );
   }
@@ -524,14 +585,14 @@ function ResultRow({ r, showCurrentPrice }) {
     if (rec.finalPence != null && Math.abs(rec.finalPence - currentPence) >= 300) rowClass = "compfinder-big-delta";
   }
 
-  const hasComps = rec.included.length + rec.excluded.length > 0;
+  const canExpand = rec.included.length + rec.excluded.length > 0 || !!(active && active.rec);
 
   return (
     <>
       <tr className={rowClass}>
         <td>{r.sku}</td><td>{r.title}</td><td>{r.query}</td>
         <td>
-          {hasComps ? (
+          {canExpand ? (
             <button type="button" className="comps-toggle" onClick={() => setOpen((o) => !o)}>
               <span className="comps-toggle-caret">{open ? "▾" : "▸"}</span> {compsCell}
             </button>
@@ -540,14 +601,44 @@ function ResultRow({ r, showCurrentPrice }) {
           )}
         </td>
         <td><span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span></td>
-        <td>{currentCell}</td><td>{priceStr}</td><td>{rec.note}</td>
+        <td>{currentCell}</td><td>{priceStr}</td>
+        <td><ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} /></td>
+        <td>{rec.note}</td>
       </tr>
-      {open && hasComps && (
+      {open && canExpand && (
         <tr className="comps-detail-row">
-          <td colSpan={8}><CompsDetail rec={rec} /></td>
+          <td colSpan={9}><CompsDetail rec={rec} active={active} /></td>
         </tr>
       )}
     </>
+  );
+}
+
+function ActiveCell({ active, soldRec, onCheck }) {
+  if (!active) {
+    return <button type="button" className="comps-toggle" onClick={onCheck}>Check</button>;
+  }
+  if (active.loading) return <span className="hint-small">…</span>;
+  if (active.error) return <span className="loc-flag" title={active.error}>failed</span>;
+  const rec = active.rec;
+  if (!rec || rec.finalPence == null) return <span className="hint-small">none</span>;
+  const val = CompFinderPricing.toPoundsStr(rec.finalPence);
+  const n = rec.included.length;
+  // Asking prices normally sit ABOVE recent sold, so this compares the gap,
+  // not raw magnitude: an ask well above recent sold hints demand/prices
+  // rising, an ask at or below recent sold hints the market is softening.
+  let arrow = null;
+  if (soldRec.finalPence != null) {
+    if (rec.finalPence > soldRec.finalPence * 1.15) {
+      arrow = <span className="conf-high" title="Asking prices well above recent sold — demand may be rising">▲</span>;
+    } else if (rec.finalPence < soldRec.finalPence * 0.95) {
+      arrow = <span className="conf-low" title="Asking prices at or below recent sold — market may be softening">▼</span>;
+    }
+  }
+  return (
+    <span title={`${n} active listing(s), median asking price`}>
+      {val} {arrow} <span className="hint-small">({n})</span>
+    </span>
   );
 }
 
@@ -587,9 +678,31 @@ function LocationCell({ loc }) {
   return <span className="loc-uk">UK / domestic</span>;
 }
 
-function CompsDetail({ rec }) {
+function compSoldDate(c) {
+  const d = c._source && c._source.endedAt;
+  if (!d) return "—";
+  const parsed = new Date(d);
+  if (Number.isNaN(parsed.getTime())) return d;
+  return parsed.toLocaleDateString(undefined, { year: "2-digit", month: "short", day: "numeric" });
+}
+
+function TitleCell({ c }) {
+  const url = c._source && c._source.url;
+  if (url) {
+    return (
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        {c.title}
+      </a>
+    );
+  }
+  return <>{c.title}</>;
+}
+
+function CompsDetail({ rec, active }) {
   const used = rec.included || [];
   const dropped = rec.excluded || [];
+  const activeRec = active && active.rec;
+  const activeListings = activeRec ? activeRec.included || [] : [];
   return (
     <div className="comps-detail">
       <div className="comps-detail-group">
@@ -600,14 +713,15 @@ function CompsDetail({ rec }) {
           <div className="comps-mini-wrap">
             <table className="comps-mini">
               <thead>
-                <tr><th>Price</th><th>Location</th><th>Listing title</th></tr>
+                <tr><th>Price</th><th>Date sold</th><th>Location</th><th>Listing title</th></tr>
               </thead>
               <tbody>
                 {used.map((c, i) => (
                   <tr key={i}>
                     <td>{compPriceStr(c)}</td>
+                    <td>{compSoldDate(c)}</td>
                     <td><LocationCell loc={c.itemLocation} /></td>
-                    <td>{c.title}</td>
+                    <td><TitleCell c={c} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -624,15 +738,16 @@ function CompsDetail({ rec }) {
           <div className="comps-mini-wrap">
             <table className="comps-mini">
               <thead>
-                <tr><th>Price</th><th>Why excluded</th><th>Location</th><th>Listing title</th></tr>
+                <tr><th>Price</th><th>Date sold</th><th>Why excluded</th><th>Location</th><th>Listing title</th></tr>
               </thead>
               <tbody>
                 {dropped.map((c, i) => (
                   <tr key={i}>
                     <td>{compPriceStr(c)}</td>
+                    <td>{compSoldDate(c)}</td>
                     <td>{exclusionLabel(c.exclusionReason)}</td>
                     <td><LocationCell loc={c.itemLocation} /></td>
-                    <td>{c.title}</td>
+                    <td><TitleCell c={c} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -640,6 +755,35 @@ function CompsDetail({ rec }) {
           </div>
         )}
       </div>
+
+      {activeRec && (
+        <div className="comps-detail-group">
+          <span className="eyebrow eyebrow-small">Active listings — asking prices ({activeListings.length})</span>
+          {activeListings.length === 0 ? (
+            <p className="hint hint-small">No active listings found for this query.</p>
+          ) : (
+            <>
+              <p className="hint hint-small">{activeRec.note}</p>
+              <div className="comps-mini-wrap">
+                <table className="comps-mini">
+                  <thead>
+                    <tr><th>Asking price</th><th>Location</th><th>Listing title</th></tr>
+                  </thead>
+                  <tbody>
+                    {activeListings.map((c, i) => (
+                      <tr key={i}>
+                        <td>{compPriceStr(c)}</td>
+                        <td><LocationCell loc={c.itemLocation} /></td>
+                        <td><TitleCell c={c} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
