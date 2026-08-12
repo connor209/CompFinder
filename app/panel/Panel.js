@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
@@ -76,6 +76,14 @@ export default function Panel() {
   const [identifying, setIdentifying] = useState(false);
   const [budget, setBudget] = useState({ count: 0 });
   const [stream, setStream] = useState("single");
+  const [seed, setSeed] = useState(null);
+  const seedNonce = useRef(0);
+
+  const deepDiveCard = useCallback((query) => {
+    seedNonce.current += 1;
+    setSeed({ query, nonce: seedNonce.current });
+    setStream("single");
+  }, []);
 
   // Search filters
   const [ebaySite, setEbaySite] = useState("ebay.co.uk");
@@ -475,8 +483,8 @@ export default function Panel() {
         <button aria-pressed={stream === "inventory"} onClick={() => setStream("inventory")}>🏷️ My listings</button>
       </div>
 
-      {stream === "single" && <QuickSearch />}
-      {stream === "inventory" && <Inventory />}
+      {stream === "single" && <QuickSearch seed={seed} />}
+      {stream === "inventory" && <Inventory onDeepDive={deepDiveCard} />}
       {stream === "batch" && (
         <>
       <div className="status-strip">

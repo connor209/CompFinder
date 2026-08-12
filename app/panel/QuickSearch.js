@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -141,7 +141,7 @@ function TrendChart({ sales, medianPence }) {
   );
 }
 
-export default function QuickSearch() {
+export default function QuickSearch({ seed }) {
   const [q, setQ] = useState("");
   const [sugs, setSugs] = useState([]);
   const [openSug, setOpenSug] = useState(false);
@@ -211,13 +211,13 @@ export default function QuickSearch() {
     runDeepDive(card);
   }
 
-  async function runFromText() {
-    const text = q.trim();
-    if (!text) return;
+  async function runQuery(text) {
+    const trimmed = (text || "").trim();
+    if (!trimmed) return;
     setOpenSug(false);
-    const m = text.match(/\b([A-Za-z]{0,3}\d{1,4}\s*\/\s*[A-Za-z]{0,3}\d{1,4})\b/);
+    const m = trimmed.match(/\b([A-Za-z]{0,3}\d{1,4}\s*\/\s*[A-Za-z]{0,3}\d{1,4})\b/);
     const number = m ? m[1].replace(/\s+/g, "") : "";
-    const name = m ? text.slice(0, m.index).trim() : text;
+    const name = m ? trimmed.slice(0, m.index).trim() : trimmed;
     let card = { name, number, set: "", series: "", rarity: "", image: null };
     try {
       const lk = await fetch(`/api/cards/lookup?name=${encodeURIComponent(name)}&number=${encodeURIComponent(number)}`).then((r) => r.json());
@@ -227,6 +227,20 @@ export default function QuickSearch() {
     }
     runDeepDive(card);
   }
+
+  function runFromText() {
+    runQuery(q);
+  }
+
+  // Deep dive triggered from another stream (e.g. "My listings" → Quick Search).
+  // seed carries { query, nonce }; the nonce forces a re-run for repeat clicks.
+  useEffect(() => {
+    if (seed && seed.query) {
+      setQ(seed.query);
+      runQuery(seed.query);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed?.nonce]);
 
   async function runDeepDive(card, lang = language) {
     setLoading(true);

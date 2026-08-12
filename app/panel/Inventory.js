@@ -1,17 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
+import CompFinderPricing from "@/lib/pricing.js";
+
+const settings = CompFinderPricing.DEFAULT_SETTINGS;
 
 /**
- * "My listings" stream — the user's active eBay listings, pulled in via the
- * connected account and cached in Supabase (ebay_listings, readable per-user
- * under RLS).
- *
- * Duplicate listings of the same card at the same price are condensed into a
- * single row with a ×N count (expandable to the individual listings). Plus
- * text filter, sort, and a "duplicates only" view. Read-only for now.
+ * "My listings" stream — the user's active eBay listings (cached in Supabase),
+ * with duplicate condensing, sort/filter, portfolio stats, and on-demand
+ * repricing intelligence: check a card's recent-sold market price against your
+ * ask and flag over/under/in-line. Read-only for now.
  */
+function pounds(pence) {
+  return pence == null ? "—" : CompFinderPricing.toPoundsStr(pence);
+}
 function priceStr(value, currency) {
   if (value == null) return "—";
   if (currency === "GBP") return `£${Number(value).toFixed(2)}`;
@@ -31,10 +34,35 @@ const SORTS = [
   { v: "price-desc", l: "Price: high → low" },
   { v: "price-asc", l: "Price: low → high" },
   { v: "count-desc", l: "Most listed" },
-  { v: "qty-desc", l: "Total quantity" }
+  { v: "qty-desc", l: "Total quantity" },
+  { v: "opportunity", l: "Biggest opportunity (priced)" }
 ];
 
-export default function Inventory() {
+// Turn a listing title into a market-price recommendation via SoldComps.
+async function priceForTitle(title) {
+  const base = CompFinderPricing.simplifyTitle(title || "", settings.stripWords);
+  const nameTokens = CompFinderPricing.extractNameTokens(base);
+  const m = (title || "").match(/\b([A-Za-z]{0,3}\d{1,4}\s*\/\s*[A-Za-z]{0,3}\d{1,4})\b/);
+  const number = m ? m[1].replace(/\s+/g, "") : null;
+  const res = await fetch("/api/soldcomps", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: base, options: { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 } })
+  }).then((r) => r.json());
+  if (!res || !res.ok) throw new Error((res && res.error) || "Pricing request failed.");
+  return CompFinderPricing.recommend(res.comps || [], settings, nameTokens, "sold", number, null);
+}
+
+// Compare a listing's ask to the recommended market price.
+function verdictFor(askPence, recPence) {
+  if (recPence == null) return { kind: "none", label: "No recent comps" };
+  const delta = askPence - recPence;
+  if (askPence > recPence * 1.08) return { kind: "over", label: "Above market", delta };
+  if (askPence < recPence * 0.92) return { kind: "under", label: "Below market", delta };
+  return { kind: "inline", label: "In line", delta };
+}
+
+export default function Inventory({ onDeepDive }) {
   const [status, setStatus] = useState({ loading: true, connected: false, configured: true });
   const [listings, setListings] = useState([]);
   const [filter, setFilter] = useState("");
@@ -42,8 +70,12 @@ export default function Inventory() {
   const [group, setGroup] = useState(true);
   const [dupOnly, setDupOnly] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
+  const [priced, setPriced] = useState(() => new Map()); // key -> { loading, recPence, error }
   const [syncing, setSyncing] = useState(false);
+  const [pricingAll, setPricingAll] = useState(false);
   const [note, setNote] = useState("");
+  const pricedRef = useRef(priced);
+  pricedRef.current = priced;
 
   async function loadStatus() {
     try {
@@ -58,16 +90,14 @@ export default function Inventory() {
 
   async function loadListings() {
     const supabase = createClient();
-    // Supabase/PostgREST caps a single select at 1000 rows, so page through
-    // with .range() until a short page comes back — otherwise big inventories
-    // would silently stop at 1000.
+    // PostgREST caps a single select at 1000 rows — page through with .range().
     const pageSize = 1000;
     let from = 0;
     let all = [];
     for (;;) {
       const { data, error } = await supabase
         .from("ebay_listings")
-        .select("ebay_item_id,title,price_value,price_currency,quantity,image_url,url,synced_at")
+        .select("ebay_item_id,title,sku,price_value,price_currency,quantity,image_url,url,synced_at")
         .order("title", { ascending: true })
         .range(from, from + pageSize - 1);
       if (error || !data || data.length === 0) break;
@@ -92,6 +122,7 @@ export default function Inventory() {
       const res = await fetch("/api/ebay/sync", { method: "POST" }).then((r) => r.json());
       if (res.ok) {
         setNote(`Synced ${res.count} listing${res.count === 1 ? "" : "s"}.`);
+        setPriced(new Map());
         await loadStatus();
         await loadListings();
       } else {
@@ -102,6 +133,18 @@ export default function Inventory() {
     }
     setSyncing(false);
   }
+
+  // --- portfolio stats (over the full, unfiltered inventory) ---
+  const stats = useMemo(() => {
+    let value = 0;
+    let gbp = true;
+    for (const l of listings) {
+      if (l.price_currency && l.price_currency !== "GBP") gbp = false;
+      value += (Number(l.price_value) || 0) * (l.quantity || 1);
+    }
+    const uniqueCards = new Set(listings.map((l) => normTitle(l.title))).size;
+    return { count: listings.length, value, uniqueCards, gbp };
+  }, [listings]);
 
   // text filter → group (same title + same price) → sort → duplicates-only
   const rows = useMemo(() => {
@@ -120,9 +163,7 @@ export default function Inventory() {
       const map = new Map();
       for (const l of shown) {
         const key = `${normTitle(l.title)}|${l.price_value}|${l.price_currency}`;
-        if (!map.has(key)) {
-          map.set(key, { key, ...l, _count: 0, _qty: 0, _items: [] });
-        }
+        if (!map.has(key)) map.set(key, { key, ...l, _count: 0, _qty: 0, _items: [] });
         const g = map.get(key);
         g._count += 1;
         g._qty += l.quantity || 0;
@@ -134,17 +175,23 @@ export default function Inventory() {
     }
 
     const num = (v) => (v == null ? -Infinity : Number(v));
+    const oppOf = (g) => {
+      const p = priced.get(g.key);
+      if (!p || p.recPence == null || g.price_value == null) return -1;
+      return Math.abs(Math.round(g.price_value * 100) - p.recPence);
+    };
     const sorters = {
       title: (a, b) => (a.title || "").localeCompare(b.title || ""),
       "price-desc": (a, b) => num(b.price_value) - num(a.price_value),
       "price-asc": (a, b) => num(a.price_value) - num(b.price_value),
       "count-desc": (a, b) => b._count - a._count || (a.title || "").localeCompare(b.title || ""),
-      "qty-desc": (a, b) => b._qty - a._qty || (a.title || "").localeCompare(b.title || "")
+      "qty-desc": (a, b) => b._qty - a._qty || (a.title || "").localeCompare(b.title || ""),
+      opportunity: (a, b) => oppOf(b) - oppOf(a) || (a.title || "").localeCompare(b.title || "")
     };
     groups.sort(sorters[sort] || sorters.title);
 
     return dupOnly ? groups.filter((g) => g._count > 1) : groups;
-  }, [listings, filter, sort, group, dupOnly]);
+  }, [listings, filter, sort, group, dupOnly, priced]);
 
   function toggleExpand(key) {
     setExpanded((prev) => {
@@ -153,6 +200,38 @@ export default function Inventory() {
       else next.add(key);
       return next;
     });
+  }
+
+  async function checkPrice(g) {
+    setPriced((prev) => new Map(prev).set(g.key, { loading: true }));
+    try {
+      const rec = await priceForTitle(g.title);
+      setPriced((prev) => new Map(prev).set(g.key, { loading: false, recPence: rec.finalPence ?? null, used: rec.included?.length || 0 }));
+    } catch (err) {
+      setPriced((prev) => new Map(prev).set(g.key, { loading: false, error: err.message || "Failed" }));
+    }
+  }
+
+  // Price every visible card, with a small concurrency limit to respect the
+  // SoldComps quota and avoid hammering the API.
+  async function priceAllVisible() {
+    const targets = rows.filter((g) => !pricedRef.current.get(g.key) || pricedRef.current.get(g.key)?.error);
+    if (targets.length === 0) return;
+    if (!confirm(`Price ${targets.length} card${targets.length === 1 ? "" : "s"}? This uses ${targets.length} SoldComps request${targets.length === 1 ? "" : "s"}.`)) return;
+    setPricingAll(true);
+    setNote("");
+    let i = 0;
+    const CONCURRENCY = 3;
+    async function worker() {
+      while (i < targets.length) {
+        const g = targets[i++];
+        // eslint-disable-next-line no-await-in-loop
+        await checkPrice(g);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
+    setPricingAll(false);
+    setNote(`Priced ${targets.length} card${targets.length === 1 ? "" : "s"}.`);
   }
 
   if (status.loading) {
@@ -183,6 +262,16 @@ export default function Inventory() {
 
   return (
     <>
+      <div className="stat-row">
+        <div className="stat"><div className="k">Active listings</div><div className="v">{stats.count}</div></div>
+        <div className="stat"><div className="k">Unique cards</div><div className="v">{stats.uniqueCards}</div></div>
+        <div className="stat">
+          <div className="k">Inventory value</div>
+          <div className="v">{stats.gbp ? pounds(Math.round(stats.value * 100)) : `~£${stats.value.toFixed(0)}`}</div>
+        </div>
+        <div className="stat"><div className="k">Last synced</div><div className="v" style={{ fontSize: 13 }}>{fmtWhen(status.lastSynced)}</div></div>
+      </div>
+
       <div className="inv-bar">
         <div className="inv-inp">
           <span className="mag" aria-hidden="true">🔍</span>
@@ -194,8 +283,9 @@ export default function Inventory() {
           />
         </div>
         <div className="inv-meta">
-          <span className="chip">{listings.length} active</span>
-          <span className="chip">Synced {fmtWhen(status.lastSynced)}</span>
+          <button className="btn btn-ghost" onClick={priceAllVisible} disabled={pricingAll || rows.length === 0}>
+            {pricingAll ? "Pricing…" : "💷 Price visible"}
+          </button>
           <button className="btn btn-ghost" onClick={handleSync} disabled={syncing}>
             {syncing ? "Syncing…" : "↻ Sync"}
           </button>
@@ -241,6 +331,9 @@ export default function Inventory() {
         <div className="inv-grid">
           {rows.map((g) => {
             const isOpen = expanded.has(g.key);
+            const p = priced.get(g.key);
+            const askPence = g.price_value != null ? Math.round(g.price_value * 100) : null;
+            const verdict = p && !p.loading && !p.error && askPence != null ? verdictFor(askPence, p.recPence) : null;
             return (
               <div className="inv-card" key={g.key}>
                 <div className="inv-thumb">
@@ -259,11 +352,43 @@ export default function Inventory() {
                       <span className="inv-qty">Qty {g.quantity}</span>
                     ) : null}
                   </div>
+                  {g._count === 1 && g.sku ? <div className="inv-sku">SKU {g.sku}</div> : null}
+
+                  {/* Repricing intelligence */}
+                  {p?.loading ? (
+                    <div className="inv-reprice loading"><span className="spinner" /> &nbsp;Checking market…</div>
+                  ) : p?.error ? (
+                    <div className="inv-reprice err">{p.error}</div>
+                  ) : verdict ? (
+                    <div className={`inv-reprice v-${verdict.kind}`}>
+                      {verdict.kind === "none" ? (
+                        <span>No recent sold comps</span>
+                      ) : (
+                        <>
+                          <span className="rp-badge">{verdict.kind === "over" ? "▲" : verdict.kind === "under" ? "▼" : "＝"} {verdict.label}</span>
+                          <span className="rp-detail">
+                            Market {pounds(p.recPence)}
+                            {verdict.delta ? ` · you ${verdict.delta > 0 ? "+" : "−"}${pounds(Math.abs(verdict.delta))}` : ""}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
+
+                  <div className="inv-actions">
+                    <button className="inv-act" onClick={() => checkPrice(g)} disabled={p?.loading}>
+                      {p && !p.loading ? "↻ Re-check" : "Check price"}
+                    </button>
+                    {onDeepDive ? (
+                      <button className="inv-act" onClick={() => onDeepDive(g.title)}>Deep dive ↗</button>
+                    ) : null}
+                  </div>
+
                   {isOpen && g._count > 1 ? (
                     <div className="inv-sublist">
                       {g._items.map((it, i) => (
                         <a key={it.ebay_item_id} href={it.url || "#"} target="_blank" rel="noopener noreferrer">
-                          Listing {i + 1}{it.quantity != null ? ` · qty ${it.quantity}` : ""} →
+                          {it.sku ? `SKU ${it.sku}` : `Listing ${i + 1}`}{it.quantity != null ? ` · qty ${it.quantity}` : ""} →
                         </a>
                       ))}
                     </div>
