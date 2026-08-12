@@ -311,7 +311,7 @@ export default function QuickSearch() {
               value={q}
               onChange={(e) => onInput(e.target.value)}
               onKeyDown={onKeyDown}
-              onFocus={() => sugs.length && setOpenSug(true)}
+              onFocus={() => { if (q.trim().length >= 2) onInput(q); }}
               onBlur={() => setTimeout(() => setOpenSug(false), 150)}
               placeholder="Search a card — e.g. Charizard 4/102"
               role="combobox"
@@ -320,6 +320,17 @@ export default function QuickSearch() {
               autoComplete="off"
               aria-label="Search a card"
             />
+            {q && (
+              <button
+                type="button"
+                className="dd-clear"
+                aria-label="Clear search"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => { setQ(""); setSugs([]); setOpenSug(false); }}
+              >
+                ✕
+              </button>
+            )}
           </div>
           <div className={`suggest${openSug ? " open" : ""}`} id="dd-suggest" role="listbox">
             {sugs.map((c, i) => (

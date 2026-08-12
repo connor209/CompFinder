@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 
 /**
  * Card-name typeahead, backed by the free pokemontcg.io database. Proxied
@@ -33,15 +32,11 @@ function tokenize(raw) {
     .slice(0, 8);
 }
 
+// No auth check here on purpose: this only proxies public card metadata, and
+// it's the per-keystroke typeahead hot path — a Supabase getUser() round-trip
+// on every keystroke was a major source of lag. The pokemontcg key + its daily
+// limit is the guard against quota abuse.
 export async function GET(request) {
-  const supabase = await createClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ ok: false, error: "Not signed in.", cards: [] }, { status: 401 });
-  }
-
   const raw = (new URL(request.url).searchParams.get("q") || "").trim();
   if (raw.length < 2) {
     return NextResponse.json({ ok: true, cards: [] });
@@ -63,7 +58,7 @@ export async function GET(request) {
 
   const params = new URLSearchParams({
     q: parts.join(" "),
-    pageSize: "50",
+    pageSize: "25",
     orderBy: "-set.releaseDate",
     select: "id,name,number,rarity,set,images"
   });
