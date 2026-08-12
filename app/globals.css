@@ -220,7 +220,8 @@ a { color:var(--accent-2); }
 .scope button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:650; font-size:12.5px; padding:6px 13px; border-radius:var(--radius-pill); cursor:pointer; }
 .scope button[aria-pressed="true"] { background:var(--surface); color:var(--ink); box-shadow:var(--shadow-1); }
 
-svg.trend { width:100%; height:200px; display:block; overflow:visible; color:var(--ink); }
+.trend-wrap { position:relative; }
+svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(--ink); }
 .trend-legend { display:flex; gap:16px; font-size:12px; color:var(--ink-soft); margin-top:10px; flex-wrap:wrap; }
 .trend-legend i { display:inline-block; width:20px; height:0; vertical-align:middle; margin-right:6px; }
 .lg-line i { border-top:2.5px solid var(--accent); }
@@ -236,6 +237,21 @@ svg.trend { width:100%; height:200px; display:block; overflow:visible; color:var
 .sale .st a { color:var(--accent-2); text-decoration:none; }
 .sale .loc { font-size:11.5px; color:var(--ink-soft); white-space:nowrap; justify-self:end; }
 .dd-empty { color:var(--ink-soft); font-size:13.5px; padding:8px 0; }
+
+/* trend: click-through day detail */
+.day-sales { margin-top:14px; border:1px solid var(--line); border-radius:var(--radius-sm); overflow:hidden; background:var(--surface-2); }
+.day-sales-head { display:flex; align-items:center; gap:10px; padding:10px 13px; border-bottom:1px solid var(--line); font-size:13px; flex-wrap:wrap; }
+.day-sales-head strong { font-weight:700; }
+.day-sales-head span { color:var(--ink-soft); }
+.day-close { margin-left:auto; background:none; border:0; color:var(--ink-faint); cursor:pointer; font-size:14px; line-height:1; padding:5px 7px; border-radius:6px; }
+.day-close:hover { background:var(--surface-sink); color:var(--ink); }
+.day-item { display:grid; grid-template-columns:84px 1fr; gap:12px; align-items:center; padding:9px 13px; border-bottom:1px solid var(--line); font-size:13.5px; }
+.day-item:last-child { border-bottom:0; }
+.day-item .sp { font-family:var(--font-mono); font-weight:700; font-variant-numeric:tabular-nums; }
+.day-item .st { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink-soft); }
+.day-item .st a { color:var(--accent-2); text-decoration:none; }
+.day-item .st a:hover { text-decoration:underline; }
+.btn-theme { padding:0 12px; }
 .spinner { display:inline-block; width:15px; height:15px; border:2px solid var(--line-strong); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; vertical-align:-2px; }
 @keyframes spin { to { transform:rotate(360deg); } }
 

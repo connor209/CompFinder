@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import QuickSearch from "./QuickSearch";
+import ThemeToggle from "./ThemeToggle";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 
@@ -460,6 +461,7 @@ export default function Panel() {
           <h1>Comp&nbsp;Finder</h1>
         </div>
         <div className="topbar-actions">
+          <ThemeToggle />
           <a href="/history">History</a>
           <a href="/settings">Settings</a>
           <button className="btn btn-ghost" onClick={handleSignOut}>Sign out</button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -20,41 +20,124 @@ function median(nums) {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
 
-/** Inline SVG price-trend chart, drawn from real sold dates + prices. */
-function TrendChart({ points, medianPence }) {
-  const pts = points.filter((p) => p.t).sort((a, b) => a.t - b.t);
-  if (pts.length < 2) {
-    return <p className="dd-empty">Not enough dated sales to chart a trend yet.</p>;
+/**
+ * Interactive price-trend chart. Sales are grouped by day; each plotted point
+ * is that day's median. Hover a point for a callout; click it to list the
+ * day's individual sales with links to the actual eBay listings.
+ */
+function TrendChart({ sales, medianPence }) {
+  const [hover, setHover] = useState(-1);
+  const [selected, setSelected] = useState(-1);
+
+  const days = useMemo(() => {
+    const map = new Map();
+    for (const s of sales) {
+      if (!s.t) continue;
+      const d = new Date(s.t);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      if (!map.has(key)) map.set(key, { t: new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(), items: [] });
+      map.get(key).items.push(s);
+    }
+    return [...map.values()]
+      .map((d) => ({ t: d.t, items: d.items.slice().sort((a, b) => a.v - b.v), v: Math.round(median(d.items.map((x) => x.v))) }))
+      .sort((a, b) => a.t - b.t);
+  }, [sales]);
+
+  if (days.length < 2) {
+    return <p className="dd-empty">Not enough dated sales to chart a trend yet — need at least two days with sales.</p>;
   }
-  const W = 640, H = 200, padT = 14, padB = 10, padX = 8;
-  const times = pts.map((p) => p.t), vals = pts.map((p) => p.v);
+
+  const W = 720, H = 260, padL = 46, padR = 16, padT = 16, padB = 30;
+  const times = days.map((d) => d.t), vals = days.map((d) => d.v);
   const tMin = Math.min(...times), tMax = Math.max(...times);
-  const vMinRaw = Math.min(...vals, medianPence ?? Infinity);
-  const vMaxRaw = Math.max(...vals, medianPence ?? -Infinity);
-  const pad = (vMaxRaw - vMinRaw) * 0.15 || vMaxRaw * 0.1 || 100;
-  const vMin = vMinRaw - pad, vMax = vMaxRaw + pad;
-  const x = (t) => padX + (tMax === tMin ? 0.5 : (t - tMin) / (tMax - tMin)) * (W - 2 * padX);
+  const allV = medianPence != null ? [...vals, medianPence] : vals;
+  const vMinRaw = Math.min(...allV), vMaxRaw = Math.max(...allV);
+  const pad = (vMaxRaw - vMinRaw) * 0.18 || vMaxRaw * 0.1 || 100;
+  const vMin = Math.max(0, vMinRaw - pad), vMax = vMaxRaw + pad;
+  const x = (t) => padL + (tMax === tMin ? 0.5 : (t - tMin) / (tMax - tMin)) * (W - padL - padR);
   const y = (v) => padT + (vMax - v) / (vMax - vMin) * (H - padT - padB);
-  const line = pts.map((p, i) => (i ? "L" : "M") + x(p.t).toFixed(1) + " " + y(p.v).toFixed(1)).join(" ");
-  const area = `${line} L ${x(pts[pts.length - 1].t).toFixed(1)} ${H - padB} L ${x(pts[0].t).toFixed(1)} ${H - padB} Z`;
+  const line = days.map((d, i) => (i ? "L" : "M") + x(d.t).toFixed(1) + " " + y(d.v).toFixed(1)).join(" ");
+  const area = `${line} L ${x(days[days.length - 1].t).toFixed(1)} ${H - padB} L ${x(days[0].t).toFixed(1)} ${H - padB} Z`;
+  const grid = [0.2, 0.5, 0.8].map((f) => Math.round(vMin + (vMax - vMin) * f));
+  const fmtShort = (t) => new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 
   return (
-    <svg className="trend" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Sold price trend">
-      <defs>
-        <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.22" />
-          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {medianPence != null && (
-        <line x1={padX} x2={W - padX} y1={y(medianPence)} y2={y(medianPence)} stroke="currentColor" strokeOpacity="0.35" strokeWidth="1.5" strokeDasharray="4 4" />
+    <div className="trend-wrap">
+      <svg className="trend" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Sold price trend">
+        <defs>
+          <linearGradient id="tg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="var(--accent)" stopOpacity="0.20" />
+            <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {grid.map((gv, i) => (
+          <g key={i}>
+            <line x1={padL} x2={W - padR} y1={y(gv)} y2={y(gv)} stroke="currentColor" strokeOpacity="0.10" />
+            <text x={padL - 8} y={y(gv) + 4} textAnchor="end" fontSize="12" fill="currentColor" opacity="0.45" fontFamily="var(--font-mono)">{pounds(gv)}</text>
+          </g>
+        ))}
+        {medianPence != null && (
+          <line x1={padL} x2={W - padR} y1={y(medianPence)} y2={y(medianPence)} stroke="currentColor" strokeOpacity="0.32" strokeWidth="1.5" strokeDasharray="5 4" />
+        )}
+        <path d={area} fill="url(#tg)" />
+        <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <text x={x(days[0].t)} y={H - 9} textAnchor="start" fontSize="11.5" fill="currentColor" opacity="0.5">{fmtShort(days[0].t)}</text>
+        <text x={x(days[days.length - 1].t)} y={H - 9} textAnchor="end" fontSize="11.5" fill="currentColor" opacity="0.5">{fmtShort(days[days.length - 1].t)}</text>
+
+        {days.map((d, i) => (
+          <circle key={"p" + i} cx={x(d.t)} cy={y(d.v)} r={i === hover || i === selected ? 5 : 3.4}
+            fill="var(--surface)" stroke="var(--accent)" strokeWidth={i === hover || i === selected ? 2.4 : 1.8} />
+        ))}
+        {days.map((d, i) => d.items.length > 1 && (
+          <circle key={"c" + i} cx={x(d.t)} cy={y(d.v)} r="1.5" fill="var(--accent)" pointerEvents="none" />
+        ))}
+        {days.map((d, i) => (
+          <circle key={"h" + i} cx={x(d.t)} cy={y(d.v)} r="15" fill="transparent" style={{ cursor: "pointer" }}
+            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(-1)} onClick={() => setSelected(selected === i ? -1 : i)} />
+        ))}
+
+        {hover >= 0 && (() => {
+          const d = days[hover];
+          const px = x(d.t), py = y(d.v);
+          const tw = 132, th = 56;
+          let tx = Math.max(padL, Math.min(px - tw / 2, W - padR - tw));
+          let ty = py - th - 12;
+          if (ty < padT) ty = py + 14;
+          return (
+            <g pointerEvents="none">
+              <rect x={tx} y={ty} width={tw} height={th} rx="8" fill="var(--surface)" stroke="var(--line-strong)" />
+              <text x={tx + 11} y={ty + 18} fontSize="12" fill="var(--ink-soft)">{fmtShort(d.t)}</text>
+              <text x={tx + 11} y={ty + 35} fontSize="14" fontWeight="700" fill="var(--ink)" fontFamily="var(--font-mono)">{pounds(d.v)}{d.items.length > 1 ? " median" : ""}</text>
+              <text x={tx + 11} y={ty + 49} fontSize="11" fill="var(--accent-2)">{d.items.length > 1 ? `${d.items.length} sales — click` : "1 sale — click"}</text>
+            </g>
+          );
+        })()}
+      </svg>
+
+      <div className="trend-legend">
+        <span className="lg-line"><i></i>Daily sold (median)</span>
+        {medianPence != null && <span className="lg-med"><i></i>Overall median {pounds(medianPence)}</span>}
+        <span className="lg-dot"><b></b>Hover / click a point</span>
+      </div>
+
+      {selected >= 0 && (
+        <div className="day-sales">
+          <div className="day-sales-head">
+            <strong>{new Date(days[selected].t).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</strong>
+            <span>{days[selected].items.length} sale(s) · median {pounds(days[selected].v)}</span>
+            <button className="day-close" onClick={() => setSelected(-1)} aria-label="Close">✕</button>
+          </div>
+          <div className="day-list">
+            {days[selected].items.map((s, i) => (
+              <div className="day-item" key={i}>
+                <span className="sp">{pounds(s.v)}</span>
+                <span className="st">{s.url ? <a href={s.url} target="_blank" rel="noopener noreferrer">{s.title}</a> : s.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
-      <path d={area} fill="url(#tg)" />
-      <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-      {pts.map((p, i) => (
-        <circle key={i} cx={x(p.t)} cy={y(p.v)} r="2.6" fill="var(--surface)" stroke="var(--accent)" strokeWidth="1.6" />
-      ))}
-    </svg>
+    </div>
   );
 }
 
@@ -137,8 +220,6 @@ export default function QuickSearch() {
     setScope("uk");
     const query = `${card.name} ${card.number}`.trim();
     const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
-    // Pull the broadest set (UK + worldwide) so we can split it locally; the
-    // recommend() call still UK-filters for the headline price.
     const options = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
     try {
       const soldRes = await fetch("/api/soldcomps", {
@@ -181,11 +262,11 @@ export default function QuickSearch() {
     const med = totals.length ? Math.round(median(totals)) : null;
     const lo = totals.length ? Math.min(...totals) : null;
     const hi = totals.length ? Math.max(...totals) : null;
-    const withDates = used
+    const chartSales = used
       .filter((c) => c._source && c._source.endedAt)
-      .map((c) => ({ t: new Date(c._source.endedAt).getTime(), v: c.totalPence }))
+      .map((c) => ({ t: new Date(c._source.endedAt).getTime(), v: c.totalPence, title: c.title, url: c._source.url }))
       .filter((p) => !Number.isNaN(p.t));
-    const lastSold = withDates.length ? withDates.slice().sort((a, b) => b.t - a.t)[0].v : null;
+    const lastSold = chartSales.length ? chartSales.slice().sort((a, b) => b.t - a.t)[0].v : null;
 
     const salesAll = comps
       .map((c) => ({
@@ -201,7 +282,7 @@ export default function QuickSearch() {
 
     const confClass = `conf-badge conf-${(rec.confidence || "low").toLowerCase()}`;
     const activePrice = active && active.finalPence != null ? active.finalPence : null;
-    view = { card, rec, med, lo, hi, lastSold, withDates, sales, salesAll, confClass, activePrice, active, usedCount: used.length };
+    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, usedCount: used.length };
   }
 
   return (
@@ -252,7 +333,7 @@ export default function QuickSearch() {
       {!data && !loading && !error && (
         <div className="panel">
           <div className="eyebrow">Quick Search</div>
-          <p className="hint">Search a single card for a full deep dive — recommended price, a price-trend chart from recent sales, UK vs worldwide sold listings, and current asking prices. Start typing above and pick a card.</p>
+          <p className="hint">Search a single card for a full deep dive — recommended price, an interactive price-trend chart, UK vs worldwide sold listings, and current asking prices. Start typing above and pick a card.</p>
         </div>
       )}
 
@@ -287,21 +368,14 @@ export default function QuickSearch() {
 
           <div className="stat-row">
             <div className="stat"><div className="k">Median (90d)</div><div className="v">{pounds(view.med)}</div></div>
-            <div className="stat"><div className="k">Range</div><div className="v">{view.lo != null ? `${(view.lo / 100).toFixed(0) === (view.hi / 100).toFixed(0) ? pounds(view.lo) : `${pounds(view.lo)}–${pounds(view.hi)}`}` : "—"}</div></div>
+            <div className="stat"><div className="k">Range</div><div className="v">{view.lo != null ? (view.lo === view.hi ? pounds(view.lo) : `${pounds(view.lo)}–${pounds(view.hi)}`) : "—"}</div></div>
             <div className="stat"><div className="k">Last sold</div><div className="v">{pounds(view.lastSold)}</div></div>
             <div className="stat"><div className="k">Sold comps</div><div className="v">{view.usedCount}</div></div>
           </div>
 
           <div className="panel">
             <div className="panel-head"><h3>Price trend</h3></div>
-            <TrendChart points={view.withDates} medianPence={view.med} />
-            {view.withDates.length >= 2 && (
-              <div className="trend-legend">
-                <span className="lg-line"><i></i>Sold price</span>
-                {view.med != null && <span className="lg-med"><i></i>Median {pounds(view.med)}</span>}
-                <span className="lg-dot"><b></b>Individual sales</span>
-              </div>
-            )}
+            <TrendChart sales={view.chartSales} medianPence={view.med} />
           </div>
 
           <div className="panel">
