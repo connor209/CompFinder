@@ -480,3 +480,5 @@ body {
 
 .comps-mini a { color: var(--accent); text-decoration: none; }
 .comps-mini a:hover { text-decoration: underline; }
+
+.file-label.is-disabled { opacity: 0.6; pointer-events: none; }

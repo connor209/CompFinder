@@ -70,6 +70,7 @@ export default function Panel() {
   const [status, setStatus] = useState("");
   const [statusIsError, setStatusIsError] = useState(false);
   const [running, setRunning] = useState(false);
+  const [identifying, setIdentifying] = useState(false);
   const [budget, setBudget] = useState({ count: 0 });
 
   // Search filters
@@ -124,6 +125,69 @@ export default function Panel() {
     };
     reader.readAsText(file);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Snap-to-search: downscale the photo in the browser (keeps the vision call
+   *  cheap and fast, and well under image-size limits), send it to /api/identify,
+   *  and append the identified card to the paste box for the user to confirm
+   *  before running. Never auto-runs — identification is a suggestion. */
+  const onPhotoSelected = useCallback((e) => {
+    const file = e.target.files[0];
+    e.target.value = ""; // let the same photo be re-selected later
+    if (!file) return;
+
+    setIdentifying(true);
+    setStatus("Reading card photo…");
+    setStatusIsError(false);
+
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = async () => {
+      URL.revokeObjectURL(url);
+      const maxEdge = 1024;
+      const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      const base64 = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+
+      try {
+        const res = await fetch("/api/identify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: base64, mediaType: "image/jpeg" })
+        }).then((r) => r.json());
+
+        if (!res.ok) throw new Error(res.error || "Could not identify the card.");
+        const card = res.result;
+        if (!card.identified || !card.suggested_query) {
+          setStatus(
+            card.notes ||
+              "Couldn't read a card in that photo — try again with the card filling the frame in good light."
+          );
+          setStatusIsError(true);
+        } else {
+          setPastedText((prev) => (prev.trim() ? `${prev.trim()}\n` : "") + card.suggested_query);
+          setStatus(`Identified: “${card.suggested_query}” — check it's right, then Run search & price.`);
+          setStatusIsError(false);
+        }
+      } catch (err) {
+        setStatus(`Card identification failed: ${err.message}`);
+        setStatusIsError(true);
+      } finally {
+        setIdentifying(false);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      setIdentifying(false);
+      setStatus("Could not read that image file.");
+      setStatusIsError(true);
+    };
+    img.src = url;
   }, []);
 
   /** One SoldComps request via the API route, with rate-limit retry —
@@ -414,6 +478,22 @@ export default function Panel() {
           value={pastedText}
           onChange={(e) => setPastedText(e.target.value)}
         />
+
+        <div className="row row-file">
+          <label className={`btn btn-ghost file-label${identifying ? " is-disabled" : ""}`} htmlFor="cardPhoto">
+            {identifying ? "Reading photo…" : "📷 Identify from photo"}
+          </label>
+          <input
+            id="cardPhoto"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            disabled={identifying}
+            onChange={onPhotoSelected}
+            style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+          />
+          <span className="hint-small">Snap a card to fill the box — you confirm before it searches.</span>
+        </div>
 
         <div className="filters">
           <span className="eyebrow eyebrow-small">SoldComps filters</span>
