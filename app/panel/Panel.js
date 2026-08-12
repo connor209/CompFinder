@@ -1,0 +1,482 @@
+"use client";
+
+import { useState, useCallback } from "react";
+import { createClient } from "@/lib/supabase/client";
+import CompFinderPricing from "@/lib/pricing.js";
+import CardUploaderCsv from "@/lib/carduploader.js";
+
+const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
+
+function monthKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}`;
+}
+
+function loadLocalBudget() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LOCAL_BUDGET_KEY) || "null");
+    if (saved && saved.month === monthKey()) return saved;
+  } catch {
+    /* ignore malformed storage */
+  }
+  return { count: 0, month: monthKey() };
+}
+
+function incrementLocalBudget() {
+  const current = loadLocalBudget();
+  const next = { count: current.count + 1, month: monthKey() };
+  localStorage.setItem(LOCAL_BUDGET_KEY, JSON.stringify(next));
+  return next;
+}
+
+function inferConditionFromTitle(title) {
+  const t = (title || "").toLowerCase();
+  if (/\bnm\b|near mint/.test(t)) return "NM";
+  if (/\blp\b|lightly played/.test(t)) return "LP";
+  if (/\bmp\b|moderately played/.test(t)) return "MP";
+  if (/(?<!\d\s)\bhp\b|heavily played/.test(t)) return "HP";
+  if (/damaged/.test(t)) return "DMG";
+  return null;
+}
+
+/** Same logic as the extension's buildQueryForItem — unchanged, just takes
+ *  its toggle values as arguments instead of reading them off the DOM. */
+function buildQueryForItem(item, settings, includeCondition, useFullTitle) {
+  if (item.source === "csv") {
+    const built = CardUploaderCsv.buildQueryFromItem(item.csvItem, { includeCondition, useFullTitle });
+    return { query: built.query, nameTokens: built.nameTokens, set: built.set, csvItem: item.csvItem, cardNumber: item.csvItem.cardNumber };
+  }
+  const baseQuery = CompFinderPricing.simplifyTitle(item.title, settings.stripWords);
+  const nameTokens = CompFinderPricing.extractNameTokens(baseQuery);
+  let query;
+  if (useFullTitle && item.title && item.title.trim()) {
+    query = item.title.trim().replace(/\s+/g, " ");
+  } else {
+    query = baseQuery;
+    if (includeCondition) {
+      const inferred = inferConditionFromTitle(item.title);
+      if (inferred) query = `${baseQuery} ${inferred}`;
+    }
+  }
+  const numMatch = /\b([A-Z]{0,3}\d{1,4}\s*\/\s*[A-Z]{0,3}\d{1,4})\b/i.exec(query);
+  return { query, nameTokens, set: null, csvItem: null, cardNumber: numMatch ? numMatch[1].replace(/\s+/g, "") : null };
+}
+
+export default function Panel() {
+  const [pastedText, setPastedText] = useState("");
+  const [csvItems, setCsvItems] = useState(null);
+  const [csvSummary, setCsvSummary] = useState("");
+  const [results, setResults] = useState([]);
+  const [status, setStatus] = useState("");
+  const [statusIsError, setStatusIsError] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [budget, setBudget] = useState({ count: 0 });
+
+  // Search filters
+  const [ebaySite, setEbaySite] = useState("ebay.co.uk");
+  const [itemLocation, setItemLocation] = useState("domestic");
+  const [itemCondition, setItemCondition] = useState("any");
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [includeCondition, setIncludeCondition] = useState(false);
+  const [useFullTitle, setUseFullTitle] = useState(false);
+
+  // Results filters
+  const [resultsSearch, setResultsSearch] = useState("");
+  const [confidenceFilter, setConfidenceFilter] = useState("");
+  const [reasonFilter, setReasonFilter] = useState("");
+  const [showCurrentPrice, setShowCurrentPrice] = useState(false);
+
+  const settings = CompFinderPricing.DEFAULT_SETTINGS;
+
+  const onCsvSelected = useCallback((e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const items = CardUploaderCsv.extractItems(reader.result);
+        if (items.length === 0) {
+          setCsvSummary("No rows with a recognisable Card Name + Card Number found — is this a CardUploader export?");
+          setCsvItems(null);
+          return;
+        }
+        const loaded = items.map((item) => ({ sku: item.sku, title: item.title, source: "csv", csvItem: item }));
+        setCsvItems(loaded);
+        const repairedCount = items.filter((i) => i.cardNumberRepaired).length;
+        setCsvSummary(
+          `Loaded ${items.length} card(s) from ${file.name}.` +
+            (repairedCount
+              ? ` ⚠ ${repairedCount} card number(s) looked like Excel had auto-converted them to dates and were repaired — worth double-checking those rows.`
+              : "")
+        );
+        runBatch(loaded);
+      } catch (err) {
+        setCsvSummary(`Could not read CSV: ${err.message}`);
+        setCsvItems(null);
+      }
+    };
+    reader.readAsText(file);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** One SoldComps request via the API route, with rate-limit retry —
+   *  same shape as the extension's fetchSoldCompsWithRetry, just a fetch()
+   *  to our own API instead of a chrome.runtime message. `sold: false`
+   *  switches to active-listings mode — this one parameter is the entire
+   *  replacement for what the Terapeak bridge used to provide. */
+  async function fetchSoldCompsWithRetry(query, opts, onRetry) {
+    let attempt = 0;
+    while (true) {
+      const response = await fetch("/api/soldcomps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, options: opts })
+      }).then((r) => r.json());
+
+      if (response && response.ok) {
+        const next = incrementLocalBudget();
+        setBudget(next);
+        return response;
+      }
+
+      if (response && response.isRateLimited && attempt < 2) {
+        attempt++;
+        if (onRetry) onRetry(attempt, 2000 * attempt);
+        await new Promise((r) => setTimeout(r, 2000 * attempt));
+        continue;
+      }
+
+      const next = incrementLocalBudget();
+      setBudget(next);
+      const e = new Error((response && response.error) || "Unknown error calling SoldComps.");
+      e.isAuthError = response && response.isAuthError;
+      e.isQuotaExceeded = response && response.isQuotaExceeded;
+      throw e;
+    }
+  }
+
+  async function runBatch(items) {
+    if (!items || items.length === 0) {
+      setStatus("Paste at least one title, or upload a CSV, first.");
+      setStatusIsError(true);
+      return;
+    }
+
+    setRunning(true);
+    setResults([]);
+    let consecutiveFailures = 0;
+    let stoppedEarly = false;
+    let stopReason = "";
+    const collected = [];
+
+    const searchOptions = { ebaySite, itemLocation, itemCondition, minPrice: minPrice || null, maxPrice: maxPrice || null };
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const { title, sku } = item;
+
+      setStatus(`Pricing ${i + 1} of ${items.length}: "${title}"`);
+      const { query, nameTokens, set, csvItem, cardNumber } = buildQueryForItem(item, settings, includeCondition, useFullTitle);
+
+      let soldComps, apiDiagnostic;
+      try {
+        const result = await fetchSoldCompsWithRetry(query, searchOptions, (attempt, delay) =>
+          setStatus(`Item ${i + 1} of ${items.length}: SoldComps rate limit — retry ${attempt} in ${Math.round(delay / 1000)}s…`)
+        );
+        soldComps = result.comps;
+        if (result.comps.length === 0) {
+          apiDiagnostic =
+            result.rawItemCount > 0
+              ? `SoldComps returned ${result.rawItemCount} raw result(s) but all ${result.skippedWrongCurrency} were filtered as non-GBP (saw: ${result.currenciesSeen.join(", ") || "unknown"}).`
+              : `SoldComps returned 0 raw results for this exact query.`;
+        }
+        consecutiveFailures = 0;
+      } catch (err) {
+        if (err.isAuthError || err.isQuotaExceeded) {
+          stoppedEarly = true;
+          stopReason = `Stopped at item ${i + 1} of ${items.length} — ${err.message}`;
+          collected.push({ title, sku, query, csvItem, rec: null, failed: err.message });
+          setResults([...collected]);
+          setStatus(stopReason);
+          setStatusIsError(true);
+          break;
+        }
+        consecutiveFailures++;
+        collected.push({ title, sku, query, csvItem, rec: null, failed: err.message });
+        setResults([...collected]);
+        setStatus(`Item ${i + 1} of ${items.length}: ${err.message}`);
+        setStatusIsError(true);
+        if (consecutiveFailures >= settings.maxConsecutiveFailures) {
+          stoppedEarly = true;
+          stopReason = `Stopped after ${consecutiveFailures} failures in a row (item ${i + 1} of ${items.length}).`;
+          setStatus(stopReason);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, settings.interItemDelayMs));
+        continue;
+      }
+
+      let rec = CompFinderPricing.recommend(soldComps, settings, nameTokens, "sold", cardNumber, set);
+      if (apiDiagnostic) rec.note = apiDiagnostic;
+
+      if (rec.included.length === 0) {
+        // No sold comps — fall back to SoldComps' own active-listings mode
+        // (sold=false, confirmed in their docs) instead of the old Terapeak
+        // bridge. No tab, no message-passing, just a second API call.
+        setStatus(`Item ${i + 1} of ${items.length}: no sold comps for "${query}" — checking active listings…`);
+        try {
+          const activeResult = await fetchSoldCompsWithRetry(query, { ...searchOptions, sold: false });
+          const activeRec = CompFinderPricing.recommend(activeResult.comps, settings, nameTokens, "active", cardNumber, set);
+          if (activeRec.included.length > 0) rec = activeRec;
+          else rec.note = `No sold or active comps found after exclusions — no price forced.${apiDiagnostic ? " " + apiDiagnostic : ""}`;
+        } catch (err) {
+          rec.note += ` (Active-listing fallback also failed: ${err.message})`;
+        }
+      }
+
+      collected.push({ title, sku, query, csvItem, rec });
+      setResults([...collected]);
+
+      if (i < items.length - 1) await new Promise((r) => setTimeout(r, Math.min(settings.interItemDelayMs, 1200)));
+    }
+
+    setRunning(false);
+    const failedCount = collected.filter((r) => r.failed).length;
+    if (!stoppedEarly) {
+      setStatus(`Done — ${collected.length} of ${items.length} item(s) processed` + (failedCount ? `, ${failedCount} failed.` : "."));
+      setStatusIsError(false);
+    }
+  }
+
+  function getPastedItems() {
+    return pastedText
+      .split("\n")
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map((title) => ({ sku: "", title, source: "paste" }));
+  }
+
+  function exportCsv() {
+    const header = "SKU,Title,Simplified Query,Comps Used,Comps Excluded,Data Source,Confidence,Current Price,Recommended Price,Note\n";
+    const rows = results.map((r) => {
+      const currentPrice = r.csvItem && r.csvItem.startPrice ? r.csvItem.startPrice : "";
+      if (!r.rec) {
+        return [r.sku || "", r.title, r.query, "", "", "", "Skipped", currentPrice, "", r.failed]
+          .map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
+      }
+      const price = r.rec.finalPence != null ? (r.rec.finalPence / 100).toFixed(2) : "";
+      return [r.sku || "", r.title, r.query, r.rec.included.length, r.rec.excluded.length, r.rec.dataSource, r.rec.confidence, currentPrice, price, r.rec.note]
+        .map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
+    });
+    const blob = new Blob([header + rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `compfinder-prices-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    window.location.href = "/login";
+  }
+
+  // Results filtering — computed at render time from plain state, same
+  // effect as the extension's dataset-attribute toggling, simpler here
+  // since React already re-renders on state change.
+  const reasonOptions = [...new Set(results.flatMap((r) => (r.rec ? Object.keys(countReasons(r.rec)) : [])))];
+  const filteredResults = results.filter((r) => {
+    const searchText = `${r.sku} ${r.title} ${r.query}`.toLowerCase();
+    const matchesSearch = !resultsSearch || searchText.includes(resultsSearch.toLowerCase());
+    const confidence = r.rec ? r.rec.confidence : "Low";
+    const matchesConfidence = !confidenceFilter || confidence === confidenceFilter;
+    const reasons = r.rec ? Object.keys(countReasons(r.rec)) : [];
+    const matchesReason = !reasonFilter || reasons.includes(reasonFilter);
+    return matchesSearch && matchesConfidence && matchesReason;
+  });
+
+  return (
+    <div id="app">
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark">CF</span>
+          <h1>Comp&nbsp;Finder</h1>
+        </div>
+        <div className="topbar-actions">
+          <a href="/settings">Settings</a>
+          <button className="btn btn-ghost" onClick={handleSignOut}>Sign out</button>
+        </div>
+      </header>
+
+      <div className="status-strip">
+        <span className="chip">{`SoldComps: ${budget.count} this month (local estimate)`}</span>
+      </div>
+
+      <section className="panel">
+        <div className="panel-head"><span className="eyebrow">Search</span></div>
+        <p className="hint">Paste titles OR upload a CardUploader CSV export below.</p>
+
+        <textarea
+          rows={5}
+          placeholder={"e.g.\nPoliwag 30/149 Pokemon NM Holo\nCharmander 4/102 Base Set LP"}
+          value={pastedText}
+          onChange={(e) => setPastedText(e.target.value)}
+        />
+
+        <div className="filters">
+          <span className="eyebrow eyebrow-small">SoldComps filters</span>
+          <div className="filter-grid">
+            <label className="field">
+              <span>eBay marketplace</span>
+              <select value={ebaySite} onChange={(e) => setEbaySite(e.target.value)}>
+                <option value="ebay.co.uk">United Kingdom</option>
+                <option value="ebay.com">United States</option>
+                <option value="ebay.de">Germany</option>
+                <option value="ebay.fr">France</option>
+                <option value="ebay.it">Italy</option>
+                <option value="ebay.es">Spain</option>
+                <option value="ebay.ca">Canada</option>
+                <option value="ebay.com.au">Australia</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Item location</span>
+              <select value={itemLocation} onChange={(e) => setItemLocation(e.target.value)}>
+                <option value="default">Default</option>
+                <option value="domestic">Domestic sellers</option>
+                <option value="worldwide">Worldwide</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Condition</span>
+              <select value={itemCondition} onChange={(e) => setItemCondition(e.target.value)}>
+                <option value="any">Any</option>
+                <option value="new">New</option>
+                <option value="used">Used</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Min price (£)</span>
+              <input type="number" min="0" step="0.01" placeholder="e.g. 1.00" value={minPrice} onChange={(e) => setMinPrice(e.target.value)} />
+            </label>
+            <label className="field">
+              <span>Max price (£)</span>
+              <input type="number" min="0" step="0.01" placeholder="e.g. 20.00" value={maxPrice} onChange={(e) => setMaxPrice(e.target.value)} />
+            </label>
+          </div>
+
+          <label className="checkbox-field">
+            <input type="checkbox" checked={includeCondition} disabled={useFullTitle} onChange={(e) => setIncludeCondition(e.target.checked)} />
+            <span>Include condition (NM, LP, MP, HP, DMG) in the search text</span>
+          </label>
+
+          <label className="checkbox-field">
+            <input type="checkbox" checked={useFullTitle} onChange={(e) => setUseFullTitle(e.target.checked)} />
+            <span>Search using the full original title, not the condensed version</span>
+          </label>
+        </div>
+
+        <div className="row">
+          <button className="btn btn-primary" disabled={running} onClick={() => runBatch(getPastedItems())}>
+            {running ? "Running…" : "Run search & price"}
+          </button>
+        </div>
+
+        <div className="divider"><span>or</span></div>
+
+        <div className="row row-file">
+          <label className="btn btn-ghost file-label" htmlFor="csvInput">Upload CardUploader CSV</label>
+          <input id="csvInput" type="file" accept=".csv" onChange={onCsvSelected} style={{ position: "absolute", width: 1, height: 1, opacity: 0 }} />
+        </div>
+        {csvSummary && <p className="hint hint-small">{csvSummary}</p>}
+      </section>
+
+      {status && <div className={statusIsError ? "compfinder-error" : ""} id="compfinder-status">{status}</div>}
+
+      <section className="panel results-panel">
+        <div className="panel-head">
+          <span className="eyebrow">Results</span>
+          <button className="btn btn-ghost" disabled={results.length === 0} onClick={exportCsv}>Export CSV</button>
+        </div>
+
+        <div className="results-toolbar">
+          <input type="text" placeholder="Filter by title, SKU, or query…" value={resultsSearch} onChange={(e) => setResultsSearch(e.target.value)} />
+          <select value={confidenceFilter} onChange={(e) => setConfidenceFilter(e.target.value)}>
+            <option value="">All confidence</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </select>
+          <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)}>
+            <option value="">All exclusion reasons</option>
+            {reasonOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <span className="hint-small">{filteredResults.length === results.length ? `${results.length} row(s)` : `${filteredResults.length} of ${results.length} row(s) shown`}</span>
+        </div>
+
+        <label className="checkbox-field">
+          <input type="checkbox" checked={showCurrentPrice} onChange={(e) => setShowCurrentPrice(e.target.checked)} />
+          <span>Show current price &amp; highlight big changes</span>
+        </label>
+
+        <div className="table-wrap">
+          <table id="compfinder-results" className={showCurrentPrice ? "" : "hide-current-price"}>
+            <thead>
+              <tr>
+                <th>SKU</th><th>Title</th><th>Query used</th><th>Comps</th>
+                <th>Confidence</th><th>Current</th><th>Recommended</th><th>Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredResults.map((r, i) => <ResultRow key={i} r={r} showCurrentPrice={showCurrentPrice} />)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function countReasons(rec) {
+  const counts = {};
+  for (const e of rec.excluded) counts[e.exclusionReason] = (counts[e.exclusionReason] || 0) + 1;
+  return counts;
+}
+
+function ResultRow({ r, showCurrentPrice }) {
+  if (!r.rec) {
+    return (
+      <tr>
+        <td>{r.sku}</td><td>{r.title}</td><td>{r.query}</td><td>—</td>
+        <td><span className="conf-badge conf-low">Skipped</span></td>
+        <td>—</td><td>—</td><td>{r.failed}</td>
+      </tr>
+    );
+  }
+  const rec = r.rec;
+  const priceStr = rec.finalPence != null ? CompFinderPricing.toPoundsStr(rec.finalPence) : "—";
+  const reasonCounts = countReasons(rec);
+  const reasonBreakdown = Object.entries(reasonCounts).map(([reason, n]) => `${n} ${reason}`).join(", ");
+  const compsCell = `${rec.included.length} used / ${rec.excluded.length} excluded` + (reasonBreakdown ? ` (${reasonBreakdown})` : "");
+  const isActive = rec.dataSource === "active";
+  const confidenceLabel = isActive ? `${rec.confidence} (active)` : rec.confidence;
+
+  let currentCell = "—";
+  let rowClass = "";
+  if (showCurrentPrice && r.csvItem && r.csvItem.startPrice) {
+    const currentPence = Math.round(parseFloat(r.csvItem.startPrice) * 100);
+    currentCell = CompFinderPricing.toPoundsStr(currentPence);
+    if (rec.finalPence != null && Math.abs(rec.finalPence - currentPence) >= 300) rowClass = "compfinder-big-delta";
+  }
+
+  return (
+    <tr className={rowClass}>
+      <td>{r.sku}</td><td>{r.title}</td><td>{r.query}</td><td>{compsCell}</td>
+      <td><span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span></td>
+      <td>{currentCell}</td><td>{priceStr}</td><td>{rec.note}</td>
+    </tr>
+  );
+}

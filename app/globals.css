@@ -1,0 +1,451 @@
+/**
+ * Comp Finder — panel visual system.
+ *
+ * Design direction: this is a working instrument for real, repetitive
+ * pricing decisions at volume, not a marketing page — closer to a
+ * trading-floor terminal or a ledger than a generic SaaS dashboard.
+ * Confidence is rendered as a small badge styled after a graded-card slab
+ * label (PSA/CGC/BGS), since that's the single most important thing to
+ * scan across a hundred-row batch — the one place this spends its
+ * "boldness," everything else stays quiet and disciplined.
+ *
+ * Palette (named, not incidental):
+ *   --paper       #EEF1EF  page background — cool, not the cream everyone defaults to
+ *   --surface     #FFFFFF  cards, table
+ *   --ink         #14202F  primary text
+ *   --ink-soft    #56636E  secondary text, labels
+ *   --line        #D7DCDA  hairlines
+ *   --accent      #8C4A2A  vintage card-box leather — primary actions, focus
+ *   --conf-high   #1E7A5C  mint
+ *   --conf-medium #A6740F  gold
+ *   --conf-low    #A33B2E  brick
+ *
+ * Type: Barlow Condensed (labels, headers, badges — a stamp/permit feel)
+ * over IBM Plex Sans (body) with IBM Plex Mono for every number, so a
+ * dense price table actually aligns.
+ */
+
+:root {
+  --paper: #EEF1EF;
+  --surface: #FFFFFF;
+  --ink: #14202F;
+  --ink-soft: #56636E;
+  --line: #D7DCDA;
+  --accent: #8C4A2A;
+  --accent-ink: #FFFFFF;
+  --conf-high: #1E7A5C;
+  --conf-medium: #A6740F;
+  --conf-low: #A33B2E;
+  --radius: 3px;
+  --font-display: "Barlow Condensed", Arial Narrow, sans-serif;
+  --font-body: "IBM Plex Sans", Arial, Helvetica, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--paper);
+  background-image:
+    linear-gradient(var(--line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+#app {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 28px 28px 80px;
+}
+
+/* ---------- Header ---------- */
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.brand { display: flex; align-items: baseline; gap: 10px; }
+
+.brand-mark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  color: var(--accent-ink);
+  background: var(--accent);
+  padding: 3px 7px;
+  border-radius: var(--radius);
+}
+
+.topbar h1 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 26px;
+  letter-spacing: 0.01em;
+  margin: 0;
+  color: var(--ink);
+}
+
+.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.topbar-actions a { color: var(--accent); font-size: 13px; text-decoration: none; font-weight: 500; }
+.topbar-actions a:hover { text-decoration: underline; }
+
+/* ---------- Status strip ---------- */
+
+.status-strip { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 22px; }
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--ink-soft);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  box-shadow: 0 1px 0 rgba(20, 32, 47, 0.03);
+}
+.chip:empty { display: none; }
+.chip.compfinder-budget-warn { color: var(--conf-low); border-color: var(--conf-low); font-weight: 500; background: #FBEDEA; }
+
+/* ---------- Panels ---------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 22px 24px 24px;
+  margin-bottom: 18px;
+}
+
+.panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.eyebrow {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.eyebrow-small { font-size: 11px; letter-spacing: 0.12em; color: var(--ink-soft); }
+
+.hint { margin: 8px 0 0; color: var(--ink-soft); line-height: 1.55; max-width: 720px; font-size: 13.5px; }
+.hint-small { font-size: 12px; margin-top: 6px; }
+
+/* ---------- Form elements ---------- */
+
+#compfinder-input {
+  width: 100%;
+  max-width: 640px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  display: block;
+  margin-top: 14px;
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.filters {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--line);
+}
+
+.filter-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1.15fr 0.85fr 0.85fr 0.85fr;
+  gap: 12px;
+  margin-top: 10px;
+  max-width: 780px;
+}
+
+.field select { text-overflow: ellipsis; }
+
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field span {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.field select, .field input[type="number"] {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.checkbox-field input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.checkbox-field-disabled { opacity: 0.45; }
+.checkbox-field-disabled input[type="checkbox"] { cursor: not-allowed; }
+
+.row { display: flex; gap: 10px; margin-top: 14px; align-items: center; }
+.row-file { align-items: center; }
+
+.divider {
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 11px;
+  margin: 16px 0;
+  position: relative;
+}
+.divider span {
+  background: var(--surface);
+  padding: 0 10px;
+  font-family: var(--font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  position: relative;
+  z-index: 1;
+}
+.divider::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 50%;
+  border-top: 1px solid var(--line);
+}
+
+.file-label { display: inline-block; cursor: pointer; }
+#compfinder-csv-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+}
+
+/* ---------- Buttons ---------- */
+
+.btn {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.03em;
+  padding: 9px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { background: #7A3E22; }
+
+.btn-ghost { background: transparent; color: var(--accent); }
+.btn-ghost:hover { background: rgba(140, 74, 42, 0.08); }
+
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+#compfinder-status { margin: 4px 2px 14px; font-size: 13px; color: var(--ink-soft); min-height: 18px; font-family: var(--font-mono); }
+.compfinder-error { color: var(--conf-low); font-weight: 500; }
+
+/* ---------- Results toolbar ---------- */
+
+.results-toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 14px 0 4px;
+  flex-wrap: wrap;
+}
+
+#results-search {
+  flex: 1;
+  min-width: 220px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  background: var(--paper);
+}
+
+#results-confidence-filter, #results-reason-filter {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 7px 8px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  background: var(--surface);
+}
+
+#results-count { color: var(--ink-soft); font-family: var(--font-mono); font-size: 12px; white-space: nowrap; }
+
+/* ---------- Table ---------- */
+
+.table-wrap { margin-top: 12px; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); }
+
+#compfinder-results { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); }
+
+#compfinder-results th {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  background: var(--paper);
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+#compfinder-results td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  max-width: 260px;
+}
+
+#compfinder-results tr:last-child td { border-bottom: none; }
+#compfinder-results tr:hover td { background: #F7F8F6; }
+
+#compfinder-results td:nth-child(6),
+#compfinder-results td:nth-child(7) {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.compfinder-big-delta td { background: #FBF0DD; }
+.compfinder-big-delta:hover td { background: #F6E6C8; }
+
+/* "Show current price" toggle — hides the whole column instantly for
+   already-rendered rows too, no re-render needed. */
+#compfinder-results.hide-current-price th:nth-child(6),
+#compfinder-results.hide-current-price td:nth-child(6) {
+  display: none;
+}
+
+.row-hidden { display: none; }
+
+/* Confidence badge — the signature element: a small grading-slab label. */
+.conf-badge {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 2px;
+  border: 1.5px solid currentColor;
+  white-space: nowrap;
+}
+.conf-high { color: var(--conf-high); }
+.conf-medium { color: var(--conf-medium); }
+.conf-low, .conf-none { color: var(--conf-low); }
+.conf-badge-active { opacity: 0.75; font-style: italic; }
+
+@media (max-width: 720px) {
+  .filter-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---------- Auth pages (login/signup) — new for the web version, reuses
+   the same design tokens rather than inventing a separate style. ---------- */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.auth-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 32px 28px;
+  width: 100%;
+  max-width: 380px;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+
+.auth-form { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; }
+
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.auth-form input {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.auth-error {
+  color: var(--conf-low);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.auth-switch { margin-top: 18px; font-size: 13px; color: var(--ink-soft); text-align: center; }
+.auth-switch a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.auth-switch a:hover { text-decoration: underline; }
