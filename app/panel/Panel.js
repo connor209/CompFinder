@@ -105,6 +105,7 @@ export default function Panel() {
   const [confidenceFilter, setConfidenceFilter] = useState("");
   const [reasonFilter, setReasonFilter] = useState("");
   const [showCurrentPrice, setShowCurrentPrice] = useState(false);
+  const [resultsView, setResultsView] = useState("cards");
 
   const settings = CompFinderPricing.DEFAULT_SETTINGS;
 
@@ -622,6 +623,10 @@ export default function Panel() {
             {reasonOptions.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
           <span className="hint-small">{filteredResults.length === results.length ? `${results.length} row(s)` : `${filteredResults.length} of ${results.length} row(s) shown`}</span>
+          <div className="view-toggle" role="group" aria-label="Results view">
+            <button aria-pressed={resultsView === "cards"} onClick={() => setResultsView("cards")}>▦ Cards</button>
+            <button aria-pressed={resultsView === "table"} onClick={() => setResultsView("table")}>☰ Table</button>
+          </div>
         </div>
 
         <label className="checkbox-field">
@@ -629,27 +634,44 @@ export default function Panel() {
           <span>Show current price &amp; highlight big changes</span>
         </label>
 
-        <div className="table-wrap">
-          <table id="compfinder-results" className={showCurrentPrice ? "" : "hide-current-price"}>
-            <thead>
-              <tr>
-                <th>SKU</th><th>Title</th><th>Query used</th><th>Comps</th>
-                <th>Confidence</th><th>Current</th><th>Recommended</th><th>Active</th><th>Note</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredResults.map(({ r, origIndex }) => (
-                <ResultRow
-                  key={origIndex}
-                  r={r}
-                  showCurrentPrice={showCurrentPrice}
-                  active={activeByIndex[origIndex]}
-                  onCheckActive={() => fetchActiveFor(r, origIndex)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {results.length === 0 ? (
+          <p className="dd-empty">Run a search or upload a CSV to see priced results here.</p>
+        ) : resultsView === "cards" ? (
+          <div className="rc-grid">
+            {filteredResults.map(({ r, origIndex }) => (
+              <ResultCard
+                key={origIndex}
+                r={r}
+                showCurrentPrice={showCurrentPrice}
+                active={activeByIndex[origIndex]}
+                onCheckActive={() => fetchActiveFor(r, origIndex)}
+                onDeepDive={deepDiveCard}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table id="compfinder-results" className={showCurrentPrice ? "" : "hide-current-price"}>
+              <thead>
+                <tr>
+                  <th>SKU</th><th>Title</th><th>Query used</th><th>Comps</th>
+                  <th>Confidence</th><th>Current</th><th>Recommended</th><th>Active</th><th>Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredResults.map(({ r, origIndex }) => (
+                  <ResultRow
+                    key={origIndex}
+                    r={r}
+                    showCurrentPrice={showCurrentPrice}
+                    active={activeByIndex[origIndex]}
+                    onCheckActive={() => fetchActiveFor(r, origIndex)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
         </>
       )}
@@ -716,6 +738,86 @@ function ResultRow({ r, showCurrentPrice, active, onCheckActive }) {
         </tr>
       )}
     </>
+  );
+}
+
+function ResultCard({ r, showCurrentPrice, active, onCheckActive, onDeepDive }) {
+  const [open, setOpen] = useState(false);
+
+  if (!r.rec) {
+    return (
+      <div className="rc rc-skip">
+        <div className="rc-head">
+          <span className="rc-title" title={r.title}>{r.title}</span>
+          <span className="conf-badge conf-low">Skipped</span>
+        </div>
+        {r.sku ? <div className="rc-sku">SKU {r.sku}</div> : null}
+        {r.failed ? <div className="rc-note">{r.failed}</div> : null}
+      </div>
+    );
+  }
+
+  const rec = r.rec;
+  const priceStr = rec.finalPence != null ? CompFinderPricing.toPoundsStr(rec.finalPence) : "—";
+  const reasonCounts = countReasons(rec);
+  const reasonBreakdown = Object.entries(reasonCounts).map(([reason, n]) => `${n} ${reason}`).join(", ");
+  const compsCell = `${rec.included.length} used / ${rec.excluded.length} excluded` + (reasonBreakdown ? ` (${reasonBreakdown})` : "");
+  const isActive = rec.dataSource === "active";
+  const confidenceLabel = isActive ? `${rec.confidence} (active)` : rec.confidence;
+  const canExpand = rec.included.length + rec.excluded.length > 0 || !!(active && active.rec);
+
+  let currentPence = null;
+  let bigDelta = false;
+  if (showCurrentPrice && r.csvItem && r.csvItem.startPrice) {
+    currentPence = Math.round(parseFloat(r.csvItem.startPrice) * 100);
+    if (rec.finalPence != null && Math.abs(rec.finalPence - currentPence) >= 300) bigDelta = true;
+  }
+  const delta = currentPence != null && rec.finalPence != null ? rec.finalPence - currentPence : null;
+
+  return (
+    <div className={`rc${bigDelta ? " rc-big-delta" : ""}`}>
+      <div className="rc-head">
+        <span className="rc-title" title={r.title}>{r.title}</span>
+        <span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span>
+      </div>
+      {r.sku ? <div className="rc-sku">SKU {r.sku}</div> : null}
+      <div className="rc-q" title={r.query}>“{r.query}”</div>
+
+      <div className="rc-prices">
+        <div className="rc-pcell">
+          <span className="k">Recommended</span>
+          <span className="v big">{priceStr}</span>
+        </div>
+        {currentPence != null ? (
+          <div className="rc-pcell">
+            <span className="k">Current</span>
+            <span className="v">
+              {CompFinderPricing.toPoundsStr(currentPence)}
+              {delta ? <span className={`rc-delta ${delta > 0 ? "up" : "down"}`}>{delta > 0 ? "▲" : "▼"} {CompFinderPricing.toPoundsStr(Math.abs(delta))}</span> : null}
+            </span>
+          </div>
+        ) : null}
+        <div className="rc-pcell">
+          <span className="k">Active</span>
+          <span className="v"><ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} /></span>
+        </div>
+      </div>
+
+      {rec.note ? <div className="rc-note">{rec.note}</div> : null}
+
+      <div className="rc-foot">
+        {canExpand ? (
+          <button type="button" className="comps-toggle" onClick={() => setOpen((o) => !o)}>
+            <span className="comps-toggle-caret">{open ? "▾" : "▸"}</span> {compsCell}
+          </button>
+        ) : (
+          <span className="hint-small">{compsCell}</span>
+        )}
+        {onDeepDive ? <button type="button" className="rc-dive" onClick={() => onDeepDive(r.title)}>Deep dive ↗</button> : null}
+      </div>
+
+      {open && canExpand ? <div className="rc-detail"><CompsDetail rec={rec} active={active} /></div> : null}
+    </div>
   );
 }
 
