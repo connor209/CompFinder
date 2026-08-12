@@ -256,6 +256,12 @@ export default function QuickSearch() {
       )
       .catch(() => setMine({ loading: false, configured: true, error: "eBay check failed.", listings: [] }));
     const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
+    // The card database is English-first: a card's English collector number and
+    // set name don't map to Japanese/Korean/Chinese prints (different numbering,
+    // localised set names). When a language is selected, drop them so comp
+    // matching leans on name + language alone instead of over-filtering.
+    const effNumber = lang ? null : card.number || null;
+    const effSet = lang ? null : card.set || null;
     const options = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
     const post = (body) =>
       fetch("/api/soldcomps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
@@ -269,7 +275,7 @@ export default function QuickSearch() {
     activePromise
       .then((actRes) => {
         if (actRes && actRes.ok) {
-          const a = CompFinderPricing.recommend(actRes.comps || [], settings, nameTokens, "active", card.number || null, card.set || null);
+          const a = CompFinderPricing.recommend(actRes.comps || [], settings, nameTokens, "active", effNumber, effSet);
           setActiveState({ loading: false, rec: a });
         } else {
           setActiveState({ loading: false, rec: null });
@@ -281,7 +287,7 @@ export default function QuickSearch() {
       const soldRes = await soldPromise;
       if (!soldRes || !soldRes.ok) throw new Error((soldRes && soldRes.error) || "Pricing request failed.");
       const comps = soldRes.comps || [];
-      const rec = CompFinderPricing.recommend(comps, settings, nameTokens, "sold", card.number || null, card.set || null);
+      const rec = CompFinderPricing.recommend(comps, settings, nameTokens, "sold", effNumber, effSet);
       setData({ card, rec, comps });
     } catch (err) {
       setError(err.message || "Something went wrong pricing that card.");
@@ -325,6 +331,32 @@ export default function QuickSearch() {
 
   return (
     <>
+      <div className="lang-row">
+        <span className="lang-label">Language</span>
+        <div className="pills" role="group" aria-label="Card language">
+          {[
+            { v: "", l: "English" },
+            { v: "Japanese", l: "Japanese" },
+            { v: "Korean", l: "Korean" },
+            { v: "Chinese", l: "Chinese" }
+          ].map((opt) => (
+            <button
+              key={opt.l}
+              aria-pressed={language === opt.v}
+              onClick={() => {
+                setLanguage(opt.v);
+                if (data) runDeepDive(data.card, opt.v);
+              }}
+            >
+              {opt.l}
+            </button>
+          ))}
+        </div>
+        {language ? (
+          <span className="lang-hint">Set number ignored — {language} cards are numbered differently.</span>
+        ) : null}
+      </div>
+
       <div className="dd-search">
         <div className="dd-combo">
           <div className="dd-inp">
@@ -376,29 +408,6 @@ export default function QuickSearch() {
         <button className="btn btn-primary" onClick={runFromText} disabled={loading}>Search</button>
       </div>
 
-      <div className="lang-row">
-        <span className="lang-label">Language</span>
-        <div className="pills" role="group" aria-label="Card language">
-          {[
-            { v: "", l: "English" },
-            { v: "Japanese", l: "Japanese" },
-            { v: "Korean", l: "Korean" },
-            { v: "Chinese", l: "Chinese" }
-          ].map((opt) => (
-            <button
-              key={opt.l}
-              aria-pressed={language === opt.v}
-              onClick={() => {
-                setLanguage(opt.v);
-                if (data) runDeepDive(data.card, opt.v);
-              }}
-            >
-              {opt.l}
-            </button>
-          ))}
-        </div>
-      </div>
-
       {loading && <div className="panel"><span className="spinner" /> &nbsp;Pricing from recent sold listings…</div>}
       {error && !loading && <div className="panel compfinder-error">{error}</div>}
 
@@ -446,7 +455,8 @@ export default function QuickSearch() {
               <h2 className="dd-title">{view.card.name}</h2>
               <div className="dd-nums">
                 {language ? <span className="badge2 badge-lang">{language}</span> : null}
-                {view.card.number ? <span className="badge2"># {view.card.number}</span> : null}
+                {view.card.number && !language ? <span className="badge2"># {view.card.number}</span> : null}
+                {view.card.number && language ? <span className="badge2 badge-muted">EN&nbsp;#{view.card.number}</span> : null}
                 {view.card.series ? <span className="badge2">{view.card.series}</span> : null}
               </div>
               <div className="dd-headline">
