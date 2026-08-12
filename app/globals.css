@@ -196,6 +196,11 @@ a { color:var(--accent-2); }
 .mine-list { display:flex; flex-direction:column; gap:3px; margin-top:5px; }
 .mine-list a { font-size:13px; color:var(--accent-2); text-decoration:none; }
 .mine-list a:hover { text-decoration:underline; }
+.mine-note { display:flex; align-items:center; font-size:13px; color:var(--ink-soft); margin:0 0 14px; }
+.mine-note a { color:var(--accent-2); text-decoration:none; }
+.mine-note a:hover { text-decoration:underline; }
+.mine-note-ok { color:var(--conf-high); }
+.mine-note-err { color:var(--warn-ink); }
 .suggest { position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:30; background:var(--surface); border:1px solid var(--line-strong); border-radius:12px; box-shadow:var(--shadow-2); padding:5px; display:none; max-height:340px; overflow:auto; }
 .suggest.open { display:block; }
 .sugg { display:grid; grid-template-columns:auto 1fr auto; gap:11px; align-items:center; padding:8px 9px; border-radius:9px; cursor:pointer; }

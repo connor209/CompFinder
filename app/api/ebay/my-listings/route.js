@@ -11,7 +11,7 @@ import { createClient } from "@/lib/supabase/server";
  * no per-user eBay login needed. Requires EBAY_CLIENT_ID / EBAY_CLIENT_SECRET
  * (the app's Production keyset) in the environment. Marketplace fixed to UK.
  *
- * GET /api/ebay/my-listings?q=Charizard%204/102
+ * GET /api/ebay/my-listings?name=Zapdos&number=15/62
  */
 const TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token";
 const BROWSE_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search";
@@ -52,8 +52,10 @@ export async function GET(request) {
     return NextResponse.json({ ok: false, error: "Not signed in.", listings: [] }, { status: 401 });
   }
 
-  const q = (new URL(request.url).searchParams.get("q") || "").trim();
-  if (!q) {
+  const sp = new URL(request.url).searchParams;
+  const name = (sp.get("name") || sp.get("q") || "").trim();
+  const number = (sp.get("number") || "").trim();
+  if (!name) {
     return NextResponse.json({ ok: true, configured: true, listings: [] });
   }
 
@@ -70,7 +72,10 @@ export async function GET(request) {
 
   try {
     const token = await getAppToken();
-    const params = new URLSearchParams({ q, limit: "10", filter: `sellers:{${username}}` });
+    // Search by NAME only (eBay full-text is finicky about "15/62"-style
+    // fragments), then interpret the card number ourselves against the
+    // returned titles — far more robust than making eBay match the number.
+    const params = new URLSearchParams({ q: name, limit: "50", filter: `sellers:{${username}}` });
     const res = await fetch(`${BROWSE_URL}?${params}`, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -78,16 +83,31 @@ export async function GET(request) {
       }
     });
     if (!res.ok) {
-      return NextResponse.json({ ok: false, configured: true, error: `eBay search failed (${res.status}).`, listings: [] }, { status: 502 });
+      const body = await res.text().catch(() => "");
+      return NextResponse.json(
+        { ok: false, configured: true, error: `eBay search failed (${res.status}). ${body.slice(0, 200)}`.trim(), listings: [] },
+        { status: 502 }
+      );
     }
     const json = await res.json();
-    const listings = (json.itemSummaries || []).map((it) => ({
+    const items = json.itemSummaries || [];
+
+    // If we have a card number, keep only listings whose title contains it
+    // (whitespace-insensitive so "15 / 62" still matches "15/62"). The card
+    // number is far more distinctive than the name, so this cuts false
+    // positives hard. If no number was supplied, fall back to name matches.
+    const normNum = number.replace(/\s+/g, "").toLowerCase();
+    const matched = normNum
+      ? items.filter((it) => (it.title || "").replace(/\s+/g, "").toLowerCase().includes(normNum))
+      : items;
+
+    const listings = matched.slice(0, 10).map((it) => ({
       title: it.title,
       url: it.itemWebUrl,
       image: it.image?.imageUrl || it.thumbnailImages?.[0]?.imageUrl || null,
       price: it.price ? { value: it.price.value, currency: it.price.currency } : null
     }));
-    return NextResponse.json({ ok: true, configured: true, listings });
+    return NextResponse.json({ ok: true, configured: true, listings, scanned: items.length });
   } catch (err) {
     return NextResponse.json({ ok: false, configured: true, error: err.message || "eBay lookup failed.", listings: [] }, { status: 500 });
   }

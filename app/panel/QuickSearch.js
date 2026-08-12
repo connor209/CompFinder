@@ -152,7 +152,7 @@ export default function QuickSearch() {
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
   const [activeState, setActiveState] = useState({ loading: false, rec: null });
-  const [mine, setMine] = useState({ loading: false, listings: [] });
+  const [mine, setMine] = useState({ loading: false, configured: true, error: "", listings: [] });
   const debounceRef = useRef(null);
   const cacheRef = useRef(new Map());
 
@@ -234,17 +234,27 @@ export default function QuickSearch() {
     setData(null);
     setScope("uk");
     setActiveState({ loading: true, rec: null });
-    setMine({ loading: true, listings: [] });
+    setMine({ loading: true, configured: true, error: "", listings: [] });
     // Non-English prints number differently, so drop the English collector
     // number and lean on name + language instead.
     const numberPart = lang ? "" : card.number || "";
     const query = `${card.name} ${numberPart} ${lang}`.replace(/\s+/g, " ").trim();
 
-    // "Already listed on eBay?" — fire-and-forget, fills in when ready.
-    fetch(`/api/ebay/my-listings?q=${encodeURIComponent(query)}`)
+    // "Already listed on eBay?" — fire-and-forget, fills in when ready. We pass
+    // name + number separately so the server can search by name and interpret
+    // the number itself (eBay full-text matching on "15/62" is unreliable).
+    const mineName = `${card.name} ${lang}`.replace(/\s+/g, " ").trim();
+    fetch(`/api/ebay/my-listings?name=${encodeURIComponent(mineName)}&number=${encodeURIComponent(lang ? "" : card.number || "")}`)
       .then((r) => r.json())
-      .then((res) => setMine({ loading: false, listings: (res && res.listings) || [] }))
-      .catch(() => setMine({ loading: false, listings: [] }));
+      .then((res) =>
+        setMine({
+          loading: false,
+          configured: res ? res.configured !== false : true,
+          error: res && res.ok === false ? res.error || "" : "",
+          listings: (res && res.listings) || []
+        })
+      )
+      .catch(() => setMine({ loading: false, configured: true, error: "eBay check failed.", listings: [] }));
     const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
     const options = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
     const post = (body) =>
@@ -401,7 +411,7 @@ export default function QuickSearch() {
 
       {view && !loading && (
         <>
-          {mine.listings.length > 0 && (
+          {mine.listings.length > 0 ? (
             <div className="mine-banner">
               <span className="mine-ic" aria-hidden="true">⚠</span>
               <div>
@@ -415,6 +425,14 @@ export default function QuickSearch() {
                 </div>
               </div>
             </div>
+          ) : mine.loading ? (
+            <p className="mine-note"><span className="spinner" /> &nbsp;Checking your eBay listings…</p>
+          ) : !mine.configured ? (
+            <p className="mine-note">Add your eBay username in <a href="/settings">Settings</a> to flag cards you already have listed.</p>
+          ) : mine.error ? (
+            <p className="mine-note mine-note-err">eBay check unavailable — {mine.error}</p>
+          ) : (
+            <p className="mine-note mine-note-ok">✓ Not in your active eBay listings.</p>
           )}
           <div className="dd-hero">
             <div className="dd-card">
