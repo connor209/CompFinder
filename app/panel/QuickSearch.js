@@ -150,7 +150,9 @@ export default function QuickSearch() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
+  const [activeState, setActiveState] = useState({ loading: false, rec: null });
   const debounceRef = useRef(null);
+  const cacheRef = useRef(new Map());
 
   function onInput(v) {
     setQ(v);
@@ -161,13 +163,24 @@ export default function QuickSearch() {
       setOpenSug(false);
       return;
     }
+    const key = v.trim().toLowerCase();
     debounceRef.current = setTimeout(async () => {
+      if (cacheRef.current.has(key)) {
+        const cards = cacheRef.current.get(key);
+        setSugs(cards);
+        setOpenSug(cards.length > 0);
+        return;
+      }
       try {
         const res = await fetch(`/api/cards/search?q=${encodeURIComponent(v.trim())}`).then((r) => r.json());
         if (res.ok) {
-          setSugs(res.cards || []);
-          setOpenSug((res.cards || []).length > 0);
+          const cards = res.cards || [];
+          cacheRef.current.set(key, cards);
+          setSugs(cards);
+          setOpenSug(cards.length > 0);
         }
+        // On a non-ok response (e.g. throttled), leave whatever's showing
+        // rather than blanking the dropdown.
       } catch {
         /* typeahead is best-effort */
       }
@@ -218,34 +231,36 @@ export default function QuickSearch() {
     setError("");
     setData(null);
     setScope("uk");
+    setActiveState({ loading: true, rec: null });
     const query = `${card.name} ${card.number}`.trim();
     const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
     const options = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
+    const post = (body) =>
+      fetch("/api/soldcomps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+
+    // Fire sold + active in parallel so active listings don't add to the wait.
+    const soldPromise = post({ query, options });
+    const activePromise = post({ query, options: { ...options, sold: false } });
+
+    // Active listings fill in on their own once ready — they don't block the
+    // main deep dive from rendering.
+    activePromise
+      .then((actRes) => {
+        if (actRes && actRes.ok) {
+          const a = CompFinderPricing.recommend(actRes.comps || [], settings, nameTokens, "active", card.number || null, card.set || null);
+          setActiveState({ loading: false, rec: a });
+        } else {
+          setActiveState({ loading: false, rec: null });
+        }
+      })
+      .catch(() => setActiveState({ loading: false, rec: null }));
+
     try {
-      const soldRes = await fetch("/api/soldcomps", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query, options })
-      }).then((r) => r.json());
-      if (!soldRes.ok) throw new Error(soldRes.error || "Pricing request failed.");
+      const soldRes = await soldPromise;
+      if (!soldRes || !soldRes.ok) throw new Error((soldRes && soldRes.error) || "Pricing request failed.");
       const comps = soldRes.comps || [];
       const rec = CompFinderPricing.recommend(comps, settings, nameTokens, "sold", card.number || null, card.set || null);
-
-      let active = null;
-      try {
-        const actRes = await fetch("/api/soldcomps", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query, options: { ...options, sold: false } })
-        }).then((r) => r.json());
-        if (actRes.ok) {
-          active = CompFinderPricing.recommend(actRes.comps || [], settings, nameTokens, "active", card.number || null, card.set || null);
-        }
-      } catch {
-        /* active listings are a bonus */
-      }
-
-      setData({ card, rec, comps, active });
+      setData({ card, rec, comps });
     } catch (err) {
       setError(err.message || "Something went wrong pricing that card.");
     } finally {
@@ -256,7 +271,8 @@ export default function QuickSearch() {
   // ---- derived view data ----
   let view = null;
   if (data) {
-    const { card, rec, comps, active } = data;
+    const { card, rec, comps } = data;
+    const active = activeState.rec;
     const used = rec.included || [];
     const totals = used.map((c) => c.totalPence);
     const med = totals.length ? Math.round(median(totals)) : null;
@@ -282,7 +298,7 @@ export default function QuickSearch() {
 
     const confClass = `conf-badge conf-${(rec.confidence || "low").toLowerCase()}`;
     const activePrice = active && active.finalPence != null ? active.finalPence : null;
-    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, usedCount: used.length };
+    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, activeLoading: activeState.loading, usedCount: used.length };
   }
 
   return (
@@ -404,7 +420,9 @@ export default function QuickSearch() {
 
           <div className="panel">
             <div className="panel-head"><h3>Active listings</h3><span className="badge2">market read</span></div>
-            {view.active && view.active.included && view.active.included.length > 0 ? (
+            {view.activeLoading ? (
+              <p className="hint" style={{ marginTop: 0 }}><span className="spinner" /> &nbsp;Checking current asking prices…</p>
+            ) : view.active && view.active.included && view.active.included.length > 0 ? (
               <p className="hint" style={{ marginTop: 0 }}>
                 Currently listed at a median <b>{pounds(view.active.finalPence)}</b> asking ({view.active.included.length} listing(s))
                 {view.rec.finalPence != null && view.active.finalPence != null

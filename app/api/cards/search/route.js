@@ -3,23 +3,34 @@ import { createClient } from "@/lib/supabase/server";
 
 /**
  * Card-name typeahead, backed by the free pokemontcg.io database. Proxied
- * server-side so POKEMONTCG_API_KEY never reaches the browser, and so results
- * can be trimmed to just what the suggestion dropdown needs. The key is
- * optional — without it the API still works at a lower daily limit.
+ * server-side so POKEMONTCG_API_KEY never reaches the browser. The key is
+ * optional but strongly recommended — without it the keyless daily/burst
+ * limit is easily exhausted by per-keystroke typeahead traffic.
  *
- * GET /api/cards/search?q=char  ->  { ok, cards: [{ id, name, number, set, rarity, image }] }
+ * Narrowing: pokemontcg's own query only matches the card NAME, so a search
+ * like "Wartortle Base Set" can't be expressed as one API query (the set is a
+ * different field, and users don't type in a fixed order). Instead we seed the
+ * upstream query with the first real word, pull a wide page, then filter/rank
+ * locally against name + set + number so the extra words genuinely narrow it.
+ *
+ * GET /api/cards/search?q=wartortle%20base -> { ok, cards: [...] }
  */
 const API = "https://api.pokemontcg.io/v2/cards";
 
-// pokemontcg.io uses a Lucene-ish query language; strip characters that would
-// break it, then wildcard each word (prefix match) and treat a bare number
-// like "4" or "4/102" as a collector-number filter.
-function buildQuery(raw) {
-  const cleaned = raw.replace(/[":()[\]{}^~?\\/]/g, " ").trim();
-  const tokens = cleaned.split(/\s+/).filter(Boolean).slice(0, 6);
-  return tokens
-    .map((t) => (/^\d{1,4}$/.test(t) ? `number:${t}` : `name:${t}*`))
-    .join(" ");
+// Filler words that shouldn't be required matches (set/condition/rarity noise).
+const STOP = new Set([
+  "set", "pokemon", "pokémon", "card", "cards", "tcg", "the", "a", "of",
+  "holo", "holographic", "reverse", "foil", "rare", "common", "uncommon",
+  "promo", "full", "art", "nm", "lp", "mp", "hp", "mint", "near", "edition"
+]);
+
+function tokenize(raw) {
+  return raw
+    .toLowerCase()
+    .replace(/[":()[\]{}^~?\\/#]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 8);
 }
 
 export async function GET(request) {
@@ -36,9 +47,24 @@ export async function GET(request) {
     return NextResponse.json({ ok: true, cards: [] });
   }
 
+  const tokens = tokenize(raw);
+  const numeric = tokens.filter((t) => /^\d{1,4}$/.test(t));
+  const words = tokens.filter((t) => !/^\d/.test(t));
+  const seed = words.find((w) => !STOP.has(w)) || words[0];
+  const required = tokens.filter((t) => !STOP.has(t)); // words + numbers, minus filler
+
+  if (!seed && !numeric.length) {
+    return NextResponse.json({ ok: true, cards: [] });
+  }
+
+  const parts = [];
+  if (seed) parts.push(`name:${seed}*`);
+  if (numeric[0]) parts.push(`number:${numeric[0]}`);
+
   const params = new URLSearchParams({
-    q: buildQuery(raw),
-    pageSize: "8",
+    q: parts.join(" "),
+    pageSize: "50",
+    orderBy: "-set.releaseDate",
     select: "id,name,number,rarity,set,images"
   });
 
@@ -46,16 +72,25 @@ export async function GET(request) {
   if (process.env.POKEMONTCG_API_KEY) headers["X-Api-Key"] = process.env.POKEMONTCG_API_KEY;
 
   try {
-    // Card metadata barely changes — cache each query for a day.
     const res = await fetch(`${API}?${params}`, { headers, next: { revalidate: 86400 } });
     if (!res.ok) {
+      // 429 etc. — surface it so the client can tell "throttled" from "no matches".
       return NextResponse.json({ ok: false, error: `Card database returned ${res.status}.`, cards: [] }, { status: 502 });
     }
     const json = await res.json();
-    const cards = (json.data || []).map((c) => ({
+    const all = json.data || [];
+
+    // Keep only cards that match every non-filler token across name + set +
+    // number; fall back to the raw seed results if that leaves nothing.
+    const matches = all.filter((c) => {
+      const hay = `${c.name} ${c.set?.name || ""} ${c.set?.series || ""} ${c.number} ${c.set?.printedTotal || ""}`.toLowerCase();
+      return required.every((t) => hay.includes(t));
+    });
+    const list = (matches.length ? matches : all).slice(0, 8);
+
+    const cards = list.map((c) => ({
       id: c.id,
       name: c.name,
-      // Reconstruct the familiar "9/108" from the printed number + set total.
       number: c.set?.printedTotal ? `${c.number}/${c.set.printedTotal}` : c.number,
       set: c.set?.name || "",
       series: c.set?.series || "",
