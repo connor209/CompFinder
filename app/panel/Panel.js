@@ -76,6 +76,7 @@ export default function Panel() {
   const [ebaySite, setEbaySite] = useState("ebay.co.uk");
   const [itemLocation, setItemLocation] = useState("domestic");
   const [itemCondition, setItemCondition] = useState("any");
+  const [soldWithin, setSoldWithin] = useState("90");
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [includeCondition, setIncludeCondition] = useState(false);
@@ -170,7 +171,7 @@ export default function Panel() {
     let stopReason = "";
     const collected = [];
 
-    const searchOptions = { ebaySite, itemLocation, itemCondition, minPrice: minPrice || null, maxPrice: maxPrice || null };
+    const searchOptions = { ebaySite, itemLocation, itemCondition, minPrice: minPrice || null, maxPrice: maxPrice || null, soldAfterDays: Number(soldWithin) };
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -396,6 +397,16 @@ export default function Panel() {
                 <option value="any">Any</option>
                 <option value="new">New</option>
                 <option value="used">Used</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Sold within</span>
+              <select value={soldWithin} onChange={(e) => setSoldWithin(e.target.value)}>
+                <option value="30">Last 30 days</option>
+                <option value="60">Last 60 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="180">Last 6 months</option>
+                <option value="365">Last 12 months</option>
               </select>
             </label>
             <label className="field">

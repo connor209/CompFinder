@@ -73,7 +73,7 @@ async function fetchSoldComps(apiKey, query, options) {
     page: options.page || 1,
     ebaySite: options.ebaySite || "ebay.co.uk",
     itemLocation: options.itemLocation || "domestic",
-    soldAfterDays: options.sold === false ? 0 : options.soldAfterDays ?? 30, // silently ignored by SoldComps when sold=false anyway — see docs
+    soldAfterDays: options.sold === false ? 0 : options.soldAfterDays ?? 90, // silently ignored by SoldComps when sold=false anyway — see docs
     itemCondition: options.itemCondition || "any",
     minPrice: options.minPrice ?? null,
     maxPrice: options.maxPrice ?? null
