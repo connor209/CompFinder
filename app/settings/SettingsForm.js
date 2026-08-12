@@ -14,6 +14,7 @@ export default function SettingsForm({ initialApiKey, initialSettings }) {
   const [apiKey, setApiKey] = useState(initialApiKey);
   const [itemLocation, setItemLocation] = useState(initialSettings.soldCompsItemLocation);
   const [monthlyQuota, setMonthlyQuota] = useState(initialSettings.soldCompsMonthlyQuota);
+  const [ebayUsername, setEbayUsername] = useState(initialSettings.ebayUsername || "");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState(null);
@@ -36,7 +37,8 @@ export default function SettingsForm({ initialApiKey, initialSettings }) {
         settings: {
           ...initialSettings,
           soldCompsItemLocation: itemLocation,
-          soldCompsMonthlyQuota: Number(monthlyQuota)
+          soldCompsMonthlyQuota: Number(monthlyQuota),
+          ebayUsername: ebayUsername.trim()
         }
       })
       .eq("id", user.id);
@@ -84,6 +86,20 @@ export default function SettingsForm({ initialApiKey, initialSettings }) {
           Monthly request quota (match your SoldComps plan)
           <input type="number" min="1" value={monthlyQuota} onChange={(e) => setMonthlyQuota(e.target.value)} />
         </label>
+
+        <label>
+          eBay username
+          <input
+            type="text"
+            value={ebayUsername}
+            onChange={(e) => setEbayUsername(e.target.value)}
+            placeholder="your-ebay-id"
+            autoComplete="off"
+          />
+        </label>
+        <p className="hint hint-small">
+          Optional. When set, a price check flags cards you already have listed on eBay (requires the app's eBay API keys to be configured).
+        </p>
 
         {error && <p className="auth-error">{error}</p>}
         {saved && <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>Saved.</p>}

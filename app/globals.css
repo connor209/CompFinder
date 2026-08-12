@@ -190,6 +190,12 @@ a { color:var(--accent-2); }
 .lang-row { display:flex; align-items:center; gap:12px; margin:0 0 18px; flex-wrap:wrap; }
 .lang-label { font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); }
 .badge-lang { color:var(--accent-ink); background:var(--accent); border-color:transparent; }
+.mine-banner { display:flex; gap:12px; align-items:flex-start; background:var(--warn-soft); border:1px solid color-mix(in srgb,var(--warn) 40%, var(--line)); border-radius:var(--radius); padding:14px 16px; margin-bottom:16px; }
+.mine-ic { font-size:16px; line-height:1.4; }
+.mine-banner strong { display:block; font-size:14px; color:var(--warn-ink); }
+.mine-list { display:flex; flex-direction:column; gap:3px; margin-top:5px; }
+.mine-list a { font-size:13px; color:var(--accent-2); text-decoration:none; }
+.mine-list a:hover { text-decoration:underline; }
 .suggest { position:absolute; top:calc(100% + 6px); left:0; right:0; z-index:30; background:var(--surface); border:1px solid var(--line-strong); border-radius:12px; box-shadow:var(--shadow-2); padding:5px; display:none; max-height:340px; overflow:auto; }
 .suggest.open { display:block; }
 .sugg { display:grid; grid-template-columns:auto 1fr auto; gap:11px; align-items:center; padding:8px 9px; border-radius:9px; cursor:pointer; }

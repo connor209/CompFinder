@@ -152,6 +152,7 @@ export default function QuickSearch() {
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
   const [activeState, setActiveState] = useState({ loading: false, rec: null });
+  const [mine, setMine] = useState({ loading: false, listings: [] });
   const debounceRef = useRef(null);
   const cacheRef = useRef(new Map());
 
@@ -233,10 +234,17 @@ export default function QuickSearch() {
     setData(null);
     setScope("uk");
     setActiveState({ loading: true, rec: null });
+    setMine({ loading: true, listings: [] });
     // Non-English prints number differently, so drop the English collector
     // number and lean on name + language instead.
     const numberPart = lang ? "" : card.number || "";
     const query = `${card.name} ${numberPart} ${lang}`.replace(/\s+/g, " ").trim();
+
+    // "Already listed on eBay?" — fire-and-forget, fills in when ready.
+    fetch(`/api/ebay/my-listings?q=${encodeURIComponent(query)}`)
+      .then((r) => r.json())
+      .then((res) => setMine({ loading: false, listings: (res && res.listings) || [] }))
+      .catch(() => setMine({ loading: false, listings: [] }));
     const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
     const options = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
     const post = (body) =>
@@ -393,6 +401,21 @@ export default function QuickSearch() {
 
       {view && !loading && (
         <>
+          {mine.listings.length > 0 && (
+            <div className="mine-banner">
+              <span className="mine-ic" aria-hidden="true">⚠</span>
+              <div>
+                <strong>You already have this listed on eBay</strong>
+                <div className="mine-list">
+                  {mine.listings.slice(0, 3).map((l, i) => (
+                    <a key={i} href={l.url} target="_blank" rel="noopener noreferrer">
+                      {l.price ? (l.price.currency === "GBP" ? `£${Number(l.price.value).toFixed(2)}` : `${l.price.value} ${l.price.currency}`) : ""} — {l.title}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           <div className="dd-hero">
             <div className="dd-card">
               {view.card.image ? <img src={view.card.image} alt={view.card.name} /> : <span className="ph" aria-hidden="true">🎴</span>}
