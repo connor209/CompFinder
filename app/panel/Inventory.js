@@ -6,8 +6,11 @@ import { createClient } from "@/lib/supabase/client";
 /**
  * "My listings" stream — the user's active eBay listings, pulled in via the
  * connected account and cached in Supabase (ebay_listings, readable per-user
- * under RLS). Read-only for now: browse, filter, jump to the listing on eBay,
- * or re-sync. Market-price comparison / price editing come in a later phase.
+ * under RLS).
+ *
+ * Duplicate listings of the same card at the same price are condensed into a
+ * single row with a ×N count (expandable to the individual listings). Plus
+ * text filter, sort, and a "duplicates only" view. Read-only for now.
  */
 function priceStr(value, currency) {
   if (value == null) return "—";
@@ -19,11 +22,26 @@ function fmtWhen(iso) {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
+function normTitle(t) {
+  return (t || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+const SORTS = [
+  { v: "title", l: "Title A–Z" },
+  { v: "price-desc", l: "Price: high → low" },
+  { v: "price-asc", l: "Price: low → high" },
+  { v: "count-desc", l: "Most listed" },
+  { v: "qty-desc", l: "Total quantity" }
+];
 
 export default function Inventory() {
   const [status, setStatus] = useState({ loading: true, connected: false, configured: true });
   const [listings, setListings] = useState([]);
   const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState("title");
+  const [group, setGroup] = useState(true);
+  const [dupOnly, setDupOnly] = useState(false);
+  const [expanded, setExpanded] = useState(() => new Set());
   const [syncing, setSyncing] = useState(false);
   const [note, setNote] = useState("");
 
@@ -72,22 +90,61 @@ export default function Inventory() {
     setSyncing(false);
   }
 
-  const shown = useMemo(() => {
+  // text filter → group (same title + same price) → sort → duplicates-only
+  const rows = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    if (!f) return listings;
-    const words = f.split(/\s+/).filter(Boolean);
-    return listings.filter((l) => {
-      const t = (l.title || "").toLowerCase();
-      return words.every((w) => t.includes(w));
-    });
-  }, [listings, filter]);
+    const words = f ? f.split(/\s+/).filter(Boolean) : [];
+    const shown = words.length
+      ? listings.filter((l) => {
+          const t = (l.title || "").toLowerCase();
+          return words.every((w) => t.includes(w));
+        })
+      : listings;
 
-  if (status.loading) {
-    return (
-      <div className="panel"><span className="spinner" /> &nbsp;Loading your eBay listings…</div>
-    );
+    const useGroup = group || dupOnly;
+    let groups;
+    if (useGroup) {
+      const map = new Map();
+      for (const l of shown) {
+        const key = `${normTitle(l.title)}|${l.price_value}|${l.price_currency}`;
+        if (!map.has(key)) {
+          map.set(key, { key, ...l, _count: 0, _qty: 0, _items: [] });
+        }
+        const g = map.get(key);
+        g._count += 1;
+        g._qty += l.quantity || 0;
+        g._items.push(l);
+      }
+      groups = [...map.values()];
+    } else {
+      groups = shown.map((l) => ({ key: l.ebay_item_id, ...l, _count: 1, _qty: l.quantity || 0, _items: [l] }));
+    }
+
+    const num = (v) => (v == null ? -Infinity : Number(v));
+    const sorters = {
+      title: (a, b) => (a.title || "").localeCompare(b.title || ""),
+      "price-desc": (a, b) => num(b.price_value) - num(a.price_value),
+      "price-asc": (a, b) => num(a.price_value) - num(b.price_value),
+      "count-desc": (a, b) => b._count - a._count || (a.title || "").localeCompare(b.title || ""),
+      "qty-desc": (a, b) => b._qty - a._qty || (a.title || "").localeCompare(b.title || "")
+    };
+    groups.sort(sorters[sort] || sorters.title);
+
+    return dupOnly ? groups.filter((g) => g._count > 1) : groups;
+  }, [listings, filter, sort, group, dupOnly]);
+
+  function toggleExpand(key) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
+  if (status.loading) {
+    return <div className="panel"><span className="spinner" /> &nbsp;Loading your eBay listings…</div>;
+  }
   if (!status.configured) {
     return (
       <div className="panel">
@@ -96,7 +153,6 @@ export default function Inventory() {
       </div>
     );
   }
-
   if (!status.connected) {
     return (
       <div className="panel">
@@ -109,6 +165,8 @@ export default function Inventory() {
       </div>
     );
   }
+
+  const totalShownListings = rows.reduce((n, g) => n + g._count, 0);
 
   return (
     <>
@@ -131,30 +189,76 @@ export default function Inventory() {
         </div>
       </div>
 
+      <div className="inv-controls">
+        <label className="inv-sort">
+          Sort
+          <select value={sort} onChange={(e) => setSort(e.target.value)}>
+            {SORTS.map((s) => (
+              <option key={s.v} value={s.v}>{s.l}</option>
+            ))}
+          </select>
+        </label>
+        <label className="inv-check">
+          <input type="checkbox" checked={group} onChange={(e) => setGroup(e.target.checked)} disabled={dupOnly} />
+          Group duplicates
+        </label>
+        <label className="inv-check">
+          <input type="checkbox" checked={dupOnly} onChange={(e) => setDupOnly(e.target.checked)} />
+          Duplicates only
+        </label>
+        <span className="inv-summary">
+          {rows.length} {group || dupOnly ? "card(s)" : "listing(s)"}
+          {(group || dupOnly) && totalShownListings !== rows.length ? ` · ${totalShownListings} listings` : ""}
+        </span>
+      </div>
+
       {note && <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{note}</p>}
 
-      {shown.length === 0 ? (
+      {rows.length === 0 ? (
         <div className="panel">
           <p className="dd-empty">
-            {listings.length === 0 ? "No active listings cached yet — try Sync." : "No listings match that filter."}
+            {listings.length === 0
+              ? "No active listings cached yet — try Sync."
+              : dupOnly
+                ? "No duplicate listings — every card is listed once at a unique price."
+                : "No listings match that filter."}
           </p>
         </div>
       ) : (
         <div className="inv-grid">
-          {shown.map((l) => (
-            <div className="inv-card" key={l.ebay_item_id}>
-              <div className="inv-thumb">
-                {l.image_url ? <img src={l.image_url} alt="" loading="lazy" /> : <span aria-hidden="true">🎴</span>}
-              </div>
-              <div className="inv-body">
-                <a className="inv-title" href={l.url || "#"} target="_blank" rel="noopener noreferrer">{l.title}</a>
-                <div className="inv-foot">
-                  <span className="inv-price">{priceStr(l.price_value, l.price_currency)}</span>
-                  {l.quantity != null ? <span className="inv-qty">Qty {l.quantity}</span> : null}
+          {rows.map((g) => {
+            const isOpen = expanded.has(g.key);
+            return (
+              <div className="inv-card" key={g.key}>
+                <div className="inv-thumb">
+                  {g.image_url ? <img src={g.image_url} alt="" loading="lazy" /> : <span aria-hidden="true">🎴</span>}
+                  {g._count > 1 ? <span className="inv-count" title={`${g._count} listings at this price`}>×{g._count}</span> : null}
+                </div>
+                <div className="inv-body">
+                  <a className="inv-title" href={g.url || "#"} target="_blank" rel="noopener noreferrer">{g.title}</a>
+                  <div className="inv-foot">
+                    <span className="inv-price">{priceStr(g.price_value, g.price_currency)}</span>
+                    {g._count > 1 ? (
+                      <button className="inv-multi" onClick={() => toggleExpand(g.key)}>
+                        {g._count} listed {isOpen ? "▾" : "▸"}
+                      </button>
+                    ) : g.quantity != null ? (
+                      <span className="inv-qty">Qty {g.quantity}</span>
+                    ) : null}
+                  </div>
+                  {isOpen && g._count > 1 ? (
+                    <div className="inv-sublist">
+                      {g._items.map((it, i) => (
+                        <a key={it.ebay_item_id} href={it.url || "#"} target="_blank" rel="noopener noreferrer">
+                          Listing {i + 1}{it.quantity != null ? ` · qty ${it.quantity}` : ""} →
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </>
