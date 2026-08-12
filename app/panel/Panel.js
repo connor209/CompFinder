@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import QuickSearch from "./QuickSearch";
+import Inventory from "./Inventory";
 import ThemeToggle from "./ThemeToggle";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -471,11 +472,12 @@ export default function Panel() {
       <div className="stream" role="group" aria-label="Search mode">
         <button aria-pressed={stream === "single"} onClick={() => setStream("single")}>🔍 Quick Search</button>
         <button aria-pressed={stream === "batch"} onClick={() => setStream("batch")}>☰ Batch</button>
+        <button aria-pressed={stream === "inventory"} onClick={() => setStream("inventory")}>🏷️ My listings</button>
       </div>
 
-      {stream === "single" ? (
-        <QuickSearch />
-      ) : (
+      {stream === "single" && <QuickSearch />}
+      {stream === "inventory" && <Inventory />}
+      {stream === "batch" && (
         <>
       <div className="status-strip">
         <span className="chip">{`SoldComps: ${budget.count} this month (local estimate)`}</span>

@@ -1,8 +1,18 @@
 import { createClient } from "@/lib/supabase/server";
 import SettingsForm from "./SettingsForm";
+import EbayConnect from "./EbayConnect";
 import CompFinderPricing from "@/lib/pricing.js";
 
-export default async function SettingsPage() {
+const EBAY_FLASH = {
+  connected: "eBay account connected — your listings are syncing.",
+  denied: "eBay connection was cancelled.",
+  error: "Something went wrong connecting to eBay. Please try again.",
+  notconfigured: "eBay integration isn't configured on the server yet."
+};
+
+export default async function SettingsPage({ searchParams }) {
+  const sp = await searchParams;
+  const flash = EBAY_FLASH[sp?.ebay] || "";
   const supabase = await createClient();
   const {
     data: { user }
@@ -32,6 +42,7 @@ export default async function SettingsPage() {
       </header>
 
       <SettingsForm initialApiKey={profile?.soldcomps_api_key || ""} initialSettings={settings} />
+      <EbayConnect flash={flash} />
     </div>
   );
 }

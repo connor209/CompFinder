@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
  * "Already listed?" check. Given a search query, returns the signed-in user's
@@ -59,7 +60,47 @@ export async function GET(request) {
     return NextResponse.json({ ok: true, configured: true, listings: [] });
   }
 
-  // The user's eBay username lives in their profile settings.
+  const normNum = number.replace(/\s+/g, "").toLowerCase();
+  const nameWords = name
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+  const matches = (list) =>
+    list.filter((l) => {
+      const title = (l.title || "").toLowerCase();
+      if (normNum) return title.replace(/\s+/g, "").includes(normNum);
+      return nameWords.length > 0 && nameWords.every((w) => title.includes(w));
+    });
+
+  // Preferred path: if the user has CONNECTED their eBay account, match against
+  // the locally cached inventory — instant, exact, and covers every listing
+  // (not just what Browse happens to index). No live eBay call needed.
+  try {
+    const admin = createAdminClient();
+    const { data: acct } = await admin.from("ebay_accounts").select("user_id").eq("user_id", user.id).single();
+    if (acct) {
+      const { data: cached } = await admin
+        .from("ebay_listings")
+        .select("title,url,image_url,price_value,price_currency")
+        .eq("user_id", user.id);
+      const listings = matches(cached || [])
+        .slice(0, 10)
+        .map((l) => ({
+          title: l.title,
+          url: l.url,
+          image: l.image_url || null,
+          price: l.price_value != null ? { value: l.price_value, currency: l.price_currency } : null
+        }));
+      return NextResponse.json({ ok: true, configured: true, connected: true, listings });
+    }
+  } catch {
+    // Service role not set up, or table missing — fall through to the Browse
+    // path below so username-only users still get a (best-effort) check.
+  }
+
+  // Fallback path (no connected account): the user's eBay username lives in
+  // their profile settings, and we search the public Browse API by name.
   const { data: profile } = await supabase.from("profiles").select("settings").eq("id", user.id).single();
   const username = profile?.settings?.ebayUsername;
   if (!username) {
@@ -92,16 +133,11 @@ export async function GET(request) {
     const json = await res.json();
     const items = json.itemSummaries || [];
 
-    // If we have a card number, keep only listings whose title contains it
-    // (whitespace-insensitive so "15 / 62" still matches "15/62"). The card
-    // number is far more distinctive than the name, so this cuts false
-    // positives hard. If no number was supplied, fall back to name matches.
-    const normNum = number.replace(/\s+/g, "").toLowerCase();
-    const matched = normNum
-      ? items.filter((it) => (it.title || "").replace(/\s+/g, "").toLowerCase().includes(normNum))
-      : items;
-
-    const listings = matched.slice(0, 10).map((it) => ({
+    // Same interpretation as the connected path: keep listings whose title
+    // contains the (whitespace-insensitive) card number, else match on name.
+    const listings = matches(items)
+      .slice(0, 10)
+      .map((it) => ({
       title: it.title,
       url: it.itemWebUrl,
       image: it.image?.imageUrl || it.thumbnailImages?.[0]?.imageUrl || null,
