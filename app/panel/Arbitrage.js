@@ -9,6 +9,21 @@ function pounds(pence) {
   return pence == null ? "—" : CompFinderPricing.toPoundsStr(pence);
 }
 
+// Raw cards vary widely by condition; sold comps are a mixed-condition blend,
+// so a cheap played card looks like a huge "opportunity" against it. Infer the
+// listing's condition and scale the expected resale down accordingly.
+const CONDITION_MULT = { NM: 1.0, LP: 0.82, MP: 0.65, HP: 0.5, DMG: 0.4 };
+const CONDITION_LABEL = { NM: "Near-mint", LP: "Lightly played", MP: "Moderately played", HP: "Heavily played", DMG: "Damaged" };
+function inferCondition(title) {
+  const t = (title || "").toLowerCase();
+  if (/\b(dmg|damaged|poor)\b/.test(t)) return "DMG";
+  if (/heavily played|\bhp\b/.test(t)) return "HP";
+  if (/moderately played|\bmp\b|\bplayed\b/.test(t)) return "MP";
+  if (/lightly played|light play|\blp\b/.test(t)) return "LP";
+  if (/near.?mint|\bnm\b|\bmint\b|\bm\/nm\b|gem/.test(t)) return "NM";
+  return null;
+}
+
 // Price an active-listing title against historic sold comps, using a tight
 // name+number query so noisy eBay titles still find comps.
 async function soldPriceForTitle(title) {
@@ -40,7 +55,11 @@ export default function Arbitrage() {
   function computeRow(listing, sold) {
     const activePence = listing.price != null ? Math.round(listing.price * 100) : null;
     const acqPence = activePence != null ? activePence + Math.round((listing.postage || 0) * 100) : null;
-    const soldPence = sold.recPence;
+    const cond = inferCondition(listing.title);
+    const mult = cond ? CONDITION_MULT[cond] ?? 1 : 1;
+    const rawSold = sold.recPence;
+    // Condition-adjusted expected resale for THIS card.
+    const soldPence = rawSold != null ? Math.round(rawSold * mult) : null;
     let profitPence = null;
     let roi = null;
     if (soldPence != null && acqPence != null && acqPence > 0) {
@@ -48,7 +67,7 @@ export default function Arbitrage() {
       profitPence = Math.round(netResale - acqPence);
       roi = profitPence / acqPence;
     }
-    return { listing, sold, activePence, acqPence, soldPence, profitPence, roi };
+    return { listing, sold, activePence, acqPence, soldPence, rawSold, cond, mult, profitPence, roi };
   }
 
   async function scan() {
@@ -115,11 +134,23 @@ export default function Arbitrage() {
           count modest to protect your quota.
         </p>
 
-        <div className="filter-grid" style={{ gridTemplateColumns: "2fr 1fr 1fr 1fr" }}>
-          <label className="field">
-            <span>Search</span>
-            <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. pokemon base set" />
-          </label>
+        <div className="dd-search" style={{ marginBottom: 12 }}>
+          <div className="dd-combo">
+            <div className="dd-inp">
+              <span className="mag" aria-hidden="true">🔍</span>
+              <input
+                type="text"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !scanning) scan(); }}
+                placeholder="Search eBay — e.g. pokemon base set"
+                aria-label="Arbitrage search"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="filter-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
           <label className="field">
             <span>Listings to scan</span>
             <select value={count} onChange={(e) => setCount(Number(e.target.value))}>
@@ -183,11 +214,17 @@ export default function Arbitrage() {
                   </div>
                   {r.sold.lot ? (
                     <div className="arb-warn">Multi-card lot — not priced.</div>
-                  ) : r.sold.graded ? (
-                    <div className="arb-warn">Graded card — priced vs raw comps, treat with caution.</div>
-                  ) : !trusted ? (
-                    <div className="arb-warn">Thin data — only {r.sold.comps} sold comp(s).</div>
-                  ) : null}
+                  ) : (
+                    <>
+                      {r.sold.graded ? <div className="arb-warn">Graded card — priced vs raw comps, treat with caution.</div> : null}
+                      {r.cond && r.mult < 1 ? (
+                        <div className="arb-warn">{CONDITION_LABEL[r.cond]} — resale adjusted from {pounds(r.rawSold)} (×{r.mult}).</div>
+                      ) : !r.cond ? (
+                        <div className="arb-note">Condition not stated — assumes near-mint.</div>
+                      ) : null}
+                      {!trusted && !r.sold.graded ? <div className="arb-warn">Thin data — only {r.sold.comps} sold comp(s).</div> : null}
+                    </>
+                  )}
                 </div>
               </div>
             );
