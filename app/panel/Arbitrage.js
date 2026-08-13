@@ -9,20 +9,19 @@ function pounds(pence) {
   return pence == null ? "—" : CompFinderPricing.toPoundsStr(pence);
 }
 
-// Price an active-listing title against historic sold comps.
+// Price an active-listing title against historic sold comps, using a tight
+// name+number query so noisy eBay titles still find comps.
 async function soldPriceForTitle(title) {
-  const base = CompFinderPricing.simplifyTitle(title || "", settings.stripWords);
-  const nameTokens = CompFinderPricing.extractNameTokens(base);
-  const m = (title || "").match(/\b([A-Za-z]{0,3}\d{1,4}\s*\/\s*[A-Za-z]{0,3}\d{1,4})\b/);
-  const number = m ? m[1].replace(/\s+/g, "") : null;
+  const { query, nameTokens, number, graded, lot } = CompFinderPricing.buildCardQuery(title || "");
+  if (lot) return { recPence: null, comps: 0, lot: true };
   const res = await fetch("/api/soldcomps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: base, options: { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 } })
+    body: JSON.stringify({ query, options: { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 } })
   }).then((r) => r.json());
   if (!res || !res.ok) throw new Error((res && res.error) || "Pricing failed");
-  const rec = CompFinderPricing.recommend(res.comps || [], settings, nameTokens, "sold", number, null);
-  return { recPence: rec.finalPence ?? null, comps: rec.included.length, confidence: rec.confidence };
+  const rec = CompFinderPricing.recommend(res.comps || [], settings, nameTokens, "sold", number || null, null);
+  return { recPence: rec.finalPence ?? null, comps: rec.included.length, confidence: rec.confidence, graded, query };
 }
 
 export default function Arbitrage() {
@@ -182,7 +181,13 @@ export default function Arbitrage() {
                       <span className={`v ${good ? "pos" : "neg"}`}>{r.profitPence != null ? `${good ? "+" : ""}${pounds(r.profitPence)}` : "—"}{r.roi != null ? ` (${Math.round(r.roi * 100)}%)` : ""}</span>
                     </div>
                   </div>
-                  {!trusted ? <div className="arb-warn">Thin data — only {r.sold.comps} sold comp(s), treat with caution.</div> : null}
+                  {r.sold.lot ? (
+                    <div className="arb-warn">Multi-card lot — not priced.</div>
+                  ) : r.sold.graded ? (
+                    <div className="arb-warn">Graded card — priced vs raw comps, treat with caution.</div>
+                  ) : !trusted ? (
+                    <div className="arb-warn">Thin data — only {r.sold.comps} sold comp(s).</div>
+                  ) : null}
                 </div>
               </div>
             );

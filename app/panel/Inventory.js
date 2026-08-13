@@ -38,19 +38,17 @@ const SORTS = [
   { v: "opportunity", l: "Biggest opportunity (priced)" }
 ];
 
-// Turn a listing title into a market-price recommendation via SoldComps.
+// Turn a listing title into a market-price recommendation via SoldComps,
+// using a tight name+number query so noisy titles still find comps.
 async function priceForTitle(title) {
-  const base = CompFinderPricing.simplifyTitle(title || "", settings.stripWords);
-  const nameTokens = CompFinderPricing.extractNameTokens(base);
-  const m = (title || "").match(/\b([A-Za-z]{0,3}\d{1,4}\s*\/\s*[A-Za-z]{0,3}\d{1,4})\b/);
-  const number = m ? m[1].replace(/\s+/g, "") : null;
+  const { query, nameTokens, number } = CompFinderPricing.buildCardQuery(title || "");
   const res = await fetch("/api/soldcomps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: base, options: { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 } })
+    body: JSON.stringify({ query, options: { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 } })
   }).then((r) => r.json());
   if (!res || !res.ok) throw new Error((res && res.error) || "Pricing request failed.");
-  return CompFinderPricing.recommend(res.comps || [], settings, nameTokens, "sold", number, null);
+  return CompFinderPricing.recommend(res.comps || [], settings, nameTokens, "sold", number || null, null);
 }
 
 // Compare a listing's ask to the recommended market price.
