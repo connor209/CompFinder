@@ -76,6 +76,12 @@ a { color:var(--accent-2); }
 .stream button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:650; font-size:14px; padding:9px 18px; border-radius:var(--radius-pill); cursor:pointer; display:inline-flex; align-items:center; gap:8px; transition:.15s; }
 .stream button[aria-pressed="true"] { background:var(--surface); color:var(--ink); box-shadow:var(--shadow-1); }
 
+/* Secondary (sub-module) tab row */
+.submodule { display:flex; gap:4px; flex-wrap:wrap; margin:-8px 0 20px; }
+.submodule button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:600; font-size:13.5px; padding:7px 14px; border-radius:var(--radius-pill); cursor:pointer; transition:.15s; }
+.submodule button:hover { color:var(--ink); background:var(--surface-sink); }
+.submodule button[aria-pressed="true"] { color:var(--accent-2); background:var(--accent-soft); }
+
 /* ---------- Status strip / chips ---------- */
 .status-strip { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 18px; }
 .chip { font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-pill); padding:6px 12px; }

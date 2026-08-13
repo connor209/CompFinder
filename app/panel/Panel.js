@@ -29,6 +29,33 @@ const STREAM_SLUG = {
 };
 const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) => [v, k]));
 
+// Sections grouped into modules for the two-level nav.
+const MODULES = [
+  { key: "dashboard", label: "Dashboard", icon: "🏠", sections: [{ key: "dashboard", label: "Dashboard" }] },
+  {
+    key: "pricing",
+    label: "Pricing",
+    icon: "🔍",
+    sections: [
+      { key: "single", label: "Quick Search" },
+      { key: "batch", label: "Batch" }
+    ]
+  },
+  {
+    key: "ebay",
+    label: "eBay",
+    icon: "🏷️",
+    sections: [
+      { key: "inventory", label: "My listings" },
+      { key: "sales", label: "Sales" },
+      { key: "stacks", label: "Stacks" },
+      { key: "pull", label: "Pull sheet" }
+    ]
+  },
+  { key: "arbitrage", label: "Arbitrage", icon: "📊", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
+];
+const moduleForStream = (s) => MODULES.find((m) => m.sections.some((sec) => sec.key === s)) || MODULES[0];
+
 function monthKey() {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}`;
@@ -113,11 +140,28 @@ export default function Panel({ initialSection = "dashboard" }) {
     if (st) setStream((cur) => (cur === st ? cur : st));
   }, [pathname]);
 
+  // Remember the last section visited within each module, so clicking a module
+  // returns you to where you were.
+  const lastByModule = useRef({});
+  useEffect(() => {
+    lastByModule.current[moduleForStream(stream).key] = stream;
+  }, [stream]);
+
+  const goModule = useCallback(
+    (m) => {
+      const target = lastByModule.current[m.key] || m.sections[0].key;
+      go(target);
+    },
+    [go]
+  );
+
   const deepDiveCard = useCallback((query) => {
     seedNonce.current += 1;
     setSeed({ query, nonce: seedNonce.current });
     go("single");
   }, [go]);
+
+  const currentModule = moduleForStream(stream);
 
   // Search filters
   const [ebaySite, setEbaySite] = useState("ebay.co.uk");
@@ -512,16 +556,23 @@ export default function Panel({ initialSection = "dashboard" }) {
         </div>
       </header>
 
-      <div className="stream" role="group" aria-label="Search mode">
-        <button aria-pressed={stream === "dashboard"} onClick={() => go("dashboard")}>🏠 Dashboard</button>
-        <button aria-pressed={stream === "single"} onClick={() => go("single")}>🔍 Quick Search</button>
-        <button aria-pressed={stream === "batch"} onClick={() => go("batch")}>☰ Batch</button>
-        <button aria-pressed={stream === "inventory"} onClick={() => go("inventory")}>🏷️ My listings</button>
-        <button aria-pressed={stream === "arbitrage"} onClick={() => go("arbitrage")}>📊 Arbitrage</button>
-        <button aria-pressed={stream === "sales"} onClick={() => go("sales")}>💰 Sales</button>
-        <button aria-pressed={stream === "stacks"} onClick={() => go("stacks")}>📦 Stacks</button>
-        <button aria-pressed={stream === "pull"} onClick={() => go("pull")}>📋 Pull sheet</button>
+      <div className="stream" role="group" aria-label="Module">
+        {MODULES.map((m) => (
+          <button key={m.key} aria-pressed={currentModule.key === m.key} onClick={() => goModule(m)}>
+            {m.icon} {m.label}
+          </button>
+        ))}
       </div>
+
+      {currentModule.sections.length > 1 ? (
+        <div className="submodule" role="group" aria-label={`${currentModule.label} sections`}>
+          {currentModule.sections.map((sec) => (
+            <button key={sec.key} aria-pressed={stream === sec.key} onClick={() => go(sec.key)}>
+              {sec.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {stream === "dashboard" && <Dashboard onNavigate={go} />}
       {stream === "single" && <QuickSearch seed={seed} />}
