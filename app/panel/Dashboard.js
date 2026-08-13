@@ -13,6 +13,77 @@ function ageDays(startTime) {
 }
 
 /**
+ * Portfolio value over time — a small SVG area chart of inventory ask value
+ * with cost basis as a second line. Uniform-scaled viewBox (CSS width:100%),
+ * so strokes stay crisp at any size. Degrades gracefully to a message when
+ * there's only a single day of history.
+ */
+function PortfolioChart({ history }) {
+  if (!history || history.length === 0) return null;
+  const W = 600;
+  const H = 170;
+  const pad = { l: 8, r: 8, t: 14, b: 22 };
+  const iw = W - pad.l - pad.r;
+  const ih = H - pad.t - pad.b;
+
+  const pts = history.map((h) => ({
+    d: h.snapshot_date,
+    v: h.inventory_value_pence || 0,
+    c: h.cost_basis_pence || 0
+  }));
+  const maxV = Math.max(1, ...pts.map((p) => Math.max(p.v, p.c)));
+  const n = pts.length;
+  const x = (i) => (n === 1 ? pad.l + iw / 2 : pad.l + (i / (n - 1)) * iw);
+  const y = (v) => pad.t + ih - (v / maxV) * ih;
+
+  const last = pts[n - 1];
+  const first = pts[0];
+  const change = last.v - first.v;
+  const fmtShort = (d) => {
+    const dt = new Date(d + "T00:00:00");
+    return dt.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  };
+
+  if (n === 1) {
+    return (
+      <div className="panel dash-card" style={{ gridColumn: "1 / -1" }}>
+        <div className="panel-head"><h3>Portfolio value over time</h3></div>
+        <p className="hint" style={{ marginTop: 0 }}>
+          Today&apos;s value is <b>{pounds(last.v)}</b>. Come back tomorrow — a new point is captured each day so you can watch your inventory trend.
+        </p>
+      </div>
+    );
+  }
+
+  const valLine = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
+  const area = `${valLine} L${x(n - 1).toFixed(1)},${(pad.t + ih).toFixed(1)} L${x(0).toFixed(1)},${(pad.t + ih).toFixed(1)} Z`;
+  const costLine = pts.map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.c).toFixed(1)}`).join(" ");
+  const hasCost = pts.some((p) => p.c > 0);
+
+  return (
+    <div className="panel dash-card" style={{ gridColumn: "1 / -1" }}>
+      <div className="panel-head">
+        <h3>Portfolio value over time</h3>
+        <span className="badge2" style={{ color: change >= 0 ? "var(--good-ink)" : "var(--bad-ink)" }}>
+          {change >= 0 ? "▲" : "▼"} {pounds(Math.abs(change))} since {fmtShort(first.d)}
+        </span>
+      </div>
+      <svg className="pf-chart" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Portfolio value over time">
+        <path d={area} className="pf-area" />
+        <path d={valLine} className="pf-line" />
+        {hasCost ? <path d={costLine} className="pf-cost" /> : null}
+        <circle cx={x(n - 1)} cy={y(last.v)} r="3.5" className="pf-dot" />
+      </svg>
+      <div className="pf-legend">
+        <span><i className="pf-sw pf-sw-val" /> Value {pounds(last.v)}</span>
+        {hasCost ? <span><i className="pf-sw pf-sw-cost" /> Cost basis {pounds(last.c)}</span> : null}
+        <span className="pf-axis">{fmtShort(first.d)} → {fmtShort(last.d)}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Business dashboard — the "mission control" home. Portfolio value, cost basis
  * and potential margin, plus at-a-glance counts (aged listings, missing cost)
  * and quick jumps into the tools. Loads inventory + costs itself.
@@ -21,6 +92,7 @@ export default function Dashboard({ onNavigate }) {
   const [status, setStatus] = useState({ loading: true, connected: false, configured: true });
   const [stats, setStats] = useState(null);
   const [onboarding, setOnboarding] = useState(null);
+  const [history, setHistory] = useState(null);
 
   async function load() {
     let s;
@@ -93,6 +165,22 @@ export default function Dashboard({ onNavigate }) {
       aged,
       lastSynced: s.lastSynced
     });
+
+    // Portfolio value over time: refresh today's snapshot, then read the series.
+    try {
+      await fetch("/api/portfolio/snapshot", { method: "POST" });
+    } catch {
+      /* snapshot best-effort — the chart still shows whatever exists */
+    }
+    try {
+      const { data: snaps } = await supabase
+        .from("portfolio_snapshots")
+        .select("snapshot_date,inventory_value_pence,cost_basis_pence")
+        .order("snapshot_date", { ascending: true });
+      setHistory(snaps || []);
+    } catch {
+      setHistory([]);
+    }
   }
 
   useEffect(() => {
@@ -155,6 +243,7 @@ export default function Dashboard({ onNavigate }) {
       </div>
 
       <div className="dash-grid">
+        <PortfolioChart history={history} />
         <div className="panel dash-card">
           <div className="panel-head"><h3>Cost coverage</h3></div>
           {stats && stats.missingCost > 0 ? (

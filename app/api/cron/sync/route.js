@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncUserListings, syncUserSales } from "@/lib/ebay";
+import { snapshotUserPortfolio } from "@/lib/portfolio";
 
 /**
  * Scheduled auto-sync (Vercel Cron, daily — see vercel.json). Re-pulls every
@@ -29,8 +30,10 @@ export async function GET(request) {
   }
 
   const { data: accounts } = await admin.from("ebay_accounts").select("user_id");
+  const today = new Date().toISOString().slice(0, 10);
   let listings = 0;
   let sales = 0;
+  let snapshots = 0;
   let errors = 0;
   for (const a of accounts || []) {
     try {
@@ -45,6 +48,13 @@ export async function GET(request) {
     } catch {
       /* sales best-effort */
     }
+    // Snapshot AFTER the listings re-sync so the day's value reflects fresh data.
+    try {
+      await snapshotUserPortfolio(admin, a.user_id, today);
+      snapshots += 1;
+    } catch {
+      /* snapshot best-effort */
+    }
   }
-  return NextResponse.json({ ok: true, accounts: (accounts || []).length, listings, sales, errors });
+  return NextResponse.json({ ok: true, accounts: (accounts || []).length, listings, sales, snapshots, errors });
 }
