@@ -429,7 +429,7 @@ export default function QuickSearch({ seed }) {
 
     const confClass = `conf-badge conf-${(rec.confidence || "low").toLowerCase()}`;
     const activePrice = active && active.finalPence != null ? active.finalPence : null;
-    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, activeLoading: activeState.loading, usedCount: used.length };
+    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, activeLoading: activeState.loading, usedCount: used.length, graded: rec.graded || [] };
   }
 
   return (
@@ -629,6 +629,31 @@ export default function QuickSearch({ seed }) {
               </div>
             );
           })()}
+
+          {view.graded.length > 0 ? (
+            <div className="panel">
+              <div className="panel-head">
+                <h3>Graded values</h3>
+                <span className="badge2 badge-muted">raw {pounds(view.rec.finalPence)}</span>
+              </div>
+              <p className="hint hint-small" style={{ marginTop: 0 }}>
+                Priced from graded sold listings for this card — separate from the raw price above. Slab premiums vary; treat low-count tiers as a guide.
+              </p>
+              <div className="grade-grid">
+                {view.graded.map((g) => (
+                  <div className={`grade-cell grade-${g.company.toLowerCase()}`} key={g.key}>
+                    <div className="grade-co">{g.company}</div>
+                    <div className="grade-num">{g.grade}</div>
+                    <div className="grade-price">{pounds(g.medianPence)}</div>
+                    <div className="grade-meta">
+                      {g.count} sale{g.count === 1 ? "" : "s"}
+                      {g.loPence !== g.hiPence ? ` · ${pounds(g.loPence)}–${pounds(g.hiPence)}` : ""}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="panel">
             <div className="panel-head"><h3>Price trend</h3></div>

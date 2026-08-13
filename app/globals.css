@@ -351,6 +351,20 @@ a { color:var(--accent-2); }
 .pf-sw-cost { background:var(--ink-faint); }
 .pf-axis { margin-left:auto; font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
 
+/* Graded value tiers (PSA / CGC / BGS …) */
+.grade-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(128px,1fr)); gap:10px; margin-top:10px; }
+.grade-cell { border:1px solid var(--line-strong); border-radius:12px; padding:11px 12px; background:var(--surface-2); position:relative; overflow:hidden; }
+.grade-cell::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--ink-faint); }
+.grade-psa::before { background:#C0392B; }
+.grade-cgc::before { background:#1E6FB8; }
+.grade-bgs::before { background:#111827; }
+.grade-sgc::before { background:#3F7A4E; }
+.grade-ace::before { background:#7C3AED; }
+.grade-co { font-size:10.5px; font-weight:800; letter-spacing:.08em; color:var(--ink-faint); }
+.grade-num { font-family:var(--font-mono); font-size:22px; font-weight:800; line-height:1.05; color:var(--ink); }
+.grade-price { font-size:16px; font-weight:750; color:var(--accent-2); margin-top:2px; }
+.grade-meta { font-size:11px; color:var(--ink-soft); margin-top:3px; }
+
 /* Legal / privacy prose */
 .legal { line-height:1.6; color:var(--ink-soft); }
 .legal p { margin:0 0 14px; font-size:14.5px; }
