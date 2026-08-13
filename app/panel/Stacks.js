@@ -23,6 +23,9 @@ export default function Stacks() {
   const [find, setFind] = useState("");
   const [finderMsg, setFinderMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [pulled, setPulled] = useState([]);
+  const [showPulled, setShowPulled] = useState(false);
+  const [msg, setMsg] = useState("");
 
   const supabase = () => createClient();
 
@@ -53,12 +56,84 @@ export default function Stacks() {
     setCards(data || []);
   }
 
+  async function loadPulled(stackId) {
+    if (!stackId) return setPulled([]);
+    const { data } = await supabase()
+      .from("stack_cards")
+      .select("id,sku,title,pulled_at")
+      .eq("stack_id", stackId)
+      .not("pulled_at", "is", null)
+      .order("pulled_at", { ascending: false })
+      .limit(30);
+    setPulled(data || []);
+  }
+
   useEffect(() => {
     loadStacks();
   }, []);
   useEffect(() => {
     loadCards(selId);
+    loadPulled(selId);
   }, [selId]);
+
+  // Auto-create stacks from eBay listing SKUs (prefix = stack, number =
+  // position). e.g. A50 -> Stack A, position 50. Reuses existing stacks and
+  // skips SKUs already added.
+  async function autoImport() {
+    const sb = supabase();
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return;
+    if (!confirm("Auto-create stacks from your eBay listing SKUs?\n\nEach SKU like A50 becomes Stack A, position 50. Existing stacks are reused and SKUs already added are skipped.")) return;
+    setBusy(true);
+    setMsg("");
+    const { data: listings } = await sb.from("ebay_listings").select("sku,title,ebay_item_id").not("sku", "is", null);
+    let unparseable = 0;
+    const parsed = [];
+    for (const l of listings || []) {
+      const m = String(l.sku).trim().match(/^([A-Za-z]+)[-_ ]?(\d{1,4})$/);
+      if (!m) { unparseable += 1; continue; }
+      parsed.push({ prefix: m[1].toUpperCase(), num: parseInt(m[2], 10), sku: String(l.sku).trim(), title: l.title || "", ebay_item_id: l.ebay_item_id || null });
+    }
+    const { data: existing } = await sb.from("stack_cards").select("sku").not("sku", "is", null);
+    const have = new Set((existing || []).map((e) => String(e.sku).toLowerCase()));
+    const fresh = parsed.filter((p) => !have.has(p.sku.toLowerCase()));
+
+    const byPrefix = new Map();
+    for (const p of fresh) {
+      if (!byPrefix.has(p.prefix)) byPrefix.set(p.prefix, []);
+      byPrefix.get(p.prefix).push(p);
+    }
+    const stackByName = new Map(stacks.map((s) => [s.name.toUpperCase(), s.id]));
+    for (const prefix of byPrefix.keys()) {
+      if (!stackByName.has(prefix)) {
+        const { data } = await sb.from("card_stacks").insert({ user_id: user.id, name: prefix }).select("id,name").single();
+        if (data) stackByName.set(prefix, data.id);
+      }
+    }
+    const rows = [];
+    for (const [prefix, cs] of byPrefix) {
+      const sid = stackByName.get(prefix);
+      if (!sid) continue;
+      for (const c of cs) rows.push({ user_id: user.id, stack_id: sid, position: c.num, sku: c.sku, title: c.title, ebay_item_id: c.ebay_item_id });
+    }
+    for (let i = 0; i < rows.length; i += 500) await sb.from("stack_cards").insert(rows.slice(i, i + 500));
+
+    setBusy(false);
+    setMsg(`Imported ${rows.length} card(s) into ${byPrefix.size} stack(s). Skipped ${parsed.length - fresh.length} already added${unparseable ? `, ${unparseable} with non-standard SKUs` : ""}.`);
+    await loadStacks();
+    await loadCards(selId);
+  }
+
+  async function undoPull(card) {
+    setBusy(true);
+    const sb = supabase();
+    const maxPos = cards.reduce((m, c) => Math.max(m, c.position || 0), 0);
+    await sb.from("stack_cards").update({ pulled_at: null, position: maxPos + 1 }).eq("id", card.id);
+    setBusy(false);
+    await loadCards(selId);
+    await loadPulled(selId);
+    await loadStacks();
+  }
 
   async function createStack() {
     const sb = supabase();
@@ -130,6 +205,7 @@ export default function Stacks() {
     await Promise.all(after.map((c) => sb.from("stack_cards").update({ position: c.position - 1 }).eq("id", c.id)));
     setBusy(false);
     await loadCards(selId);
+    await loadPulled(selId);
     await loadStacks();
   }
 
@@ -178,10 +254,12 @@ export default function Stacks() {
           </button>
         ))}
         <button className="stack-tab stack-new" onClick={createStack}>+ New stack</button>
+        <button className="stack-tab stack-new" onClick={autoImport} disabled={busy}>⤓ Auto-import from listings</button>
       </div>
+      {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)", marginTop: -8 }}>{msg}</p> : null}
 
       {!sel ? (
-        <div className="panel"><p className="dd-empty">Create a stack to start ingesting cards.</p></div>
+        <div className="panel"><p className="dd-empty">Create a stack, or use <b>Auto-import from listings</b> to build stacks from your eBay SKUs automatically.</p></div>
       ) : (
         <>
           <div className="panel">
@@ -225,8 +303,27 @@ export default function Stacks() {
                 ))}
               </div>
             )}
-            {cards.length >= 50 ? <p className="hint hint-small">This stack has {cards.length} cards — consider starting a new one for easy counting.</p> : null}
           </div>
+
+          {pulled.length > 0 ? (
+            <div className="panel">
+              <div className="panel-head">
+                <span className="eyebrow">Recently pulled ({pulled.length})</span>
+                <button className="btn btn-ghost" onClick={() => setShowPulled((v) => !v)}>{showPulled ? "Hide" : "Show"}</button>
+              </div>
+              {showPulled ? (
+                <div className="stack-list">
+                  {pulled.map((c) => (
+                    <div className="stack-row" key={c.id}>
+                      <span className="stack-sku">{c.sku}</span>
+                      <span className="stack-title">{c.title || <em>—</em>}</span>
+                      <button className="stack-pull" style={{ color: "var(--accent-2)", borderColor: "var(--line-strong)" }} onClick={() => undoPull(c)} disabled={busy}>↺ Undo</button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </>
       )}
     </>
