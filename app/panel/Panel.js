@@ -9,6 +9,7 @@ import Inventory from "./Inventory";
 import Arbitrage from "./Arbitrage";
 import Dashboard from "./Dashboard";
 import Sales from "./Sales";
+import Stacks from "./Stacks";
 import ThemeToggle from "./ThemeToggle";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -488,6 +489,7 @@ export default function Panel() {
         <button aria-pressed={stream === "inventory"} onClick={() => setStream("inventory")}>🏷️ My listings</button>
         <button aria-pressed={stream === "arbitrage"} onClick={() => setStream("arbitrage")}>📊 Arbitrage</button>
         <button aria-pressed={stream === "sales"} onClick={() => setStream("sales")}>💰 Sales</button>
+        <button aria-pressed={stream === "stacks"} onClick={() => setStream("stacks")}>📦 Stacks</button>
       </div>
 
       {stream === "dashboard" && <Dashboard onNavigate={setStream} />}
@@ -495,6 +497,7 @@ export default function Panel() {
       {stream === "inventory" && <Inventory onDeepDive={deepDiveCard} />}
       {stream === "arbitrage" && <Arbitrage />}
       {stream === "sales" && <Sales />}
+      {stream === "stacks" && <Stacks />}
       {stream === "batch" && (
         <>
       <div className="status-strip">
