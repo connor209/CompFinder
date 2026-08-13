@@ -159,7 +159,6 @@ export default function QuickSearch({ seed }) {
   const [browsing, setBrowsing] = useState(false);
   const [listing, setListing] = useState(false);
   const [art, setArt] = useState(null);
-  const [cmarket, setCmarket] = useState(null);
   const [mine, setMine] = useState({ loading: false, configured: true, error: "", listings: [] });
   const debounceRef = useRef(null);
   const cacheRef = useRef(new Map());
@@ -297,23 +296,16 @@ export default function QuickSearch({ seed }) {
     setScope("uk");
     setActiveState({ loading: true, rec: null });
     setArt(null);
-    setCmarket(null);
     setListing(false);
     setMine({ loading: true, configured: true, error: "", listings: [] });
 
-    // For English cards, pull from pokemontcg.io in the background: the card art
-    // (catalog cards carry none) and the CardMarket price guide (converted to
-    // GBP). Non-English prints keep the placeholder and skip CardMarket, whose
-    // pokemontcg data is English/EU only.
-    if (!lang) {
+    // Catalog cards carry no art — pull the English card image from
+    // pokemontcg.io in the background to fill the header (non-English prints
+    // keep the placeholder).
+    if (!card.image && !lang) {
       fetch(`/api/cards/lookup?name=${encodeURIComponent(card.name)}&number=${encodeURIComponent(card.number || "")}&set=${encodeURIComponent(card.set || "")}`)
         .then((r) => r.json())
-        .then((lk) => {
-          if (lk.ok && lk.card) {
-            if (!card.image && lk.card.image) setArt(lk.card.image);
-            if (lk.card.cardmarket) setCmarket(lk.card.cardmarket);
-          }
-        })
+        .then((lk) => { if (lk.ok && lk.card && lk.card.image) setArt(lk.card.image); })
         .catch(() => {});
     }
     // Non-English prints number differently, so drop the English collector
@@ -637,18 +629,6 @@ export default function QuickSearch({ seed }) {
               </div>
             );
           })()}
-
-          {cmarket && (cmarket.trendPence != null || cmarket.avgPence != null || cmarket.lowPence != null) ? (
-            <div className="cmarket">
-              <span className="cm-label">CardMarket <span className="cm-eu">EU</span></span>
-              <span className="cm-vals">
-                {cmarket.trendPence != null ? <><b>{pounds(cmarket.trendPence)}</b> trend</> : null}
-                {cmarket.avgPence != null ? <span> · {pounds(cmarket.avgPence)} avg</span> : null}
-                {cmarket.lowPence != null ? <span> · from {pounds(cmarket.lowPence)}</span> : null}
-              </span>
-              {cmarket.url ? <a className="cm-link" href={cmarket.url} target="_blank" rel="noopener noreferrer">View →</a> : null}
-            </div>
-          ) : null}
 
           <div className="panel">
             <div className="panel-head"><h3>Price trend</h3></div>
