@@ -7,6 +7,7 @@ import CardUploaderCsv from "@/lib/carduploader.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
 import Arbitrage from "./Arbitrage";
+import Dashboard from "./Dashboard";
 import ThemeToggle from "./ThemeToggle";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -76,7 +77,7 @@ export default function Panel() {
   const [running, setRunning] = useState(false);
   const [identifying, setIdentifying] = useState(false);
   const [budget, setBudget] = useState({ count: 0 });
-  const [stream, setStream] = useState("single");
+  const [stream, setStream] = useState("dashboard");
   const [seed, setSeed] = useState(null);
   const seedNonce = useRef(0);
 
@@ -480,12 +481,14 @@ export default function Panel() {
       </header>
 
       <div className="stream" role="group" aria-label="Search mode">
+        <button aria-pressed={stream === "dashboard"} onClick={() => setStream("dashboard")}>🏠 Dashboard</button>
         <button aria-pressed={stream === "single"} onClick={() => setStream("single")}>🔍 Quick Search</button>
         <button aria-pressed={stream === "batch"} onClick={() => setStream("batch")}>☰ Batch</button>
         <button aria-pressed={stream === "inventory"} onClick={() => setStream("inventory")}>🏷️ My listings</button>
         <button aria-pressed={stream === "arbitrage"} onClick={() => setStream("arbitrage")}>📊 Arbitrage</button>
       </div>
 
+      {stream === "dashboard" && <Dashboard onNavigate={setStream} />}
       {stream === "single" && <QuickSearch seed={seed} />}
       {stream === "inventory" && <Inventory onDeepDive={deepDiveCard} />}
       {stream === "arbitrage" && <Arbitrage />}

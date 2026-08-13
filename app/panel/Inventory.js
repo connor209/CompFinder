@@ -131,6 +131,39 @@ const ALL_COLUMNS = [
       return verdictFor(ask, p.recPence).label;
     }
   },
+  {
+    key: "cost",
+    label: "Cost £",
+    cell: (g, ctx) => {
+      const cp = ctx.costs.get(g.ebay_item_id);
+      return (
+        <input
+          className="itbl-cost"
+          type="number"
+          step="0.01"
+          min="0"
+          placeholder="—"
+          defaultValue={cp != null ? (cp / 100).toFixed(2) : ""}
+          key={cp == null ? "e" : cp}
+          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+          onBlur={(e) => ctx.onSetCost(g, e.target.value)}
+        />
+      );
+    }
+  },
+  {
+    key: "margin",
+    label: "Margin",
+    cell: (g, ctx) => {
+      const cost = ctx.costs.get(g.ebay_item_id);
+      if (cost == null) return "—";
+      const p = ctx.priced.get(g.key);
+      const basis = p && p.recPence != null ? p.recPence : g.price_value != null ? Math.round(g.price_value * 100) : null;
+      if (basis == null) return "—";
+      const m = basis - cost;
+      return <span className={`mono ${m > 0 ? "pos" : m < 0 ? "neg" : ""}`}>{m > 0 ? "+" : ""}{pounds(m)}</span>;
+    }
+  },
   { key: "condition", label: "Condition", cell: (g) => g.extra?.condition || "—" },
   { key: "format", label: "Format", cell: (g) => g.extra?.format || "—" },
   { key: "sold", label: "Sold", cell: (g) => (g.extra?.quantitySold ?? "—") },
@@ -160,7 +193,7 @@ const ALL_COLUMNS = [
     }
   }
 ];
-const DEFAULT_COLS = ["image", "title", "sku", "price", "qty", "market", "delta", "actions"];
+const DEFAULT_COLS = ["image", "title", "sku", "price", "cost", "market", "margin", "actions"];
 
 export default function Inventory({ onDeepDive }) {
   const [status, setStatus] = useState({ loading: true, connected: false, configured: true });
@@ -171,6 +204,7 @@ export default function Inventory({ onDeepDive }) {
   const [dupOnly, setDupOnly] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   const [priced, setPriced] = useState(() => new Map()); // key -> { loading, recPence, error }
+  const [costs, setCosts] = useState(() => new Map()); // ebay_item_id -> cost_pence
   const [updating, setUpdating] = useState(() => new Map()); // key -> { loading, done, error }
   const [syncing, setSyncing] = useState(false);
   const [pricingAll, setPricingAll] = useState(false);
@@ -237,10 +271,41 @@ export default function Inventory({ onDeepDive }) {
     setListings(all);
   }
 
+  async function loadCosts() {
+    const supabase = createClient();
+    const { data } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
+    const m = new Map();
+    (data || []).forEach((r) => m.set(r.ebay_item_id, r.cost_pence));
+    setCosts(m);
+  }
+
+  async function setCost(g, value) {
+    const supabase = createClient();
+    const {
+      data: { user }
+    } = await supabase.auth.getUser();
+    if (!user) return;
+    const ids = g._items.map((it) => it.ebay_item_id);
+    const raw = String(value == null ? "" : value).trim();
+    if (raw === "") {
+      await supabase.from("listing_costs").delete().eq("user_id", user.id).in("ebay_item_id", ids);
+      setCosts((prev) => { const n = new Map(prev); ids.forEach((id) => n.delete(id)); return n; });
+      return;
+    }
+    const pence = Math.round(parseFloat(raw) * 100);
+    if (!Number.isFinite(pence) || pence < 0) return;
+    const rows = ids.map((id) => ({ user_id: user.id, ebay_item_id: id, cost_pence: pence, updated_at: new Date().toISOString() }));
+    await supabase.from("listing_costs").upsert(rows, { onConflict: "user_id,ebay_item_id" });
+    setCosts((prev) => { const n = new Map(prev); ids.forEach((id) => n.set(id, pence)); return n; });
+  }
+
   useEffect(() => {
     (async () => {
       const s = await loadStatus();
-      if (s.connected) loadListings();
+      if (s.connected) {
+        loadListings();
+        loadCosts();
+      }
     })();
   }, []);
 
@@ -254,6 +319,7 @@ export default function Inventory({ onDeepDive }) {
         setPriced(new Map());
         await loadStatus();
         await loadListings();
+        await loadCosts();
       } else {
         setNote(res.error || "Sync failed.");
       }
@@ -696,7 +762,7 @@ export default function Inventory({ onDeepDive }) {
                   </td>
                   {ALL_COLUMNS.filter((c) => c.always || cols.has(c.key)).map((c) => (
                     <td key={c.key} className={`itbl-${c.key}`}>
-                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne })}
+                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, costs, onSetCost: setCost })}
                     </td>
                   ))}
                 </tr>
