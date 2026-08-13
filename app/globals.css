@@ -520,6 +520,7 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
   .sale .sd { grid-column:2; text-align:right; }
   .sale .st { grid-column:1 / -1; }
   .dd-search { flex-wrap:wrap; }
+  .dd-combo { flex:1 1 100%; }
   .dd-search .btn { flex:1; }
   .rc-grid { grid-template-columns:1fr; }
   .inv-inp { min-width:0; }
