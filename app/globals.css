@@ -104,6 +104,7 @@ a { color:var(--accent-2); }
 .eyebrow-small { font-size:11px; letter-spacing:.1em; }
 .hint { margin:8px 0 0; color:var(--ink-soft); line-height:1.55; max-width:760px; font-size:13.5px; }
 .hint-small { font-size:12.5px; margin-top:6px; }
+.danger-zone { margin-top:18px; padding-top:16px; border-top:1px solid color-mix(in srgb,var(--bad) 30%, var(--line)); }
 
 /* ---------- Form elements ---------- */
 .panel textarea, textarea.field {
