@@ -21,6 +21,11 @@ export const metadata = {
     card: "summary_large_image",
     title: "CompFinder — Real eBay sold-comp pricing",
     description: "Instant, recency-weighted prices from real eBay sold data, with your live listings synced in."
+  },
+  appleWebApp: {
+    capable: true,
+    title: "CompFinder",
+    statusBarStyle: "black-translucent"
   }
 };
 
