@@ -478,10 +478,15 @@ export default function QuickSearch({ seed }) {
       }))
       .sort((a, b) => b.t - a.t);
     const sales = (scope === "uk" ? salesAll.filter((s) => !s.loc) : salesAll).slice(0, 12);
+    // Graded-sale visibility: how many graded comps exist across ALL locations
+    // vs how many are actually shown in the current scope — so we can nudge the
+    // user to Worldwide when graded slabs (often sold from the US) are hidden.
+    const gradedTotal = salesAll.filter((s) => s.grade).length;
+    const gradedShown = sales.filter((s) => s.grade).length;
 
     const confClass = `conf-badge conf-${(rec.confidence || "low").toLowerCase()}`;
     const activePrice = active && active.finalPence != null ? active.finalPence : null;
-    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, activeLoading: activeState.loading, usedCount: used.length, graded: rec.graded || [] };
+    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, activeLoading: activeState.loading, usedCount: used.length, graded: rec.graded || [], gradedTotal, gradedShown };
   }
 
   return (
@@ -752,6 +757,14 @@ export default function QuickSearch({ seed }) {
                 <button aria-pressed={scope === "ww"} onClick={() => setScope("ww")}>🌍 Worldwide</button>
               </div>
             </div>
+            {view.gradedTotal > 0 ? (
+              <p className="hint hint-small" style={{ marginTop: 0 }}>
+                {view.gradedTotal} graded sale{view.gradedTotal === 1 ? "" : "s"} in this data — flagged with a slab chip (e.g. <span className="sale-grade grade-psa">PSA 10</span>).
+                {scope === "uk" && view.gradedShown < view.gradedTotal
+                  ? ` ${view.gradedTotal - view.gradedShown} ${view.gradedShown === 0 ? "are" : "more are"} international — switch to 🌍 Worldwide to see ${view.gradedShown === 0 ? "them" : "all"}.`
+                  : ""}
+              </p>
+            ) : null}
             {view.sales.length === 0 ? (
               <p className="dd-empty">No {scope === "uk" ? "UK" : ""} sold listings in this window.</p>
             ) : (
