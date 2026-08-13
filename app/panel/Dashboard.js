@@ -134,7 +134,7 @@ export default function Dashboard({ onNavigate }) {
               ? <><b>{stats.aged}</b> listing(s) have been live over 90 days — candidates to reprice or relist.</>
               : "No listings older than 90 days."}
           </p>
-          <p className="hint hint-small">Last synced {stats?.lastSynced ? new Date(stats.lastSynced).toLocaleString() : "—"}.</p>
+          <p className="hint hint-small">Last synced {stats?.lastSynced ? new Date(stats.lastSynced).toLocaleString() : "—"}. Auto-syncs daily.</p>
         </div>
 
         <div className="panel dash-card">
