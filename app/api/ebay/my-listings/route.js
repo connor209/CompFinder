@@ -66,11 +66,26 @@ export async function GET(request) {
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter((w) => w.length > 2);
+
+  // The card number REFINES the name match — it never stands in for it. A bare
+  // number like "006" appears inside unrelated listings (e.g. a One Piece
+  // "PRB02-006"), so matching on the number alone produced false "already
+  // listed" hits. Require the name to match first, then (if a number is given)
+  // require the number too — and only where it isn't part of a longer digit run
+  // (so "006" doesn't match inside "2006").
+  const numOk = (title) => {
+    if (!normNum) return true;
+    const t = title.replace(/\s+/g, "");
+    for (let i = t.indexOf(normNum); i !== -1; i = t.indexOf(normNum, i + 1)) {
+      if (i === 0 || !/[0-9]/.test(t[i - 1])) return true;
+    }
+    return false;
+  };
   const matches = (list) =>
     list.filter((l) => {
       const title = (l.title || "").toLowerCase();
-      if (normNum) return title.replace(/\s+/g, "").includes(normNum);
-      return nameWords.length > 0 && nameWords.every((w) => title.includes(w));
+      const nameOk = nameWords.length > 0 && nameWords.every((w) => title.includes(w));
+      return nameOk && numOk(title);
     });
 
   // Preferred path: if the user has CONNECTED their eBay account, match against
