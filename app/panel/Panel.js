@@ -549,12 +549,12 @@ export default function Panel({ initialSection = "dashboard" }) {
         </div>
       </header>
 
-      <div className="modbar" role="menubar" aria-label="Modules" onMouseLeave={() => setOpenModule(null)}>
+      <div className="modbar" role="menubar" aria-label="Modules">
         {MODULES.map((m) => {
           const multi = m.sections.length > 1;
           const open = openModule === m.key;
           return (
-            <div className="mod" key={m.key} onMouseEnter={() => { if (multi) setOpenModule(m.key); }}>
+            <div className="mod" key={m.key}>
               <button
                 aria-pressed={currentModule.key === m.key}
                 aria-haspopup={multi ? "menu" : undefined}
