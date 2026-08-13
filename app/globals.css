@@ -264,6 +264,25 @@ a { color:var(--accent-2); }
 .inv-check input { accent-color:var(--accent); }
 .inv-check input:disabled { opacity:.5; }
 .inv-summary { margin-left:auto; color:var(--ink-faint); }
+.col-picker { position:relative; }
+.col-menu-backdrop { position:fixed; inset:0; z-index:20; }
+.col-menu { position:absolute; right:0; top:calc(100% + 6px); z-index:21; background:var(--surface); border:1px solid var(--line-strong); border-radius:12px; box-shadow:var(--shadow-2); padding:8px; display:grid; gap:2px; min-width:170px; }
+.col-menu label { display:flex; align-items:center; gap:8px; font-size:13px; padding:5px 8px; border-radius:8px; cursor:pointer; }
+.col-menu label:hover { background:var(--surface-sink); }
+.col-menu label.is-locked { opacity:.6; cursor:default; }
+.col-menu input { accent-color:var(--accent); }
+.itbl { width:100%; border-collapse:collapse; font-size:13px; }
+.itbl th { text-align:left; font-weight:700; font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--ink-faint); padding:8px 10px; border-bottom:1px solid var(--line-strong); white-space:nowrap; }
+.itbl td { padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; color:var(--ink); }
+.itbl tr:hover td { background:var(--surface-sink); }
+.itbl a { color:var(--ink); text-decoration:none; }
+.itbl a:hover { color:var(--accent-2); }
+.itbl .mono { font-family:var(--font-mono); }
+.itbl .pos { color:var(--good-ink); font-weight:700; }
+.itbl .neg { color:var(--bad-ink); }
+.itbl-img { width:38px; height:38px; object-fit:contain; border-radius:6px; background:var(--surface-sink); display:block; }
+.itbl-title { max-width:340px; }
+.itbl-title a { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .inv-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:12px; }
 .inv-card { display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line); border-radius:14px; overflow:hidden; transition:border-color .15s, transform .15s; }
 .inv-card:hover { border-color:var(--line-strong); transform:translateY(-2px); }

@@ -60,6 +60,64 @@ function verdictFor(askPence, recPence) {
   return { kind: "inline", label: "In line", delta };
 }
 
+function ageDays(startTime) {
+  if (!startTime) return null;
+  const t = new Date(startTime).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+function skusOf(g) {
+  const s = g._items.map((i) => i.sku).filter(Boolean);
+  return s.length ? s.join(", ") : "—";
+}
+
+// Table columns for the "pick columns" view. Each cell gets (g, ctx) where
+// ctx.priced is the repricing map. `always` columns can't be hidden.
+const ALL_COLUMNS = [
+  { key: "image", label: "Image", always: false, cell: (g) => (g.image_url ? <img className="itbl-img" src={g.image_url} alt="" loading="lazy" /> : <span aria-hidden="true">🎴</span>) },
+  { key: "title", label: "Title", always: true, cell: (g) => <a href={g.url || "#"} target="_blank" rel="noopener noreferrer">{g.title}</a> },
+  { key: "sku", label: "SKU", cell: (g) => <span className="mono">{skusOf(g)}</span> },
+  { key: "price", label: "Ask", cell: (g) => <span className="mono">{priceStr(g.price_value, g.price_currency)}</span> },
+  { key: "qty", label: "Qty", cell: (g) => g._qty },
+  { key: "listings", label: "Listings", cell: (g) => g._count },
+  {
+    key: "market",
+    label: "Market",
+    cell: (g, ctx) => {
+      const p = ctx.priced.get(g.key);
+      return <span className="mono">{p && p.recPence != null ? pounds(p.recPence) : "—"}</span>;
+    }
+  },
+  {
+    key: "delta",
+    label: "Δ vs ask",
+    cell: (g, ctx) => {
+      const p = ctx.priced.get(g.key);
+      const ask = g.price_value != null ? Math.round(g.price_value * 100) : null;
+      if (!p || p.recPence == null || ask == null) return "—";
+      const d = ask - p.recPence;
+      return <span className={`mono ${d > 0 ? "pos" : d < 0 ? "neg" : ""}`}>{d > 0 ? "+" : ""}{pounds(d)}</span>;
+    }
+  },
+  {
+    key: "verdict",
+    label: "Verdict",
+    cell: (g, ctx) => {
+      const p = ctx.priced.get(g.key);
+      const ask = g.price_value != null ? Math.round(g.price_value * 100) : null;
+      if (!p || p.recPence == null || ask == null) return "—";
+      return verdictFor(ask, p.recPence).label;
+    }
+  },
+  { key: "condition", label: "Condition", cell: (g) => g.extra?.condition || "—" },
+  { key: "format", label: "Format", cell: (g) => g.extra?.format || "—" },
+  { key: "sold", label: "Sold", cell: (g) => (g.extra?.quantitySold ?? "—") },
+  { key: "watchers", label: "Watchers", cell: (g) => (g.extra?.watchCount ?? "—") },
+  { key: "age", label: "Age (days)", cell: (g) => { const d = ageDays(g.extra?.startTime); return d == null ? "—" : d; } },
+  { key: "itemId", label: "Item ID", cell: (g) => <span className="mono">{g.ebay_item_id}</span> }
+];
+const DEFAULT_COLS = ["image", "title", "sku", "price", "qty", "market", "delta"];
+
 export default function Inventory({ onDeepDive }) {
   const [status, setStatus] = useState({ loading: true, connected: false, configured: true });
   const [listings, setListings] = useState([]);
@@ -73,6 +131,32 @@ export default function Inventory({ onDeepDive }) {
   const [syncing, setSyncing] = useState(false);
   const [pricingAll, setPricingAll] = useState(false);
   const [note, setNote] = useState("");
+  const [view, setView] = useState("cards");
+  const [colMenu, setColMenu] = useState(false);
+  const [cols, setCols] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = JSON.parse(localStorage.getItem("cf-inv-cols") || "null");
+        if (Array.isArray(saved) && saved.length) return new Set(saved);
+      } catch {
+        /* ignore */
+      }
+    }
+    return new Set(DEFAULT_COLS);
+  });
+  function toggleCol(k) {
+    setCols((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      try {
+        localStorage.setItem("cf-inv-cols", JSON.stringify([...next]));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
   const pricedRef = useRef(priced);
   pricedRef.current = priced;
 
@@ -96,7 +180,7 @@ export default function Inventory({ onDeepDive }) {
     for (;;) {
       const { data, error } = await supabase
         .from("ebay_listings")
-        .select("ebay_item_id,title,sku,price_value,price_currency,quantity,image_url,url,synced_at")
+        .select("*")
         .order("title", { ascending: true })
         .range(from, from + pageSize - 1);
       if (error || !data || data.length === 0) break;
@@ -403,6 +487,28 @@ export default function Inventory({ onDeepDive }) {
           {rows.length} {group || dupOnly ? "card(s)" : "listing(s)"}
           {(group || dupOnly) && totalShownListings !== rows.length ? ` · ${totalShownListings} listings` : ""}
         </span>
+        <div className="view-toggle" role="group" aria-label="Inventory view">
+          <button aria-pressed={view === "cards"} onClick={() => setView("cards")}>▦ Cards</button>
+          <button aria-pressed={view === "table"} onClick={() => setView("table")}>☰ Table</button>
+        </div>
+        {view === "table" ? (
+          <div className="col-picker">
+            <button className="btn btn-ghost" onClick={() => setColMenu((o) => !o)}>Columns ▾</button>
+            {colMenu ? (
+              <>
+                <div className="col-menu-backdrop" onClick={() => setColMenu(false)} />
+                <div className="col-menu">
+                  {ALL_COLUMNS.map((c) => (
+                    <label key={c.key} className={c.always ? "is-locked" : ""}>
+                      <input type="checkbox" checked={c.always || cols.has(c.key)} disabled={c.always} onChange={() => toggleCol(c.key)} />
+                      {c.label}
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {note && <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{note}</p>}
@@ -416,6 +522,27 @@ export default function Inventory({ onDeepDive }) {
                 ? "No duplicate listings — every card is listed once at a unique price."
                 : "No listings match that filter."}
           </p>
+        </div>
+      ) : view === "table" ? (
+        <div className="table-wrap">
+          <table className="itbl">
+            <thead>
+              <tr>
+                {ALL_COLUMNS.filter((c) => c.always || cols.has(c.key)).map((c) => (
+                  <th key={c.key}>{c.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((g) => (
+                <tr key={g.key}>
+                  {ALL_COLUMNS.filter((c) => c.always || cols.has(c.key)).map((c) => (
+                    <td key={c.key} className={`itbl-${c.key}`}>{c.cell(g, { priced })}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
         <div className="inv-grid">
