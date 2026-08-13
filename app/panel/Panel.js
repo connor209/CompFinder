@@ -10,6 +10,7 @@ import Arbitrage from "./Arbitrage";
 import Dashboard from "./Dashboard";
 import Sales from "./Sales";
 import Stacks from "./Stacks";
+import PullSheet from "./PullSheet";
 import ThemeToggle from "./ThemeToggle";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -490,6 +491,7 @@ export default function Panel() {
         <button aria-pressed={stream === "arbitrage"} onClick={() => setStream("arbitrage")}>📊 Arbitrage</button>
         <button aria-pressed={stream === "sales"} onClick={() => setStream("sales")}>💰 Sales</button>
         <button aria-pressed={stream === "stacks"} onClick={() => setStream("stacks")}>📦 Stacks</button>
+        <button aria-pressed={stream === "pull"} onClick={() => setStream("pull")}>📋 Pull sheet</button>
       </div>
 
       {stream === "dashboard" && <Dashboard onNavigate={setStream} />}
@@ -498,6 +500,7 @@ export default function Panel() {
       {stream === "arbitrage" && <Arbitrage />}
       {stream === "sales" && <Sales />}
       {stream === "stacks" && <Stacks />}
+      {stream === "pull" && <PullSheet />}
       {stream === "batch" && (
         <>
       <div className="status-strip">
