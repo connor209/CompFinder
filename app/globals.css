@@ -505,8 +505,11 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
   #app { padding:16px 13px 96px; }
   .topbar h1 { font-size:19px; }
   .topbar-actions a { padding:7px 9px; font-size:13px; }
-  .stream { display:flex; }
-  .stream button { flex:1; justify-content:center; padding:10px 6px; }
+  /* Scrollable tab strip — 6 tabs won't fit squished, so let them keep their
+     full labels and swipe horizontally instead. */
+  .stream { display:flex; flex-wrap:nowrap; max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-snap-type:x proximity; }
+  .stream::-webkit-scrollbar { display:none; }
+  .stream button { flex:0 0 auto; justify-content:center; padding:9px 14px; font-size:13px; gap:6px; scroll-snap-align:start; }
   .filter-grid { grid-template-columns:repeat(2,1fr); }
   .dd-hero { grid-template-columns:1fr; gap:16px; padding:16px; }
   .dd-card { width:120px; margin:0 auto; }
