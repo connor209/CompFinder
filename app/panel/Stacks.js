@@ -33,8 +33,8 @@ export default function Stacks() {
     const sb = supabase();
     const { data: st } = await sb.from("card_stacks").select("id,name,created_at").order("created_at", { ascending: true });
     setStacks(st || []);
-    // live counts per stack
-    const { data: rows } = await sb.from("stack_cards").select("stack_id,position").not("position", "is", null);
+    // live counts per stack (unpulled only)
+    const { data: rows } = await sb.from("stack_cards").select("stack_id").is("pulled_at", null);
     const c = new Map();
     (rows || []).forEach((r) => c.set(r.stack_id, (c.get(r.stack_id) || 0) + 1));
     setCounts(c);
@@ -126,9 +126,9 @@ export default function Stacks() {
 
   async function undoPull(card) {
     setBusy(true);
-    const sb = supabase();
-    const maxPos = cards.reduce((m, c) => Math.max(m, c.position || 0), 0);
-    await sb.from("stack_cards").update({ pulled_at: null, position: maxPos + 1 }).eq("id", card.id);
+    // Just clear the pulled flag — its stored position slots it back into its
+    // original place in the order automatically.
+    await supabase().from("stack_cards").update({ pulled_at: null }).eq("id", card.id);
     setBusy(false);
     await loadCards(selId);
     await loadPulled(selId);
@@ -196,13 +196,12 @@ export default function Stacks() {
   }
 
   async function pullCard(card) {
-    if (!confirm(`Mark "${card.sku}" as pulled? Cards behind it shift down one.`)) return;
+    if (!confirm(`Mark "${card.sku}" as pulled? Everything behind it moves up one.`)) return;
     setBusy(true);
-    const sb = supabase();
-    const P = card.position;
-    await sb.from("stack_cards").update({ pulled_at: new Date().toISOString(), position: null }).eq("id", card.id);
-    const after = cards.filter((c) => c.position != null && c.position > P);
-    await Promise.all(after.map((c) => sb.from("stack_cards").update({ position: c.position - 1 }).eq("id", c.id)));
+    // Keep `position` as a stable sort key; just flag it pulled. The displayed
+    // position is the live rank among unpulled cards, so everything re-flows
+    // automatically — no renumbering needed.
+    await supabase().from("stack_cards").update({ pulled_at: new Date().toISOString() }).eq("id", card.id);
     setBusy(false);
     await loadCards(selId);
     await loadPulled(selId);
@@ -213,18 +212,30 @@ export default function Stacks() {
     const q = find.trim().toLowerCase();
     setFinderMsg(null);
     if (!q) return;
-    const { data } = await supabase()
+    const sb = supabase();
+    const { data: hits } = await sb
       .from("stack_cards")
       .select("sku,title,position,stack_id")
       .is("pulled_at", null)
       .ilike("sku", `%${q}%`);
-    if (!data || data.length === 0) {
+    if (!hits || hits.length === 0) {
       setFinderMsg({ ok: false, text: `No unpulled card matches SKU “${find}”.` });
       return;
     }
+    // Live rank = how many present cards in the same stack sit at/before it.
+    const stackIds = [...new Set(hits.map((h) => h.stack_id))];
+    const positionsByStack = new Map();
+    for (const sid of stackIds) {
+      const { data: all } = await sb.from("stack_cards").select("position").eq("stack_id", sid).is("pulled_at", null);
+      positionsByStack.set(sid, (all || []).map((a) => a.position).filter((v) => v != null).sort((a, b) => a - b));
+    }
     const byStack = new Map(stacks.map((s) => [s.id, s.name]));
-    const hits = data.slice(0, 5).map((r) => `${byStack.get(r.stack_id) || "Stack"} · position ${r.position}${r.sku ? ` (${r.sku})` : ""}`);
-    setFinderMsg({ ok: true, text: hits.join(" · ") });
+    const lines = hits.slice(0, 5).map((h) => {
+      const positions = positionsByStack.get(h.stack_id) || [];
+      const rank = positions.filter((p) => p <= h.position).length;
+      return `${byStack.get(h.stack_id) || "Stack"} · position ${rank}${h.sku ? ` (${h.sku})` : ""}`;
+    });
+    setFinderMsg({ ok: true, text: lines.join(" · ") });
   }
 
   const sel = useMemo(() => stacks.find((s) => s.id === selId), [stacks, selId]);
@@ -289,13 +300,14 @@ export default function Stacks() {
               <h3>{sel.name}</h3>
               <span className="badge2">{cards.length} in stack</span>
             </div>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up.</p>
             {cards.length === 0 ? (
               <p className="dd-empty">No cards in this stack yet.</p>
             ) : (
               <div className="stack-list rise-group">
-                {cards.map((c) => (
+                {cards.map((c, idx) => (
                   <div className="stack-row" key={c.id}>
-                    <span className="stack-pos">{c.position}</span>
+                    <span className="stack-pos" title="Live position (count from top)">{idx + 1}</span>
                     <span className="stack-sku">{c.sku}</span>
                     <span className="stack-title">{c.title || <em>—</em>}</span>
                     <button className="stack-pull" onClick={() => pullCard(c)} disabled={busy}>Pull</button>
