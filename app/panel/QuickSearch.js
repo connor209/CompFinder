@@ -4,6 +4,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
 import { detectLanguage } from "@/lib/catalog.js";
 import { createClient } from "@/lib/supabase/client";
+import CatalogBrowser from "./CatalogBrowser";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 
@@ -154,6 +155,7 @@ export default function QuickSearch({ seed }) {
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
   const [activeState, setActiveState] = useState({ loading: false, rec: null });
+  const [browsing, setBrowsing] = useState(false);
   const [art, setArt] = useState(null);
   const [mine, setMine] = useState({ loading: false, configured: true, error: "", listings: [] });
   const debounceRef = useRef(null);
@@ -503,7 +505,15 @@ export default function QuickSearch({ seed }) {
           </div>
         </div>
         <button className="btn btn-primary" onClick={runFromText} disabled={loading}>Search</button>
+        <button className="btn btn-ghost" onClick={() => setBrowsing((b) => !b)} aria-pressed={browsing}>📚 Browse sets</button>
       </div>
+
+      {browsing ? (
+        <CatalogBrowser
+          onClose={() => setBrowsing(false)}
+          onPick={(card) => { setBrowsing(false); pickSug(card); }}
+        />
+      ) : null}
 
       {loading && <div className="panel"><span className="spinner" /> &nbsp;Pricing from recent sold listings…</div>}
       {error && !loading && <div className="panel compfinder-error">{error}</div>}
