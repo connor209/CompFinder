@@ -289,6 +289,13 @@ export default function Stacks() {
   }
 
   const sel = useMemo(() => stacks.find((s) => s.id === selId), [stacks, selId]);
+  // Alphabetise: shorter names first (A–Z, then AA–AH, then longer like ACE /
+  // GRADED), alphabetical within each length.
+  const sortedStacks = useMemo(
+    () => [...stacks].sort((a, b) => (a.name.length - b.name.length) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })),
+    [stacks]
+  );
+  const TAB_LIMIT = 20;
 
   if (loading) return <div className="panel"><span className="spinner" /> &nbsp;Loading stacks…</div>;
 
@@ -309,11 +316,22 @@ export default function Stacks() {
       </div>
 
       <div className="stack-tabs">
-        {stacks.map((s) => (
-          <button key={s.id} className={`stack-tab${s.id === selId ? " on" : ""}`} onClick={() => setSelId(s.id)}>
-            {s.name} <span className="stack-count">{counts.get(s.id) || 0}</span>
-          </button>
-        ))}
+        {sortedStacks.length > TAB_LIMIT ? (
+          <label className="stack-select-wrap">
+            Stack
+            <select className="stack-select" value={selId || ""} onChange={(e) => setSelId(e.target.value)}>
+              {sortedStacks.map((s) => (
+                <option key={s.id} value={s.id}>{s.name} ({counts.get(s.id) || 0})</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          sortedStacks.map((s) => (
+            <button key={s.id} className={`stack-tab${s.id === selId ? " on" : ""}`} onClick={() => setSelId(s.id)}>
+              {s.name} <span className="stack-count">{counts.get(s.id) || 0}</span>
+            </button>
+          ))
+        )}
         <button className="stack-tab stack-new" onClick={createStack}>+ New stack</button>
         <button className="stack-tab stack-new" onClick={autoImport} disabled={busy}>⤓ Auto-import from listings</button>
         <button className="stack-tab stack-new" onClick={runReconcile} disabled={busy}>🔄 Reconcile</button>
