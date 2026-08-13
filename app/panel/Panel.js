@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
@@ -14,6 +15,19 @@ import PullSheet from "./PullSheet";
 import ThemeToggle from "./ThemeToggle";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
+
+// Section <-> URL slug mapping so each stream has its own /panel/<slug>.
+const STREAM_SLUG = {
+  dashboard: "dashboard",
+  single: "search",
+  batch: "batch",
+  inventory: "listings",
+  arbitrage: "arbitrage",
+  sales: "sales",
+  stacks: "stacks",
+  pull: "pull"
+};
+const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) => [v, k]));
 
 function monthKey() {
   const d = new Date();
@@ -70,7 +84,7 @@ function buildQueryForItem(item, settings, includeCondition, useFullTitle) {
   return { query, nameTokens, set: null, csvItem: null, cardNumber: numMatch ? numMatch[1].replace(/\s+/g, "") : null };
 }
 
-export default function Panel() {
+export default function Panel({ initialSection = "dashboard" }) {
   const [pastedText, setPastedText] = useState("");
   const [csvItems, setCsvItems] = useState(null);
   const [csvSummary, setCsvSummary] = useState("");
@@ -80,15 +94,30 @@ export default function Panel() {
   const [running, setRunning] = useState(false);
   const [identifying, setIdentifying] = useState(false);
   const [budget, setBudget] = useState({ count: 0 });
-  const [stream, setStream] = useState("dashboard");
+  const [stream, setStream] = useState(SLUG_STREAM[initialSection] || "dashboard");
   const [seed, setSeed] = useState(null);
   const seedNonce = useRef(0);
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Navigate a section: update state + the URL so each has a distinct page.
+  const go = useCallback((s) => {
+    setStream(s);
+    router.push(`/panel/${STREAM_SLUG[s] || "dashboard"}`, { scroll: false });
+  }, [router]);
+
+  // Keep the active section in sync with the URL (back/forward, direct links).
+  useEffect(() => {
+    const slug = (pathname || "").replace(/^\/panel\/?/, "").split("/")[0] || "dashboard";
+    const st = SLUG_STREAM[slug];
+    if (st) setStream((cur) => (cur === st ? cur : st));
+  }, [pathname]);
 
   const deepDiveCard = useCallback((query) => {
     seedNonce.current += 1;
     setSeed({ query, nonce: seedNonce.current });
-    setStream("single");
-  }, []);
+    go("single");
+  }, [go]);
 
   // Search filters
   const [ebaySite, setEbaySite] = useState("ebay.co.uk");
@@ -484,17 +513,17 @@ export default function Panel() {
       </header>
 
       <div className="stream" role="group" aria-label="Search mode">
-        <button aria-pressed={stream === "dashboard"} onClick={() => setStream("dashboard")}>🏠 Dashboard</button>
-        <button aria-pressed={stream === "single"} onClick={() => setStream("single")}>🔍 Quick Search</button>
-        <button aria-pressed={stream === "batch"} onClick={() => setStream("batch")}>☰ Batch</button>
-        <button aria-pressed={stream === "inventory"} onClick={() => setStream("inventory")}>🏷️ My listings</button>
-        <button aria-pressed={stream === "arbitrage"} onClick={() => setStream("arbitrage")}>📊 Arbitrage</button>
-        <button aria-pressed={stream === "sales"} onClick={() => setStream("sales")}>💰 Sales</button>
-        <button aria-pressed={stream === "stacks"} onClick={() => setStream("stacks")}>📦 Stacks</button>
-        <button aria-pressed={stream === "pull"} onClick={() => setStream("pull")}>📋 Pull sheet</button>
+        <button aria-pressed={stream === "dashboard"} onClick={() => go("dashboard")}>🏠 Dashboard</button>
+        <button aria-pressed={stream === "single"} onClick={() => go("single")}>🔍 Quick Search</button>
+        <button aria-pressed={stream === "batch"} onClick={() => go("batch")}>☰ Batch</button>
+        <button aria-pressed={stream === "inventory"} onClick={() => go("inventory")}>🏷️ My listings</button>
+        <button aria-pressed={stream === "arbitrage"} onClick={() => go("arbitrage")}>📊 Arbitrage</button>
+        <button aria-pressed={stream === "sales"} onClick={() => go("sales")}>💰 Sales</button>
+        <button aria-pressed={stream === "stacks"} onClick={() => go("stacks")}>📦 Stacks</button>
+        <button aria-pressed={stream === "pull"} onClick={() => go("pull")}>📋 Pull sheet</button>
       </div>
 
-      {stream === "dashboard" && <Dashboard onNavigate={setStream} />}
+      {stream === "dashboard" && <Dashboard onNavigate={go} />}
       {stream === "single" && <QuickSearch seed={seed} />}
       {stream === "inventory" && <Inventory onDeepDive={deepDiveCard} />}
       {stream === "arbitrage" && <Arbitrage />}
