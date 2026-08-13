@@ -153,6 +153,7 @@ export default function QuickSearch({ seed }) {
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
   const [activeState, setActiveState] = useState({ loading: false, rec: null });
+  const [art, setArt] = useState(null);
   const [mine, setMine] = useState({ loading: false, configured: true, error: "", listings: [] });
   const debounceRef = useRef(null);
   const cacheRef = useRef(new Map());
@@ -188,15 +189,20 @@ export default function QuickSearch({ seed }) {
         return;
       }
       try {
-        const res = await fetch(`/api/cards/search?q=${encodeURIComponent(v.trim())}`).then((r) => r.json());
-        if (res.ok) {
-          const cards = res.cards || [];
-          cacheRef.current.set(key, cards);
-          setSugs(cards);
-          setOpenSug(cards.length > 0);
+        const term = encodeURIComponent(v.trim());
+        // Catalog first (full set/language coverage); fall back to the
+        // pokemontcg.io lookup if the catalog isn't loaded or has no match.
+        let cards = [];
+        const cat = await fetch(`/api/catalog/search?q=${term}`).then((r) => r.json());
+        if (cat.ok && cat.available && (cat.cards || []).length) {
+          cards = cat.cards;
+        } else {
+          const res = await fetch(`/api/cards/search?q=${term}`).then((r) => r.json());
+          if (res.ok) cards = res.cards || [];
         }
-        // On a non-ok response (e.g. throttled), leave whatever's showing
-        // rather than blanking the dropdown.
+        cacheRef.current.set(key, cards);
+        setSugs(cards);
+        setOpenSug(cards.length > 0);
       } catch {
         /* typeahead is best-effort */
       }
@@ -262,7 +268,18 @@ export default function QuickSearch({ seed }) {
     setData(null);
     setScope("uk");
     setActiveState({ loading: true, rec: null });
+    setArt(null);
     setMine({ loading: true, configured: true, error: "", listings: [] });
+
+    // Catalog cards carry no art — pull the English card image from
+    // pokemontcg.io in the background to fill the header (non-English prints
+    // keep the placeholder).
+    if (!card.image && !lang) {
+      fetch(`/api/cards/lookup?name=${encodeURIComponent(card.name)}&number=${encodeURIComponent(card.number || "")}`)
+        .then((r) => r.json())
+        .then((lk) => { if (lk.ok && lk.card && lk.card.image) setArt(lk.card.image); })
+        .catch(() => {});
+    }
     // Non-English prints number differently, so drop the English collector
     // number and lean on name + language instead.
     const numberPart = lang ? "" : card.number || "";
@@ -502,7 +519,7 @@ export default function QuickSearch({ seed }) {
           )}
           <div className="dd-hero">
             <div className="dd-card">
-              {view.card.image ? <img src={view.card.image} alt={view.card.name} /> : <span className="ph" aria-hidden="true">🎴</span>}
+              {view.card.image || art ? <img src={view.card.image || art} alt={view.card.name} /> : <span className="ph" aria-hidden="true">🎴</span>}
             </div>
             <div className="dd-meta">
               <span className="dd-set">
