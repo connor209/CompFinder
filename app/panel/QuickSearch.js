@@ -303,7 +303,7 @@ export default function QuickSearch({ seed }) {
     // pokemontcg.io in the background to fill the header (non-English prints
     // keep the placeholder).
     if (!card.image && !lang) {
-      fetch(`/api/cards/lookup?name=${encodeURIComponent(card.name)}&number=${encodeURIComponent(card.number || "")}`)
+      fetch(`/api/cards/lookup?name=${encodeURIComponent(card.name)}&number=${encodeURIComponent(card.number || "")}&set=${encodeURIComponent(card.set || "")}`)
         .then((r) => r.json())
         .then((lk) => { if (lk.ok && lk.card && lk.card.image) setArt(lk.card.image); })
         .catch(() => {});
