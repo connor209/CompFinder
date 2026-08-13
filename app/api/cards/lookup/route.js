@@ -41,16 +41,11 @@ export async function GET(request) {
   if (!name) return NextResponse.json({ ok: false, error: "A card name is required.", card: null }, { status: 400 });
 
   const words = name.toLowerCase().split(/\s+/).filter(Boolean);
-  try {
-    // Exact-phrase name first; if that finds nothing, loosen to a prefix on the
-    // first word (covers "Charizard ex" vs "Charizard-EX" style differences).
-    let { data } = await fetchCards(`name:"${name}"`, 25);
-    if (data.length === 0 && words[0]) ({ data } = await fetchCards(`name:${words[0]}*`, 25));
-    if (data.length === 0) return NextResponse.json({ ok: true, card: null });
-
-    const wantNum = stripZero(number);
-    const setWords = setName.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-    const scored = data.map((c) => {
+  const wantNum = stripZero(number);
+  const setWords = setName.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+  const pick = (arr) => {
+    let best = null;
+    for (const c of arr) {
       let s = 0;
       if (wantNum && stripZero(c.number) === wantNum) s += 5;
       if (setWords.length) {
@@ -58,10 +53,23 @@ export async function GET(request) {
         s += setWords.filter((w) => cs.includes(w)).length * 2;
       }
       if (c.name.toLowerCase() === name.toLowerCase()) s += 1;
-      return { c, s };
-    });
-    scored.sort((a, b) => b.s - a.s);
-    const c = scored[0].c;
+      if (!best || s > best.s) best = { c, s };
+    }
+    return best;
+  };
+
+  try {
+    // Exact-phrase name first, then rank by set + number. If that yields no
+    // meaningful match (no number/set overlap), widen to a prefix query and
+    // re-rank across everything — so a wrong-set card can't win by default.
+    const { data } = await fetchCards(`name:"${name}"`, 25);
+    let best = pick(data);
+    if ((!best || best.s === 0) && words[0]) {
+      const more = await fetchCards(`name:${words[0]}*`, 50);
+      best = pick([...data, ...more.data]);
+    }
+    if (!best) return NextResponse.json({ ok: true, card: null });
+    const c = best.c;
 
     return NextResponse.json({
       ok: true,
