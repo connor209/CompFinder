@@ -24,11 +24,26 @@ function inferCondition(title) {
   return null;
 }
 
-// Price an active-listing title against historic sold comps, using a tight
-// name+number query so noisy eBay titles still find comps.
-async function soldPriceForTitle(title) {
-  const { query, nameTokens, number, graded, lot } = CompFinderPricing.buildCardQuery(title || "");
-  if (lot) return { recPence: null, comps: 0, lot: true };
+// Price an active-listing title against historic sold comps. Prefers the
+// catalog resolver's canonical, language-aware query; falls back to the local
+// buildCardQuery when the listing didn't resolve.
+async function soldPriceForTitle(title, resolved) {
+  let query;
+  let nameTokens;
+  let number;
+  let graded;
+  if (resolved && resolved.matched) {
+    ({ query, nameTokens, number, graded } = resolved);
+  } else if (resolved && resolved.lot) {
+    return { recPence: null, comps: 0, lot: true };
+  } else {
+    const b = CompFinderPricing.buildCardQuery(title || "");
+    if (b.lot) return { recPence: null, comps: 0, lot: true };
+    query = b.query;
+    nameTokens = b.nameTokens;
+    number = b.number;
+    graded = b.graded;
+  }
   const res = await fetch("/api/soldcomps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -36,7 +51,15 @@ async function soldPriceForTitle(title) {
   }).then((r) => r.json());
   if (!res || !res.ok) throw new Error((res && res.error) || "Pricing failed");
   const rec = CompFinderPricing.recommend(res.comps || [], settings, nameTokens, "sold", number || null, null);
-  return { recPence: rec.finalPence ?? null, comps: rec.included.length, confidence: rec.confidence, graded, query };
+  return {
+    recPence: rec.finalPence ?? null,
+    comps: rec.included.length,
+    confidence: rec.confidence,
+    graded,
+    query,
+    set: resolved?.matched ? resolved.expansion : null,
+    language: resolved?.matched ? resolved.language : null
+  };
 }
 
 export default function Arbitrage() {
@@ -87,14 +110,28 @@ export default function Arbitrage() {
       }
       setProgress({ done: 0, total: listings.length });
 
+      // Resolve all titles to canonical catalog cards up front (language-aware).
+      let resolved = [];
+      try {
+        const rr = await fetch("/api/catalog/resolve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ titles: listings.map((l) => l.title) })
+        }).then((r) => r.json());
+        if (rr.ok) resolved = rr.results || [];
+      } catch {
+        /* fall back to local query building */
+      }
+
       const out = [];
       let i = 0;
       const CONCURRENCY = 3;
       async function worker() {
         while (i < listings.length && !abortRef.current) {
-          const listing = listings[i++];
+          const idx = i++;
+          const listing = listings[idx];
           try {
-            const sold = await soldPriceForTitle(listing.title);
+            const sold = await soldPriceForTitle(listing.title, resolved[idx]);
             out.push(computeRow(listing, sold));
           } catch {
             out.push(computeRow(listing, { recPence: null, comps: 0, confidence: "Low" }));
@@ -204,6 +241,9 @@ export default function Arbitrage() {
                 </div>
                 <div className="arb-body">
                   <a className="arb-title" href={r.listing.url || "#"} target="_blank" rel="noopener noreferrer">{r.listing.title}</a>
+                  {r.sold.set ? (
+                    <div className="arb-set">{r.sold.set}{r.sold.language && r.sold.language !== "English" ? ` · ${r.sold.language}` : ""}</div>
+                  ) : null}
                   <div className="arb-nums">
                     <div><span className="k">Listed</span><span className="v">{pounds(r.activePence)}{r.listing.postage ? ` +${pounds(Math.round(r.listing.postage * 100))} p&p` : ""}</span></div>
                     <div><span className="k">Sold (est)</span><span className="v">{pounds(r.soldPence)} <em>· {r.sold.comps} comps</em></span></div>

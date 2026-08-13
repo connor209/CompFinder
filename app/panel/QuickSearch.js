@@ -2,6 +2,7 @@
 
 import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
+import { detectLanguage } from "@/lib/catalog.js";
 import { createClient } from "@/lib/supabase/client";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -228,13 +229,35 @@ export default function QuickSearch({ seed }) {
   function pickSug(card) {
     setQ(`${card.name} ${card.number}`.trim());
     setOpenSug(false);
-    runDeepDive(card);
+    // Catalog suggestions carry the set, so auto-select the language (Chinese/
+    // Korean/etc. sets name their language); English stays default.
+    const lang = detectLanguage(card.set);
+    const l = lang === "English" ? "" : lang;
+    setLanguage(l);
+    runDeepDive(card, l);
   }
 
   async function runQuery(text) {
     const trimmed = (text || "").trim();
     if (!trimmed) return;
     setOpenSug(false);
+
+    // Resolve the typed text to a canonical catalog card first (right set,
+    // localised number, language). Fall back to the pokemontcg.io lookup.
+    try {
+      const rr = await fetch(`/api/catalog/resolve?title=${encodeURIComponent(trimmed)}`).then((r) => r.json());
+      if (rr.ok && rr.available && rr.result && rr.result.matched) {
+        const r = rr.result;
+        const l = r.language === "English" ? "" : r.language;
+        const number = r.denominator ? `${r.number}/${r.denominator}` : r.number;
+        setLanguage(l);
+        runDeepDive({ name: r.name, number, set: r.expansion, series: r.expansionCode, rarity: "", image: null }, l);
+        return;
+      }
+    } catch {
+      /* fall back below */
+    }
+
     const m = trimmed.match(/\b([A-Za-z]{0,3}\d{1,4}\s*\/\s*[A-Za-z]{0,3}\d{1,4})\b/);
     const number = m ? m[1].replace(/\s+/g, "") : "";
     const name = m ? trimmed.slice(0, m.index).trim() : trimmed;

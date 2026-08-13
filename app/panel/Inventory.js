@@ -39,10 +39,27 @@ const SORTS = [
   { v: "opportunity", l: "Biggest opportunity (priced)" }
 ];
 
-// Turn a listing title into a market-price recommendation via SoldComps,
-// using a tight name+number query so noisy titles still find comps.
+// Turn a listing title into a market-price recommendation via SoldComps.
+// Prefers the catalog resolver (canonical, language-aware); falls back to the
+// local buildCardQuery when the listing didn't resolve.
 async function priceForTitle(title) {
-  const { query, nameTokens, number } = CompFinderPricing.buildCardQuery(title || "");
+  let query;
+  let nameTokens;
+  let number;
+  try {
+    const rr = await fetch(`/api/catalog/resolve?title=${encodeURIComponent(title || "")}`).then((r) => r.json());
+    if (rr.ok && rr.available && rr.result && rr.result.matched) {
+      ({ query, nameTokens, number } = rr.result);
+    }
+  } catch {
+    /* fall back below */
+  }
+  if (!query) {
+    const b = CompFinderPricing.buildCardQuery(title || "");
+    query = b.query;
+    nameTokens = b.nameTokens;
+    number = b.number;
+  }
   const res = await fetch("/api/soldcomps", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
