@@ -27,6 +27,8 @@ export default function Stacks() {
   const [pulled, setPulled] = useState([]);
   const [showPulled, setShowPulled] = useState(false);
   const [msg, setMsg] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
   const [showRecon, setShowRecon] = useState(false);
   const [reconLoading, setReconLoading] = useState(false);
   const [reconRows, setReconRows] = useState([]);
@@ -295,7 +297,11 @@ export default function Stacks() {
     () => [...stacks].sort((a, b) => (a.name.length - b.name.length) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })),
     [stacks]
   );
-  const TAB_LIMIT = 20;
+  const TAB_LIMIT = 12;
+  const pickerList = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    return q ? sortedStacks.filter((s) => s.name.toLowerCase().includes(q)) : sortedStacks;
+  }, [sortedStacks, pickerQuery]);
 
   if (loading) return <div className="panel"><span className="spinner" /> &nbsp;Loading stacks…</div>;
 
@@ -317,14 +323,33 @@ export default function Stacks() {
 
       <div className="stack-tabs">
         {sortedStacks.length > TAB_LIMIT ? (
-          <label className="stack-select-wrap">
-            Stack
-            <select className="stack-select" value={selId || ""} onChange={(e) => setSelId(e.target.value)}>
-              {sortedStacks.map((s) => (
-                <option key={s.id} value={s.id}>{s.name} ({counts.get(s.id) || 0})</option>
-              ))}
-            </select>
-          </label>
+          <div className="stack-picker">
+            <button className="stack-picker-btn" onClick={() => setPickerOpen((o) => !o)}>
+              {sel ? sel.name : "Select stack"}
+              {sel ? <span className="stack-count">{counts.get(sel.id) || 0}</span> : null}
+              <span className="stack-picker-caret">▾</span>
+            </button>
+            {pickerOpen ? (
+              <>
+                <div className="col-menu-backdrop" onClick={() => { setPickerOpen(false); setPickerQuery(""); }} />
+                <div className="stack-picker-menu">
+                  <input className="stack-picker-search" autoFocus value={pickerQuery} onChange={(e) => setPickerQuery(e.target.value)} placeholder="Search stacks…" />
+                  <div className="stack-picker-list">
+                    {pickerList.length === 0 ? (
+                      <div className="stack-picker-empty">No match</div>
+                    ) : (
+                      pickerList.map((s) => (
+                        <button key={s.id} className={`stack-picker-item${s.id === selId ? " on" : ""}`} onClick={() => { setSelId(s.id); setPickerOpen(false); setPickerQuery(""); }}>
+                          <span>{s.name}</span>
+                          <span className="stack-count">{counts.get(s.id) || 0}</span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
         ) : (
           sortedStacks.map((s) => (
             <button key={s.id} className={`stack-tab${s.id === selId ? " on" : ""}`} onClick={() => setSelId(s.id)}>
