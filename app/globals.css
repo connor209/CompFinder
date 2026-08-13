@@ -365,6 +365,21 @@ a { color:var(--accent-2); }
 .grade-price { font-size:16px; font-weight:750; color:var(--accent-2); margin-top:2px; }
 .grade-meta { font-size:11px; color:var(--ink-soft); margin-top:3px; }
 
+/* Buy module — purchase form + ledger */
+.buy-form { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px 14px; align-items:end; }
+.buy-field { display:flex; flex-direction:column; gap:5px; }
+.buy-field > span { font-size:12px; font-weight:650; color:var(--ink-soft); }
+.buy-opt { font-weight:500; color:var(--ink-faint); }
+.buy-field input, .buy-field select { border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:9px 10px; font-family:var(--font-body); font-size:13.5px; background:var(--surface-2); color:var(--ink); min-height:40px; }
+.buy-desc { grid-column:1 / -1; }
+.buy-qty { max-width:110px; }
+.buy-amt input { font-family:var(--font-mono); }
+.buy-note { grid-column:1 / -1; }
+.buy-actions { grid-column:1 / -1; display:flex; justify-content:flex-end; }
+.buy-rownote { color:var(--ink-faint); font-size:12px; }
+.itbl-del { border:0; background:transparent; color:var(--ink-faint); cursor:pointer; font-size:13px; padding:4px 8px; border-radius:8px; line-height:1; }
+.itbl-del:hover { color:var(--bad-ink); background:var(--bad-soft); }
+
 /* Legal / privacy prose */
 .legal { line-height:1.6; color:var(--ink-soft); }
 .legal p { margin:0 0 14px; font-size:14.5px; }

@@ -12,6 +12,7 @@ import Dashboard from "./Dashboard";
 import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
+import Buy from "./Buy";
 import ThemeToggle from "./ThemeToggle";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -21,6 +22,7 @@ const STREAM_SLUG = {
   dashboard: "dashboard",
   single: "search",
   batch: "batch",
+  buy: "buy",
   inventory: "listings",
   arbitrage: "arbitrage",
   sales: "sales",
@@ -41,6 +43,7 @@ const MODULES = [
       { key: "batch", label: "Batch" }
     ]
   },
+  { key: "buy", label: "Buy", icon: "🛒", sections: [{ key: "buy", label: "Buy" }] },
   {
     key: "ebay",
     label: "eBay",
@@ -590,6 +593,7 @@ export default function Panel({ initialSection = "dashboard" }) {
       {stream === "sales" && <Sales />}
       {stream === "stacks" && <Stacks />}
       {stream === "pull" && <PullSheet />}
+      {stream === "buy" && <Buy />}
       {stream === "batch" && (
         <>
       <div className="status-strip">

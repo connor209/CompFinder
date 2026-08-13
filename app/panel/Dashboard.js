@@ -271,6 +271,7 @@ export default function Dashboard({ onNavigate }) {
           <div className="panel-head"><h3>Quick actions</h3></div>
           <div className="dash-actions">
             <button className="btn btn-primary" onClick={() => onNavigate?.("single")}>🔍 Price a card</button>
+            <button className="btn btn-ghost" onClick={() => onNavigate?.("buy")}>🛒 Log a purchase</button>
             <button className="btn btn-ghost" onClick={() => onNavigate?.("arbitrage")}>📊 Find arbitrage</button>
             <button className="btn btn-ghost" onClick={() => onNavigate?.("inventory")}>🏷️ My listings</button>
           </div>
