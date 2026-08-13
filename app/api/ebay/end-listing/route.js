@@ -29,7 +29,7 @@ export async function POST(request) {
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("ebay_listings")
-    .select("ebay_item_id")
+    .select("ebay_item_id,title,price_value,price_currency")
     .eq("user_id", user.id)
     .eq("ebay_item_id", itemId)
     .single();
@@ -41,6 +41,22 @@ export async function POST(request) {
 
     await endListing(token, itemId);
     await admin.from("ebay_listings").delete().eq("user_id", user.id).eq("ebay_item_id", itemId);
+
+    // Log the end so it can be relisted / audited (best-effort).
+    try {
+      await admin.from("ebay_price_changes").insert({
+        user_id: user.id,
+        ebay_item_id: itemId,
+        title: row.title || null,
+        old_price: row.price_value != null ? Number(row.price_value) : null,
+        new_price: null,
+        currency: row.price_currency || null,
+        source: "ended"
+      });
+    } catch {
+      /* audit table optional */
+    }
+
     return NextResponse.json({ ok: true, itemId });
   } catch (err) {
     return NextResponse.json({ ok: false, error: err.message || "End-listing failed." }, { status: 502 });

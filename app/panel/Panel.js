@@ -640,7 +640,7 @@ export default function Panel() {
         {results.length === 0 ? (
           <p className="dd-empty">Run a search or upload a CSV to see priced results here.</p>
         ) : resultsView === "cards" ? (
-          <div className="rc-grid">
+          <div className="rc-grid rise-grid">
             {filteredResults.map(({ r, origIndex }) => (
               <ResultCard
                 key={origIndex}

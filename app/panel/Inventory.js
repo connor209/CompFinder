@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
+import EbayActivity from "./EbayActivity";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 
@@ -158,6 +159,7 @@ export default function Inventory({ onDeepDive }) {
   const [pricingAll, setPricingAll] = useState(false);
   const [note, setNote] = useState("");
   const [view, setView] = useState("cards");
+  const [showActivity, setShowActivity] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [colMenu, setColMenu] = useState(false);
   const [cols, setCols] = useState(() => {
@@ -585,6 +587,7 @@ export default function Inventory({ onDeepDive }) {
             </button>
           )}
           <button className="btn btn-ghost" onClick={exportCsv} disabled={rows.length === 0}>⤓ CSV</button>
+          <button className="btn btn-ghost" aria-pressed={showActivity} onClick={() => setShowActivity((s) => !s)}>🕘 Activity</button>
           <button className="btn btn-ghost" onClick={handleSync} disabled={syncing}>
             {syncing ? "Syncing…" : "↻ Sync"}
           </button>
@@ -638,6 +641,8 @@ export default function Inventory({ onDeepDive }) {
 
       {note && <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{note}</p>}
 
+      {showActivity ? <EbayActivity onChange={() => { loadStatus(); loadListings(); }} /> : null}
+
       {rows.length === 0 ? (
         <div className="panel">
           <p className="dd-empty">
@@ -683,7 +688,7 @@ export default function Inventory({ onDeepDive }) {
           </table>
         </div>
       ) : (
-        <div className="inv-grid">
+        <div className="inv-grid rise-grid">
           {rows.map((g) => {
             const isOpen = expanded.has(g.key);
             const p = priced.get(g.key);

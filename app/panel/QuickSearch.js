@@ -476,7 +476,7 @@ export default function QuickSearch({ seed }) {
       )}
 
       {view && !loading && (
-        <>
+        <div className="rise-group">
           {mine.listings.length > 0 ? (
             <div className="mine-banner">
               <span className="mine-ic" aria-hidden="true">⚠</span>
@@ -612,7 +612,7 @@ export default function QuickSearch({ seed }) {
               <p className="dd-empty">No active listings found for this card.</p>
             )}
           </div>
-        </>
+        </div>
       )}
     </>
   );

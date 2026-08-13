@@ -159,7 +159,7 @@ export default function Arbitrage() {
       </div>
 
       {shown.length > 0 ? (
-        <div className="arb-grid">
+        <div className="arb-grid rise-grid">
           {shown.map((r) => {
             const good = r.profitPence != null && r.profitPence > 0;
             const trusted = r.sold.comps >= 2;

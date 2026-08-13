@@ -189,6 +189,10 @@ a { color:var(--accent-2); }
 .dd-clear:hover { background:var(--surface-sink); color:var(--ink); }
 .lang-row { display:flex; align-items:center; gap:12px; margin:0 0 18px; flex-wrap:wrap; }
 .lang-label { font-size:11.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); }
+.pills { display:inline-flex; background:var(--surface-sink); border:1px solid var(--line-strong); border-radius:var(--radius-pill); padding:3px; gap:2px; box-shadow:inset 0 1px 2px rgba(0,0,0,.05); }
+.pills button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:650; font-size:13px; padding:7px 15px; border-radius:var(--radius-pill); cursor:pointer; transition:.15s; }
+.pills button:hover { color:var(--ink); }
+.pills button[aria-pressed="true"] { background:var(--surface); color:var(--ink); box-shadow:var(--shadow-1); }
 .badge-lang { color:var(--accent-ink); background:var(--accent); border-color:transparent; }
 .badge-muted { opacity:.6; }
 .lang-hint { font-size:12px; color:var(--ink-faint); }
@@ -294,6 +298,26 @@ a { color:var(--accent-2); }
 .itbl-set:hover { filter:brightness(1.06); }
 .itbl-end { font-size:12px; font-weight:600; color:var(--bad-ink); background:var(--surface); border:1px solid color-mix(in srgb,var(--bad) 40%, var(--line-strong)); border-radius:8px; padding:3px 9px; cursor:pointer; }
 .itbl-end:hover { background:var(--bad-soft); }
+
+/* eBay activity log */
+.act-list { display:flex; flex-direction:column; }
+.act-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-top:1px solid var(--line); }
+.act-row:first-child { border-top:0; }
+.act-main { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.act-title { font-size:13.5px; color:var(--ink); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:52ch; }
+.act-detail { font-size:12px; color:var(--ink-soft); font-family:var(--font-mono); }
+.act-detail em { color:var(--ink-faint); font-style:normal; }
+
+/* Tactile entrance animation — results settle down into place */
+@keyframes cf-rise { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
+.rise-group > *, .rise-grid > * { animation:cf-rise .34s cubic-bezier(.22,.61,.36,1) both; }
+.rise-group > *:nth-child(1), .rise-grid > *:nth-child(1) { animation-delay:0s; }
+.rise-group > *:nth-child(2), .rise-grid > *:nth-child(2) { animation-delay:.04s; }
+.rise-group > *:nth-child(3), .rise-grid > *:nth-child(3) { animation-delay:.08s; }
+.rise-group > *:nth-child(4), .rise-grid > *:nth-child(4) { animation-delay:.12s; }
+.rise-group > *:nth-child(5), .rise-grid > *:nth-child(5) { animation-delay:.16s; }
+.rise-group > *:nth-child(6), .rise-grid > *:nth-child(6) { animation-delay:.2s; }
+.rise-group > *:nth-child(n+7), .rise-grid > *:nth-child(n+7) { animation-delay:.24s; }
 .itbl-img { width:38px; height:38px; object-fit:contain; border-radius:6px; background:var(--surface-sink); display:block; }
 .itbl-title { max-width:340px; }
 .itbl-title a { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
