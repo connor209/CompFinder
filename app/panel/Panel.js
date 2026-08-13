@@ -6,6 +6,7 @@ import CompFinderPricing from "@/lib/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
+import Arbitrage from "./Arbitrage";
 import ThemeToggle from "./ThemeToggle";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -482,10 +483,12 @@ export default function Panel() {
         <button aria-pressed={stream === "single"} onClick={() => setStream("single")}>🔍 Quick Search</button>
         <button aria-pressed={stream === "batch"} onClick={() => setStream("batch")}>☰ Batch</button>
         <button aria-pressed={stream === "inventory"} onClick={() => setStream("inventory")}>🏷️ My listings</button>
+        <button aria-pressed={stream === "arbitrage"} onClick={() => setStream("arbitrage")}>📊 Arbitrage</button>
       </div>
 
       {stream === "single" && <QuickSearch seed={seed} />}
       {stream === "inventory" && <Inventory onDeepDive={deepDiveCard} />}
+      {stream === "arbitrage" && <Arbitrage />}
       {stream === "batch" && (
         <>
       <div className="status-strip">

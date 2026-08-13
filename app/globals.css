@@ -204,6 +204,30 @@ a { color:var(--accent-2); }
 .mine-note-ok { color:var(--conf-high); }
 .mine-note-err { color:var(--warn-ink); }
 
+/* Arbitrage scanner */
+.arb-progress { position:relative; height:26px; margin-top:14px; background:var(--surface-sink); border-radius:var(--radius-pill); overflow:hidden; }
+.arb-bar { position:absolute; inset:0 auto 0 0; background:var(--holo); transition:width .2s ease; }
+.arb-progress-txt { position:relative; z-index:1; display:flex; align-items:center; height:100%; padding-left:12px; font-size:12px; font-weight:600; color:#0d1c22; mix-blend-mode:luminosity; }
+.arb-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:14px; }
+.arb-card { display:flex; gap:12px; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:12px; }
+.arb-win { border-color:color-mix(in srgb,var(--good) 45%, var(--line)); box-shadow:0 0 0 1px color-mix(in srgb,var(--good) 25%, transparent); }
+.arb-thumb { position:relative; width:84px; height:84px; flex:none; border-radius:10px; overflow:hidden; background:var(--surface-sink); display:flex; align-items:center; justify-content:center; font-size:26px; }
+.arb-thumb img { width:100%; height:100%; object-fit:contain; }
+.arb-badge { position:absolute; left:4px; bottom:4px; font-family:var(--font-mono); font-weight:700; font-size:11px; padding:2px 7px; border-radius:var(--radius-pill); }
+.arb-badge.up { color:var(--good-ink); background:var(--good-soft); }
+.arb-badge.down { color:var(--bad-ink); background:var(--bad-soft); }
+.arb-body { display:flex; flex-direction:column; gap:7px; min-width:0; flex:1; }
+.arb-title { font-size:13px; line-height:1.35; color:var(--ink); text-decoration:none; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.arb-title:hover { color:var(--accent-2); }
+.arb-nums { display:flex; flex-direction:column; gap:3px; }
+.arb-nums > div { display:flex; justify-content:space-between; gap:10px; font-size:12.5px; }
+.arb-nums .k { color:var(--ink-faint); font-weight:600; }
+.arb-nums .v { font-family:var(--font-mono); color:var(--ink); }
+.arb-nums .v em { color:var(--ink-faint); font-style:normal; font-size:11px; }
+.arb-nums .v.pos { color:var(--good-ink); font-weight:700; }
+.arb-nums .v.neg { color:var(--bad-ink); }
+.arb-warn { font-size:11.5px; color:var(--warn-ink); }
+
 /* Market depth / liquidity line (deep dive) */
 .depth { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin:0 0 16px; padding:11px 14px; border-radius:12px; background:var(--surface); border:1px solid var(--line); font-size:13px; }
 .depth-dot { width:9px; height:9px; border-radius:50%; flex:none; }
