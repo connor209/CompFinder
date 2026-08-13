@@ -13,7 +13,7 @@ import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import Buy from "./Buy";
-import ThemeToggle from "./ThemeToggle";
+import ThemeSeg from "./ThemeSeg";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 
@@ -126,6 +126,8 @@ export default function Panel({ initialSection = "dashboard" }) {
   const [budget, setBudget] = useState({ count: 0 });
   const [stream, setStream] = useState(SLUG_STREAM[initialSection] || "dashboard");
   const [openModule, setOpenModule] = useState(null);
+  const [navSheet, setNavSheet] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState(false);
   const [seed, setSeed] = useState(null);
   const seedNonce = useRef(0);
   const router = useRouter();
@@ -136,6 +138,14 @@ export default function Panel({ initialSection = "dashboard" }) {
     setStream(s);
     router.push(`/panel/${STREAM_SLUG[s] || "dashboard"}`, { scroll: false });
   }, [router]);
+
+  // Navigate + close any open nav overlay (rail flyout / full sheet / context).
+  const nav = useCallback((s) => {
+    go(s);
+    setOpenModule(null);
+    setNavSheet(false);
+    setCtxOpen(false);
+  }, [go]);
 
   // Keep the active section in sync with the URL (back/forward, direct links).
   useEffect(() => {
@@ -538,54 +548,71 @@ export default function Panel({ initialSection = "dashboard" }) {
     });
 
   return (
-    <div id="app">
-      <header className="topbar">
-        <div className="brand">
+    <div id="app" className="shell">
+      <header className="appbar">
+        <button
+          className="icobtn"
+          aria-label="Open navigation"
+          aria-expanded={navSheet}
+          onClick={() => { setNavSheet((v) => !v); setCtxOpen(false); setOpenModule(null); }}
+        >
+          {navSheet ? "✕" : "☰"}
+        </button>
+        <div className="wordmark">
           <span className="brand-mark">CF</span>
-          <h1>Comp&nbsp;Finder</h1>
+          <span className="wm-t">Comp&nbsp;Finder</span>
         </div>
-        <div className="topbar-actions">
-          <ThemeToggle />
-          <a href="/history">History</a>
-          <a href="/settings">Settings</a>
-          <button className="btn btn-ghost" onClick={handleSignOut}>Sign out</button>
-        </div>
+        <button
+          className={`icobtn ctx${ctxOpen ? " on" : ""}`}
+          aria-label="More"
+          aria-haspopup="menu"
+          aria-expanded={ctxOpen}
+          onClick={() => { setCtxOpen((v) => !v); setNavSheet(false); setOpenModule(null); }}
+        >
+          •••
+        </button>
       </header>
 
-      <div className="modbar" role="menubar" aria-label="Modules">
-        {MODULES.map((m) => {
-          const multi = m.sections.length > 1;
-          const open = openModule === m.key;
-          return (
-            <div className="mod" key={m.key}>
-              <button
-                aria-pressed={currentModule.key === m.key}
-                aria-haspopup={multi ? "menu" : undefined}
-                aria-expanded={multi ? open : undefined}
-                onClick={() => {
-                  if (multi) setOpenModule((o) => (o === m.key ? null : m.key));
-                  else { go(m.sections[0].key); setOpenModule(null); }
-                }}
+      <div className="workspace">
+        <nav className="rail" aria-label="Sections">
+          {MODULES.map((m) => {
+            const multi = m.sections.length > 1;
+            const active = currentModule.key === m.key;
+            const open = openModule === m.key;
+            return (
+              <div
+                className="rail-item"
+                key={m.key}
+                onMouseEnter={() => { if (multi) setOpenModule(m.key); }}
+                onMouseLeave={() => setOpenModule((o) => (o === m.key ? null : o))}
               >
-                {m.icon} {m.label}
-                {multi ? <span className="mod-caret" aria-hidden="true">▾</span> : null}
-              </button>
-              {multi ? (
-                <div className={`mod-menu${open ? " open" : ""}`} role="menu">
-                  {m.sections.map((sec) => (
-                    <button key={sec.key} role="menuitem" aria-current={stream === sec.key} onClick={() => { go(sec.key); setOpenModule(null); }}>
-                      <span>{sec.label}</span>
-                      {stream === sec.key ? <span aria-hidden="true">✓</span> : null}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-      {openModule ? <div className="mod-backdrop" onClick={() => setOpenModule(null)} /> : null}
+                <button
+                  className={active ? "on" : ""}
+                  aria-label={m.label}
+                  aria-current={active ? "true" : undefined}
+                  aria-haspopup={multi ? "menu" : undefined}
+                  aria-expanded={multi ? open : undefined}
+                  onClick={() => { if (multi) setOpenModule((o) => (o === m.key ? null : m.key)); else nav(m.sections[0].key); }}
+                >
+                  <span className="rail-ic" aria-hidden="true">{m.icon}</span>
+                </button>
+                {multi && open ? (
+                  <div className="rail-fly" role="menu">
+                    <div className="rail-fly-h">{m.label}</div>
+                    {m.sections.map((sec) => (
+                      <button key={sec.key} role="menuitem" className={stream === sec.key ? "on" : ""} onClick={() => nav(sec.key)}>
+                        <span>{sec.label}</span>
+                        {stream === sec.key ? <span aria-hidden="true">✓</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </nav>
 
+        <main className="stream-main">
       {stream === "dashboard" && <Dashboard onNavigate={go} />}
       {stream === "single" && <QuickSearch seed={seed} />}
       {stream === "inventory" && <Inventory onDeepDive={deepDiveCard} />}
@@ -783,6 +810,59 @@ export default function Panel({ initialSection = "dashboard" }) {
       </section>
         </>
       )}
+        </main>
+      </div>
+
+      {/* Full navigation sheet (☰) — labelled modules + their sections */}
+      {navSheet ? (
+        <div className="navsheet-wrap" onClick={() => setNavSheet(false)}>
+          <div className="navsheet" role="menu" aria-label="Navigate" onClick={(e) => e.stopPropagation()}>
+            <div className="navsheet-h">Navigate</div>
+            {MODULES.map((m) => {
+              const multi = m.sections.length > 1;
+              const active = currentModule.key === m.key;
+              return (
+                <div key={m.key}>
+                  <button
+                    className={`nav-i${active ? " on" : ""}`}
+                    onClick={() => { if (!multi) nav(m.sections[0].key); }}
+                  >
+                    <span className="ic" aria-hidden="true">{m.icon}</span> {m.label}
+                  </button>
+                  {multi ? (
+                    <div className="subs">
+                      {m.sections.map((sec) => (
+                        <button key={sec.key} className={`sub-i${stream === sec.key ? " on" : ""}`} onClick={() => nav(sec.key)}>
+                          {sec.label}
+                          {stream === sec.key ? <span className="tick" aria-hidden="true">✓</span> : null}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Context menu (•••) — appearance + settings + sign out */}
+      {ctxOpen ? (
+        <>
+          <div className="ctx-backdrop" onClick={() => setCtxOpen(false)} />
+          <div className="ctxsheet" role="menu" aria-label="More">
+            <div className="ctx-theme">
+              <div className="ctx-theme-l">Appearance</div>
+              <ThemeSeg />
+            </div>
+            <div className="ctx-sep" />
+            <a className="ctx-row" href="/settings"><span className="ic" aria-hidden="true">⚙</span> Settings</a>
+            <a className="ctx-row" href="/history"><span className="ic" aria-hidden="true">🕘</span> History</a>
+            <div className="ctx-sep" />
+            <button className="ctx-row danger" onClick={handleSignOut}><span className="ic" aria-hidden="true">⎋</span> Sign out</button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }
