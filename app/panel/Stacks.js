@@ -27,6 +27,10 @@ export default function Stacks() {
   const [pulled, setPulled] = useState([]);
   const [showPulled, setShowPulled] = useState(false);
   const [msg, setMsg] = useState("");
+  const [showRecon, setShowRecon] = useState(false);
+  const [reconLoading, setReconLoading] = useState(false);
+  const [reconRows, setReconRows] = useState([]);
+  const [reconSel, setReconSel] = useState(new Set());
 
   const supabase = () => createClient();
 
@@ -123,6 +127,51 @@ export default function Stacks() {
     setMsg(`Imported ${rows.length} card(s) into ${byPrefix.size} stack(s). Skipped ${parsed.length - fresh.length} already added${unparseable ? `, ${unparseable} with non-standard SKUs` : ""}.`);
     await loadStacks();
     await loadCards(selId);
+  }
+
+  // Reconciliation: cards still in a stack but no longer in active listings
+  // (sold / ended). "sold" = confirmed in sales history; "not listed" = gone
+  // from active listings for another reason. Lets you bulk-pull to true up.
+  async function runReconcile() {
+    setShowRecon(true);
+    setReconLoading(true);
+    const sb = supabase();
+    const active = await pagedSelect(() => sb.from("ebay_listings").select("sku").not("sku", "is", null));
+    const activeSet = new Set(active.map((a) => String(a.sku).toLowerCase()));
+    const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date").not("sku", "is", null));
+    const saleMap = new Map();
+    sales.forEach((s) => { const k = String(s.sku).toLowerCase(); if (!saleMap.has(k)) saleMap.set(k, s.sold_date); });
+    const cards = await pagedSelect(() => sb.from("stack_cards").select("id,sku,stack_id,title").is("pulled_at", null));
+    const nameMap = new Map(stacks.map((s) => [s.id, s.name]));
+    const cand = cards
+      .filter((c) => c.sku && !activeSet.has(String(c.sku).toLowerCase()))
+      .map((c) => {
+        const sold = saleMap.get(String(c.sku).toLowerCase());
+        return { id: c.id, sku: c.sku, title: c.title, stack: nameMap.get(c.stack_id) || "", soldDate: sold || null, reason: sold ? "sold" : "notlisted" };
+      })
+      .sort((a, b) => (a.reason === b.reason ? (a.stack || "").localeCompare(b.stack || "") : a.reason === "sold" ? -1 : 1));
+    setReconRows(cand);
+    setReconSel(new Set(cand.filter((c) => c.reason === "sold").map((c) => c.id)));
+    setReconLoading(false);
+  }
+
+  function toggleRecon(id) {
+    setReconSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+
+  async function pullReconSelected() {
+    const ids = [...reconSel];
+    if (ids.length === 0) return;
+    if (!confirm(`Pull ${ids.length} card(s) from your stacks? They'll be marked pulled.`)) return;
+    setBusy(true);
+    const sb = supabase();
+    for (let i = 0; i < ids.length; i += 200) await sb.from("stack_cards").update({ pulled_at: new Date().toISOString() }).in("id", ids.slice(i, i + 200));
+    setBusy(false);
+    setShowRecon(false);
+    setMsg(`Reconciled — pulled ${ids.length} card(s) that had left your listings.`);
+    await loadStacks();
+    await loadCards(selId);
+    await loadPulled(selId);
   }
 
   async function undoPull(card) {
@@ -267,8 +316,46 @@ export default function Stacks() {
         ))}
         <button className="stack-tab stack-new" onClick={createStack}>+ New stack</button>
         <button className="stack-tab stack-new" onClick={autoImport} disabled={busy}>⤓ Auto-import from listings</button>
+        <button className="stack-tab stack-new" onClick={runReconcile} disabled={busy}>🔄 Reconcile</button>
       </div>
       {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)", marginTop: -8 }}>{msg}</p> : null}
+
+      {showRecon ? (
+        <div className="panel">
+          <div className="panel-head">
+            <span className="eyebrow">Reconcile — cards sold but still in stacks</span>
+            <button className="btn btn-ghost" onClick={() => setShowRecon(false)}>Close</button>
+          </div>
+          {reconLoading ? (
+            <p className="hint hint-small"><span className="spinner" /> &nbsp;Checking stacks against your listings & sales…</p>
+          ) : reconRows.length === 0 ? (
+            <p className="dd-empty">Everything&apos;s in sync — no sold cards sitting in stacks. 🎉</p>
+          ) : (
+            <>
+              <p className="hint hint-small" style={{ marginTop: 0 }}>
+                These are in a stack but no longer in your active listings. <b>sold</b> = matched in your sales history;
+                <b> not listed</b> = gone from active listings (sold, ended or delisted). Sold ones are pre-ticked.
+              </p>
+              <div className="stack-list">
+                {reconRows.map((r) => (
+                  <label className="ps-row" key={r.id}>
+                    <input type="checkbox" checked={reconSel.has(r.id)} onChange={() => toggleRecon(r.id)} />
+                    <span className="stack-sku">{r.sku}</span>
+                    <span className="stack-title">{r.title || <em>—</em>}</span>
+                    <span className="badge2">{r.stack}</span>
+                    <span className="hint-small" style={{ color: r.reason === "sold" ? "var(--conf-high)" : "var(--ink-faint)", flex: "none" }}>
+                      {r.reason === "sold" ? `sold ${r.soldDate ? new Date(r.soldDate).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : ""}`.trim() : "not listed"}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <button className="btn btn-primary" onClick={pullReconSelected} disabled={busy || reconSel.size === 0} style={{ marginTop: 10 }}>
+                Pull selected ({reconSel.size})
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
 
       {!sel ? (
         <div className="panel"><p className="dd-empty">Create a stack, or use <b>Auto-import from listings</b> to build stacks from your eBay SKUs automatically.</p></div>
