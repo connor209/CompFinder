@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { pagedSelect } from "@/lib/pagedSelect";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -33,14 +34,14 @@ export default function Stacks() {
     const sb = supabase();
     const { data: st } = await sb.from("card_stacks").select("id,name,created_at").order("created_at", { ascending: true });
     setStacks(st || []);
-    // live counts per stack (unpulled only)
-    const { data: rows } = await sb.from("stack_cards").select("stack_id").is("pulled_at", null);
+    // live counts per stack (unpulled only) — paged past the 1000-row cap
+    const rows = await pagedSelect(() => sb.from("stack_cards").select("stack_id").is("pulled_at", null));
     const c = new Map();
-    (rows || []).forEach((r) => c.set(r.stack_id, (c.get(r.stack_id) || 0) + 1));
+    rows.forEach((r) => c.set(r.stack_id, (c.get(r.stack_id) || 0) + 1));
     setCounts(c);
     // eBay listing SKU→title for auto-fill
-    const { data: listings } = await sb.from("ebay_listings").select("sku,title").not("sku", "is", null);
-    setSkuTitle(new Map((listings || []).filter((l) => l.sku).map((l) => [String(l.sku).toLowerCase(), l.title])));
+    const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title").not("sku", "is", null));
+    setSkuTitle(new Map(listings.filter((l) => l.sku).map((l) => [String(l.sku).toLowerCase(), l.title])));
     setLoading(false);
     if (!selId && st && st.length) setSelId(st[0].id);
   }
@@ -86,16 +87,16 @@ export default function Stacks() {
     if (!confirm("Auto-create stacks from your eBay listing SKUs?\n\nEach SKU like A50 becomes Stack A, position 50. Existing stacks are reused and SKUs already added are skipped.")) return;
     setBusy(true);
     setMsg("");
-    const { data: listings } = await sb.from("ebay_listings").select("sku,title,ebay_item_id").not("sku", "is", null);
+    const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title,ebay_item_id").not("sku", "is", null));
     let unparseable = 0;
     const parsed = [];
-    for (const l of listings || []) {
+    for (const l of listings) {
       const m = String(l.sku).trim().match(/^([A-Za-z]+)[-_ ]?(\d{1,4})$/);
       if (!m) { unparseable += 1; continue; }
       parsed.push({ prefix: m[1].toUpperCase(), num: parseInt(m[2], 10), sku: String(l.sku).trim(), title: l.title || "", ebay_item_id: l.ebay_item_id || null });
     }
-    const { data: existing } = await sb.from("stack_cards").select("sku").not("sku", "is", null);
-    const have = new Set((existing || []).map((e) => String(e.sku).toLowerCase()));
+    const existing = await pagedSelect(() => sb.from("stack_cards").select("sku").not("sku", "is", null));
+    const have = new Set(existing.map((e) => String(e.sku).toLowerCase()));
     const fresh = parsed.filter((p) => !have.has(p.sku.toLowerCase()));
 
     const byPrefix = new Map();

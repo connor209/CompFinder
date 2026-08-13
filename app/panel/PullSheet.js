@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { pagedSelect } from "@/lib/pagedSelect";
 
 /**
  * Pull sheet — the daily picking workflow. Lists unshipped eBay orders matched
@@ -48,12 +49,12 @@ export default function PullSheet() {
     const sb = supabase();
     const { data: stacks } = await sb.from("card_stacks").select("id,name");
     const nameMap = new Map((stacks || []).map((s) => [s.id, s.name]));
-    const { data: cards } = await sb.from("stack_cards").select("id,sku,stack_id,position,pulled_at");
+    const cards = await pagedSelect(() => sb.from("stack_cards").select("id,sku,stack_id,position,pulled_at"));
 
     const unpulledBySku = new Map();
     const pulledSkus = new Set();
     const order = new Map();
-    for (const c of cards || []) {
+    for (const c of cards) {
       const skl = c.sku ? String(c.sku).toLowerCase() : null;
       if (c.pulled_at) {
         if (skl) pulledSkus.add(skl);
