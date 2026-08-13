@@ -71,6 +71,7 @@ export default function Inventory({ onDeepDive }) {
   const [dupOnly, setDupOnly] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   const [priced, setPriced] = useState(() => new Map()); // key -> { loading, recPence, error }
+  const [updating, setUpdating] = useState(() => new Map()); // key -> { loading, done, error }
   const [syncing, setSyncing] = useState(false);
   const [pricingAll, setPricingAll] = useState(false);
   const [note, setNote] = useState("");
@@ -209,6 +210,47 @@ export default function Inventory({ onDeepDive }) {
       setPriced((prev) => new Map(prev).set(g.key, { loading: false, recPence: rec.finalPence ?? null, used: rec.included?.length || 0 }));
     } catch (err) {
       setPriced((prev) => new Map(prev).set(g.key, { loading: false, error: err.message || "Failed" }));
+    }
+  }
+
+  // Write-back: set the listing(s) in a group to the recommended market price
+  // on eBay. Confirms first; handles the server's drastic-change guard.
+  async function updateToMarket(g) {
+    const p = priced.get(g.key);
+    if (!p || p.recPence == null) return;
+    const newPrice = Math.round(p.recPence) / 100;
+    const from = g.price_value != null ? `£${Number(g.price_value).toFixed(2)}` : "current";
+    const n = g._items.length;
+    if (!confirm(`Update ${n} live eBay listing${n === 1 ? "" : "s"} of "${g.title}" from ${from} to £${newPrice.toFixed(2)}?\n\nThis changes your real listing${n === 1 ? "" : "s"} on eBay.`)) return;
+
+    setUpdating((prev) => new Map(prev).set(g.key, { loading: true }));
+    try {
+      for (const it of g._items) {
+        let res = await fetch("/api/ebay/revise-price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemId: it.ebay_item_id, price: newPrice })
+        }).then((r) => r.json());
+        if (res.needsConfirm) {
+          if (!confirm(`${res.warning}\n\nProceed with £${newPrice.toFixed(2)}?`)) {
+            setUpdating((prev) => new Map(prev).set(g.key, { loading: false, error: "Cancelled" }));
+            return;
+          }
+          res = await fetch("/api/ebay/revise-price", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ itemId: it.ebay_item_id, price: newPrice, force: true })
+          }).then((r) => r.json());
+        }
+        if (!res.ok) throw new Error(res.error || "Update failed");
+      }
+      // Reflect new price locally (re-groups under the new price).
+      const ids = new Set(g._items.map((it) => it.ebay_item_id));
+      setListings((prev) => prev.map((l) => (ids.has(l.ebay_item_id) ? { ...l, price_value: newPrice } : l)));
+      setUpdating((prev) => new Map(prev).set(g.key, { loading: false, done: true }));
+      setNote(`Updated ${n} listing${n === 1 ? "" : "s"} to £${newPrice.toFixed(2)} on eBay.`);
+    } catch (err) {
+      setUpdating((prev) => new Map(prev).set(g.key, { loading: false, error: err.message || "Update failed" }));
     }
   }
 
@@ -433,6 +475,21 @@ export default function Inventory({ onDeepDive }) {
                       <button className="inv-act" onClick={() => onDeepDive(g.title)}>Deep dive ↗</button>
                     ) : null}
                   </div>
+                  {(() => {
+                    const u = updating.get(g.key);
+                    const canUpdate =
+                      p && !p.loading && !p.error && p.recPence != null && askPence != null && Math.abs(p.recPence - askPence) >= 1;
+                    if (u?.loading) return <div className="inv-upd busy"><span className="spinner" /> &nbsp;Updating eBay…</div>;
+                    if (u?.done) return <div className="inv-upd ok">✓ Live price updated</div>;
+                    if (u?.error && u.error !== "Cancelled") return <div className="inv-upd err">{u.error}</div>;
+                    if (canUpdate)
+                      return (
+                        <button className="inv-update" onClick={() => updateToMarket(g)}>
+                          ⤴ Set eBay price to {pounds(p.recPence)}
+                        </button>
+                      );
+                    return null;
+                  })()}
 
                   {isOpen && g._count > 1 ? (
                     <div className="inv-sublist">
