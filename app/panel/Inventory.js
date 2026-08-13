@@ -85,7 +85,11 @@ const ALL_COLUMNS = [
     label: "Market",
     cell: (g, ctx) => {
       const p = ctx.priced.get(g.key);
-      return <span className="mono">{p && p.recPence != null ? pounds(p.recPence) : "—"}</span>;
+      if (p?.loading) return <span className="mono">…</span>;
+      if (p?.error) return <span className="mono neg" title={p.error}>err</span>;
+      if (p && p.recPence != null) return <span className="mono">{pounds(p.recPence)}</span>;
+      if (p && p.recPence == null) return <span className="mono muted">no comps</span>;
+      return <button className="itbl-check" onClick={() => ctx.onCheck(g)}>Check</button>;
     }
   },
   {
@@ -132,6 +136,7 @@ export default function Inventory({ onDeepDive }) {
   const [pricingAll, setPricingAll] = useState(false);
   const [note, setNote] = useState("");
   const [view, setView] = useState("cards");
+  const [selected, setSelected] = useState(() => new Set());
   const [colMenu, setColMenu] = useState(false);
   const [cols, setCols] = useState(() => {
     if (typeof window !== "undefined") {
@@ -336,26 +341,39 @@ export default function Inventory({ onDeepDive }) {
     }
   }
 
-  // Price every visible card, with a small concurrency limit to respect the
-  // SoldComps quota and avoid hammering the API.
-  async function priceAllVisible() {
-    const targets = rows.filter((g) => !pricedRef.current.get(g.key) || pricedRef.current.get(g.key)?.error);
-    if (targets.length === 0) return;
-    if (!confirm(`Price ${targets.length} card${targets.length === 1 ? "" : "s"}? This uses ${targets.length} SoldComps request${targets.length === 1 ? "" : "s"}.`)) return;
+  // Price a set of cards, concurrency-limited to respect the SoldComps quota.
+  async function priceMany(targets, labelWhat) {
+    const todo = targets.filter((g) => !pricedRef.current.get(g.key) || pricedRef.current.get(g.key)?.error);
+    if (todo.length === 0) return;
+    if (!confirm(`Price ${todo.length} ${labelWhat}? This uses ${todo.length} SoldComps request${todo.length === 1 ? "" : "s"}.`)) return;
     setPricingAll(true);
     setNote("");
     let i = 0;
     const CONCURRENCY = 3;
     async function worker() {
-      while (i < targets.length) {
-        const g = targets[i++];
+      while (i < todo.length) {
+        const g = todo[i++];
         // eslint-disable-next-line no-await-in-loop
         await checkPrice(g);
       }
     }
-    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targets.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, todo.length) }, worker));
     setPricingAll(false);
-    setNote(`Priced ${targets.length} card${targets.length === 1 ? "" : "s"}.`);
+    setNote(`Priced ${todo.length} card${todo.length === 1 ? "" : "s"}.`);
+  }
+  const priceAllVisible = () => priceMany(rows, `card${rows.length === 1 ? "" : "s"}`);
+  const priceSelected = () => priceMany(rows.filter((g) => selected.has(g.key)), "selected card(s)");
+
+  function toggleSel(key) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  function toggleSelAll(allSelected) {
+    setSelected(allSelected ? new Set() : new Set(rows.map((g) => g.key)));
   }
 
   function exportCsv() {
@@ -456,9 +474,15 @@ export default function Inventory({ onDeepDive }) {
           />
         </div>
         <div className="inv-meta">
-          <button className="btn btn-ghost" onClick={priceAllVisible} disabled={pricingAll || rows.length === 0}>
-            {pricingAll ? "Pricing…" : "💷 Price visible"}
-          </button>
+          {view === "table" && selected.size > 0 ? (
+            <button className="btn btn-primary" onClick={priceSelected} disabled={pricingAll}>
+              {pricingAll ? "Pricing…" : `💷 Price selected (${selected.size})`}
+            </button>
+          ) : (
+            <button className="btn btn-ghost" onClick={priceAllVisible} disabled={pricingAll || rows.length === 0}>
+              {pricingAll ? "Pricing…" : "💷 Price visible"}
+            </button>
+          )}
           <button className="btn btn-ghost" onClick={exportCsv} disabled={rows.length === 0}>⤓ CSV</button>
           <button className="btn btn-ghost" onClick={handleSync} disabled={syncing}>
             {syncing ? "Syncing…" : "↻ Sync"}
@@ -528,6 +552,14 @@ export default function Inventory({ onDeepDive }) {
           <table className="itbl">
             <thead>
               <tr>
+                <th className="itbl-selcol">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all"
+                    checked={rows.length > 0 && rows.every((g) => selected.has(g.key))}
+                    onChange={() => toggleSelAll(rows.length > 0 && rows.every((g) => selected.has(g.key)))}
+                  />
+                </th>
                 {ALL_COLUMNS.filter((c) => c.always || cols.has(c.key)).map((c) => (
                   <th key={c.key}>{c.label}</th>
                 ))}
@@ -535,9 +567,12 @@ export default function Inventory({ onDeepDive }) {
             </thead>
             <tbody>
               {rows.map((g) => (
-                <tr key={g.key}>
+                <tr key={g.key} className={selected.has(g.key) ? "is-sel" : ""}>
+                  <td className="itbl-selcol">
+                    <input type="checkbox" aria-label="Select row" checked={selected.has(g.key)} onChange={() => toggleSel(g.key)} />
+                  </td>
                   {ALL_COLUMNS.filter((c) => c.always || cols.has(c.key)).map((c) => (
-                    <td key={c.key} className={`itbl-${c.key}`}>{c.cell(g, { priced })}</td>
+                    <td key={c.key} className={`itbl-${c.key}`}>{c.cell(g, { priced, onCheck: checkPrice })}</td>
                   ))}
                 </tr>
               ))}
