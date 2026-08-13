@@ -2,6 +2,7 @@
 
 import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
+import { createClient } from "@/lib/supabase/client";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 
@@ -316,10 +317,40 @@ export default function QuickSearch({ seed }) {
       const comps = soldRes.comps || [];
       const rec = CompFinderPricing.recommend(comps, settings, nameTokens, "sold", effNumber, effSet);
       setData({ card, rec, comps });
+      saveHistory(card, query, rec, lang);
     } catch (err) {
       setError(err.message || "Something went wrong pricing that card.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Save a deep dive to the price-check history (fire-and-forget) so the
+  // History page covers single searches, not just batch runs.
+  async function saveHistory(card, query, rec, lang) {
+    try {
+      const supabase = createClient();
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const title = `${card.name}${card.number ? ` ${card.number}` : ""}`.trim() + (lang ? ` (${lang})` : "");
+      await supabase.from("price_checks").insert({
+        user_id: user.id,
+        title: title || query,
+        sku: null,
+        query,
+        ebay_site: "ebay.co.uk",
+        data_source: rec.dataSource,
+        confidence: rec.confidence,
+        recommended_pence: rec.finalPence ?? null,
+        current_pence: null,
+        comps_used: rec.included.length,
+        comps_excluded: rec.excluded.length,
+        note: rec.note || null
+      });
+    } catch {
+      /* history is best-effort */
     }
   }
 

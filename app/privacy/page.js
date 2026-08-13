@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Privacy Policy — CompFinder",
+  title: "Privacy Policy",
   description: "How CompFinder handles your data"
 };
 

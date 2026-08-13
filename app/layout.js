@@ -1,8 +1,31 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "Comp Finder",
-  description: "Real eBay sold-comp pricing for trading card resellers"
+  metadataBase: new URL("https://comp-finder-alpha.vercel.app"),
+  title: {
+    default: "CompFinder — Real eBay sold-comp pricing",
+    template: "%s · CompFinder"
+  },
+  description:
+    "Turn real eBay sold data into instant, recency-weighted prices, sync your live listings, spot repricing opportunities, and never undersell again.",
+  keywords: ["eBay sold comps", "trading card pricing", "Pokemon card prices", "reseller tools", "inventory pricing"],
+  openGraph: {
+    title: "CompFinder — Real eBay sold-comp pricing",
+    description:
+      "Instant, recency-weighted prices from real eBay sold data — with your live listings synced in. Price faster, list smarter.",
+    url: "/",
+    siteName: "CompFinder",
+    type: "website"
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "CompFinder — Real eBay sold-comp pricing",
+    description: "Instant, recency-weighted prices from real eBay sold data, with your live listings synced in."
+  }
+};
+
+export const viewport = {
+  themeColor: "#0C7B6E"
 };
 
 export default function RootLayout({ children }) {

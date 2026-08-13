@@ -234,6 +234,55 @@ export default function Inventory({ onDeepDive }) {
     setNote(`Priced ${targets.length} card${targets.length === 1 ? "" : "s"}.`);
   }
 
+  function exportCsv() {
+    const esc = (v) => {
+      const s = v == null ? "" : String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = ["Title", "SKU", "Ask", "Currency", "Qty", "Listings", "Market", "Delta", "Verdict", "URL"];
+    const lines = [header.join(",")];
+    for (const g of rows) {
+      const p = priced.get(g.key);
+      const askPence = g.price_value != null ? Math.round(g.price_value * 100) : null;
+      let market = "";
+      let deltaStr = "";
+      let verdictLabel = "";
+      if (p && !p.loading && !p.error) {
+        if (p.recPence != null) {
+          market = (p.recPence / 100).toFixed(2);
+          if (askPence != null) {
+            const d = askPence - p.recPence;
+            deltaStr = (d >= 0 ? "+" : "-") + (Math.abs(d) / 100).toFixed(2);
+            verdictLabel = verdictFor(askPence, p.recPence).label;
+          }
+        } else {
+          verdictLabel = "No recent comps";
+        }
+      }
+      const skus = g._items.map((i) => i.sku).filter(Boolean).join(" | ");
+      const row = [
+        g.title,
+        skus,
+        g.price_value != null ? Number(g.price_value).toFixed(2) : "",
+        g.price_currency || "",
+        g._qty,
+        g._count,
+        market,
+        deltaStr,
+        verdictLabel,
+        g.url || ""
+      ];
+      lines.push(row.map(esc).join(","));
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "compfinder-inventory.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   if (status.loading) {
     return <div className="panel"><span className="spinner" /> &nbsp;Loading your eBay listings…</div>;
   }
@@ -286,6 +335,7 @@ export default function Inventory({ onDeepDive }) {
           <button className="btn btn-ghost" onClick={priceAllVisible} disabled={pricingAll || rows.length === 0}>
             {pricingAll ? "Pricing…" : "💷 Price visible"}
           </button>
+          <button className="btn btn-ghost" onClick={exportCsv} disabled={rows.length === 0}>⤓ CSV</button>
           <button className="btn btn-ghost" onClick={handleSync} disabled={syncing}>
             {syncing ? "Syncing…" : "↻ Sync"}
           </button>
