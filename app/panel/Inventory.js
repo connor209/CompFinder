@@ -85,7 +85,7 @@ const ALL_COLUMNS = [
     label: "Market",
     cell: (g, ctx) => {
       const p = ctx.priced.get(g.key);
-      if (p?.loading) return <span className="mono">…</span>;
+      if (p?.loading) return <span className="itbl-progress" aria-label="Checking price"><i /></span>;
       if (p?.error) return <span className="mono neg" title={p.error}>err</span>;
       if (p && p.recPence != null) return <span className="mono">{pounds(p.recPence)}</span>;
       if (p && p.recPence == null) return <span className="mono muted">no comps</span>;
@@ -118,9 +118,31 @@ const ALL_COLUMNS = [
   { key: "sold", label: "Sold", cell: (g) => (g.extra?.quantitySold ?? "—") },
   { key: "watchers", label: "Watchers", cell: (g) => (g.extra?.watchCount ?? "—") },
   { key: "age", label: "Age (days)", cell: (g) => { const d = ageDays(g.extra?.startTime); return d == null ? "—" : d; } },
-  { key: "itemId", label: "Item ID", cell: (g) => <span className="mono">{g.ebay_item_id}</span> }
+  { key: "itemId", label: "Item ID", cell: (g) => <span className="mono">{g.ebay_item_id}</span> },
+  {
+    key: "actions",
+    label: "Actions",
+    cell: (g, ctx) => {
+      const u = ctx.updating.get(g.key);
+      const p = ctx.priced.get(g.key);
+      const ask = g.price_value != null ? Math.round(g.price_value * 100) : null;
+      const canUpdate = p && !p.loading && !p.error && p.recPence != null && ask != null && Math.abs(p.recPence - ask) >= 1;
+      return (
+        <span className="itbl-acts">
+          {u?.loading ? (
+            <span className="itbl-progress" aria-label="Updating"><i /></span>
+          ) : u?.done ? (
+            <span className="pos">✓ set</span>
+          ) : canUpdate ? (
+            <button className="itbl-set" onClick={() => ctx.onUpdate(g)} title="Update eBay price to market">↳ {pounds(p.recPence)}</button>
+          ) : null}
+          <button className="itbl-end" onClick={() => ctx.onEnd(g)} title="End (delist) on eBay">End</button>
+        </span>
+      );
+    }
+  }
 ];
-const DEFAULT_COLS = ["image", "title", "sku", "price", "qty", "market", "delta"];
+const DEFAULT_COLS = ["image", "title", "sku", "price", "qty", "market", "delta", "actions"];
 
 export default function Inventory({ onDeepDive }) {
   const [status, setStatus] = useState({ loading: true, connected: false, configured: true });
@@ -341,6 +363,80 @@ export default function Inventory({ onDeepDive }) {
     }
   }
 
+  // Delist (end) all listings in a group on eBay.
+  async function endOne(g) {
+    const n = g._items.length;
+    if (!confirm(`END ${n} live eBay listing${n === 1 ? "" : "s"} of "${g.title}"?\n\nThis permanently removes the listing${n === 1 ? "" : "s"} from eBay. This cannot be undone here.`)) return;
+    setUpdating((prev) => new Map(prev).set(g.key, { loading: true }));
+    try {
+      for (const it of g._items) {
+        const res = await fetch("/api/ebay/end-listing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemId: it.ebay_item_id })
+        }).then((r) => r.json());
+        if (!res.ok) throw new Error(res.error || "End failed");
+      }
+      const ids = new Set(g._items.map((it) => it.ebay_item_id));
+      setListings((prev) => prev.filter((l) => !ids.has(l.ebay_item_id)));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(g.key);
+        return next;
+      });
+      setNote(`Ended ${n} listing${n === 1 ? "" : "s"} on eBay.`);
+    } catch (err) {
+      setUpdating((prev) => new Map(prev).set(g.key, { loading: false, error: err.message || "End failed" }));
+    }
+  }
+
+  // Bulk write-back: update every selected (priced) card to its market price,
+  // with a single confirm and drastic-change items skipped rather than forced.
+  async function updateSelectedToMarket() {
+    const targets = rows.filter((g) => {
+      if (!selected.has(g.key)) return false;
+      const p = priced.get(g.key);
+      const ask = g.price_value != null ? Math.round(g.price_value * 100) : null;
+      return p && !p.loading && !p.error && p.recPence != null && ask != null && Math.abs(p.recPence - ask) >= 1;
+    });
+    if (targets.length === 0) {
+      setNote("No selected cards have a market price to apply — run a price check first.");
+      return;
+    }
+    if (!confirm(`Update ${targets.length} selected listing${targets.length === 1 ? "" : "s"} to their market prices on eBay?\n\nThis changes your real listings. Drastic changes (>5× / <20%) are skipped.`)) return;
+
+    setPricingAll(true);
+    setNote("");
+    let applied = 0;
+    let skipped = 0;
+    for (const g of targets) {
+      const newPrice = Math.round(priced.get(g.key).recPence) / 100;
+      setUpdating((prev) => new Map(prev).set(g.key, { loading: true }));
+      try {
+        for (const it of g._items) {
+          const res = await fetch("/api/ebay/revise-price", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ itemId: it.ebay_item_id, price: newPrice })
+          }).then((r) => r.json());
+          if (res.needsConfirm) {
+            skipped++;
+            throw new Error("Skipped — big change");
+          }
+          if (!res.ok) throw new Error(res.error || "Update failed");
+        }
+        const ids = new Set(g._items.map((it) => it.ebay_item_id));
+        setListings((prev) => prev.map((l) => (ids.has(l.ebay_item_id) ? { ...l, price_value: newPrice } : l)));
+        setUpdating((prev) => new Map(prev).set(g.key, { loading: false, done: true }));
+        applied++;
+      } catch (err) {
+        setUpdating((prev) => new Map(prev).set(g.key, { loading: false, error: err.message || "Failed" }));
+      }
+    }
+    setPricingAll(false);
+    setNote(`Updated ${applied} listing${applied === 1 ? "" : "s"} to market${skipped ? ` · ${skipped} skipped (too big a change — update individually)` : ""}.`);
+  }
+
   // Price a set of cards, concurrency-limited to respect the SoldComps quota.
   async function priceMany(targets, labelWhat) {
     const todo = targets.filter((g) => !pricedRef.current.get(g.key) || pricedRef.current.get(g.key)?.error);
@@ -475,9 +571,14 @@ export default function Inventory({ onDeepDive }) {
         </div>
         <div className="inv-meta">
           {view === "table" && selected.size > 0 ? (
-            <button className="btn btn-primary" onClick={priceSelected} disabled={pricingAll}>
-              {pricingAll ? "Pricing…" : `💷 Price selected (${selected.size})`}
-            </button>
+            <>
+              <button className="btn btn-primary" onClick={priceSelected} disabled={pricingAll}>
+                {pricingAll ? "Working…" : `💷 Price selected (${selected.size})`}
+              </button>
+              <button className="btn btn-ghost" onClick={updateSelectedToMarket} disabled={pricingAll} title="Update selected listings to market price on eBay">
+                ⤴ Update selected
+              </button>
+            </>
           ) : (
             <button className="btn btn-ghost" onClick={priceAllVisible} disabled={pricingAll || rows.length === 0}>
               {pricingAll ? "Pricing…" : "💷 Price visible"}
@@ -572,7 +673,9 @@ export default function Inventory({ onDeepDive }) {
                     <input type="checkbox" aria-label="Select row" checked={selected.has(g.key)} onChange={() => toggleSel(g.key)} />
                   </td>
                   {ALL_COLUMNS.filter((c) => c.always || cols.has(c.key)).map((c) => (
-                    <td key={c.key} className={`itbl-${c.key}`}>{c.cell(g, { priced, onCheck: checkPrice })}</td>
+                    <td key={c.key} className={`itbl-${c.key}`}>
+                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne })}
+                    </td>
                   ))}
                 </tr>
               ))}

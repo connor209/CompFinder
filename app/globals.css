@@ -286,6 +286,14 @@ a { color:var(--accent-2); }
 .itbl tr.is-sel td { background:var(--accent-soft); }
 .itbl-check { font-size:12px; font-weight:600; color:var(--accent-2); background:var(--surface); border:1px solid var(--line-strong); border-radius:8px; padding:3px 10px; cursor:pointer; transition:border-color .12s; }
 .itbl-check:hover { border-color:var(--accent); }
+.itbl-progress { display:inline-block; width:52px; height:6px; border-radius:3px; background:var(--surface-sink); overflow:hidden; vertical-align:middle; }
+.itbl-progress i { display:block; width:40%; height:100%; border-radius:3px; background:var(--accent); animation:itbl-indet 1s ease-in-out infinite; }
+@keyframes itbl-indet { 0% { margin-left:-40%; } 100% { margin-left:100%; } }
+.itbl-acts { display:inline-flex; gap:6px; align-items:center; white-space:nowrap; }
+.itbl-set { font-size:12px; font-weight:700; color:var(--accent-ink); background:var(--accent); border:0; border-radius:8px; padding:4px 9px; cursor:pointer; }
+.itbl-set:hover { filter:brightness(1.06); }
+.itbl-end { font-size:12px; font-weight:600; color:var(--bad-ink); background:var(--surface); border:1px solid color-mix(in srgb,var(--bad) 40%, var(--line-strong)); border-radius:8px; padding:3px 9px; cursor:pointer; }
+.itbl-end:hover { background:var(--bad-soft); }
 .itbl-img { width:38px; height:38px; object-fit:contain; border-radius:6px; background:var(--surface-sink); display:block; }
 .itbl-title { max-width:340px; }
 .itbl-title a { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
