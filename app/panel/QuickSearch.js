@@ -152,6 +152,7 @@ export default function QuickSearch({ seed }) {
   const [activeSug, setActiveSug] = useState(-1);
   const [scope, setScope] = useState("uk");
   const [language, setLanguage] = useState("");
+  const [game, setGame] = useState("pokemon");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
@@ -185,7 +186,14 @@ export default function QuickSearch({ seed }) {
       setOpenSug(false);
       return;
     }
-    const key = v.trim().toLowerCase();
+    // "Other TCG" has no catalog to suggest from — price straight from the
+    // typed text against eBay comps.
+    if (game === "other") {
+      setSugs([]);
+      setOpenSug(false);
+      return;
+    }
+    const key = `${game}:${v.trim().toLowerCase()}`;
     debounceRef.current = setTimeout(async () => {
       if (cacheRef.current.has(key)) {
         const cards = cacheRef.current.get(key);
@@ -195,15 +203,21 @@ export default function QuickSearch({ seed }) {
       }
       try {
         const term = encodeURIComponent(v.trim());
-        // Catalog first (full set/language coverage); fall back to the
-        // pokemontcg.io lookup if the catalog isn't loaded or has no match.
         let cards = [];
-        const cat = await fetch(`/api/catalog/search?q=${term}`).then((r) => r.json());
-        if (cat.ok && cat.available && (cat.cards || []).length) {
-          cards = cat.cards;
-        } else {
-          const res = await fetch(`/api/cards/search?q=${term}`).then((r) => r.json());
+        if (game === "mtg") {
+          // Magic: The Gathering — Scryfall proxy (name, set, number, art).
+          const res = await fetch(`/api/mtg/search?q=${term}`).then((r) => r.json());
           if (res.ok) cards = res.cards || [];
+        } else {
+          // Pokémon: catalog first (full set/language coverage); fall back to
+          // the pokemontcg.io lookup if the catalog isn't loaded / has no match.
+          const cat = await fetch(`/api/catalog/search?q=${term}`).then((r) => r.json());
+          if (cat.ok && cat.available && (cat.cards || []).length) {
+            cards = cat.cards;
+          } else {
+            const res = await fetch(`/api/cards/search?q=${term}`).then((r) => r.json());
+            if (res.ok) cards = res.cards || [];
+          }
         }
         cacheRef.current.set(key, cards);
         setSugs(cards);
@@ -233,12 +247,13 @@ export default function QuickSearch({ seed }) {
   function pickSug(card) {
     setQ(`${card.name} ${card.number}`.trim());
     setOpenSug(false);
-    // Catalog suggestions carry the set, so auto-select the language (Chinese/
-    // Korean/etc. sets name their language); English stays default.
-    const lang = detectLanguage(card.set);
+    // Language auto-detection is a Pokémon catalog thing (Chinese/Korean/etc.
+    // sets name their language). Other games keep the default.
+    const g = card.game || game;
+    const lang = g === "pokemon" ? detectLanguage(card.set) : "English";
     const l = lang === "English" ? "" : lang;
     setLanguage(l);
-    runDeepDive(card, l);
+    runDeepDive(card, l, g);
   }
 
   async function runQuery(text) {
@@ -246,8 +261,30 @@ export default function QuickSearch({ seed }) {
     if (!trimmed) return;
     setOpenSug(false);
 
-    // Resolve the typed text to a canonical catalog card first (right set,
-    // localised number, language). Fall back to the pokemontcg.io lookup.
+    // Magic: resolve the typed text via Scryfall (best matching printing), so
+    // free-text search still gets a set + art. Falls through to a bare price.
+    if (game === "mtg") {
+      try {
+        const res = await fetch(`/api/mtg/search?q=${encodeURIComponent(trimmed)}`).then((r) => r.json());
+        if (res.ok && (res.cards || []).length) {
+          runDeepDive(res.cards[0], "", "mtg");
+          return;
+        }
+      } catch {
+        /* fall through to a plain text price */
+      }
+      runDeepDive({ name: trimmed, number: "", set: "", series: "", rarity: "", image: null }, "", "mtg");
+      return;
+    }
+
+    // Other TCG: no catalog — price the typed text directly.
+    if (game === "other") {
+      runDeepDive({ name: trimmed, number: "", set: "", series: "", rarity: "", image: null }, "", "other");
+      return;
+    }
+
+    // Pokémon: resolve the typed text to a canonical catalog card first (right
+    // set, localised number, language). Fall back to the pokemontcg.io lookup.
     try {
       const rr = await fetch(`/api/catalog/resolve?title=${encodeURIComponent(trimmed)}`).then((r) => r.json());
       if (rr.ok && rr.available && rr.result && rr.result.matched) {
@@ -289,7 +326,7 @@ export default function QuickSearch({ seed }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce]);
 
-  async function runDeepDive(card, lang = language) {
+  async function runDeepDive(card, lang = language, gameArg = game) {
     setLoading(true);
     setError("");
     setData(null);
@@ -298,26 +335,37 @@ export default function QuickSearch({ seed }) {
     setArt(null);
     setListing(false);
     setMine({ loading: true, configured: true, error: "", listings: [] });
+    const isPokemon = gameArg === "pokemon";
 
-    // Catalog cards carry no art — pull the English card image from
+    // Pokémon catalog cards carry no art — pull the English card image from
     // pokemontcg.io in the background to fill the header (non-English prints
-    // keep the placeholder).
-    if (!card.image && !lang) {
+    // keep the placeholder). Magic suggestions already carry Scryfall art;
+    // "Other" has no art source.
+    if (isPokemon && !card.image && !lang) {
       fetch(`/api/cards/lookup?name=${encodeURIComponent(card.name)}&number=${encodeURIComponent(card.number || "")}&set=${encodeURIComponent(card.set || "")}`)
         .then((r) => r.json())
         .then((lk) => { if (lk.ok && lk.card && lk.card.image) setArt(lk.card.image); })
         .catch(() => {});
     }
-    // Non-English prints number differently, so drop the English collector
-    // number and lean on name + language instead.
-    const numberPart = lang ? "" : card.number || "";
-    const query = `${card.name} ${numberPart} ${lang}`.replace(/\s+/g, " ").trim();
+    // Query building differs by game. Pokémon: name + English collector number
+    // (dropped for non-English prints, which number differently). Magic: name +
+    // set name (the same card reprints at very different prices across sets, so
+    // the set is what pins the value). Other: just the name/typed text.
+    let query;
+    if (isPokemon) {
+      const numberPart = lang ? "" : card.number || "";
+      query = `${card.name} ${numberPart} ${lang}`.replace(/\s+/g, " ").trim();
+    } else if (gameArg === "mtg") {
+      query = `${card.name} ${card.set || ""}`.replace(/\s+/g, " ").trim();
+    } else {
+      query = card.name.trim();
+    }
 
     // "Already listed on eBay?" — fire-and-forget, fills in when ready. We pass
     // name + number separately so the server can search by name and interpret
     // the number itself (eBay full-text matching on "15/62" is unreliable).
     const mineName = `${card.name} ${lang}`.replace(/\s+/g, " ").trim();
-    fetch(`/api/ebay/my-listings?name=${encodeURIComponent(mineName)}&number=${encodeURIComponent(lang ? "" : card.number || "")}`)
+    fetch(`/api/ebay/my-listings?name=${encodeURIComponent(mineName)}&number=${encodeURIComponent(isPokemon && !lang ? card.number || "" : "")}`)
       .then((r) => r.json())
       .then((res) =>
         setMine({
@@ -333,8 +381,11 @@ export default function QuickSearch({ seed }) {
     // set name don't map to Japanese/Korean/Chinese prints (different numbering,
     // localised set names). When a language is selected, drop them so comp
     // matching leans on name + language alone instead of over-filtering.
-    const effNumber = lang ? null : card.number || null;
-    const effSet = lang ? null : card.set || null;
+    // Number/set filters are tuned for Pokémon's "032/182" numbering and set
+    // naming; they'd over-exclude Magic/other comps, so only apply them for
+    // English Pokémon cards.
+    const effNumber = isPokemon && !lang ? card.number || null : null;
+    const effSet = isPokemon && !lang ? card.set || null : null;
     const options = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
     const post = (body) =>
       fetch("/api/soldcomps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
@@ -435,30 +486,60 @@ export default function QuickSearch({ seed }) {
   return (
     <>
       <div className="lang-row">
-        <span className="lang-label">Language</span>
-        <div className="pills" role="group" aria-label="Card language">
+        <span className="lang-label">Game</span>
+        <div className="pills" role="group" aria-label="Trading card game">
           {[
-            { v: "", l: "English" },
-            { v: "Japanese", l: "Japanese" },
-            { v: "Korean", l: "Korean" },
-            { v: "Chinese", l: "Chinese" }
+            { v: "pokemon", l: "Pokémon" },
+            { v: "mtg", l: "Magic" },
+            { v: "other", l: "Other TCG" }
           ].map((opt) => (
             <button
-              key={opt.l}
-              aria-pressed={language === opt.v}
+              key={opt.v}
+              aria-pressed={game === opt.v}
               onClick={() => {
-                setLanguage(opt.v);
-                if (data) runDeepDive(data.card, opt.v);
+                if (game === opt.v) return;
+                setGame(opt.v);
+                setLanguage("");
+                setSugs([]);
+                setOpenSug(false);
               }}
             >
               {opt.l}
             </button>
           ))}
         </div>
-        {language ? (
-          <span className="lang-hint">Set number ignored — {language} cards are numbered differently.</span>
+        {game === "other" ? (
+          <span className="lang-hint">No catalog — type the card and we price it straight from eBay sold comps.</span>
         ) : null}
       </div>
+
+      {game === "pokemon" ? (
+        <div className="lang-row">
+          <span className="lang-label">Language</span>
+          <div className="pills" role="group" aria-label="Card language">
+            {[
+              { v: "", l: "English" },
+              { v: "Japanese", l: "Japanese" },
+              { v: "Korean", l: "Korean" },
+              { v: "Chinese", l: "Chinese" }
+            ].map((opt) => (
+              <button
+                key={opt.l}
+                aria-pressed={language === opt.v}
+                onClick={() => {
+                  setLanguage(opt.v);
+                  if (data) runDeepDive(data.card, opt.v, "pokemon");
+                }}
+              >
+                {opt.l}
+              </button>
+            ))}
+          </div>
+          {language ? (
+            <span className="lang-hint">Set number ignored — {language} cards are numbered differently.</span>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="dd-search">
         <div className="dd-combo" ref={comboRef}>
@@ -469,7 +550,7 @@ export default function QuickSearch({ seed }) {
               onChange={(e) => onInput(e.target.value)}
               onKeyDown={onKeyDown}
               onFocus={() => { if (q.trim().length >= 2) onInput(q); }}
-              placeholder="Search a card — e.g. Charizard 4/102"
+              placeholder={game === "mtg" ? "Search a card — e.g. Ragavan" : game === "other" ? "Type a card — e.g. Blue-Eyes White Dragon LOB-001" : "Search a card — e.g. Charizard 4/102"}
               role="combobox"
               aria-expanded={openSug}
               aria-controls="dd-suggest"
@@ -508,7 +589,9 @@ export default function QuickSearch({ seed }) {
           </div>
         </div>
         <button className="btn btn-primary" onClick={runFromText} disabled={loading}>Search</button>
-        <button className="btn btn-ghost" onClick={() => setBrowsing((b) => !b)} aria-pressed={browsing}>📚 Browse sets</button>
+        {game === "pokemon" ? (
+          <button className="btn btn-ghost" onClick={() => setBrowsing((b) => !b)} aria-pressed={browsing}>📚 Browse sets</button>
+        ) : null}
       </div>
 
       {browsing ? (
