@@ -93,6 +93,8 @@ export default function Dashboard({ onNavigate }) {
   const [stats, setStats] = useState(null);
   const [onboarding, setOnboarding] = useState(null);
   const [history, setHistory] = useState(null);
+  const [prefs, setPrefs] = useState(null);
+  const show = (k) => !prefs || prefs[k] !== false;
 
   async function load() {
     let s;
@@ -110,9 +112,10 @@ export default function Dashboard({ onNavigate }) {
         data: { user }
       } = await supabase.auth.getUser();
       const [{ data: profile }, { count: checks }] = await Promise.all([
-        supabase.from("profiles").select("soldcomps_api_key").eq("id", user.id).single(),
+        supabase.from("profiles").select("soldcomps_api_key, settings").eq("id", user.id).single(),
         supabase.from("price_checks").select("*", { count: "exact", head: true })
       ]);
+      setPrefs(profile?.settings?.dashboard || {});
       setOnboarding({ hasKey: !!(profile && profile.soldcomps_api_key), connected: !!s.connected, firstSearch: (checks || 0) > 0 });
     } catch {
       setOnboarding({ hasKey: false, connected: !!s.connected, firstSearch: false });
@@ -202,7 +205,7 @@ export default function Dashboard({ onNavigate }) {
 
   return (
     <div className="rise-group">
-      {onboarding && !allDone ? (
+      {show("onboarding") && onboarding && !allDone ? (
         <div className="panel onb">
           <div className="panel-head">
             <span className="eyebrow">Get started</span>
@@ -230,6 +233,7 @@ export default function Dashboard({ onNavigate }) {
         </div>
       ) : (
       <>
+      {show("portfolio") ? (
       <div className="stat-row">
         <div className="stat"><div className="k">Portfolio value</div><div className="v">{stats ? pounds(stats.value) : "—"}</div></div>
         <div className="stat"><div className="k">Cost basis</div><div className="v">{stats ? pounds(stats.costBasis) : "—"}</div></div>
@@ -241,9 +245,11 @@ export default function Dashboard({ onNavigate }) {
         </div>
         <div className="stat"><div className="k">Active listings</div><div className="v">{stats ? stats.count : "—"}</div></div>
       </div>
+      ) : null}
 
       <div className="dash-grid">
-        <PortfolioChart history={history} />
+        {show("valueChart") ? <PortfolioChart history={history} /> : null}
+        {show("costCoverage") ? (
         <div className="panel dash-card">
           <div className="panel-head"><h3>Cost coverage</h3></div>
           {stats && stats.missingCost > 0 ? (
@@ -256,7 +262,9 @@ export default function Dashboard({ onNavigate }) {
           )}
           <button className="btn btn-ghost" onClick={() => onNavigate?.("inventory")} style={{ marginTop: 8 }}>Open My listings →</button>
         </div>
+        ) : null}
 
+        {show("aged") ? (
         <div className="panel dash-card">
           <div className="panel-head"><h3>Aged listings</h3></div>
           <p className="hint" style={{ marginTop: 0 }}>
@@ -266,7 +274,9 @@ export default function Dashboard({ onNavigate }) {
           </p>
           <p className="hint hint-small">Last synced {stats?.lastSynced ? new Date(stats.lastSynced).toLocaleString() : "—"}. Auto-syncs daily.</p>
         </div>
+        ) : null}
 
+        {show("quickActions") ? (
         <div className="panel dash-card">
           <div className="panel-head"><h3>Quick actions</h3></div>
           <div className="dash-actions">
@@ -276,6 +286,7 @@ export default function Dashboard({ onNavigate }) {
             <button className="btn btn-ghost" onClick={() => onNavigate?.("inventory")}>🏷️ My listings</button>
           </div>
         </div>
+        ) : null}
       </div>
       </>
       )}

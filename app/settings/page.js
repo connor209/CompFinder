@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import SettingsForm from "./SettingsForm";
 import EbayConnect from "./EbayConnect";
 import AccountData from "./AccountData";
+import DashboardPrefs from "./DashboardPrefs";
 import CompFinderPricing from "@/lib/pricing.js";
 
 const EBAY_FLASH = {
@@ -43,6 +44,7 @@ export default async function SettingsPage({ searchParams }) {
       </header>
 
       <SettingsForm initialApiKey={profile?.soldcomps_api_key || ""} initialSettings={settings} />
+      <DashboardPrefs initialSettings={settings} />
       <EbayConnect flash={flash} />
       <AccountData email={user.email} />
     </div>
