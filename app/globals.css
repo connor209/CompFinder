@@ -387,6 +387,12 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
   .sale .st { grid-column:1 / -1; }
   .dd-search { flex-wrap:wrap; }
   .dd-search .btn { flex:1; }
+  .rc-grid { grid-template-columns:1fr; }
+  .inv-inp { min-width:0; }
+  .inv-summary { margin-left:0; width:100%; }
+  .inv-bar { gap:10px; }
+  .inv-bar .inv-meta { width:100%; }
+  .inv-bar .inv-meta .btn { flex:1; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
 

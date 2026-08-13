@@ -155,6 +155,19 @@ export default function QuickSearch({ seed }) {
   const [mine, setMine] = useState({ loading: false, configured: true, error: "", listings: [] });
   const debounceRef = useRef(null);
   const cacheRef = useRef(new Map());
+  const comboRef = useRef(null);
+
+  // Close the suggestions on a genuine outside click, rather than on input
+  // blur. A blur-timeout would spuriously fire while the deep dive re-renders
+  // (which momentarily steals focus), which is what made the dropdown seem to
+  // need "a click somewhere" before it would show.
+  useEffect(() => {
+    function onDocDown(e) {
+      if (comboRef.current && !comboRef.current.contains(e.target)) setOpenSug(false);
+    }
+    document.addEventListener("pointerdown", onDocDown);
+    return () => document.removeEventListener("pointerdown", onDocDown);
+  }, []);
 
   function onInput(v) {
     setQ(v);
@@ -186,7 +199,7 @@ export default function QuickSearch({ seed }) {
       } catch {
         /* typeahead is best-effort */
       }
-    }, 250);
+    }, 180);
   }
 
   function onKeyDown(e) {
@@ -372,7 +385,7 @@ export default function QuickSearch({ seed }) {
       </div>
 
       <div className="dd-search">
-        <div className="dd-combo">
+        <div className="dd-combo" ref={comboRef}>
           <div className="dd-inp">
             <span className="mag" aria-hidden="true">🔍</span>
             <input
@@ -380,7 +393,6 @@ export default function QuickSearch({ seed }) {
               onChange={(e) => onInput(e.target.value)}
               onKeyDown={onKeyDown}
               onFocus={() => { if (q.trim().length >= 2) onInput(q); }}
-              onBlur={() => setTimeout(() => setOpenSug(false), 150)}
               placeholder="Search a card — e.g. Charizard 4/102"
               role="combobox"
               aria-expanded={openSug}
