@@ -13,7 +13,22 @@ import { createClient } from "@/lib/supabase/server";
  * GET /api/cards/lookup?name=Charizard%20ex&number=125&set=Obsidian%20Flames
  */
 const API = "https://api.pokemontcg.io/v2/cards";
-const SELECT = "id,name,number,rarity,set,images";
+const SELECT = "id,name,number,rarity,set,images,cardmarket";
+
+// EUR→GBP for CardMarket prices (reported in EUR). Live daily rate, cached, with
+// a sensible fallback if the FX service is unreachable.
+async function eurToGbp() {
+  try {
+    const res = await fetch("https://api.frankfurter.app/latest?from=EUR&to=GBP", { next: { revalidate: 86400 } });
+    if (res.ok) {
+      const j = await res.json();
+      if (j.rates?.GBP) return j.rates.GBP;
+    }
+  } catch {
+    /* fall through */
+  }
+  return 0.86;
+}
 
 async function fetchCards(q, pageSize) {
   const params = new URLSearchParams({ q, pageSize: String(pageSize), select: SELECT });
@@ -71,6 +86,23 @@ export async function GET(request) {
     if (!best) return NextResponse.json({ ok: true, card: null });
     const c = best.c;
 
+    // CardMarket price guide (EUR) → GBP.
+    let cardmarket = null;
+    const cm = c.cardmarket;
+    if (cm && cm.prices) {
+      const rate = await eurToGbp();
+      const g = (v) => (v != null && v > 0 ? Math.round(v * rate * 100) : null);
+      cardmarket = {
+        trendPence: g(cm.prices.trendPrice),
+        avgPence: g(cm.prices.averageSellPrice),
+        lowPence: g(cm.prices.lowPrice),
+        avg7Pence: g(cm.prices.avg7),
+        avg30Pence: g(cm.prices.avg30),
+        url: cm.url || null,
+        updatedAt: cm.updatedAt || null
+      };
+    }
+
     return NextResponse.json({
       ok: true,
       card: {
@@ -80,7 +112,8 @@ export async function GET(request) {
         set: c.set?.name || "",
         series: c.set?.series || "",
         rarity: c.rarity || "",
-        image: c.images?.large || c.images?.small || null
+        image: c.images?.large || c.images?.small || null,
+        cardmarket
       }
     });
   } catch (err) {
