@@ -170,12 +170,14 @@ export default function PullSheet() {
           <b>{pickedInSheet}</b> / {total} picked{doneCount ? ` · ${doneCount} already pulled` : ""}
         </div>
         <div className="ps-actions">
+          <button className="btn btn-ghost" onClick={() => window.print()}>🖨 Print</button>
           <button className="btn btn-ghost" onClick={load} disabled={committing}>↻ Refresh</button>
           <button className="btn btn-primary" onClick={commit} disabled={committing || pickedInSheet === 0}>
             {committing ? "Committing…" : `Commit ${pickedInSheet} pull(s)`}
           </button>
         </div>
       </div>
+      <div className="print-title">Pull sheet — {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · {total} to pick</div>
       {note ? <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>{note}</p> : null}
       {error ? <p className="compfinder-error">{error}</p> : null}
 

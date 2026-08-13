@@ -595,6 +595,21 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 }
 @media (prefers-reduced-motion: reduce) { * { transition:none !important; animation:none !important; } }
 
+/* Print-only pull-sheet title (hidden on screen) */
+.print-title { display:none; }
+@media print {
+  .topbar, .modbar, .mod-backdrop, .ps-bar, .stream, .status-strip { display:none !important; }
+  #app { padding:0; max-width:none; }
+  body { background:#fff; color:#000; }
+  .print-title { display:block; font-size:18px; font-weight:700; margin:0 0 12px; }
+  .panel { box-shadow:none; border:1px solid #bbb; break-inside:avoid; margin-bottom:10px; background:#fff; }
+  .panel-head .btn, .ps-actions { display:none !important; }
+  .ps-row { break-inside:avoid; cursor:default; }
+  .ps-row input[type="checkbox"] { appearance:none; -webkit-appearance:none; width:15px; height:15px; border:1.5px solid #000; border-radius:3px; }
+  .ps-row .stack-title, .ps-row .stack-sku, .stack-pos { color:#000; }
+  a { color:#000; text-decoration:none; }
+}
+
 /* ============================================================= *
  * Landing page (.lp-*) — public marketing page for logged-out users
  * ============================================================= */
