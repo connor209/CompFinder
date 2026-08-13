@@ -536,6 +536,34 @@ export default function QuickSearch({ seed }) {
             <div className="stat"><div className="k">Sold comps</div><div className="v">{view.usedCount}</div></div>
           </div>
 
+          {(() => {
+            const sold = view.usedCount;
+            const active = view.active && view.active.included ? view.active.included.length : null;
+            if (sold === 0 && !active) return null;
+            let tone = "depth-mid";
+            let label = "Steady demand";
+            let ratio = null;
+            if (active != null && sold + active > 0) {
+              ratio = sold / (sold + active);
+              if (ratio >= 0.6) { tone = "depth-hi"; label = "Sells briskly"; }
+              else if (ratio < 0.35) { tone = "depth-lo"; label = "Slow mover — lots of supply"; }
+            }
+            return (
+              <div className={`depth ${tone}`}>
+                <span className="depth-dot" aria-hidden="true" />
+                <span className="depth-label">{label}</span>
+                <span className="depth-detail">
+                  {sold} sold in 90d
+                  {view.activeLoading
+                    ? " · checking current supply…"
+                    : active != null
+                      ? ` vs ${active} listed now${ratio != null ? ` · ${Math.round(ratio * 100)}% sell-through` : ""}`
+                      : ""}
+                </span>
+              </div>
+            );
+          })()}
+
           <div className="panel">
             <div className="panel-head"><h3>Price trend</h3></div>
             <TrendChart sales={view.chartSales} medianPence={view.med} />

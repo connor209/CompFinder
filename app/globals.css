@@ -204,6 +204,20 @@ a { color:var(--accent-2); }
 .mine-note-ok { color:var(--conf-high); }
 .mine-note-err { color:var(--warn-ink); }
 
+/* Market depth / liquidity line (deep dive) */
+.depth { display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin:0 0 16px; padding:11px 14px; border-radius:12px; background:var(--surface); border:1px solid var(--line); font-size:13px; }
+.depth-dot { width:9px; height:9px; border-radius:50%; flex:none; }
+.depth-label { font-weight:700; }
+.depth-detail { color:var(--ink-soft); font-family:var(--font-mono); font-size:12px; }
+.depth-hi { border-color:color-mix(in srgb,var(--good) 40%, var(--line)); }
+.depth-hi .depth-dot { background:var(--good); }
+.depth-hi .depth-label { color:var(--good-ink); }
+.depth-mid .depth-dot { background:var(--warn); }
+.depth-mid .depth-label { color:var(--warn-ink); }
+.depth-lo { border-color:color-mix(in srgb,var(--bad) 40%, var(--line)); }
+.depth-lo .depth-dot { background:var(--bad); }
+.depth-lo .depth-label { color:var(--bad-ink); }
+
 /* Legal / privacy prose */
 .legal { line-height:1.6; color:var(--ink-soft); }
 .legal p { margin:0 0 14px; font-size:14.5px; }
