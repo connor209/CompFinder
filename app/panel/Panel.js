@@ -122,6 +122,7 @@ export default function Panel({ initialSection = "dashboard" }) {
   const [identifying, setIdentifying] = useState(false);
   const [budget, setBudget] = useState({ count: 0 });
   const [stream, setStream] = useState(SLUG_STREAM[initialSection] || "dashboard");
+  const [openModule, setOpenModule] = useState(null);
   const [seed, setSeed] = useState(null);
   const seedNonce = useRef(0);
   const router = useRouter();
@@ -146,14 +147,6 @@ export default function Panel({ initialSection = "dashboard" }) {
   useEffect(() => {
     lastByModule.current[moduleForStream(stream).key] = stream;
   }, [stream]);
-
-  const goModule = useCallback(
-    (m) => {
-      const target = lastByModule.current[m.key] || m.sections[0].key;
-      go(target);
-    },
-    [go]
-  );
 
   const deepDiveCard = useCallback((query) => {
     seedNonce.current += 1;
@@ -556,23 +549,39 @@ export default function Panel({ initialSection = "dashboard" }) {
         </div>
       </header>
 
-      <div className="stream" role="group" aria-label="Module">
-        {MODULES.map((m) => (
-          <button key={m.key} aria-pressed={currentModule.key === m.key} onClick={() => goModule(m)}>
-            {m.icon} {m.label}
-          </button>
-        ))}
+      <div className="modbar" role="menubar" aria-label="Modules" onMouseLeave={() => setOpenModule(null)}>
+        {MODULES.map((m) => {
+          const multi = m.sections.length > 1;
+          const open = openModule === m.key;
+          return (
+            <div className="mod" key={m.key} onMouseEnter={() => { if (multi) setOpenModule(m.key); }}>
+              <button
+                aria-pressed={currentModule.key === m.key}
+                aria-haspopup={multi ? "menu" : undefined}
+                aria-expanded={multi ? open : undefined}
+                onClick={() => {
+                  if (multi) setOpenModule((o) => (o === m.key ? null : m.key));
+                  else { go(m.sections[0].key); setOpenModule(null); }
+                }}
+              >
+                {m.icon} {m.label}
+                {multi ? <span className="mod-caret" aria-hidden="true">▾</span> : null}
+              </button>
+              {multi ? (
+                <div className={`mod-menu${open ? " open" : ""}`} role="menu">
+                  {m.sections.map((sec) => (
+                    <button key={sec.key} role="menuitem" aria-current={stream === sec.key} onClick={() => { go(sec.key); setOpenModule(null); }}>
+                      <span>{sec.label}</span>
+                      {stream === sec.key ? <span aria-hidden="true">✓</span> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
-
-      {currentModule.sections.length > 1 ? (
-        <div className="submodule" role="group" aria-label={`${currentModule.label} sections`}>
-          {currentModule.sections.map((sec) => (
-            <button key={sec.key} aria-pressed={stream === sec.key} onClick={() => go(sec.key)}>
-              {sec.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      {openModule ? <div className="mod-backdrop" onClick={() => setOpenModule(null)} /> : null}
 
       {stream === "dashboard" && <Dashboard onNavigate={go} />}
       {stream === "single" && <QuickSearch seed={seed} />}

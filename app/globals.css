@@ -76,11 +76,19 @@ a { color:var(--accent-2); }
 .stream button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:650; font-size:14px; padding:9px 18px; border-radius:var(--radius-pill); cursor:pointer; display:inline-flex; align-items:center; gap:8px; transition:.15s; }
 .stream button[aria-pressed="true"] { background:var(--surface); color:var(--ink); box-shadow:var(--shadow-1); }
 
-/* Secondary (sub-module) tab row */
-.submodule { display:flex; gap:4px; flex-wrap:wrap; margin:-8px 0 20px; }
-.submodule button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:600; font-size:13.5px; padding:7px 14px; border-radius:var(--radius-pill); cursor:pointer; transition:.15s; }
-.submodule button:hover { color:var(--ink); background:var(--surface-sink); }
-.submodule button[aria-pressed="true"] { color:var(--accent-2); background:var(--accent-soft); }
+/* Module menu bar with animated dropdowns */
+.modbar { display:inline-flex; flex-wrap:wrap; background:var(--surface-sink); border:1px solid var(--line-strong); border-radius:var(--radius-pill); padding:4px; gap:3px; box-shadow:inset 0 1px 2px rgba(0,0,0,.05); margin:2px 0 20px; }
+.mod { position:relative; }
+.mod > button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:650; font-size:14px; padding:9px 18px; border-radius:var(--radius-pill); cursor:pointer; display:inline-flex; align-items:center; gap:8px; transition:.15s; white-space:nowrap; }
+.mod > button:hover { color:var(--ink); }
+.mod > button[aria-pressed="true"] { background:var(--surface); color:var(--ink); box-shadow:var(--shadow-1); }
+.mod-caret { font-size:.72em; opacity:.55; }
+.mod-menu { position:absolute; top:calc(100% + 8px); left:0; min-width:190px; background:var(--surface); border:1px solid var(--line-strong); border-radius:12px; box-shadow:var(--shadow-2); padding:6px; z-index:30; opacity:0; transform:translateY(-8px) scale(.98); transform-origin:top left; pointer-events:none; transition:opacity .16s ease, transform .16s cubic-bezier(.22,.61,.36,1); }
+.mod-menu.open { opacity:1; transform:translateY(0) scale(1); pointer-events:auto; }
+.mod-menu button { display:flex; width:100%; align-items:center; justify-content:space-between; gap:10px; text-align:left; background:transparent; border:0; border-radius:8px; padding:9px 12px; font-size:13.5px; font-weight:600; color:var(--ink-soft); cursor:pointer; }
+.mod-menu button:hover { background:var(--surface-sink); color:var(--ink); }
+.mod-menu button[aria-current="true"] { color:var(--accent-2); background:var(--accent-soft); }
+.mod-backdrop { position:fixed; inset:0; z-index:20; }
 
 /* ---------- Status strip / chips ---------- */
 .status-strip { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 18px; }
