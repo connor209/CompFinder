@@ -473,7 +473,8 @@ export default function QuickSearch({ seed }) {
         date: c._source && c._source.endedAt,
         title: c.title,
         url: c._source && c._source.url,
-        loc: c.itemLocation
+        loc: c.itemLocation,
+        grade: CompFinderPricing.parseGrade(c.title)
       }))
       .sort((a, b) => b.t - a.t);
     const sales = (scope === "uk" ? salesAll.filter((s) => !s.loc) : salesAll).slice(0, 12);
@@ -759,7 +760,10 @@ export default function QuickSearch({ seed }) {
                   <div className="sale" key={i}>
                     <span className="sp">{pounds(s.price)}</span>
                     <span className="sd">{fmtDate(s.date)}</span>
-                    <span className="st">{s.url ? <a href={s.url} target="_blank" rel="noopener noreferrer">{s.title}</a> : s.title}</span>
+                    <span className="st">
+                      {s.grade ? <span className={`sale-grade grade-${s.grade.company.toLowerCase()}`} title={`Graded ${s.grade.company} ${s.grade.grade}`}>{s.grade.company} {s.grade.grade}</span> : null}
+                      {s.url ? <a href={s.url} target="_blank" rel="noopener noreferrer">{s.title}</a> : s.title}
+                    </span>
                     <span className="loc">{s.loc ? s.loc : "🇬🇧 UK"}</span>
                   </div>
                 ))}

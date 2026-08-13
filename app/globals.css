@@ -380,6 +380,14 @@ a { color:var(--accent-2); }
 .itbl-del { border:0; background:transparent; color:var(--ink-faint); cursor:pointer; font-size:13px; padding:4px 8px; border-radius:8px; line-height:1; }
 .itbl-del:hover { color:var(--bad-ink); background:var(--bad-soft); }
 
+/* Graded-sale chip in the Recent sales list */
+.sale-grade { display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:800; letter-spacing:.02em; color:#fff; padding:2px 7px; border-radius:6px; margin-right:8px; vertical-align:1px; white-space:nowrap; background:var(--ink-faint); }
+.sale-grade.grade-psa { background:#C0392B; }
+.sale-grade.grade-cgc { background:#1E6FB8; }
+.sale-grade.grade-bgs { background:#1F2937; }
+.sale-grade.grade-sgc { background:#3F7A4E; }
+.sale-grade.grade-ace { background:#7C3AED; }
+
 /* Legal / privacy prose */
 .legal { line-height:1.6; color:var(--ink-soft); }
 .legal p { margin:0 0 14px; font-size:14.5px; }
