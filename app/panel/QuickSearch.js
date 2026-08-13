@@ -5,6 +5,7 @@ import CompFinderPricing from "@/lib/pricing.js";
 import { detectLanguage } from "@/lib/catalog.js";
 import { createClient } from "@/lib/supabase/client";
 import CatalogBrowser from "./CatalogBrowser";
+import ListForm from "./ListForm";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 
@@ -156,6 +157,7 @@ export default function QuickSearch({ seed }) {
   const [data, setData] = useState(null);
   const [activeState, setActiveState] = useState({ loading: false, rec: null });
   const [browsing, setBrowsing] = useState(false);
+  const [listing, setListing] = useState(false);
   const [art, setArt] = useState(null);
   const [mine, setMine] = useState({ loading: false, configured: true, error: "", listings: [] });
   const debounceRef = useRef(null);
@@ -294,6 +296,7 @@ export default function QuickSearch({ seed }) {
     setScope("uk");
     setActiveState({ loading: true, rec: null });
     setArt(null);
+    setListing(false);
     setMine({ loading: true, configured: true, error: "", listings: [] });
 
     // Catalog cards carry no art — pull the English card image from
@@ -576,8 +579,21 @@ export default function QuickSearch({ seed }) {
                   : "No UK sold comps in the last 90 days — try the worldwide view below, or the active-listings read."}
                 {view.activePrice != null ? ` Currently listed around ${pounds(view.activePrice)} asking.` : ""}
               </p>
+              <div className="dd-actions">
+                <button className="btn btn-ghost" onClick={() => setListing((v) => !v)} aria-pressed={listing}>🏷️ List on eBay</button>
+              </div>
             </div>
           </div>
+
+          {listing ? (
+            <ListForm
+              card={view.card}
+              suggestedPence={view.rec.finalPence}
+              language={language}
+              imageUrl={view.card.image || art}
+              onClose={() => setListing(false)}
+            />
+          ) : null}
 
           <div className="stat-row">
             <div className="stat"><div className="k">Median (90d)</div><div className="v">{pounds(view.med)}</div></div>
