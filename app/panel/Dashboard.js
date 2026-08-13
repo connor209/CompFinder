@@ -20,6 +20,7 @@ function ageDays(startTime) {
 export default function Dashboard({ onNavigate }) {
   const [status, setStatus] = useState({ loading: true, connected: false, configured: true });
   const [stats, setStats] = useState(null);
+  const [onboarding, setOnboarding] = useState(null);
 
   async function load() {
     let s;
@@ -29,9 +30,24 @@ export default function Dashboard({ onNavigate }) {
       s = { connected: false };
     }
     setStatus({ loading: false, ...s });
-    if (!s.connected) return;
 
     const supabase = createClient();
+    // Onboarding checks — shown until the essentials are set up.
+    try {
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+      const [{ data: profile }, { count: checks }] = await Promise.all([
+        supabase.from("profiles").select("soldcomps_api_key").eq("id", user.id).single(),
+        supabase.from("price_checks").select("*", { count: "exact", head: true })
+      ]);
+      setOnboarding({ hasKey: !!(profile && profile.soldcomps_api_key), connected: !!s.connected, firstSearch: (checks || 0) > 0 });
+    } catch {
+      setOnboarding({ hasKey: false, connected: !!s.connected, firstSearch: false });
+    }
+
+    if (!s.connected) return;
+
     // Page through listings.
     let from = 0;
     let all = [];
@@ -85,22 +101,47 @@ export default function Dashboard({ onNavigate }) {
 
   if (status.loading) return <div className="panel"><span className="spinner" /> &nbsp;Loading dashboard…</div>;
 
-  if (!status.connected) {
-    return (
-      <div className="panel">
-        <div className="eyebrow">Dashboard</div>
-        <p className="hint">
-          Connect your eBay account to see your portfolio value, cost basis and margins here.
-        </p>
-        <a className="btn btn-primary" href="/settings" style={{ marginTop: 10 }}>Connect in Settings →</a>
-      </div>
-    );
-  }
-
+  const steps = onboarding
+    ? [
+        { key: "key", label: "Add your SoldComps API key", desc: "Powers pricing from real eBay sold listings.", done: onboarding.hasKey, cta: "Add key", act: () => { window.location.href = "/settings"; } },
+        { key: "ebay", label: "Connect your eBay account", desc: "Sync listings & sales, and unlock the inventory tools.", done: onboarding.connected, cta: "Connect", act: () => { window.location.href = "/settings"; } },
+        { key: "search", label: "Run your first price check", desc: "Search a card for a full deep dive.", done: onboarding.firstSearch, cta: "Search", act: () => onNavigate?.("single") }
+      ]
+    : [];
+  const doneCount = steps.filter((s) => s.done).length;
+  const allDone = onboarding && doneCount === steps.length;
   const marginPct = stats && stats.costBasis > 0 ? Math.round((stats.potentialMargin / stats.costBasis) * 100) : null;
 
   return (
     <div className="rise-group">
+      {onboarding && !allDone ? (
+        <div className="panel onb">
+          <div className="panel-head">
+            <span className="eyebrow">Get started</span>
+            <span className="badge2">{doneCount}/{steps.length}</span>
+          </div>
+          <div className="onb-steps">
+            {steps.map((st) => (
+              <div className={`onb-step${st.done ? " done" : ""}`} key={st.key}>
+                <span className="onb-check">{st.done ? "✓" : "○"}</span>
+                <div className="onb-body">
+                  <strong>{st.label}</strong>
+                  <span>{st.desc}</span>
+                </div>
+                {!st.done ? <button className="btn btn-primary" onClick={st.act}>{st.cta}</button> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {!status.connected ? (
+        <div className="panel">
+          <div className="eyebrow">Dashboard</div>
+          <p className="hint">Connect your eBay account to unlock portfolio value, cost basis and margins here.</p>
+        </div>
+      ) : (
+      <>
       <div className="stat-row">
         <div className="stat"><div className="k">Portfolio value</div><div className="v">{stats ? pounds(stats.value) : "—"}</div></div>
         <div className="stat"><div className="k">Cost basis</div><div className="v">{stats ? pounds(stats.costBasis) : "—"}</div></div>
@@ -146,6 +187,8 @@ export default function Dashboard({ onNavigate }) {
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
