@@ -4,6 +4,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
 import { detectLanguage } from "@/lib/catalog.js";
 import { cleanSearchName } from "@/lib/cardname.js";
+import { ebaySearchUrl, cardmarketSearchUrl } from "@/lib/marketplace.js";
 import { createClient } from "@/lib/supabase/client";
 import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
@@ -146,6 +147,9 @@ function TrendChart({ sales, medianPence }) {
   );
 }
 
+// Quick Search's pricing mode -> catalogue game slug for the Cardmarket link.
+const MODE_TO_SLUG = { pokemon: "pokemon", mtg: "magic", other: null };
+
 export default function QuickSearch({ seed }) {
   const [q, setQ] = useState("");
   const [sugs, setSugs] = useState([]);
@@ -154,6 +158,10 @@ export default function QuickSearch({ seed }) {
   const [scope, setScope] = useState("uk");
   const [language, setLanguage] = useState("");
   const [game, setGame] = useState("pokemon");
+  // The catalogue game slug behind the current result (pokemon, magic,
+  // onepiece…), preserved for the Cardmarket link even though the pricing
+  // pipeline collapses everything to pokemon/mtg/other.
+  const [sourceGame, setSourceGame] = useState("pokemon");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
@@ -266,6 +274,7 @@ export default function QuickSearch({ seed }) {
     const lang = g === "pokemon" ? detectLanguage(card.set) : "English";
     const l = lang === "English" ? "" : lang;
     setLanguage(l);
+    setSourceGame(MODE_TO_SLUG[g] ?? null);
     runDeepDive(card, l, g);
   }
 
@@ -273,6 +282,7 @@ export default function QuickSearch({ seed }) {
     const trimmed = (text || "").trim();
     if (!trimmed) return;
     setOpenSug(false);
+    setSourceGame(MODE_TO_SLUG[game] ?? null);
 
     // Magic: resolve the typed text via Scryfall (best matching printing), so
     // free-text search still gets a set + art. Falls through to a bare price.
@@ -351,6 +361,8 @@ export default function QuickSearch({ seed }) {
       ? dd.game === "pokemon" ? "pokemon" : dd.game === "magic" ? "mtg" : "other"
       : null;
     if (mapped && mapped !== game) setGame(mapped);
+    // Keep the real catalogue slug (dd.game) for the Cardmarket link.
+    setSourceGame(dd.game || MODE_TO_SLUG[mapped] || null);
     if (dd.card && mapped) {
       setQ(dd.query);
       const g = mapped;
@@ -733,6 +745,17 @@ export default function QuickSearch({ seed }) {
               </p>
               <div className="dd-actions">
                 <button className="btn btn-ghost" onClick={() => setListing((v) => !v)} aria-pressed={listing}>🏷️ List on eBay</button>
+                {(() => {
+                  const baseQ = `${view.card.name} ${view.card.number || ""}`.replace(/\s+/g, " ").trim();
+                  const ebayQ = `${baseQ} ${language}`.replace(/\s+/g, " ").trim();
+                  const cmUrl = cardmarketSearchUrl(baseQ, sourceGame);
+                  return (
+                    <>
+                      <a className="btn btn-ghost" href={ebaySearchUrl(ebayQ)} target="_blank" rel="noopener noreferrer" title="Open this card's sold listings on eBay">🔍 eBay ↗</a>
+                      {cmUrl ? <a className="btn btn-ghost" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Search this card on Cardmarket">🔍 Cardmarket ↗</a> : null}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>

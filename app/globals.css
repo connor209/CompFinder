@@ -376,7 +376,7 @@ a { color:var(--accent-2); }
 .depth-lo .depth-dot { background:var(--bad); }
 .depth-lo .depth-label { color:var(--bad-ink); }
 
-.dd-actions { margin-top:12px; }
+.dd-actions { margin-top:12px; display:flex; flex-wrap:wrap; gap:8px; }
 
 /* Rolling stacks */
 .stack-tabs { display:flex; gap:8px; flex-wrap:wrap; margin:0 0 16px; }
