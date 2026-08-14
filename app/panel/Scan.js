@@ -23,6 +23,7 @@ export default function Scan({ onDeepDive }) {
   const [error, setError] = useState("");
   const [diag, setDiag] = useState(""); // human-readable reason when the camera won't start
   const [needsTap, setNeedsTap] = useState(false); // playback blocked until a user gesture
+  const [dbg, setDbg] = useState(""); // live diagnostic of the stream/video state
   const [recent, setRecent] = useState([]);
 
   const stopCamera = useCallback(() => {
@@ -119,6 +120,23 @@ export default function Scan({ onDeepDive }) {
   useEffect(() => {
     if (camera === "live") attach();
   }, [camera, attach]);
+
+  // Live diagnostic: when the feed looks black, this readout tells us why —
+  // whether the track is live, muted (no frames), which camera, and whether the
+  // <video> has real dimensions / is playing.
+  useEffect(() => {
+    if (camera !== "live") { setDbg(""); return; }
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      const s = streamRef.current;
+      const t = s && s.getVideoTracks ? s.getVideoTracks()[0] : null;
+      const st = t && t.getSettings ? t.getSettings() : {};
+      setDbg(
+        `track:${t ? t.readyState : "none"} muted:${t ? t.muted : "-"} · cam:${st.facingMode || (t && t.label ? t.label.slice(0, 14) : "?")} · video ${v ? v.videoWidth : 0}x${v ? v.videoHeight : 0} paused:${v ? v.paused : "-"}`
+      );
+    }, 600);
+    return () => clearInterval(id);
+  }, [camera]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -272,6 +290,7 @@ export default function Scan({ onDeepDive }) {
           <>
             <video ref={videoRef} className="scan-video" playsInline muted autoPlay onLoadedMetadata={() => attach()} />
             <div className="scan-guide" aria-hidden="true" />
+            {dbg ? <div className="scan-dbg">{dbg}</div> : null}
             {needsTap ? (
               <button className="scan-tap" onClick={attach}>▶ Tap to start the camera</button>
             ) : null}
