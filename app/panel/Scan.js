@@ -120,7 +120,7 @@ export default function Scan({ onDeepDive }) {
       const t = s && s.getVideoTracks ? s.getVideoTracks()[0] : null;
       const st = t && t.getSettings ? t.getSettings() : {};
       setDbg(
-        `track:${t ? t.readyState : "none"} muted:${t ? t.muted : "-"} · cam:${st.facingMode || (t && t.label ? t.label.slice(0, 14) : "?")} · video ${v ? v.videoWidth : 0}x${v ? v.videoHeight : 0} paused:${v ? v.paused : "-"}`
+        `track:${t ? t.readyState : "none"} muted:${t ? t.muted : "-"} · cam:${((t && t.label) || st.facingMode || "?").slice(0, 24)} · ${v ? v.videoWidth : 0}x${v ? v.videoHeight : 0} paused:${v ? v.paused : "-"}`
       );
     }, 600);
     return () => clearInterval(id);

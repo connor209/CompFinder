@@ -81,7 +81,7 @@ export default function CameraCapture({ onCapture, onClose, label = "Take a phot
       const v = videoRef.current;
       const t = streamRef.current?.getVideoTracks?.()[0];
       const st = t?.getSettings ? t.getSettings() : {};
-      setDbg(`track:${t ? t.readyState : "none"} muted:${t ? t.muted : "-"} · cam:${st.facingMode || (t?.label ? t.label.slice(0, 14) : "?")} · video ${v ? v.videoWidth : 0}x${v ? v.videoHeight : 0} paused:${v ? v.paused : "-"}`);
+      setDbg(`track:${t ? t.readyState : "none"} muted:${t ? t.muted : "-"} · cam:${((t?.label) || st.facingMode || "?").slice(0, 24)} · ${v ? v.videoWidth : 0}x${v ? v.videoHeight : 0} paused:${v ? v.paused : "-"}`);
     }, 600);
     return () => clearInterval(id);
   }, [state]);
