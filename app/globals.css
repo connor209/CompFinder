@@ -449,6 +449,27 @@ a { color:var(--accent-2); }
 .buy-note { grid-column:1 / -1; }
 .buy-actions { grid-column:1 / -1; display:flex; justify-content:flex-end; }
 .buy-rownote { color:var(--ink-faint); font-size:12px; }
+
+/* Buy — deal entry (multiple cards in one deal) */
+.deal-entry { display:flex; flex-direction:column; gap:8px; }
+.deal-entry-row { display:flex; gap:8px; align-items:center; }
+.deal-name-inp { flex:1; min-width:0; border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:9px 10px; font-size:13.5px; background:var(--surface-2); color:var(--ink); min-height:40px; }
+.deal-qty-inp { width:64px; flex:none; border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:9px 8px; font-size:13.5px; background:var(--surface-2); color:var(--ink); min-height:40px; }
+.deal-price-inp { width:96px; flex:none; border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:9px 10px; font-family:var(--font-mono); font-size:13.5px; background:var(--surface-2); color:var(--ink); min-height:40px; }
+.deal-add-card { align-self:flex-start; margin-top:2px; }
+.deal-total { font-family:var(--font-display); font-weight:800; font-size:22px; color:var(--accent-2); padding:4px 0; }
+/* expandable deal rows in the ledger */
+.deal-toggle { background:transparent; border:0; cursor:pointer; color:var(--ink); font-size:13.5px; font-weight:600; padding:0; display:inline-flex; align-items:center; gap:6px; }
+.deal-toggle:hover { color:var(--accent-2); }
+.deal-caret { color:var(--ink-faint); font-size:11px; }
+.deal-detail-row > td { background:var(--surface-2); padding:8px 14px 12px; }
+.deal-cards-list { display:flex; flex-direction:column; gap:4px; }
+.deal-card-line { display:flex; align-items:baseline; gap:10px; font-size:13px; padding:4px 0; border-bottom:1px solid var(--line); }
+.deal-card-line:last-child { border-bottom:0; }
+.deal-card-name { flex:1; color:var(--ink-soft); }
+.deal-card-qty { font-family:var(--font-mono); font-size:12px; color:var(--ink-faint); }
+.deal-card-price { font-family:var(--font-mono); font-weight:600; min-width:64px; text-align:right; }
+.deal-card-note { font-size:12px; color:var(--ink-faint); margin-top:4px; font-style:italic; }
 .itbl-del { border:0; background:transparent; color:var(--ink-faint); cursor:pointer; font-size:13px; padding:4px 8px; border-radius:8px; line-height:1; }
 .itbl-del:hover { color:var(--bad-ink); background:var(--bad-soft); }
 
