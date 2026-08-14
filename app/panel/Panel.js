@@ -180,16 +180,23 @@ export default function Panel({ initialSection = "dashboard" }) {
   // card (name + number + set), not just a text string.
   //
   // The payload is stashed in sessionStorage as well as React state: navigating
-  // to /panel/search re-renders the route, which can reset this component's
-  // state before Quick Search reads the prop — sessionStorage survives that, so
-  // the search always fires. Quick Search consumes and clears it on mount.
+  // to /panel/search remounts this component (a slug change remounts the route),
+  // which resets its state before Quick Search reads the prop — sessionStorage
+  // survives that, so the search always fires. Quick Search consumes it on mount.
+  //
+  // Crucially we DON'T call go()/setStream here: setStream would mount Quick
+  // Search on the *old* Panel for one render before the navigation remounts it,
+  // and that throwaway instance would consume+clear the payload and run a search
+  // that's immediately discarded — leaving the real (post-remount) Quick Search
+  // with nothing. Navigating via the URL alone means only the final Quick Search
+  // reads the payload.
   const deepDiveCard = useCallback((query, opts = {}) => {
     seedNonce.current += 1;
     const payload = { query, nonce: seedNonce.current, game: opts.game || null, card: opts.card || null };
     try { sessionStorage.setItem("cf-deepdive", JSON.stringify(payload)); } catch { /* private mode */ }
     setSeed(payload);
-    go("single");
-  }, [go]);
+    router.push(`/panel/${STREAM_SLUG.single}`, { scroll: false });
+  }, [router]);
 
   const currentModule = moduleForStream(stream);
 
