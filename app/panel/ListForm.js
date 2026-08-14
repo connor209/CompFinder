@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
+import { createClient } from "@/lib/supabase/client";
+import { resizeImage } from "@/lib/resizeImage";
 
 const CONDITIONS = [
   { l: "Near mint or better", v: "400010" },
@@ -44,8 +46,26 @@ export default function ListForm({ card, suggestedPence, language, imageUrl, onC
   const [dispatchDays, setDispatchDays] = useState(d.dispatchDays || "3");
   const [description, setDescription] = useState("");
   const [image, setImage] = useState(imageUrl || "");
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+
+  async function uploadPhoto(file) {
+    if (!file) return;
+    setUploading(true);
+    try {
+      const sb = createClient();
+      const { data: { user } } = await sb.auth.getUser();
+      const blob = await resizeImage(file);
+      const path = `${user.id}/${crypto.randomUUID()}.jpg`;
+      const { error: upErr } = await sb.storage.from("listing-photos").upload(path, blob, { contentType: "image/jpeg", upsert: false });
+      if (upErr) throw new Error(upErr.message);
+      setImage(sb.storage.from("listing-photos").getPublicUrl(path).data.publicUrl);
+    } catch (e) {
+      alert(e.message || "Photo upload failed.");
+    }
+    setUploading(false);
+  }
 
   function persist() {
     try {
@@ -136,8 +156,14 @@ export default function ListForm({ card, suggestedPence, language, imageUrl, onC
           </div>
 
           <label className="field" style={{ marginTop: 10 }}>
-            <span>Image URL (optional)</span>
-            <input type="text" value={image} onChange={(e) => setImage(e.target.value)} placeholder="https://…" />
+            <span>Photo</span>
+            <div className="bulk-img-row">
+              <input type="text" value={image} onChange={(e) => setImage(e.target.value)} placeholder="Photo URL, or upload your own →" />
+              <label className="bulk-img-up" title="Upload your own photo">
+                {uploading ? <span className="spinner" /> : "📷"}
+                <input type="file" accept="image/*" capture="environment" hidden disabled={uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadPhoto(f); }} />
+              </label>
+            </div>
           </label>
           <label className="field" style={{ marginTop: 10 }}>
             <span>Description (optional)</span>

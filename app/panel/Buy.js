@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import { pagedSelect } from "@/lib/pagedSelect";
+import { resizeImage } from "@/lib/resizeImage";
 
 const BUCKET = "purchase-photos";
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
@@ -15,33 +16,6 @@ function fmtDate(iso) {
 function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-/**
- * Downscale a captured photo to a sensible max dimension and re-encode as JPEG
- * before upload — phone photos are several MB, and a haul snapshot doesn't need
- * more than ~1600px. Returns a Blob. Throws if the file isn't a decodable image.
- */
-function resizeImage(file, maxDim = 1600, quality = 0.82) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width > maxDim || height > maxDim) {
-        if (width >= height) { height = Math.round((height * maxDim) / width); width = maxDim; }
-        else { width = Math.round((width * maxDim) / height); height = maxDim; }
-      }
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
-      canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("Couldn't process that image."))), "image/jpeg", quality);
-    };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("That file isn't a supported image.")); };
-    img.src = url;
-  });
 }
 
 const CATEGORIES = ["Singles", "Sealed / boxes", "Supplies", "Postage", "Fees", "Other"];

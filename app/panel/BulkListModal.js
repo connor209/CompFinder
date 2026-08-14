@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { resizeImage } from "@/lib/resizeImage";
+
+const LISTING_BUCKET = "listing-photos";
 
 const CONDITIONS = [
   { l: "Near Mint", v: "400010" },
@@ -122,6 +125,26 @@ export default function BulkListModal({ cards, onClose, onDone }) {
 
   function setRow(key, patch) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  }
+
+  // Upload the seller's own photo to the public listing-photos bucket and use
+  // its public URL (eBay fetches the image from there at list time).
+  async function uploadRowPhoto(key, file) {
+    if (!file) return;
+    setRow(key, { uploading: true });
+    try {
+      const sb = createClient();
+      const { data: { user } } = await sb.auth.getUser();
+      const blob = await resizeImage(file);
+      const path = `${user.id}/${crypto.randomUUID()}.jpg`;
+      const { error: upErr } = await sb.storage.from(LISTING_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: false });
+      if (upErr) throw new Error(upErr.message);
+      const url = sb.storage.from(LISTING_BUCKET).getPublicUrl(path).data.publicUrl;
+      setRow(key, { image: url, uploading: false });
+    } catch (e) {
+      setRow(key, { uploading: false });
+      alert(e.message || "Photo upload failed.");
+    }
   }
   function applyTemplateToAll() {
     const label = CONDITION_LABEL[conditionId];
@@ -266,7 +289,13 @@ export default function BulkListModal({ cards, onClose, onDone }) {
                   </td>
                   <td>
                     <input className="bulk-title-inp" type="text" maxLength={80} value={r.title} disabled={running} onChange={(e) => setRow(r.key, { title: e.target.value })} />
-                    <input className="bulk-img-inp" type="text" value={r.image} disabled={running} placeholder="Image URL (optional)" onChange={(e) => setRow(r.key, { image: e.target.value })} />
+                    <div className="bulk-img-row">
+                      <input className="bulk-img-inp" type="text" value={r.image} disabled={running} placeholder="Photo URL, or upload →" onChange={(e) => setRow(r.key, { image: e.target.value })} />
+                      <label className="bulk-img-up" title="Upload your own photo">
+                        {r.uploading ? <span className="spinner" /> : "📷"}
+                        <input type="file" accept="image/*" capture="environment" hidden disabled={running || r.uploading} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadRowPhoto(r.key, f); }} />
+                      </label>
+                    </div>
                   </td>
                   <td>
                     <select value={r.conditionId} disabled={running} onChange={(e) => setRow(r.key, { conditionId: e.target.value })}>

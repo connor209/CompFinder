@@ -472,7 +472,10 @@ a { color:var(--accent-2); }
 .bulk-rows table { min-width:640px; }
 .bulk-row-off { opacity:.45; }
 .bulk-title-inp { width:100%; min-width:180px; border:1px solid var(--line-strong); border-radius:8px; padding:6px 9px; font-size:12.5px; background:var(--surface); color:var(--ink); }
-.bulk-img-inp { width:100%; min-width:180px; border:1px solid var(--line); border-radius:8px; padding:5px 9px; font-size:11px; background:var(--surface-2); color:var(--ink-soft); margin-top:4px; }
+.bulk-img-row { display:flex; gap:6px; align-items:center; margin-top:4px; }
+.bulk-img-inp { flex:1; min-width:120px; border:1px solid var(--line); border-radius:8px; padding:5px 9px; font-size:11px; background:var(--surface-2); color:var(--ink-soft); }
+.bulk-img-up { flex:none; display:grid; place-items:center; width:30px; height:28px; border:1px dashed var(--line-strong); border-radius:8px; color:var(--ink-faint); font-size:13px; cursor:pointer; background:var(--surface-2); }
+.bulk-img-up:hover { color:var(--accent-2); border-color:var(--accent); }
 .bulk-price-inp { width:78px; border:1px solid var(--line-strong); border-radius:8px; padding:6px 8px; font-family:var(--font-mono); font-size:13px; background:var(--surface); color:var(--ink); }
 .bulk-qty-inp { width:58px; border:1px solid var(--line-strong); border-radius:8px; padding:6px 8px; font-size:13px; background:var(--surface); color:var(--ink); }
 .bulk-rows select { border:1px solid var(--line-strong); border-radius:8px; padding:6px 8px; font-size:12.5px; background:var(--surface); color:var(--ink); }
