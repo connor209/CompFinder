@@ -161,6 +161,7 @@ export default function QuickSearch({ seed }) {
   const [listing, setListing] = useState(false);
   const [art, setArt] = useState(null);
   const [mine, setMine] = useState({ loading: false, configured: true, error: "", listings: [] });
+  const [suggestOn, setSuggestOn] = useState(true);
   const debounceRef = useRef(null);
   const cacheRef = useRef(new Map());
   const comboRef = useRef(null);
@@ -177,10 +178,21 @@ export default function QuickSearch({ seed }) {
     return () => document.removeEventListener("pointerdown", onDocDown);
   }, []);
 
+  // Restore the "suggest as I type" preference.
+  useEffect(() => {
+    try { if (localStorage.getItem("cf-suggest") === "off") setSuggestOn(false); } catch { /* ignore */ }
+  }, []);
+
   function onInput(v) {
     setQ(v);
     setActiveSug(-1);
     clearTimeout(debounceRef.current);
+    // Suggestions off — free-text search only (type anything, hit Search).
+    if (!suggestOn) {
+      setSugs([]);
+      setOpenSug(false);
+      return;
+    }
     if (v.trim().length < 2) {
       setSugs([]);
       setOpenSug(false);
@@ -598,7 +610,23 @@ export default function QuickSearch({ seed }) {
         {game === "pokemon" ? (
           <button className="btn btn-ghost" onClick={() => setBrowsing((b) => !b)} aria-pressed={browsing}>📚 Browse sets</button>
         ) : null}
+        <label className="suggest-toggle" title="Suggest matching cards as you type. Turn off to search any text freely.">
+          <input
+            type="checkbox"
+            checked={suggestOn}
+            onChange={(e) => {
+              const on = e.target.checked;
+              setSuggestOn(on);
+              try { localStorage.setItem("cf-suggest", on ? "on" : "off"); } catch { /* ignore */ }
+              if (!on) { setSugs([]); setOpenSug(false); }
+            }}
+          />
+          <span>Suggest as I type</span>
+        </label>
       </div>
+      {!suggestOn ? (
+        <p className="hint hint-small" style={{ marginTop: 6 }}>Suggestions off — type anything and press Search to price it from eBay sold comps.</p>
+      ) : null}
 
       {browsing ? (
         <CatalogBrowser

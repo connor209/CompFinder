@@ -241,6 +241,20 @@ export default function PullSheet() {
     return [...g.entries()];
   }, [rows]);
 
+  // Group loose/variation picks by SET (the listing title) — for variation
+  // listings you go to the set in the warehouse, then pick its cards by number.
+  const looseGroups = useMemo(() => {
+    const g = new Map();
+    for (const u of unmatched) {
+      const key = u.title || "Other";
+      if (!g.has(key)) g.set(key, []);
+      g.get(key).push(u);
+    }
+    return [...g.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([title, items]) => ({ title, items: items.slice().sort((a, b) => a.nk - b.nk) }));
+  }, [unmatched]);
+
   if (loading) return <div className="panel"><span className="spinner" /> &nbsp;Loading pull sheet…</div>;
 
   if (needsReconnect) {
@@ -321,31 +335,35 @@ export default function PullSheet() {
       ))}
 
       {unmatched.length > 0 ? (
-        <div className="panel">
-          <div className="panel-head">
-            <span className="eyebrow">Loose / variation picks ({unmatched.length})</span>
-            <span className="badge2">by card number</span>
+        <>
+          <div className="ps-section-head">
+            <span className="eyebrow">Variation / loose picks — by set ({unmatched.length})</span>
+            <p className="hint hint-small" style={{ margin: "4px 0 0" }}>Grouped by set, then sorted by card number — go to each set and pick its cards in one pass.</p>
           </div>
-          <p className="hint hint-small" style={{ marginTop: 0 }}>
-            Orders with no stack match (variation listings and one-offs), sorted by card number so you can pick them in one pass through your numbered storage. Tick as you go.
-          </p>
-          <div className="stack-list">
-            {unmatched.map((u) => {
-              const isPicked = loosePicked.has(u.key);
-              return (
-                <label className={`ps-row${isPicked ? " done" : ""}`} key={u.key}>
-                  <input type="checkbox" checked={isPicked} onChange={() => toggleLoose(u.key)} />
-                  <span className="stack-pos">{u.nk !== Number.MAX_SAFE_INTEGER ? u.nk : "—"}</span>
-                  <span className="pack-card">
-                    <span className="stack-sku">{u.variation || u.sku || "no SKU"}</span>
-                    <span className="stack-title">{u.title || <em>—</em>}</span>
-                  </span>
-                  {u.deliveryName || u.buyer ? <span className="pack-dest-buyer" style={{ flex: "none" }}>{u.deliveryName || u.buyer}</span> : null}
-                </label>
-              );
-            })}
-          </div>
-        </div>
+          {looseGroups.map((grp, gi) => (
+            <div className="panel loose-set" key={gi}>
+              <div className="panel-head">
+                <h3 className="loose-set-name">{grp.title}</h3>
+                <span className="badge2">{grp.items.filter((u) => !loosePicked.has(u.key)).length} to pick</span>
+              </div>
+              <div className="stack-list">
+                {grp.items.map((u) => {
+                  const isPicked = loosePicked.has(u.key);
+                  return (
+                    <label className={`ps-row loose-row${isPicked ? " done" : ""}`} key={u.key}>
+                      <input type="checkbox" checked={isPicked} onChange={() => toggleLoose(u.key)} />
+                      <span className="stack-pos">{u.nk !== Number.MAX_SAFE_INTEGER ? u.nk : "—"}</span>
+                      <span className="loose-card">
+                        <span className="loose-card-name">{u.variation || u.sku || "no SKU"}</span>
+                        {u.deliveryName || u.buyer ? <span className="loose-card-buyer">for {u.deliveryName || u.buyer}</span> : null}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </>
       ) : null}
       </>
       ) : (
