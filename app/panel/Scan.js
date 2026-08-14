@@ -15,11 +15,20 @@ const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 export default function Scan({ onDeepDive }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
+  const mountedRef = useRef(true);
   const [camera, setCamera] = useState("starting"); // starting | live | denied | unsupported
   const [phase, setPhase] = useState("idle"); // idle | reading | pricing
   const [result, setResult] = useState(null); // { query, name, number, set, rec, med, lo, hi, count }
   const [error, setError] = useState("");
   const [recent, setRecent] = useState([]);
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) videoRef.current.srcObject = null;
+  }, []);
 
   const startCamera = useCallback(async () => {
     setError("");
@@ -29,6 +38,12 @@ export default function Scan({ onDeepDive }) {
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      // If we navigated away while the permission/stream was resolving, release
+      // it immediately — otherwise the camera stays live with nothing to stop it.
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
@@ -36,22 +51,26 @@ export default function Scan({ onDeepDive }) {
       }
       setCamera("live");
     } catch {
-      setCamera("denied");
+      if (mountedRef.current) setCamera("denied");
     }
   }, []);
-
-  function stopCamera() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-  }
 
   useEffect(() => {
+    mountedRef.current = true;
     startCamera();
-    return () => stopCamera();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // Release the camera when the tab is hidden/backgrounded, and resume it on
+    // return (only if it was stopped, to avoid opening a second stream).
+    const onVis = () => {
+      if (document.visibilityState === "hidden") stopCamera();
+      else if (mountedRef.current && !streamRef.current) startCamera();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      mountedRef.current = false;
+      document.removeEventListener("visibilitychange", onVis);
+      stopCamera();
+    };
+  }, [startCamera, stopCamera]);
 
   function frameToBase64FromVideo() {
     const v = videoRef.current;
