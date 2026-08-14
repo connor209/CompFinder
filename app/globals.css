@@ -286,8 +286,8 @@ a { color:var(--accent-2); }
 /* Catalog browser (browse by set) */
 .brw-inp { margin-bottom:12px; }
 .brw-exps { display:flex; flex-direction:column; gap:4px; max-height:360px; overflow:auto; }
-.brw-exp { display:flex; align-items:center; justify-content:space-between; gap:12px; text-align:left; background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:10px 12px; cursor:pointer; transition:border-color .12s; }
-.brw-exp:hover { border-color:var(--accent); }
+.brw-exp { display:flex; align-items:center; justify-content:space-between; gap:12px; text-align:left; background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:10px 13px; cursor:pointer; transition:border-color .12s, background .12s, padding-left .12s; }
+.brw-exp:hover { border-color:var(--accent); background:var(--surface); padding-left:16px; }
 .brw-exp-name { font-size:13.5px; color:var(--ink); font-weight:600; }
 .brw-exp-meta { display:flex; align-items:center; gap:6px; flex:none; }
 .brw-code { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
@@ -296,15 +296,16 @@ a { color:var(--accent-2); }
 .brw-card:hover { border-color:var(--accent); background:var(--surface); }
 .brw-card-main { flex:1; min-width:0; display:flex; align-items:center; gap:8px; text-align:left; background:transparent; border:0; padding:5px 2px; cursor:pointer; color:inherit; font:inherit; }
 .brw-card-no { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); min-width:34px; flex:none; }
-.brw-card-name { font-size:13px; color:var(--ink); font-weight:600; flex:1; min-width:0; }
-.brw-card-rar { font-size:10.5px; color:var(--ink-faint); }
+.brw-card-name { font-size:13px; color:var(--ink); font-weight:600; flex:1; min-width:0; line-height:1.25; }
+.brw-card-rar { font-size:9.5px; font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-faint); white-space:nowrap; }
 .brw-card-acts { display:flex; gap:1px; flex:none; }
-.brw-act { width:30px; height:30px; display:grid; place-items:center; border-radius:8px; font-size:14px; text-decoration:none; color:var(--ink-faint); transition:background .12s, color .12s; }
-.brw-act:hover { background:var(--surface-sink); color:var(--ink); transform:scale(1.08); }
+.brw-act { width:30px; height:30px; display:grid; place-items:center; border-radius:8px; font-size:13px; text-decoration:none; color:var(--ink-faint); opacity:.72; transition:background .12s, color .12s, opacity .12s, transform .12s; }
+.brw-act:hover { background:var(--surface-sink); color:var(--ink); opacity:1; transform:scale(1.1); }
+.brw-card:hover .brw-act { opacity:.9; }
 /* Shared marketplace-link pair (Batch results, My listings) */
 .mkt-links { display:inline-flex; gap:2px; align-items:center; }
-.mkt-link { width:28px; height:28px; display:inline-grid; place-items:center; border-radius:7px; font-size:13px; text-decoration:none; color:var(--ink-faint); transition:background .12s, color .12s, transform .12s; }
-.mkt-link:hover { background:var(--surface-sink); color:var(--ink); transform:scale(1.08); }
+.mkt-link { width:28px; height:28px; display:inline-grid; place-items:center; border-radius:7px; font-size:12.5px; text-decoration:none; color:var(--ink-faint); opacity:.72; transition:background .12s, color .12s, transform .12s, opacity .12s; }
+.mkt-link:hover { background:var(--surface-sink); color:var(--ink); opacity:1; transform:scale(1.1); }
 .rr-title { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
 #compfinder-results .mkt-link { width:24px; height:24px; font-size:12px; }
 .brw-retry { background:transparent; border:0; padding:0; color:var(--accent-2); font-weight:600; font:inherit; cursor:pointer; text-decoration:underline; }
@@ -316,12 +317,16 @@ a { color:var(--accent-2); }
 }
 
 /* Browse module — games grid, breadcrumbs, set counts, card categories */
-.brw-games { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; margin-top:12px; }
-.brw-game { display:flex; flex-direction:column; align-items:flex-start; gap:6px; text-align:left; background:var(--surface-2); border:1px solid var(--line); border-radius:14px; padding:16px; cursor:pointer; transition:border-color .12s, transform .12s, box-shadow .12s; }
-.brw-game:hover { border-color:var(--accent); transform:translateY(-2px); box-shadow:var(--shadow-1); }
-.brw-game-ic { font-size:26px; line-height:1; }
-.brw-game-name { font-size:14px; font-weight:700; color:var(--ink); }
-.brw-game-count { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+.brw-games { display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:10px; margin-top:12px; }
+.brw-game { position:relative; display:flex; flex-direction:column; align-items:flex-start; gap:7px; min-height:118px; text-align:left; background:var(--surface-2); border:1px solid var(--line); border-radius:14px; padding:16px; cursor:pointer; overflow:hidden; transition:border-color .14s, transform .14s, box-shadow .14s; }
+.brw-game::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); transform:scaleY(0); transform-origin:top; transition:transform .16s; }
+.brw-game:hover { border-color:var(--accent); transform:translateY(-2px); box-shadow:var(--shadow-2); }
+.brw-game:hover::before { transform:scaleY(1); }
+.brw-game::after { content:"›"; position:absolute; top:14px; right:15px; font-size:18px; color:var(--ink-faint); opacity:0; transform:translateX(-4px); transition:opacity .14s, transform .14s; }
+.brw-game:hover::after { opacity:1; transform:translateX(0); }
+.brw-game-ic { font-size:27px; line-height:1; }
+.brw-game-name { font-size:14px; font-weight:700; color:var(--ink); line-height:1.25; }
+.brw-game-count { margin-top:auto; font-family:var(--font-mono); font-size:11px; color:var(--accent-2); letter-spacing:.01em; }
 .brw-crumbs { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; font-size:13px; }
 .brw-crumb-link { background:transparent; border:0; padding:0; color:var(--accent-2); font-weight:600; font-size:13px; cursor:pointer; }
 .brw-crumb-link:hover { text-decoration:underline; }
