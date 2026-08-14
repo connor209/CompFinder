@@ -16,10 +16,12 @@ export default function Scan({ onDeepDive }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const mountedRef = useRef(true);
-  const [camera, setCamera] = useState("starting"); // starting | live | denied | unsupported
+  const [camera, setCamera] = useState("starting"); // starting | live | denied | unsupported | blocked
   const [phase, setPhase] = useState("idle"); // idle | reading | pricing
   const [result, setResult] = useState(null); // { query, name, number, set, rec, med, lo, hi, count }
   const [error, setError] = useState("");
+  const [diag, setDiag] = useState(""); // human-readable reason when the camera won't start
+  const [needsTap, setNeedsTap] = useState(false); // playback blocked until a user gesture
   const [recent, setRecent] = useState([]);
 
   const stopCamera = useCallback(() => {
@@ -30,41 +32,88 @@ export default function Scan({ onDeepDive }) {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
+  // Attach the current stream to the <video> and start playback. play() can
+  // reject when the browser wants a user gesture (common on iOS Safari) — we
+  // then show a "tap to start" overlay rather than sitting on a black frame.
+  const attach = useCallback(async () => {
+    const v = videoRef.current;
+    const s = streamRef.current;
+    if (!v || !s) return;
+    if (v.srcObject !== s) v.srcObject = s;
+    try {
+      await v.play();
+      setNeedsTap(false);
+    } catch {
+      setNeedsTap(true);
+    }
+  }, []);
+
   const startCamera = useCallback(async () => {
     setError("");
+    setDiag("");
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setCamera("unsupported");
       return;
     }
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      setCamera("blocked");
+      setDiag("The camera needs a secure (https) connection.");
+      return;
+    }
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-      // If we navigated away while the permission/stream was resolving, release
-      // it immediately — otherwise the camera stays live with nothing to stop it.
-      if (!mountedRef.current) {
-        stream.getTracks().forEach((t) => t.stop());
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+    } catch (e) {
+      // A specific rear-camera request can over-constrain some devices — retry
+      // with any camera before giving up.
+      if (e && (e.name === "OverconstrainedError" || e.name === "NotFoundError")) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        } catch (e2) {
+          failCamera(e2);
+          return;
+        }
+      } else {
+        failCamera(e);
         return;
       }
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
-      }
-      setCamera("live");
-    } catch {
-      if (mountedRef.current) setCamera("denied");
     }
-  }, []);
+    // If we navigated away while the permission/stream was resolving, release it
+    // immediately — otherwise the camera stays live with nothing to stop it.
+    if (!mountedRef.current) {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
+    streamRef.current = stream;
+    setCamera("live");
+    // The <video> mounts on the next render; attach after it commits. The
+    // onLoadedMetadata handler and the [camera] effect are belt-and-braces.
+    requestAnimationFrame(() => attach());
+  }, [attach]);
 
-  // Attach the stream once the <video> actually exists. On first start the
-  // video isn't rendered yet (camera === "starting"), so startCamera can't set
-  // srcObject — this effect runs when camera flips to "live" and the element
-  // has mounted, which is what makes the feed appear instead of staying black.
-  useEffect(() => {
-    if (camera === "live" && videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
-      videoRef.current.srcObject = streamRef.current;
-      videoRef.current.play().catch(() => {});
+  function failCamera(e) {
+    if (!mountedRef.current) return;
+    const name = (e && e.name) || "";
+    if (name === "NotAllowedError" || name === "SecurityError") {
+      setCamera("denied");
+      setDiag("Camera permission was blocked — allow it in your browser's site settings, then retry.");
+    } else if (name === "NotFoundError" || name === "OverconstrainedError") {
+      setCamera("unsupported");
+      setDiag("No camera was found on this device.");
+    } else if (name === "NotReadableError" || name === "TrackStartError") {
+      setCamera("denied");
+      setDiag("The camera is already in use by another app or tab. Close it and retry.");
+    } else {
+      setCamera("denied");
+      setDiag(name ? `Camera error: ${name}.` : "Couldn't start the camera.");
     }
-  }, [camera]);
+  }
+
+  // Belt-and-braces: also attach when camera flips to "live" and the element
+  // exists, in case the rAF attach raced the commit.
+  useEffect(() => {
+    if (camera === "live") attach();
+  }, [camera, attach]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -194,8 +243,11 @@ export default function Scan({ onDeepDive }) {
       <div className="scan-stage">
         {camera === "live" ? (
           <>
-            <video ref={videoRef} className="scan-video" playsInline muted autoPlay />
+            <video ref={videoRef} className="scan-video" playsInline muted autoPlay onLoadedMetadata={() => attach()} />
             <div className="scan-guide" aria-hidden="true" />
+            {needsTap ? (
+              <button className="scan-tap" onClick={attach}>▶ Tap to start the camera</button>
+            ) : null}
             {busy ? (
               <div className="scan-busy">
                 <span className="spinner" /> &nbsp;{phase === "reading" ? "Reading card…" : "Pricing…"}
@@ -206,10 +258,11 @@ export default function Scan({ onDeepDive }) {
           <div className="scan-msg"><span className="spinner" /> &nbsp;Starting camera…</div>
         ) : (
           <div className="scan-msg">
-            <p style={{ margin: "0 0 10px" }}>
-              {camera === "denied" ? "Camera access was blocked." : "No camera available on this device."}
+            <p style={{ margin: "0 0 6px" }}>
+              {camera === "denied" ? "Camera access was blocked." : camera === "blocked" ? "Camera unavailable." : "No camera available on this device."}
             </p>
-            {camera === "denied" ? <button className="btn btn-ghost" onClick={startCamera}>Try camera again</button> : null}
+            {diag ? <p className="hint hint-small" style={{ margin: "0 0 10px", maxWidth: 320 }}>{diag}</p> : null}
+            {camera === "denied" || camera === "blocked" ? <button className="btn btn-ghost" onClick={startCamera} style={{ marginBottom: 8 }}>Try camera again</button> : null}
             <label className="btn btn-primary scan-upload-btn">
               📷 Upload a photo instead
               <input type="file" accept="image/*" capture="environment" hidden onChange={onUpload} />
