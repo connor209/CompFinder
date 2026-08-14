@@ -5,6 +5,18 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 
 /**
+ * A sortable card-number key from any string (variation / title / SKU): the
+ * numerator of an "X/Y" collector number, else the first number, else a big
+ * sentinel so number-less items sort last. Lets loose "variation" picks be
+ * ordered by card number for a single pass through numbered storage.
+ */
+function numKey(s) {
+  const t = String(s || "");
+  const m = t.match(/(\d{1,4})\s*\/\s*\d{1,4}/) || t.match(/\b(\d{1,4})\b/);
+  return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+}
+
+/**
  * Pull sheet — the daily picking workflow. Lists unshipped eBay orders matched
  * to their stack + live position. You pick a card, tick it, and any other
  * sheet items in the same stack re-rank live (a working preview). Nothing hits
@@ -19,14 +31,17 @@ export default function PullSheet() {
   const [stackOrder, setStackOrder] = useState(new Map()); // stackId -> [{id,position}]
   const [indexByCard, setIndexByCard] = useState(new Map());
   const [picked, setPicked] = useState(new Set());
+  const [loosePicked, setLoosePicked] = useState(new Set()); // ephemeral checklist for loose/variation picks (not stack cards)
   const [committing, setCommitting] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [mode, setMode] = useState("pick"); // pick | pack
-  const [packItems, setPackItems] = useState([]); // order line items in pull order, each tagged with its pile
-  const [piles, setPiles] = useState([]); // [{pileNo, orderId, buyer, count}]
+  const [packItems, setPackItems] = useState([]); // order line items in pull order (piles derived below)
   const [placed, setPlaced] = useState(new Set()); // lineItemIds dealt into their pile
+  // Default: last-pulled card on top of the hand (LIFO), so we deal in reverse
+  // pull order. Toggle for anyone who holds the stack the other way up.
+  const [packReverse, setPackReverse] = useState(true);
 
   const supabase = () => createClient();
 
@@ -83,7 +98,9 @@ export default function PullSheet() {
       } else if (skl && pulledSkus.has(skl)) {
         done += 1;
       } else {
-        unm.push({ sku: l.sku, title: l.title, orderId: l.orderId });
+        // Loose / variation pick — no stack match. Sort these by card number so
+        // they're a single pass through numbered storage (2, 4, 17, 101…).
+        unm.push({ key: l.lineItemId, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, nk: numKey(l.variation || l.title || l.sku) });
       }
     }
     active.sort((a, b) => {
@@ -92,49 +109,39 @@ export default function PullSheet() {
       if (na !== nb) return na.localeCompare(nb);
       return (idxByCard.get(a.cardId) ?? 0) - (idxByCard.get(b.cardId) ?? 0);
     });
+    unm.sort((a, b) => a.nk - b.nk);
 
-    // ---- Pack data: every order line in PULL order, tagged with its pile ----
-    // Pull order = the sequence cards come off the stacks (stack name, then
-    // position) — the same order you physically pull them. Each distinct order
-    // becomes a "pile" you deal cards into; piles are numbered by the order they
-    // arrived (eBay's order), so the pull sequence naturally scrambles across
-    // piles — which is exactly the sorting job packing solves.
+    // ---- Pack data: every order line in PULL order (stack, then position;
+    // loose/variation picks by card number, last). Piles are numbered later
+    // from the display sequence, so they form left-to-right as you deal.
     const anyBySku = new Map();
     for (const c of cards) {
       const skl = c.sku ? String(c.sku).toLowerCase() : null;
       if (skl && !anyBySku.has(skl)) anyBySku.set(skl, c);
     }
-    const orderPile = new Map();
-    const pileList = [];
-    for (const l of lines) {
-      if (!orderPile.has(l.orderId)) {
-        orderPile.set(l.orderId, pileList.length + 1);
-        pileList.push({ pileNo: pileList.length + 1, orderId: l.orderId, buyer: l.buyer || "", count: 0 });
-      }
-    }
-    const pileByOrder = new Map(pileList.map((p) => [p.orderId, p]));
     const pack = lines.map((l) => {
       const skl = l.sku ? l.sku.toLowerCase() : null;
       const card = skl ? anyBySku.get(skl) : null;
-      const p = pileByOrder.get(l.orderId);
-      if (p) p.count += 1;
       return {
         key: l.lineItemId,
         orderId: l.orderId,
         sku: l.sku,
         title: l.title,
+        variation: l.variation,
         buyer: l.buyer || "",
-        pileNo: orderPile.get(l.orderId),
-        stackId: card ? card.stack_id : null,
         stackNm: card ? nameMap.get(card.stack_id) || "" : "",
         position: card ? card.position : null,
+        nk: numKey(l.variation || l.title || l.sku),
         matched: !!card
       };
     });
     pack.sort((a, b) => {
-      if (a.matched !== b.matched) return a.matched ? -1 : 1; // unmatched (no stack) last
-      if (a.stackNm !== b.stackNm) return a.stackNm.localeCompare(b.stackNm);
-      return (a.position ?? 0) - (b.position ?? 0);
+      if (a.matched !== b.matched) return a.matched ? -1 : 1; // loose (no stack) last
+      if (a.matched) {
+        if (a.stackNm !== b.stackNm) return a.stackNm.localeCompare(b.stackNm);
+        return (a.position ?? 0) - (b.position ?? 0);
+      }
+      return a.nk - b.nk; // loose picks by card number
     });
 
     setStackName(nameMap);
@@ -144,8 +151,8 @@ export default function PullSheet() {
     setUnmatched(unm);
     setDoneCount(done);
     setPicked(new Set());
+    setLoosePicked(new Set());
     setPackItems(pack);
-    setPiles(pileList);
     setPlaced(new Set());
     setLoading(false);
   }
@@ -167,6 +174,15 @@ export default function PullSheet() {
       const n = new Set(prev);
       if (n.has(cardId)) n.delete(cardId);
       else n.add(cardId);
+      return n;
+    });
+  }
+
+  function toggleLoose(key) {
+    setLoosePicked((prev) => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
       return n;
     });
   }
@@ -195,6 +211,25 @@ export default function PullSheet() {
     await load();
   }
 
+  // Pack sequence + piles, derived from the deal order. Piles are numbered by
+  // first appearance in that sequence, so they form left-to-right as you deal
+  // (Pile 1 = the first order you hit) — no need to pre-label piles by buyer.
+  const packView = useMemo(() => {
+    const seq = packReverse ? [...packItems].reverse() : packItems;
+    const orderPile = new Map();
+    const pileList = [];
+    for (const it of seq) {
+      if (!orderPile.has(it.orderId)) {
+        orderPile.set(it.orderId, pileList.length + 1);
+        pileList.push({ pileNo: pileList.length + 1, orderId: it.orderId, buyer: it.buyer || "", count: 0 });
+      }
+    }
+    const byOrder = new Map(pileList.map((p) => [p.orderId, p]));
+    for (const it of seq) byOrder.get(it.orderId).count += 1;
+    const items = seq.map((it) => ({ ...it, pileNo: orderPile.get(it.orderId) }));
+    return { items, piles: pileList };
+  }, [packItems, packReverse]);
+
   // group active rows by stack for display
   const groups = useMemo(() => {
     const g = new Map();
@@ -222,8 +257,8 @@ export default function PullSheet() {
 
   const total = rows.length;
   const pickedInSheet = rows.filter((r) => picked.has(r.cardId)).length;
-  const placedCount = packItems.filter((i) => placed.has(i.key)).length;
-  const placedInPile = (pileNo) => packItems.filter((i) => i.pileNo === pileNo && placed.has(i.key)).length;
+  const placedCount = packView.items.filter((i) => placed.has(i.key)).length;
+  const placedInPile = (pileNo) => packView.items.filter((i) => i.pileNo === pileNo && placed.has(i.key)).length;
 
   return (
     <>
@@ -233,6 +268,11 @@ export default function PullSheet() {
           <button aria-pressed={mode === "pack"} onClick={() => setMode("pack")}>2 · Pack</button>
         </div>
         <div className="ps-actions">
+          {mode === "pack" ? (
+            <button className="btn btn-ghost" onClick={() => setPackReverse((v) => !v)} title="Which end of your pulled stack you start from">
+              ⇅ {packReverse ? "Last pulled on top" : "First pulled on top"}
+            </button>
+          ) : null}
           <button className="btn btn-ghost" onClick={() => window.print()}>🖨 Print</button>
           <button className="btn btn-ghost" onClick={load} disabled={committing}>↻ Refresh</button>
           {mode === "pick" ? (
@@ -281,15 +321,28 @@ export default function PullSheet() {
 
       {unmatched.length > 0 ? (
         <div className="panel">
-          <div className="panel-head"><span className="eyebrow">Not in a stack ({unmatched.length})</span></div>
-          <p className="hint hint-small" style={{ marginTop: 0 }}>These sold orders don&apos;t match a card in any stack (SKU not found). Pick them manually.</p>
+          <div className="panel-head">
+            <span className="eyebrow">Loose / variation picks ({unmatched.length})</span>
+            <span className="badge2">by card number</span>
+          </div>
+          <p className="hint hint-small" style={{ marginTop: 0 }}>
+            Orders with no stack match (variation listings and one-offs), sorted by card number so you can pick them in one pass through your numbered storage. Tick as you go.
+          </p>
           <div className="stack-list">
-            {unmatched.map((u, i) => (
-              <div className="stack-row" key={i}>
-                <span className="stack-sku">{u.sku || "no SKU"}</span>
-                <span className="stack-title">{u.title || <em>—</em>}</span>
-              </div>
-            ))}
+            {unmatched.map((u) => {
+              const isPicked = loosePicked.has(u.key);
+              return (
+                <label className={`ps-row${isPicked ? " done" : ""}`} key={u.key}>
+                  <input type="checkbox" checked={isPicked} onChange={() => toggleLoose(u.key)} />
+                  <span className="stack-pos">{u.nk !== Number.MAX_SAFE_INTEGER ? u.nk : "—"}</span>
+                  <span className="pack-card">
+                    <span className="stack-sku">{u.variation || u.sku || "no SKU"}</span>
+                    <span className="stack-title">{u.title || <em>—</em>}</span>
+                  </span>
+                  {u.buyer ? <span className="pack-dest-buyer" style={{ flex: "none" }}>{u.buyer}</span> : null}
+                </label>
+              );
+            })}
           </div>
         </div>
       ) : null}
@@ -298,19 +351,19 @@ export default function PullSheet() {
       /* ---- PACK MODE ---- */
       <>
       <div className="ps-progress" style={{ marginBottom: 12 }}>
-        <b>{placedCount}</b> / {packItems.length} sorted into orders
+        <b>{placedCount}</b> / {packView.items.length} sorted into orders
       </div>
-      {packItems.length === 0 ? (
+      {packView.items.length === 0 ? (
         <div className="panel"><p className="dd-empty">Nothing to pack — no open orders. 🎉</p></div>
       ) : (
         <>
           <div className="panel">
-            <div className="panel-head"><span className="eyebrow">Order piles ({piles.length})</span></div>
+            <div className="panel-head"><span className="eyebrow">Order piles ({packView.piles.length})</span></div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>
-              Lay out a pile for each order below. Then work through your pulled stack in order — each card tells you which pile it goes in.
+              Work through your stack in order below. Start a new numbered pile each time a new pile number appears — no need to label them; the buyer for each pile is shown here for when you reconcile at the end.
             </p>
             <div className="pack-piles">
-              {piles.map((p) => {
+              {packView.piles.map((p) => {
                 const got = placedInPile(p.pileNo);
                 const full = got >= p.count;
                 return (
@@ -327,20 +380,20 @@ export default function PullSheet() {
           <div className="panel">
             <div className="panel-head">
               <h3>Your pulled stack — in order</h3>
-              <span className="badge2">top → bottom</span>
+              <span className="badge2">{packReverse ? "last pulled first" : "first pulled first"}</span>
             </div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>Take each card off the top and drop it into the pile shown. Tick as you go.</p>
             <div className="stack-list">
-              {packItems.map((it, i) => {
+              {packView.items.map((it, i) => {
                 const done = placed.has(it.key);
                 return (
                   <label className={`ps-row pack-row${done ? " done" : ""}`} key={it.key}>
                     <input type="checkbox" checked={done} onChange={() => togglePlaced(it.key)} />
                     <span className="stack-pos">{i + 1}</span>
                     <span className="pack-card">
-                      <span className="stack-sku">{it.sku || "no SKU"}</span>
+                      <span className="stack-sku">{it.variation || it.sku || "no SKU"}</span>
                       <span className="stack-title">{it.title || <em>—</em>}</span>
-                      {it.matched ? null : <span className="loc-flag"> · not in a stack</span>}
+                      {it.matched ? null : <span className="loc-flag"> · loose / variation</span>}
                     </span>
                     <span className="pack-dest" aria-label={`Pile ${it.pileNo}, ${it.buyer}`}>
                       <span className="pack-dest-no">Pile {it.pileNo}</span>
@@ -352,8 +405,8 @@ export default function PullSheet() {
             </div>
           </div>
 
-          {placedCount === packItems.length ? (
-            <div className="panel"><p className="dd-empty" style={{ color: "var(--conf-high)" }}>All {packItems.length} cards sorted into {piles.length} order pile(s) — ready to pack &amp; ship. 🎉</p></div>
+          {placedCount === packView.items.length ? (
+            <div className="panel"><p className="dd-empty" style={{ color: "var(--conf-high)" }}>All {packView.items.length} cards sorted into {packView.piles.length} order pile(s) — ready to pack &amp; ship. 🎉</p></div>
           ) : null}
         </>
       )}
