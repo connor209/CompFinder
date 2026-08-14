@@ -297,6 +297,26 @@ a { color:var(--accent-2); }
 .brw-card-no { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); min-width:34px; }
 .brw-card-name { font-size:13px; color:var(--ink); font-weight:600; flex:1; }
 .brw-card-rar { font-size:10.5px; color:var(--ink-faint); }
+
+/* Browse module — games grid, breadcrumbs, set counts, card categories */
+.brw-games { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; margin-top:12px; }
+.brw-game { display:flex; flex-direction:column; align-items:flex-start; gap:6px; text-align:left; background:var(--surface-2); border:1px solid var(--line); border-radius:14px; padding:16px; cursor:pointer; transition:border-color .12s, transform .12s, box-shadow .12s; }
+.brw-game:hover { border-color:var(--accent); transform:translateY(-2px); box-shadow:var(--shadow-1); }
+.brw-game-ic { font-size:26px; line-height:1; }
+.brw-game-name { font-size:14px; font-weight:700; color:var(--ink); }
+.brw-game-count { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+.brw-crumbs { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; font-size:13px; }
+.brw-crumb-link { background:transparent; border:0; padding:0; color:var(--accent-2); font-weight:600; font-size:13px; cursor:pointer; }
+.brw-crumb-link:hover { text-decoration:underline; }
+.brw-crumb-sep { color:var(--ink-faint); }
+.brw-crumb-cur { color:var(--ink); font-weight:700; }
+.brw-exp-count { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); min-width:44px; text-align:right; }
+.brw-cardbar { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:10px; }
+.brw-cardbar .brw-inp { flex:1; min-width:220px; margin-bottom:0; }
+.brw-extras { margin:0; white-space:nowrap; }
+.brw-card-tags { display:flex; align-items:center; gap:6px; flex:none; }
+.brw-card-cat { font-size:9.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--accent-2); background:var(--accent-soft); border-radius:5px; padding:1px 5px; }
+.brw-more { display:flex; justify-content:center; margin-top:12px; }
 .mine-banner { display:flex; gap:12px; align-items:flex-start; background:var(--warn-soft); border:1px solid color-mix(in srgb,var(--warn) 40%, var(--line)); border-radius:var(--radius); padding:14px 16px; margin-bottom:16px; }
 .mine-ic { font-size:16px; line-height:1.4; }
 .mine-banner strong { display:block; font-size:14px; color:var(--warn-ink); }

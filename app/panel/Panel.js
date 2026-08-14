@@ -14,6 +14,7 @@ import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import Buy from "./Buy";
 import Accounts from "./Accounts";
+import Browse from "./Browse";
 import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
 import ThemeSeg from "./ThemeSeg";
@@ -26,6 +27,7 @@ const STREAM_SLUG = {
   single: "search",
   scan: "scan",
   batch: "batch",
+  browse: "browse",
   buy: "buy",
   inventory: "listings",
   arbitrage: "arbitrage",
@@ -52,6 +54,7 @@ const MODULES = [
       { key: "batch", label: "Batch", desc: "Price a whole list or CSV at once" }
     ]
   },
+  { key: "browse", label: "Browse", icon: "📚", desc: "Explore every game, set & card", sections: [{ key: "browse", label: "Browse" }] },
   { key: "buy", label: "Buy", icon: "🛒", desc: "Log deals & purchases you take in", sections: [{ key: "buy", label: "Buy" }] },
   {
     key: "ebay",
@@ -648,6 +651,7 @@ export default function Panel({ initialSection = "dashboard" }) {
       {stream === "stacks" && <Stacks />}
       {stream === "pull" && <PullSheet />}
       {stream === "buy" && <Buy />}
+      {stream === "browse" && <Browse onDeepDive={deepDiveCard} />}
       {stream === "accounts" && <Accounts />}
       {stream === "batch" && (
         <>
