@@ -16,6 +16,7 @@ export default function Scan({ onDeepDive }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const mountedRef = useRef(true);
+  const standaloneRef = useRef(false);
   const [camera, setCamera] = useState("starting"); // starting | live | denied | unsupported | blocked
   const [phase, setPhase] = useState("idle"); // idle | reading | pricing
   const [result, setResult] = useState(null); // { query, name, number, set, rec, med, lo, hi, count }
@@ -117,12 +118,25 @@ export default function Scan({ onDeepDive }) {
 
   useEffect(() => {
     mountedRef.current = true;
-    startCamera();
+    // iOS Home Screen (standalone) web apps only grant camera access when
+    // getUserMedia is called from a user gesture — auto-starting on mount gives
+    // a black/blocked feed. So in standalone we wait for a tap ("prompt"); in a
+    // normal browser tab we can start immediately.
+    const standalone =
+      (typeof navigator !== "undefined" && navigator.standalone === true) ||
+      (typeof window !== "undefined" && window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+    standaloneRef.current = !!standalone;
+    if (standalone) setCamera("prompt");
+    else startCamera();
     // Release the camera when the tab is hidden/backgrounded, and resume it on
-    // return (only if it was stopped, to avoid opening a second stream).
+    // return (only if it was stopped, to avoid opening a second stream). In
+    // standalone we go back to the tap prompt instead of auto-resuming.
     const onVis = () => {
       if (document.visibilityState === "hidden") stopCamera();
-      else if (mountedRef.current && !streamRef.current) startCamera();
+      else if (mountedRef.current && !streamRef.current) {
+        if (standaloneRef.current) setCamera("prompt");
+        else startCamera();
+      }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => {
@@ -241,7 +255,16 @@ export default function Scan({ onDeepDive }) {
   return (
     <div className="scan-wrap rise-group">
       <div className="scan-stage">
-        {camera === "live" ? (
+        {camera === "prompt" ? (
+          <div className="scan-msg">
+            <p style={{ margin: "0 0 14px", maxWidth: 280 }}>Line up a card, then start the camera.</p>
+            <button className="btn btn-primary scan-start-btn" onClick={startCamera}>📸 Start camera</button>
+            <label className="btn btn-ghost scan-upload-btn" style={{ marginTop: 4 }}>
+              🖼️ Upload a photo instead
+              <input type="file" accept="image/*" hidden onChange={onUpload} />
+            </label>
+          </div>
+        ) : camera === "live" ? (
           <>
             <video ref={videoRef} className="scan-video" playsInline muted autoPlay onLoadedMetadata={() => attach()} />
             <div className="scan-guide" aria-hidden="true" />
@@ -265,7 +288,7 @@ export default function Scan({ onDeepDive }) {
             {camera === "denied" || camera === "blocked" ? <button className="btn btn-ghost" onClick={startCamera} style={{ marginBottom: 8 }}>Try camera again</button> : null}
             <label className="btn btn-primary scan-upload-btn">
               📷 Upload a photo instead
-              <input type="file" accept="image/*" capture="environment" hidden onChange={onUpload} />
+              <input type="file" accept="image/*" hidden onChange={onUpload} />
             </label>
           </div>
         )}
