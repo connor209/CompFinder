@@ -13,6 +13,7 @@ import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import Buy from "./Buy";
+import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
 import ThemeSeg from "./ThemeSeg";
 
@@ -22,6 +23,7 @@ const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 const STREAM_SLUG = {
   dashboard: "dashboard",
   single: "search",
+  scan: "scan",
   batch: "batch",
   buy: "buy",
   inventory: "listings",
@@ -41,6 +43,7 @@ const MODULES = [
     icon: "🔍",
     sections: [
       { key: "single", label: "Quick Search" },
+      { key: "scan", label: "Scan" },
       { key: "batch", label: "Batch" }
     ]
   },
@@ -617,6 +620,7 @@ export default function Panel({ initialSection = "dashboard" }) {
         <main className="stream-main">
       {stream === "dashboard" && <Dashboard onNavigate={go} />}
       {stream === "single" && <QuickSearch seed={seed} />}
+      {stream === "scan" && <Scan onDeepDive={deepDiveCard} />}
       {stream === "inventory" && <Inventory onDeepDive={deepDiveCard} />}
       {stream === "arbitrage" && <Arbitrage />}
       {stream === "sales" && <Sales />}
