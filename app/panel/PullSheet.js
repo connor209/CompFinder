@@ -100,7 +100,7 @@ export default function PullSheet() {
       } else {
         // Loose / variation pick — no stack match. Sort these by card number so
         // they're a single pass through numbered storage (2, 4, 17, 101…).
-        unm.push({ key: l.lineItemId, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, nk: numKey(l.variation || l.title || l.sku) });
+        unm.push({ key: l.lineItemId, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku) });
       }
     }
     active.sort((a, b) => {
@@ -129,6 +129,7 @@ export default function PullSheet() {
         title: l.title,
         variation: l.variation,
         buyer: l.buyer || "",
+        deliveryName: l.deliveryName || "",
         stackNm: card ? nameMap.get(card.stack_id) || "" : "",
         position: card ? card.position : null,
         nk: numKey(l.variation || l.title || l.sku),
@@ -221,7 +222,7 @@ export default function PullSheet() {
     for (const it of seq) {
       if (!orderPile.has(it.orderId)) {
         orderPile.set(it.orderId, pileList.length + 1);
-        pileList.push({ pileNo: pileList.length + 1, orderId: it.orderId, buyer: it.buyer || "", count: 0 });
+        pileList.push({ pileNo: pileList.length + 1, orderId: it.orderId, buyer: it.buyer || "", deliveryName: it.deliveryName || "", count: 0 });
       }
     }
     const byOrder = new Map(pileList.map((p) => [p.orderId, p]));
@@ -339,7 +340,7 @@ export default function PullSheet() {
                     <span className="stack-sku">{u.variation || u.sku || "no SKU"}</span>
                     <span className="stack-title">{u.title || <em>—</em>}</span>
                   </span>
-                  {u.buyer ? <span className="pack-dest-buyer" style={{ flex: "none" }}>{u.buyer}</span> : null}
+                  {u.deliveryName || u.buyer ? <span className="pack-dest-buyer" style={{ flex: "none" }}>{u.deliveryName || u.buyer}</span> : null}
                 </label>
               );
             })}
@@ -369,7 +370,8 @@ export default function PullSheet() {
                 return (
                   <div className={`pack-pile${full ? " full" : ""}`} key={p.pileNo}>
                     <div className="pack-pile-no">Pile {p.pileNo}</div>
-                    <div className="pack-pile-buyer">{p.buyer || "Buyer"}</div>
+                    <div className="pack-pile-buyer">{p.deliveryName || p.buyer || "Buyer"}</div>
+                    {p.deliveryName && p.buyer ? <div className="pack-pile-user">@{p.buyer}</div> : null}
                     <div className="pack-pile-meta">{got}/{p.count} card{p.count === 1 ? "" : "s"}{full ? " ✓" : ""}</div>
                   </div>
                 );
@@ -395,9 +397,9 @@ export default function PullSheet() {
                       <span className="stack-title">{it.title || <em>—</em>}</span>
                       {it.matched ? null : <span className="loc-flag"> · loose / variation</span>}
                     </span>
-                    <span className="pack-dest" aria-label={`Pile ${it.pileNo}, ${it.buyer}`}>
+                    <span className="pack-dest" aria-label={`Pile ${it.pileNo}, ${it.deliveryName || it.buyer}`}>
                       <span className="pack-dest-no">Pile {it.pileNo}</span>
-                      <span className="pack-dest-buyer">{it.buyer || "Buyer"}</span>
+                      <span className="pack-dest-buyer">{it.deliveryName || it.buyer || "Buyer"}</span>
                     </span>
                   </label>
                 );
