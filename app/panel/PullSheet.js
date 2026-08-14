@@ -23,6 +23,10 @@ export default function PullSheet() {
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [needsReconnect, setNeedsReconnect] = useState(false);
+  const [mode, setMode] = useState("pick"); // pick | pack
+  const [packItems, setPackItems] = useState([]); // order line items in pull order, each tagged with its pile
+  const [piles, setPiles] = useState([]); // [{pileNo, orderId, buyer, count}]
+  const [placed, setPlaced] = useState(new Set()); // lineItemIds dealt into their pile
 
   const supabase = () => createClient();
 
@@ -89,6 +93,50 @@ export default function PullSheet() {
       return (idxByCard.get(a.cardId) ?? 0) - (idxByCard.get(b.cardId) ?? 0);
     });
 
+    // ---- Pack data: every order line in PULL order, tagged with its pile ----
+    // Pull order = the sequence cards come off the stacks (stack name, then
+    // position) — the same order you physically pull them. Each distinct order
+    // becomes a "pile" you deal cards into; piles are numbered by the order they
+    // arrived (eBay's order), so the pull sequence naturally scrambles across
+    // piles — which is exactly the sorting job packing solves.
+    const anyBySku = new Map();
+    for (const c of cards) {
+      const skl = c.sku ? String(c.sku).toLowerCase() : null;
+      if (skl && !anyBySku.has(skl)) anyBySku.set(skl, c);
+    }
+    const orderPile = new Map();
+    const pileList = [];
+    for (const l of lines) {
+      if (!orderPile.has(l.orderId)) {
+        orderPile.set(l.orderId, pileList.length + 1);
+        pileList.push({ pileNo: pileList.length + 1, orderId: l.orderId, buyer: l.buyer || "", count: 0 });
+      }
+    }
+    const pileByOrder = new Map(pileList.map((p) => [p.orderId, p]));
+    const pack = lines.map((l) => {
+      const skl = l.sku ? l.sku.toLowerCase() : null;
+      const card = skl ? anyBySku.get(skl) : null;
+      const p = pileByOrder.get(l.orderId);
+      if (p) p.count += 1;
+      return {
+        key: l.lineItemId,
+        orderId: l.orderId,
+        sku: l.sku,
+        title: l.title,
+        buyer: l.buyer || "",
+        pileNo: orderPile.get(l.orderId),
+        stackId: card ? card.stack_id : null,
+        stackNm: card ? nameMap.get(card.stack_id) || "" : "",
+        position: card ? card.position : null,
+        matched: !!card
+      };
+    });
+    pack.sort((a, b) => {
+      if (a.matched !== b.matched) return a.matched ? -1 : 1; // unmatched (no stack) last
+      if (a.stackNm !== b.stackNm) return a.stackNm.localeCompare(b.stackNm);
+      return (a.position ?? 0) - (b.position ?? 0);
+    });
+
     setStackName(nameMap);
     setStackOrder(order);
     setIndexByCard(idxByCard);
@@ -96,6 +144,9 @@ export default function PullSheet() {
     setUnmatched(unm);
     setDoneCount(done);
     setPicked(new Set());
+    setPackItems(pack);
+    setPiles(pileList);
+    setPlaced(new Set());
     setLoading(false);
   }
 
@@ -116,6 +167,15 @@ export default function PullSheet() {
       const n = new Set(prev);
       if (n.has(cardId)) n.delete(cardId);
       else n.add(cardId);
+      return n;
+    });
+  }
+
+  function togglePlaced(key) {
+    setPlaced((prev) => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
       return n;
     });
   }
@@ -162,20 +222,31 @@ export default function PullSheet() {
 
   const total = rows.length;
   const pickedInSheet = rows.filter((r) => picked.has(r.cardId)).length;
+  const placedCount = packItems.filter((i) => placed.has(i.key)).length;
+  const placedInPile = (pileNo) => packItems.filter((i) => i.pileNo === pileNo && placed.has(i.key)).length;
 
   return (
     <>
       <div className="ps-bar">
-        <div className="ps-progress">
-          <b>{pickedInSheet}</b> / {total} picked{doneCount ? ` · ${doneCount} already pulled` : ""}
+        <div className="pills" role="group" aria-label="Pull sheet mode">
+          <button aria-pressed={mode === "pick"} onClick={() => setMode("pick")}>1 · Pick</button>
+          <button aria-pressed={mode === "pack"} onClick={() => setMode("pack")}>2 · Pack</button>
         </div>
         <div className="ps-actions">
           <button className="btn btn-ghost" onClick={() => window.print()}>🖨 Print</button>
           <button className="btn btn-ghost" onClick={load} disabled={committing}>↻ Refresh</button>
-          <button className="btn btn-primary" onClick={commit} disabled={committing || pickedInSheet === 0}>
-            {committing ? "Committing…" : `Commit ${pickedInSheet} pull(s)`}
-          </button>
+          {mode === "pick" ? (
+            <button className="btn btn-primary" onClick={commit} disabled={committing || pickedInSheet === 0}>
+              {committing ? "Committing…" : `Commit ${pickedInSheet} pull(s)`}
+            </button>
+          ) : null}
         </div>
+      </div>
+
+      {mode === "pick" ? (
+      <>
+      <div className="ps-progress" style={{ marginBottom: 12 }}>
+        <b>{pickedInSheet}</b> / {total} picked{doneCount ? ` · ${doneCount} already pulled` : ""}
       </div>
       <div className="print-title">Pull sheet — {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · {total} to pick</div>
       {note ? <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>{note}</p> : null}
@@ -222,6 +293,72 @@ export default function PullSheet() {
           </div>
         </div>
       ) : null}
+      </>
+      ) : (
+      /* ---- PACK MODE ---- */
+      <>
+      <div className="ps-progress" style={{ marginBottom: 12 }}>
+        <b>{placedCount}</b> / {packItems.length} sorted into orders
+      </div>
+      {packItems.length === 0 ? (
+        <div className="panel"><p className="dd-empty">Nothing to pack — no open orders. 🎉</p></div>
+      ) : (
+        <>
+          <div className="panel">
+            <div className="panel-head"><span className="eyebrow">Order piles ({piles.length})</span></div>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>
+              Lay out a pile for each order below. Then work through your pulled stack in order — each card tells you which pile it goes in.
+            </p>
+            <div className="pack-piles">
+              {piles.map((p) => {
+                const got = placedInPile(p.pileNo);
+                const full = got >= p.count;
+                return (
+                  <div className={`pack-pile${full ? " full" : ""}`} key={p.pileNo}>
+                    <div className="pack-pile-no">Pile {p.pileNo}</div>
+                    <div className="pack-pile-buyer">{p.buyer || "Buyer"}</div>
+                    <div className="pack-pile-meta">{got}/{p.count} card{p.count === 1 ? "" : "s"}{full ? " ✓" : ""}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-head">
+              <h3>Your pulled stack — in order</h3>
+              <span className="badge2">top → bottom</span>
+            </div>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>Take each card off the top and drop it into the pile shown. Tick as you go.</p>
+            <div className="stack-list">
+              {packItems.map((it, i) => {
+                const done = placed.has(it.key);
+                return (
+                  <label className={`ps-row pack-row${done ? " done" : ""}`} key={it.key}>
+                    <input type="checkbox" checked={done} onChange={() => togglePlaced(it.key)} />
+                    <span className="stack-pos">{i + 1}</span>
+                    <span className="pack-card">
+                      <span className="stack-sku">{it.sku || "no SKU"}</span>
+                      <span className="stack-title">{it.title || <em>—</em>}</span>
+                      {it.matched ? null : <span className="loc-flag"> · not in a stack</span>}
+                    </span>
+                    <span className="pack-dest" aria-label={`Pile ${it.pileNo}, ${it.buyer}`}>
+                      <span className="pack-dest-no">Pile {it.pileNo}</span>
+                      <span className="pack-dest-buyer">{it.buyer || "Buyer"}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          {placedCount === packItems.length ? (
+            <div className="panel"><p className="dd-empty" style={{ color: "var(--conf-high)" }}>All {packItems.length} cards sorted into {piles.length} order pile(s) — ready to pack &amp; ship. 🎉</p></div>
+          ) : null}
+        </>
+      )}
+      </>
+      )}
     </>
   );
 }
