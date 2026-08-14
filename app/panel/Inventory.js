@@ -658,7 +658,7 @@ export default function Inventory({ onDeepDive }) {
           {view === "table" && selected.size > 0 ? (
             <>
               <button className="btn btn-primary" onClick={priceSelected} disabled={pricingAll}>
-                {pricingAll ? "Working…" : `💷 Price selected (${selected.size})`}
+                {pricingAll ? "Pricing…" : `💷 Price selected (${selected.size})`}
               </button>
               <button className="btn btn-ghost" onClick={updateSelectedToMarket} disabled={pricingAll} title="Update selected listings to market price on eBay">
                 ⤴ Update selected

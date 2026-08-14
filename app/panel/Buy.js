@@ -337,9 +337,9 @@ export default function Buy() {
                 {deal.cards.map((c, i) => (
                   <div className="deal-entry-row" key={i}>
                     <input className="deal-name-inp" type="text" value={c.name} onChange={(e) => setCard(i, { name: e.target.value })} placeholder={`Card ${i + 1} — e.g. Charizard ex 006/165`} />
-                    <input className="deal-qty-inp" type="number" min="1" step="1" value={c.quantity} onChange={(e) => setCard(i, { quantity: e.target.value })} title="Quantity" />
+                    <input className="deal-qty-inp" type="number" min="1" step="1" value={c.quantity} onChange={(e) => setCard(i, { quantity: e.target.value })} title="Quantity" placeholder="Qty" aria-label="Quantity" />
                     <input className="deal-price-inp" type="number" min="0" step="0.01" value={c.amount} onChange={(e) => setCard(i, { amount: e.target.value })} placeholder="£ (blank = split)" />
-                    <button type="button" className="itbl-del" title="Remove card" onClick={() => removeCard(i)} disabled={deal.cards.length === 1}>✕</button>
+                    <button type="button" className="itbl-del" title="Remove card" aria-label="Remove card" onClick={() => removeCard(i)} disabled={deal.cards.length === 1}>✕</button>
                   </div>
                 ))}
                 <button type="button" className="btn btn-ghost deal-add-card" onClick={addCard}>+ Add card</button>
@@ -423,7 +423,7 @@ export default function Buy() {
           <div className="table-wrap">
             <table className="itbl">
               <thead>
-                <tr><th aria-label="Haul photo"></th><th aria-label="Receipt"></th><th>Date</th><th>Type</th><th>Description</th><th>Cards</th><th>From</th><th>Amount</th><th></th></tr>
+                <tr><th aria-label="Haul photo"></th><th aria-label="Receipt"></th><th>Date</th><th>Type</th><th>Description</th><th>Cards</th><th>From</th><th>Amount</th><th aria-label="Actions"></th></tr>
               </thead>
               <tbody>
                 {inPeriod.map((r) => {
@@ -472,7 +472,7 @@ export default function Buy() {
                         <td>{isDeal ? cardCount : "—"}</td>
                         <td>{r.source || "—"}</td>
                         <td className="mono">{pounds(r.amount_pence)}</td>
-                        <td><button className="itbl-del" title="Delete" onClick={() => remove(r)}>✕</button></td>
+                        <td><button className="itbl-del" title="Delete" aria-label="Delete purchase" onClick={() => remove(r)}>✕</button></td>
                       </tr>
                       {isDeal && isOpen ? (
                         <tr className="deal-detail-row">

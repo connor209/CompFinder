@@ -49,7 +49,7 @@ const MODULES = [
     icon: "🔍",
     desc: "Search, scan or batch-price cards",
     sections: [
-      { key: "single", label: "Quick Search", desc: "Price a single card fast" },
+      { key: "single", label: "Quick search", desc: "Price a single card fast" },
       { key: "scan", label: "Scan", desc: "Point your camera to price instantly" },
       { key: "batch", label: "Batch", desc: "Price a whole list or CSV at once" }
     ]
@@ -821,29 +821,33 @@ export default function Panel({ initialSection = "dashboard" }) {
           />
         ) : null}
 
-        <div className="results-toolbar">
-          <input type="text" placeholder="Filter by title, SKU, or query…" value={resultsSearch} onChange={(e) => setResultsSearch(e.target.value)} />
-          <select value={confidenceFilter} onChange={(e) => setConfidenceFilter(e.target.value)}>
-            <option value="">All confidence</option>
-            <option value="High">High</option>
-            <option value="Medium">Medium</option>
-            <option value="Low">Low</option>
-          </select>
-          <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)}>
-            <option value="">All exclusion reasons</option>
-            {reasonOptions.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
-          <span className="hint-small">{filteredResults.length === results.length ? `${results.length} row(s)` : `${filteredResults.length} of ${results.length} row(s) shown`}</span>
-          <div className="view-toggle" role="group" aria-label="Results view">
-            <button aria-pressed={resultsView === "cards"} onClick={() => setResultsView("cards")}>▦ Cards</button>
-            <button aria-pressed={resultsView === "table"} onClick={() => setResultsView("table")}>☰ Table</button>
-          </div>
-        </div>
+        {results.length > 0 ? (
+          <>
+            <div className="results-toolbar">
+              <input type="text" placeholder="Filter by title, SKU, or query…" value={resultsSearch} onChange={(e) => setResultsSearch(e.target.value)} />
+              <select value={confidenceFilter} onChange={(e) => setConfidenceFilter(e.target.value)}>
+                <option value="">All confidence</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+              <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)}>
+                <option value="">All exclusion reasons</option>
+                {reasonOptions.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <span className="hint-small">{filteredResults.length === results.length ? `${results.length} row(s)` : `${filteredResults.length} of ${results.length} row(s) shown`}</span>
+              <div className="view-toggle" role="group" aria-label="Results view">
+                <button aria-pressed={resultsView === "cards"} onClick={() => setResultsView("cards")}>▦ Cards</button>
+                <button aria-pressed={resultsView === "table"} onClick={() => setResultsView("table")}>☰ Table</button>
+              </div>
+            </div>
 
-        <label className="checkbox-field">
-          <input type="checkbox" checked={showCurrentPrice} onChange={(e) => setShowCurrentPrice(e.target.checked)} />
-          <span>Show current price &amp; highlight big changes</span>
-        </label>
+            <label className="checkbox-field">
+              <input type="checkbox" checked={showCurrentPrice} onChange={(e) => setShowCurrentPrice(e.target.checked)} />
+              <span>Show current price &amp; highlight big changes</span>
+            </label>
+          </>
+        ) : null}
 
         {results.length === 0 ? (
           <p className="dd-empty">Run a search or upload a CSV to see priced results here.</p>

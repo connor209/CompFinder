@@ -209,8 +209,9 @@ export default function Scan({ onDeepDive }) {
 
       {camera === "live" ? (
         <div className="scan-controls">
-          <label className="btn btn-ghost scan-upload-inline">
-            🖼️<input type="file" accept="image/*" hidden onChange={onUpload} />
+          <label className="btn btn-ghost scan-upload-inline" title="Upload a photo">
+            🖼️<span className="sr-only">Upload a photo</span>
+            <input type="file" accept="image/*" hidden aria-label="Upload a photo" onChange={onUpload} />
           </label>
           <button className="scan-shutter" onClick={capture} disabled={busy} aria-label="Scan card">
             {busy ? <span className="spinner" /> : <span className="scan-shutter-dot" />}
@@ -238,7 +239,7 @@ export default function Scan({ onDeepDive }) {
           <div className="scan-meta">
             {result.count > 0
               ? <>from <b>{result.count}</b> sold comp(s){result.med != null ? <> · median {pounds(result.med)}{result.lo !== result.hi ? <> · {pounds(result.lo)}–{pounds(result.hi)}</> : null}</> : null}</>
-              : "No UK sold comps in 90 days — try a deep dive."}
+              : "No UK sold comps in the last 90 days — try a deep dive."}
           </div>
           <div className="scan-actions">
             <button className="btn btn-ghost" onClick={() => onDeepDive?.(result.query)}>🔍 Deep dive</button>

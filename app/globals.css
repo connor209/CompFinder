@@ -158,6 +158,8 @@ a { color:var(--accent-2); }
 .eyebrow-small { font-size:11px; letter-spacing:.1em; }
 .hint { margin:8px 0 0; color:var(--ink-soft); line-height:1.55; max-width:760px; font-size:13.5px; }
 .hint-small { font-size:12.5px; margin-top:6px; }
+/* Visually-hidden but available to screen readers (icon-only control labels). */
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 .danger-zone { margin-top:18px; padding-top:16px; border-top:1px solid color-mix(in srgb,var(--bad) 30%, var(--line)); }
 
 /* Dashboard visibility toggles */

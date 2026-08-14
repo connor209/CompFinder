@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
+// Shared default eBay final-value fee estimate — kept in step with Accounts.
+const DEFAULT_FEE_PCT = 12.8;
 function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -19,7 +21,8 @@ function fmtDate(iso) {
 export default function Sales() {
   const [sales, setSales] = useState(null);
   const [costs, setCosts] = useState(new Map());
-  const [feePct, setFeePct] = useState(13);
+  const [feePct, setFeePct] = useState(DEFAULT_FEE_PCT);
+  const [settings, setSettings] = useState({});
   const [syncing, setSyncing] = useState(false);
   const [note, setNote] = useState("");
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -34,6 +37,26 @@ export default function Sales() {
     setSales(data || []);
     const { data: costRows } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
     setCosts(new Map((costRows || []).map((r) => [r.ebay_item_id, r.cost_pence])));
+    // Share the eBay-fee % with the Accounts P&L so the same data reads the same
+    // on both screens.
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase.from("profiles").select("settings").eq("id", user.id).single();
+      const st = profile?.settings || {};
+      setSettings(st);
+      if (st.accounts?.feePct != null) setFeePct(st.accounts.feePct);
+    }
+  }
+
+  // Persist the fee back to the shared profile setting (mirrors Accounts).
+  async function saveFee(pct) {
+    setFeePct(pct);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const next = { ...settings, accounts: { ...(settings.accounts || {}), feePct: pct } };
+    setSettings(next);
+    await supabase.from("profiles").update({ settings: next }).eq("id", user.id);
   }
 
   useEffect(() => {
@@ -100,13 +123,13 @@ export default function Sales() {
         <div className="stat"><div className="k">Cost of sales</div><div className="v">{pounds(totals.cost)}</div></div>
         <div className="stat">
           <div className="k">Est. profit</div>
-          <div className="v" style={{ color: totals.profit >= 0 ? "var(--good-ink)" : "var(--bad-ink)" }}>{pounds(totals.profit)}</div>
+          <div className="v" style={{ color: totals.profit > 0 ? "var(--good-ink)" : totals.profit < 0 ? "var(--bad-ink)" : "var(--ink)" }}>{pounds(totals.profit)}</div>
         </div>
       </div>
 
       <div className="inv-bar">
         <label className="inv-sort">eBay fees %
-          <input type="number" min="0" max="30" step="0.5" value={feePct} onChange={(e) => setFeePct(Number(e.target.value))} style={{ width: 70 }} />
+          <input type="number" min="0" max="30" step="0.1" value={feePct} onChange={(e) => saveFee(Number(e.target.value))} style={{ width: 70 }} />
         </label>
         <div className="inv-meta">
           <span className="chip">{totals.count} sale(s)</span>

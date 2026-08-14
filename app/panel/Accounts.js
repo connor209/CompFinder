@@ -182,7 +182,7 @@ export default function Accounts() {
         <div className="stat"><div className="k">Expenses</div><div className="v">{pounds(report.expensesTotal)}</div></div>
         <div className="stat">
           <div className="k">Net profit</div>
-          <div className="v" style={{ color: report.netProfit >= 0 ? "var(--good-ink)" : "var(--bad-ink)" }}>{pounds(report.netProfit)}{marginPct != null ? ` (${marginPct}%)` : ""}</div>
+          <div className="v" style={{ color: report.netProfit > 0 ? "var(--good-ink)" : report.netProfit < 0 ? "var(--bad-ink)" : "var(--ink)" }}>{pounds(report.netProfit)}{marginPct != null ? ` (${marginPct}%)` : ""}</div>
         </div>
         <div className="stat"><div className="k">Items sold</div><div className="v">{report.unitsSold}</div></div>
       </div>

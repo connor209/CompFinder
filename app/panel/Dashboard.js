@@ -239,7 +239,7 @@ export default function Dashboard({ onNavigate }) {
         <div className="stat"><div className="k">Cost basis</div><div className="v">{stats ? pounds(stats.costBasis) : "—"}</div></div>
         <div className="stat">
           <div className="k">Potential margin</div>
-          <div className="v" style={{ color: stats && stats.potentialMargin >= 0 ? "var(--good-ink)" : "var(--bad-ink)" }}>
+          <div className="v" style={{ color: !stats || stats.potentialMargin === 0 ? "var(--ink)" : stats.potentialMargin > 0 ? "var(--good-ink)" : "var(--bad-ink)" }}>
             {stats ? pounds(stats.potentialMargin) : "—"}{marginPct != null ? ` (${marginPct}%)` : ""}
           </div>
         </div>

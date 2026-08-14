@@ -326,6 +326,7 @@ export default function QuickSearch({ seed }) {
   }
 
   function runFromText() {
+    if (loading) return; // Enter can bypass the disabled Search button mid-fetch
     runQuery(q);
   }
 
