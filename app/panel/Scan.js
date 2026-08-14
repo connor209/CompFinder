@@ -61,23 +61,27 @@ export default function Scan({ onDeepDive }) {
       setDiag("The camera needs a secure (https) connection.");
       return;
     }
+    // Force the REAR camera: { ideal: "environment" } is only a hint and iOS
+    // frequently hands back the selfie cam, so try exact rear first, then a soft
+    // rear preference, then any camera as a last resort.
     let stream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
-    } catch (e) {
-      // A specific rear-camera request can over-constrain some devices — retry
-      // with any camera before giving up.
-      if (e && (e.name === "OverconstrainedError" || e.name === "NotFoundError")) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        } catch (e2) {
-          failCamera(e2);
-          return;
-        }
-      } else {
-        failCamera(e);
-        return;
+    const attempts = [
+      { video: { facingMode: { exact: "environment" } }, audio: false },
+      { video: { facingMode: "environment" }, audio: false },
+      { video: true, audio: false }
+    ];
+    let lastErr;
+    for (const constraints of attempts) {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        break;
+      } catch (e) {
+        lastErr = e;
       }
+    }
+    if (!stream) {
+      failCamera(lastErr);
+      return;
     }
     // If we navigated away while the permission/stream was resolving, release it
     // immediately — otherwise the camera stays live with nothing to stop it.

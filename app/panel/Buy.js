@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { resizeImage } from "@/lib/resizeImage";
+import CameraCapture from "./CameraCapture";
 
 const BUCKET = "purchase-photos";
 const toPence = CompFinderPricing.toPence;
@@ -45,6 +46,7 @@ export default function Buy() {
   const [formReceipts, setFormReceipts] = useState([]); // proof of purchase
   const [attaching, setAttaching] = useState(null); // `${id}:${field}`
   const [gallery, setGallery] = useState(null); // { rowId, field, index }
+  const [camSetter, setCamSetter] = useState(null); // which tray's setter the in-app camera feeds
   const [expanded, setExpanded] = useState(new Set());
 
   async function load() {
@@ -97,6 +99,13 @@ export default function Buy() {
   }
   function clearPhotos(setter) {
     setter((prev) => { prev.forEach((p) => URL.revokeObjectURL(p.url)); return []; });
+  }
+  // In-app camera (works inside the iOS Home Screen app, unlike the native
+  // capture). Stash the target tray's setter, then push the captured File.
+  function openCamera(setter) { setCamSetter(() => setter); }
+  function onCameraCapture(file) {
+    if (camSetter) camSetter((prev) => [...prev, { file, url: URL.createObjectURL(file) }]);
+    setCamSetter(null);
   }
 
   // Derived deal maths (live). Agreed per-card prices stand; any card left blank
@@ -271,7 +280,7 @@ export default function Buy() {
   // Cards for a deal row (from deal_cards, or a 1-card fallback for legacy rows).
   const cardsFor = (r) => dealCards[r.id] || [{ id: "legacy", name: r.description, amount_pence: r.amount_pence, quantity: r.quantity || 1 }];
 
-  const tray = (items, setter, label, hint, icon) => (
+  const tray = (items, setter, label, hint) => (
     <div className="buy-field buy-photo-field">
       <span>{label} <span className="buy-opt">{hint}</span></span>
       <div className="buy-photo-tray">
@@ -281,8 +290,11 @@ export default function Buy() {
             <button type="button" className="buy-photo-x" onClick={() => removePhoto(setter, i)} aria-label="Remove">✕</button>
           </div>
         ))}
+        <button type="button" className="buy-photo-btn" onClick={() => openCamera(setter)}>
+          📷 <span>Camera</span>
+        </button>
         <label className="buy-photo-btn">
-          {icon} <span>{items.length ? "Add another" : "Snap or upload"}</span>
+          🖼️ <span>{items.length ? "Add" : "Upload"}</span>
           <input type="file" accept="image/*" multiple hidden onChange={(e) => onPickPhotos(setter, e)} />
         </label>
       </div>
@@ -290,13 +302,16 @@ export default function Buy() {
   );
   const attachments = (
     <>
-      {tray(formHaul, setFormHaul, "Photos of the haul", "(optional — a snap of what you took in)", "📷")}
-      {tray(formReceipts, setFormReceipts, "Receipt / invoice", "(optional — proof of purchase: receipt, Amazon invoice, PayPal…)", "🧾")}
+      {tray(formHaul, setFormHaul, "Photos of the haul", "(optional — a snap of what you took in)")}
+      {tray(formReceipts, setFormReceipts, "Receipt / invoice", "(optional — proof of purchase: receipt, Amazon invoice, PayPal…)")}
     </>
   );
 
   return (
     <div className="rise-group">
+      {camSetter ? (
+        <CameraCapture label="Snap the receipt or haul" onCapture={onCameraCapture} onClose={() => setCamSetter(null)} />
+      ) : null}
       <div className="stat-row">
         <div className="stat"><div className="k">Spend ({periodLabel})</div><div className="v">{pounds(totals.spend)}</div></div>
         <div className="stat"><div className="k">Cards bought</div><div className="v">{totals.cardUnits}</div></div>
