@@ -15,8 +15,9 @@ create table if not exists public.deal_cards (
   purchase_id uuid not null references public.purchases(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
   name text not null,
-  amount_pence integer,            -- per-card price; null when the deal is a lump sum
+  amount_pence integer,            -- per-unit cost basis (agreed, or an allocated share of the deal total)
   quantity integer not null default 1,
+  allocated boolean not null default false,  -- true when the price was auto-shared from the deal total (a "thrown-in" card)
   position integer,
   created_at timestamptz not null default now()
 );

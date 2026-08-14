@@ -457,7 +457,13 @@ a { color:var(--accent-2); }
 .deal-qty-inp { width:64px; flex:none; border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:9px 8px; font-size:13.5px; background:var(--surface-2); color:var(--ink); min-height:40px; }
 .deal-price-inp { width:96px; flex:none; border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:9px 10px; font-family:var(--font-mono); font-size:13.5px; background:var(--surface-2); color:var(--ink); min-height:40px; }
 .deal-add-card { align-self:flex-start; margin-top:2px; }
-.deal-total { font-family:var(--font-display); font-weight:800; font-size:22px; color:var(--accent-2); padding:4px 0; }
+.deal-total { font-family:var(--font-display); font-weight:800; font-size:22px; color:var(--accent-2); }
+.deal-summary { border:1px solid var(--line-strong); border-radius:12px; padding:12px 14px; background:var(--surface-2); display:flex; flex-direction:column; gap:5px; }
+.deal-summary.over { border-color:color-mix(in srgb,var(--bad) 45%, var(--line)); background:var(--bad-soft); }
+.deal-sum-line { font-size:13px; color:var(--ink-soft); }
+.deal-sum-line b { color:var(--ink); font-family:var(--font-mono); }
+.deal-sum-warn { font-size:13px; color:var(--bad-ink); font-weight:600; }
+.deal-card-tag { font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface); border:1px solid var(--line); border-radius:5px; padding:1px 5px; }
 /* expandable deal rows in the ledger */
 .deal-toggle { background:transparent; border:0; cursor:pointer; color:var(--ink); font-size:13.5px; font-weight:600; padding:0; display:inline-flex; align-items:center; gap:6px; }
 .deal-toggle:hover { color:var(--accent-2); }

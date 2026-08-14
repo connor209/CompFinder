@@ -21,7 +21,7 @@ function todayStr() {
 const qtyOf = (v) => Math.max(1, parseInt(v, 10) || 1);
 
 const CATEGORIES = ["Singles", "Sealed / boxes", "Supplies", "Postage", "Fees", "Other"];
-const emptyDeal = () => ({ source: "", purchased_at: todayStr(), note: "", pricingMode: "per_card", totalAmount: "", cards: [{ name: "", amount: "", quantity: "1" }] });
+const emptyDeal = () => ({ source: "", purchased_at: todayStr(), note: "", totalAmount: "", cards: [{ name: "", amount: "", quantity: "1" }] });
 const emptyExpense = () => ({ description: "", category: "Singles", amount: "", source: "", purchased_at: todayStr(), note: "" });
 
 /**
@@ -52,7 +52,7 @@ export default function Buy() {
       sb.from("purchases").select("id,kind,description,quantity,amount_pence,category,source,purchased_at,note,photo_paths,pricing_mode").order("purchased_at", { ascending: false })
     );
     setRows(data || []);
-    const dcs = await pagedSelect(() => sb.from("deal_cards").select("id,purchase_id,name,amount_pence,quantity,position").order("position", { ascending: true }));
+    const dcs = await pagedSelect(() => sb.from("deal_cards").select("id,purchase_id,name,amount_pence,quantity,allocated,position").order("position", { ascending: true }));
     const map = {};
     for (const d of dcs || []) (map[d.purchase_id] ||= []).push(d);
     setDealCards(map);
@@ -98,13 +98,20 @@ export default function Buy() {
     setFormPhotos((prev) => { prev.forEach((p) => URL.revokeObjectURL(p.url)); return []; });
   }
 
-  // derived deal totals (live)
-  const perCard = deal.pricingMode === "per_card";
+  // Derived deal maths (live). Agreed per-card prices stand; any card left blank
+  // shares the remainder of the deal total evenly (a "thrown-in" card). If no
+  // deal total is entered, the total is just the sum of the priced cards.
   const dealCardsFilled = deal.cards.filter((c) => c.name.trim());
   const dealCardCount = dealCardsFilled.reduce((s, c) => s + qtyOf(c.quantity), 0);
-  const dealComputedTotal = perCard
-    ? dealCardsFilled.reduce((s, c) => s + Math.max(0, toPence(c.amount) || 0) * qtyOf(c.quantity), 0)
-    : Math.max(0, toPence(deal.totalAmount) || 0);
+  const pricedSum = dealCardsFilled.reduce((s, c) => (toPence(c.amount) > 0 ? s + toPence(c.amount) * qtyOf(c.quantity) : s), 0);
+  const unpricedUnits = dealCardsFilled.reduce((s, c) => (toPence(c.amount) > 0 ? s : s + qtyOf(c.quantity)), 0);
+  const totalEntered = toPence(deal.totalAmount) > 0 ? toPence(deal.totalAmount) : null;
+  const useTotal = totalEntered != null && unpricedUnits > 0; // total drives the split only when there are cards to absorb it
+  const dealComputedTotal = useTotal ? totalEntered : pricedSum;
+  const remainder = useTotal ? totalEntered - pricedSum : 0;
+  const perUnpriced = useTotal && unpricedUnits > 0 ? remainder / unpricedUnits : 0;
+  const dealOver = useTotal && remainder < 0;
+  const totalIgnored = totalEntered != null && unpricedUnits === 0; // every card priced, so the sum wins
 
   async function add(e) {
     e?.preventDefault();
@@ -119,7 +126,8 @@ export default function Buy() {
       if (kind === "deal") {
         const cards = deal.cards.filter((c) => c.name.trim());
         if (!cards.length) { setError("Add at least one card to the deal."); setSaving(false); return; }
-        if (!(dealComputedTotal > 0)) { setError(perCard ? "Enter a price for at least one card." : "Enter the total deal price."); setSaving(false); return; }
+        if (dealOver) { setError(`The agreed card prices (${pounds(pricedSum)}) already exceed the deal total (${pounds(totalEntered)}).`); setSaving(false); return; }
+        if (!(dealComputedTotal > 0)) { setError("Enter a deal total, or a price on at least one card."); setSaving(false); return; }
         const dealRow = {
           user_id: user.id,
           kind: "card",
@@ -131,21 +139,26 @@ export default function Buy() {
           purchased_at: deal.purchased_at || todayStr(),
           note: deal.note.trim() || null,
           photo_paths,
-          pricing_mode: perCard ? "per_card" : "total"
+          pricing_mode: useTotal ? "mixed" : "per_card"
         };
         const { data: inserted, error: e1 } = await sb.from("purchases").insert(dealRow).select("id").single();
         if (e1) throw new Error(e1.message);
-        const dc = cards.map((c, i) => ({
-          purchase_id: inserted.id,
-          user_id: user.id,
-          name: c.name.trim(),
-          amount_pence: perCard && toPence(c.amount) > 0 ? toPence(c.amount) : null,
-          quantity: qtyOf(c.quantity),
-          position: i
-        }));
+        const dc = cards.map((c, i) => {
+          const p = toPence(c.amount);
+          const isPriced = p > 0;
+          return {
+            purchase_id: inserted.id,
+            user_id: user.id,
+            name: c.name.trim(),
+            amount_pence: isPriced ? p : useTotal ? Math.max(0, Math.round(perUnpriced)) : null,
+            quantity: qtyOf(c.quantity),
+            allocated: !isPriced && useTotal,
+            position: i
+          };
+        });
         const { error: e2 } = await sb.from("deal_cards").insert(dc);
         if (e2) throw new Error(e2.message);
-        setDeal((d) => ({ ...emptyDeal(), purchased_at: d.purchased_at, source: d.source, pricingMode: d.pricingMode }));
+        setDeal((d) => ({ ...emptyDeal(), purchased_at: d.purchased_at, source: d.source }));
       } else {
         const amountPence = toPence(expense.amount);
         if (!expense.description.trim()) { setError("Add a description."); setSaving(false); return; }
@@ -296,24 +309,19 @@ export default function Buy() {
               <input type="text" value={deal.note} onChange={(e) => setDealField("note", e.target.value)} placeholder="Anything worth remembering" />
             </label>
 
-            <div className="buy-field buy-desc">
-              <span>Pricing</span>
-              <div className="pills" role="group" aria-label="Deal pricing">
-                <button type="button" aria-pressed={perCard} onClick={() => setDealField("pricingMode", "per_card")}>Price per card</button>
-                <button type="button" aria-pressed={!perCard} onClick={() => setDealField("pricingMode", "total")}>One total for the deal</button>
-              </div>
-            </div>
+            <label className="buy-field buy-amt">
+              <span>Total deal price (£) <span className="buy-opt">— optional; leave blank to total up the card prices</span></span>
+              <input type="number" min="0" step="0.01" value={deal.totalAmount} onChange={(e) => setDealField("totalAmount", e.target.value)} placeholder="e.g. 100.00 for the whole lot" />
+            </label>
 
             <div className="buy-field buy-desc">
-              <span>Cards in this deal</span>
+              <span>Cards in this deal <span className="buy-opt">— price the ones you agreed; leave the rest blank</span></span>
               <div className="deal-entry">
                 {deal.cards.map((c, i) => (
                   <div className="deal-entry-row" key={i}>
                     <input className="deal-name-inp" type="text" value={c.name} onChange={(e) => setCard(i, { name: e.target.value })} placeholder={`Card ${i + 1} — e.g. Charizard ex 006/165`} />
                     <input className="deal-qty-inp" type="number" min="1" step="1" value={c.quantity} onChange={(e) => setCard(i, { quantity: e.target.value })} title="Quantity" />
-                    {perCard ? (
-                      <input className="deal-price-inp" type="number" min="0" step="0.01" value={c.amount} onChange={(e) => setCard(i, { amount: e.target.value })} placeholder="£ paid" />
-                    ) : null}
+                    <input className="deal-price-inp" type="number" min="0" step="0.01" value={c.amount} onChange={(e) => setCard(i, { amount: e.target.value })} placeholder="£ (blank = split)" />
                     <button type="button" className="itbl-del" title="Remove card" onClick={() => removeCard(i)} disabled={deal.cards.length === 1}>✕</button>
                   </div>
                 ))}
@@ -321,17 +329,24 @@ export default function Buy() {
               </div>
             </div>
 
-            {perCard ? (
-              <div className="buy-field buy-desc">
-                <span>Deal total</span>
+            <div className="buy-field buy-desc">
+              <span>Deal summary</span>
+              <div className={`deal-summary${dealOver ? " over" : ""}`}>
                 <div className="deal-total">{pounds(dealComputedTotal)} <span className="buy-opt">· {dealCardCount} card{dealCardCount === 1 ? "" : "s"}</span></div>
+                {dealOver ? (
+                  <div className="deal-sum-warn">⚠ Agreed prices ({pounds(pricedSum)}) exceed the deal total ({pounds(totalEntered)}).</div>
+                ) : useTotal ? (
+                  <div className="deal-sum-line">
+                    {pricedSum > 0 ? <>{pounds(pricedSum)} agreed · </> : null}
+                    <b>{pounds(remainder)}</b> split across {unpricedUnits} card{unpricedUnits === 1 ? "" : "s"} = <b>{pounds(Math.round(perUnpriced))}</b> each
+                  </div>
+                ) : totalIgnored ? (
+                  <div className="deal-sum-line">Every card priced — total taken from the card prices.</div>
+                ) : unpricedUnits > 0 ? (
+                  <div className="deal-sum-line">{unpricedUnits} unpriced card{unpricedUnits === 1 ? "" : "s"} logged at £0 (add a deal total to share a cost across them).</div>
+                ) : null}
               </div>
-            ) : (
-              <label className="buy-field buy-amt">
-                <span>Total deal price (£)</span>
-                <input type="number" min="0" step="0.01" value={deal.totalAmount} onChange={(e) => setDealField("totalAmount", e.target.value)} placeholder="0.00" />
-              </label>
-            )}
+            </div>
 
             {photoTray}
             <div className="buy-actions">
@@ -444,10 +459,11 @@ export default function Buy() {
                                 <div className="deal-card-line" key={c.id || i}>
                                   <span className="deal-card-name">{c.name || <em>—</em>}</span>
                                   {(c.quantity || 1) > 1 ? <span className="deal-card-qty">×{c.quantity}</span> : null}
+                                  {c.allocated ? <span className="deal-card-tag">split</span> : null}
                                   <span className="deal-card-price">{c.amount_pence != null ? pounds(c.amount_pence) : "—"}</span>
                                 </div>
                               ))}
-                              {r.pricing_mode === "total" ? <div className="deal-card-note">Bought as one lump sum — {pounds(r.amount_pence)} total across {cardCount} card(s).</div> : null}
+                              {r.pricing_mode === "mixed" ? <div className="deal-card-note">“split” cards share the leftover of the {pounds(r.amount_pence)} deal total.</div> : null}
                             </div>
                           </td>
                         </tr>
