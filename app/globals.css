@@ -301,6 +301,12 @@ a { color:var(--accent-2); }
 .brw-card-acts { display:flex; gap:1px; flex:none; }
 .brw-act { width:30px; height:30px; display:grid; place-items:center; border-radius:8px; font-size:14px; text-decoration:none; color:var(--ink-faint); transition:background .12s, color .12s; }
 .brw-act:hover { background:var(--surface-sink); color:var(--ink); transform:scale(1.08); }
+/* Shared marketplace-link pair (Batch results, My listings) */
+.mkt-links { display:inline-flex; gap:2px; align-items:center; }
+.mkt-link { width:28px; height:28px; display:inline-grid; place-items:center; border-radius:7px; font-size:13px; text-decoration:none; color:var(--ink-faint); transition:background .12s, color .12s, transform .12s; }
+.mkt-link:hover { background:var(--surface-sink); color:var(--ink); transform:scale(1.08); }
+.rr-title { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
+#compfinder-results .mkt-link { width:24px; height:24px; font-size:12px; }
 .brw-retry { background:transparent; border:0; padding:0; color:var(--accent-2); font-weight:600; font:inherit; cursor:pointer; text-decoration:underline; }
 .brw-filter-note { margin-top:8px; }
 /* On touch/small screens let the lists grow with the page instead of trapping

@@ -17,6 +17,7 @@ import Accounts from "./Accounts";
 import Browse from "./Browse";
 import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
+import MarketLinks from "./MarketLinks";
 import ThemeSeg from "./ThemeSeg";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -958,7 +959,9 @@ function ResultRow({ r, showCurrentPrice, active, onCheckActive }) {
   if (!r.rec) {
     return (
       <tr>
-        <td>{r.sku}</td><td>{r.title}</td><td>{r.query}</td><td>—</td>
+        <td>{r.sku}</td>
+        <td><span className="rr-title">{r.title} <MarketLinks query={r.query || r.title} gameSlug="pokemon" /></span></td>
+        <td>{r.query}</td><td>—</td>
         <td><span className="conf-badge conf-low">Skipped</span></td>
         <td>—</td><td>—</td><td>—</td><td>{r.failed}</td>
       </tr>
@@ -985,7 +988,9 @@ function ResultRow({ r, showCurrentPrice, active, onCheckActive }) {
   return (
     <>
       <tr className={rowClass}>
-        <td>{r.sku}</td><td>{r.title}</td><td>{r.query}</td>
+        <td>{r.sku}</td>
+        <td><span className="rr-title">{r.title} <MarketLinks query={r.query || r.title} gameSlug="pokemon" /></span></td>
+        <td>{r.query}</td>
         <td>
           {canExpand ? (
             <button type="button" className="comps-toggle" onClick={() => setOpen((o) => !o)}>
@@ -1081,6 +1086,7 @@ function ResultCard({ r, showCurrentPrice, active, onCheckActive, onDeepDive }) 
         ) : (
           <span className="hint-small">{compsCell}</span>
         )}
+        <MarketLinks query={r.query || r.title} gameSlug="pokemon" />
         {onDeepDive ? <button type="button" className="rc-dive" onClick={() => onDeepDive(r.title)}>Deep dive ↗</button> : null}
       </div>
 

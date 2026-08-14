@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import EbayActivity from "./EbayActivity";
+import MarketLinks from "./MarketLinks";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 
@@ -825,6 +826,7 @@ export default function Inventory({ onDeepDive }) {
                     {onDeepDive ? (
                       <button className="inv-act" onClick={() => onDeepDive(g.title)}>Deep dive ↗</button>
                     ) : null}
+                    <MarketLinks query={g.title} gameSlug="pokemon" label={g.title} />
                   </div>
                   {(() => {
                     const u = updating.get(g.key);
