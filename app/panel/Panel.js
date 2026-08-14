@@ -36,33 +36,37 @@ const STREAM_SLUG = {
 };
 const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) => [v, k]));
 
-// Sections grouped into modules for the two-level nav.
+// Sections grouped into modules for the two-level nav. `desc` is the one-line
+// contextual description shown on hover (as a rail tooltip for single-section
+// modules, and as a subtitle in the flyout for multi-section ones).
 const MODULES = [
-  { key: "dashboard", label: "Dashboard", icon: "🏠", sections: [{ key: "dashboard", label: "Dashboard" }] },
+  { key: "dashboard", label: "Dashboard", icon: "🏠", desc: "Your portfolio & activity at a glance", sections: [{ key: "dashboard", label: "Dashboard" }] },
   {
     key: "pricing",
     label: "Pricing",
     icon: "🔍",
+    desc: "Search, scan or batch-price cards",
     sections: [
-      { key: "single", label: "Quick Search" },
-      { key: "scan", label: "Scan" },
-      { key: "batch", label: "Batch" }
+      { key: "single", label: "Quick Search", desc: "Price a single card fast" },
+      { key: "scan", label: "Scan", desc: "Point your camera to price instantly" },
+      { key: "batch", label: "Batch", desc: "Price a whole list or CSV at once" }
     ]
   },
-  { key: "buy", label: "Buy", icon: "🛒", sections: [{ key: "buy", label: "Buy" }] },
+  { key: "buy", label: "Buy", icon: "🛒", desc: "Log deals & purchases you take in", sections: [{ key: "buy", label: "Buy" }] },
   {
     key: "ebay",
     label: "eBay",
     icon: "🏷️",
+    desc: "List, sell & fulfil on eBay",
     sections: [
-      { key: "inventory", label: "My listings" },
-      { key: "sales", label: "Sales" },
-      { key: "stacks", label: "Stacks" },
-      { key: "pull", label: "Pull sheet" }
+      { key: "inventory", label: "My listings", desc: "Your live eBay listings & repricing" },
+      { key: "sales", label: "Sales", desc: "Completed sales, fees & profit" },
+      { key: "stacks", label: "Stacks", desc: "Group inventory into sellable stacks" },
+      { key: "pull", label: "Pull sheet", desc: "Pick & pack the day's orders" }
     ]
   },
-  { key: "accounts", label: "Accounts", icon: "📒", sections: [{ key: "accounts", label: "P&L" }] },
-  { key: "arbitrage", label: "Arbitrage", icon: "📊", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
+  { key: "accounts", label: "Accounts", icon: "📒", desc: "Profit & loss and tax-ready reports", sections: [{ key: "accounts", label: "P&L" }] },
+  { key: "arbitrage", label: "Arbitrage", icon: "📊", desc: "Spot underpriced buying opportunities", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
 ];
 const moduleForStream = (s) => MODULES.find((m) => m.sections.some((sec) => sec.key === s)) || MODULES[0];
 
@@ -596,7 +600,7 @@ export default function Panel({ initialSection = "dashboard" }) {
               >
                 <button
                   className={active ? "on" : ""}
-                  aria-label={m.label}
+                  aria-label={m.desc ? `${m.label} — ${m.desc}` : m.label}
                   aria-current={active ? "true" : undefined}
                   aria-haspopup={multi ? "menu" : undefined}
                   aria-expanded={multi ? open : undefined}
@@ -604,12 +608,26 @@ export default function Panel({ initialSection = "dashboard" }) {
                 >
                   <span className="rail-ic" aria-hidden="true">{m.icon}</span>
                 </button>
+                {/* Single-section modules reveal a description tooltip on hover;
+                    multi-section ones show theirs in the flyout header below. */}
+                {!multi ? (
+                  <span className="rail-tip" role="tooltip">
+                    <b>{m.label}</b>
+                    {m.desc ? <span>{m.desc}</span> : null}
+                  </span>
+                ) : null}
                 {multi && open ? (
                   <div className="rail-fly" role="menu">
-                    <div className="rail-fly-h">{m.label}</div>
+                    <div className="rail-fly-h">
+                      {m.label}
+                      {m.desc ? <span className="rail-fly-sub">{m.desc}</span> : null}
+                    </div>
                     {m.sections.map((sec) => (
-                      <button key={sec.key} role="menuitem" className={stream === sec.key ? "on" : ""} onClick={() => nav(sec.key)}>
-                        <span>{sec.label}</span>
+                      <button key={sec.key} role="menuitem" className={stream === sec.key ? "on" : ""} onClick={() => nav(sec.key)} title={sec.desc || undefined}>
+                        <span className="rail-fly-lbl">
+                          {sec.label}
+                          {sec.desc ? <span className="rail-fly-desc">{sec.desc}</span> : null}
+                        </span>
                         {stream === sec.key ? <span aria-hidden="true">✓</span> : null}
                       </button>
                     ))}

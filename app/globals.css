@@ -91,10 +91,21 @@ a { color:var(--accent-2); }
 .rail-item > button.on::before { content:""; position:absolute; left:-8px; top:10px; bottom:10px; width:3px; border-radius:0 3px 3px 0; background:var(--accent); }
 .rail-fly { position:absolute; left:100%; top:-2px; margin-left:8px; min-width:172px; background:var(--surface); border:1px solid var(--line-strong); border-radius:13px; box-shadow:var(--shadow-2); padding:6px; z-index:40; animation:flyin .15s cubic-bezier(.22,.61,.36,1); }
 .rail-fly::before { content:""; position:absolute; left:-10px; top:0; bottom:0; width:12px; }
-.rail-fly-h { font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); padding:4px 10px 7px; }
+.rail-fly-h { font-family:var(--font-mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); padding:4px 10px 7px; display:flex; flex-direction:column; gap:3px; }
+.rail-fly-sub { font-family:var(--font-sans); font-size:11.5px; letter-spacing:0; text-transform:none; color:var(--ink-soft); font-weight:500; }
 .rail-fly button { display:flex; width:100%; align-items:center; justify-content:space-between; gap:10px; text-align:left; background:transparent; border:0; border-radius:9px; padding:9px 11px; font-size:13.5px; font-weight:600; color:var(--ink-soft); cursor:pointer; white-space:nowrap; }
 .rail-fly button:hover { background:var(--surface-sink); color:var(--ink); }
 .rail-fly button.on { color:var(--accent-2); background:var(--accent-soft); }
+.rail-fly-lbl { display:flex; flex-direction:column; gap:2px; }
+.rail-fly-desc { font-size:11px; font-weight:500; color:var(--ink-faint); white-space:nowrap; }
+.rail-fly button.on .rail-fly-desc { color:var(--accent-2); opacity:.8; }
+
+/* Hover tooltip for single-section rail icons (Dashboard, Buy, Accounts…) */
+.rail-tip { position:absolute; left:100%; top:50%; transform:translateY(-50%) translateX(4px); margin-left:8px; display:flex; flex-direction:column; gap:2px; min-width:150px; max-width:230px; background:var(--surface); border:1px solid var(--line-strong); border-radius:11px; box-shadow:var(--shadow-2); padding:8px 11px; z-index:40; pointer-events:none; opacity:0; visibility:hidden; transition:opacity .13s, transform .13s; }
+.rail-tip::before { content:""; position:absolute; left:-10px; top:0; bottom:0; width:12px; }
+.rail-tip b { font-size:13px; font-weight:700; color:var(--ink); }
+.rail-tip span { font-size:11.5px; font-weight:500; color:var(--ink-soft); line-height:1.35; white-space:normal; }
+.rail-item:hover .rail-tip, .rail-item:focus-within .rail-tip { opacity:1; visibility:visible; transform:translateY(-50%) translateX(0); }
 @keyframes flyin { from { opacity:0; transform:translateX(-6px); } to { opacity:1; transform:none; } }
 
 /* Full navigation sheet (☰) */
