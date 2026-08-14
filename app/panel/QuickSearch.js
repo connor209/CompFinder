@@ -23,6 +23,14 @@ function median(nums) {
   const m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
+// Cardmarket jams the Mega prefix onto the name — "MRayquaza EX", "MCharizard EX
+// (Y)" — which doesn't match how eBay lists them ("M Rayquaza EX"). Split a
+// leading "M" that's followed by an uppercase letter (a Mega); names like
+// "Mimikyu"/"Mewtwo" (M + lowercase) are left alone. Purely for the eBay search
+// text + display; the catalogue data is untouched.
+function normalizeMegaName(name) {
+  return (name || "").replace(/^M([A-Z])/, "M $1");
+}
 
 /**
  * Interactive price-trend chart. Sales are grouped by day; each plotted point
@@ -377,6 +385,9 @@ export default function QuickSearch({ seed }) {
     setListing(false);
     setMine({ loading: true, configured: true, error: "", listings: [] });
     const isPokemon = gameArg === "pokemon";
+    // Normalise the Cardmarket Mega prefix so the eBay search + header read
+    // "M Rayquaza EX", not "MRayquaza EX".
+    if (isPokemon) card = { ...card, name: normalizeMegaName(card.name) };
 
     // Pokémon catalog cards carry no art — pull the English card image from
     // pokemontcg.io in the background to fill the header (non-English prints
