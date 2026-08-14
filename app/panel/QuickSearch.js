@@ -4,7 +4,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
 import { detectLanguage } from "@/lib/catalog.js";
 import { cleanSearchName } from "@/lib/cardname.js";
-import { ebaySearchUrl, cardmarketSearchUrl } from "@/lib/marketplace.js";
+import { ebaySearchUrl, cardmarketBestUrl } from "@/lib/marketplace.js";
 import { createClient } from "@/lib/supabase/client";
 import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
@@ -275,7 +275,10 @@ export default function QuickSearch({ seed }) {
     const l = lang === "English" ? "" : lang;
     setLanguage(l);
     setSourceGame(MODE_TO_SLUG[g] ?? null);
-    runDeepDive(card, l, g);
+    // Catalogue suggestions carry their Cardmarket id as "cm-<id>"; keep it for
+    // the exact Cardmarket link.
+    const cmId = typeof card.id === "string" && card.id.startsWith("cm-") ? card.id.slice(3) : null;
+    runDeepDive({ ...card, cardmarketId: card.cardmarketId || cmId }, l, g);
   }
 
   async function runQuery(text) {
@@ -748,7 +751,7 @@ export default function QuickSearch({ seed }) {
                 {(() => {
                   const baseQ = `${view.card.name} ${view.card.number || ""}`.replace(/\s+/g, " ").trim();
                   const ebayQ = `${baseQ} ${language}`.replace(/\s+/g, " ").trim();
-                  const cmUrl = cardmarketSearchUrl(baseQ, sourceGame);
+                  const cmUrl = cardmarketBestUrl({ cardmarketId: view.card.cardmarketId, query: baseQ, gameSlug: sourceGame });
                   return (
                     <>
                       <a className="btn btn-ghost" href={ebaySearchUrl(ebayQ)} target="_blank" rel="noopener noreferrer" title="Open this card's sold listings on eBay">🔍 eBay ↗</a>

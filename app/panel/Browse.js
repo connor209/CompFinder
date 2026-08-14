@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { cleanSearchName } from "@/lib/cardname.js";
+import { ebaySearchUrl, cardmarketBestUrl } from "@/lib/marketplace.js";
 
 /**
  * Browse — explore the whole card catalogue across every supported game:
@@ -231,27 +233,36 @@ export default function Browse({ onDeepDive }) {
         ) : (
           <>
             <div className="brw-cards">
-              {filteredCards.map((c) => (
-                <button
-                  key={c.id}
-                  className="brw-card"
-                  title={onDeepDive ? "Price this card in Quick Search" : c.name}
-                  onClick={() =>
-                    onDeepDive &&
-                    onDeepDive(`${c.name} ${c.number}`.trim(), {
-                      game: game.slug,
-                      card: { name: c.name, number: c.number, set: set.name, series: set.code, rarity: c.rarity, image: null }
-                    })
-                  }
-                >
-                  <span className="brw-card-no">{c.number || "—"}</span>
-                  <span className="brw-card-name">{c.name}</span>
-                  <span className="brw-card-tags">
-                    {c.category !== "card" ? <span className="brw-card-cat">{CATEGORY_LABEL[c.category] || c.category}</span> : null}
-                    {c.rarity ? <span className="brw-card-rar">{c.rarity}</span> : null}
-                  </span>
-                </button>
-              ))}
+              {filteredCards.map((c) => {
+                const ebayUrl = ebaySearchUrl(`${cleanSearchName(c.name, game.slug)} ${c.number}`.trim(), { sold: true });
+                const cmUrl = cardmarketBestUrl({ cardmarketId: c.cardmarketId, query: `${c.name} ${c.number}`.trim(), gameSlug: game.slug });
+                return (
+                  <div key={c.id} className="brw-card">
+                    <button
+                      className="brw-card-main"
+                      title={onDeepDive ? "Price this card in Quick Search" : c.name}
+                      onClick={() =>
+                        onDeepDive &&
+                        onDeepDive(`${c.name} ${c.number}`.trim(), {
+                          game: game.slug,
+                          card: { name: c.name, number: c.number, set: set.name, series: set.code, rarity: c.rarity, image: null, cardmarketId: c.cardmarketId }
+                        })
+                      }
+                    >
+                      <span className="brw-card-no">{c.number || "—"}</span>
+                      <span className="brw-card-name">{c.name}</span>
+                      <span className="brw-card-tags">
+                        {c.category !== "card" ? <span className="brw-card-cat">{CATEGORY_LABEL[c.category] || c.category}</span> : null}
+                        {c.rarity ? <span className="brw-card-rar">{c.rarity}</span> : null}
+                      </span>
+                    </button>
+                    <div className="brw-card-acts">
+                      <a className="brw-act" href={ebayUrl} target="_blank" rel="noopener noreferrer" title="eBay sold listings ↗" aria-label={`${c.name} — eBay sold listings`}>🔍</a>
+                      {cmUrl ? <a className="brw-act" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Cardmarket page ↗" aria-label={`${c.name} — Cardmarket page`}>🛒</a> : null}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
             {filtering ? (
               <p className="hint hint-small brw-filter-note">Filtering {cards.length.toLocaleString()} loaded card{cards.length === 1 ? "" : "s"}{hasMore ? " — load more to search the whole set." : "."}</p>
