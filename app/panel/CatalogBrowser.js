@@ -42,7 +42,7 @@ export default function CatalogBrowser({ onPick, onClose }) {
     setCards([]);
     setCardsLoading(true);
     try {
-      const res = await fetch(`/api/catalog/cards?expansion=${encodeURIComponent(exp.name)}`).then((r) => r.json());
+      const res = await fetch(`/api/catalog/cards?game=pokemon&expansion=${encodeURIComponent(exp.name)}&code=${encodeURIComponent(exp.code || "")}`).then((r) => r.json());
       setCards(res.cards || []);
     } catch {
       setCards([]);

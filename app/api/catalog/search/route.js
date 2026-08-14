@@ -26,10 +26,15 @@ export async function GET(request) {
   const numToken = (raw.match(/\b(\d{1,4})\b/) || [])[1] || "";
   if (words.length === 0) return NextResponse.json({ ok: true, available: true, cards: [] });
 
+  // The catalogue is multi-game; this typeahead is the Pokémon path (Magic uses
+  // Scryfall, "other" has no catalogue). Default to Pokémon, overridable.
+  const gameFilter = (new URL(request.url).searchParams.get("game") || "pokemon").trim();
+
   const supabase = await createClient();
   let query = supabase
     .from("card_catalog")
     .select("cardmarket_id,name,collector_number,rarity,expansion,expansion_code")
+    .eq("game", gameFilter)
     .limit(60);
   // Every alphabetic token must appear in the name (trigram-indexed ilike).
   for (const w of words) query = query.ilike("name", `%${w}%`);

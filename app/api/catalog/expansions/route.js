@@ -16,6 +16,7 @@ export async function GET(request) {
   const { data, error } = await supabase
     .from("card_catalog")
     .select("expansion,expansion_code")
+    .eq("game", "pokemon") // Quick Search's "Browse sets" picker is Pokémon-only
     .ilike("expansion", `%${q}%`)
     .limit(2000);
   if (error) return NextResponse.json({ ok: true, available: false, expansions: [] });

@@ -40,6 +40,7 @@ async function resolveOne(supabase, title) {
   let query = supabase
     .from("card_catalog")
     .select("cardmarket_id,name,collector_number,rarity,expansion,expansion_code")
+    .eq("game", "pokemon") // this resolver is Pokémon-specific; the catalogue is now multi-game
     .limit(60);
   for (const w of nameTokens) query = query.ilike("name", `%${w}%`);
 
