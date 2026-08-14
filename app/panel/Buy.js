@@ -41,22 +41,23 @@ export default function Buy() {
   const [error, setError] = useState("");
   const [period, setPeriod] = useState("month"); // month | year | all
   const [photoUrls, setPhotoUrls] = useState({});
-  const [formPhotos, setFormPhotos] = useState([]);
-  const [attaching, setAttaching] = useState(null);
-  const [gallery, setGallery] = useState(null);
+  const [formHaul, setFormHaul] = useState([]); // "what you took in" photos
+  const [formReceipts, setFormReceipts] = useState([]); // proof of purchase
+  const [attaching, setAttaching] = useState(null); // `${id}:${field}`
+  const [gallery, setGallery] = useState(null); // { rowId, field, index }
   const [expanded, setExpanded] = useState(new Set());
 
   async function load() {
     const sb = createClient();
     const data = await pagedSelect(() =>
-      sb.from("purchases").select("id,kind,description,quantity,amount_pence,category,source,purchased_at,note,photo_paths,pricing_mode").order("purchased_at", { ascending: false })
+      sb.from("purchases").select("id,kind,description,quantity,amount_pence,category,source,purchased_at,note,photo_paths,receipt_paths,pricing_mode").order("purchased_at", { ascending: false })
     );
     setRows(data || []);
     const dcs = await pagedSelect(() => sb.from("deal_cards").select("id,purchase_id,name,amount_pence,quantity,allocated,position").order("position", { ascending: true }));
     const map = {};
     for (const d of dcs || []) (map[d.purchase_id] ||= []).push(d);
     setDealCards(map);
-    const paths = (data || []).flatMap((r) => r.photo_paths || []);
+    const paths = (data || []).flatMap((r) => [...(r.photo_paths || []), ...(r.receipt_paths || [])]);
     if (paths.length) {
       const { data: signed } = await sb.storage.from(BUCKET).createSignedUrls(paths, 3600);
       const m = {};
@@ -85,17 +86,17 @@ export default function Buy() {
     if (upErr) throw new Error(upErr.message);
     return path;
   }
-  function onPickFormPhotos(e) {
+  function onPickPhotos(setter, e) {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
     if (!files.length) return;
-    setFormPhotos((prev) => [...prev, ...files.map((file) => ({ file, url: URL.createObjectURL(file) }))]);
+    setter((prev) => [...prev, ...files.map((file) => ({ file, url: URL.createObjectURL(file) }))]);
   }
-  function removeFormPhoto(i) {
-    setFormPhotos((prev) => { const p = prev[i]; if (p) URL.revokeObjectURL(p.url); return prev.filter((_, idx) => idx !== i); });
+  function removePhoto(setter, i) {
+    setter((prev) => { const p = prev[i]; if (p) URL.revokeObjectURL(p.url); return prev.filter((_, idx) => idx !== i); });
   }
-  function clearFormPhotos() {
-    setFormPhotos((prev) => { prev.forEach((p) => URL.revokeObjectURL(p.url)); return []; });
+  function clearPhotos(setter) {
+    setter((prev) => { prev.forEach((p) => URL.revokeObjectURL(p.url)); return []; });
   }
 
   // Derived deal maths (live). Agreed per-card prices stand; any card left blank
@@ -121,7 +122,9 @@ export default function Buy() {
       const sb = createClient();
       const { data: { user } } = await sb.auth.getUser();
       const photo_paths = [];
-      for (const p of formPhotos) photo_paths.push(await uploadOne(sb, p.file, user.id));
+      for (const p of formHaul) photo_paths.push(await uploadOne(sb, p.file, user.id));
+      const receipt_paths = [];
+      for (const p of formReceipts) receipt_paths.push(await uploadOne(sb, p.file, user.id));
 
       if (kind === "deal") {
         const cards = deal.cards.filter((c) => c.name.trim());
@@ -139,6 +142,7 @@ export default function Buy() {
           purchased_at: deal.purchased_at || todayStr(),
           note: deal.note.trim() || null,
           photo_paths,
+          receipt_paths,
           pricing_mode: useTotal ? "mixed" : "per_card"
         };
         const { data: inserted, error: e1 } = await sb.from("purchases").insert(dealRow).select("id").single();
@@ -173,13 +177,15 @@ export default function Buy() {
           source: expense.source.trim() || null,
           purchased_at: expense.purchased_at || todayStr(),
           note: expense.note.trim() || null,
-          photo_paths
+          photo_paths,
+          receipt_paths
         };
         const { error: err } = await sb.from("purchases").insert(row);
         if (err) throw new Error(err.message);
         setExpense((x) => ({ ...emptyExpense(), purchased_at: x.purchased_at, source: x.source, category: x.category }));
       }
-      clearFormPhotos();
+      clearPhotos(setFormHaul);
+      clearPhotos(setFormReceipts);
       await load();
     } catch (err) {
       setError(err.message || "Couldn't save that.");
@@ -187,30 +193,32 @@ export default function Buy() {
     setSaving(false);
   }
 
-  async function attachPhotos(row, files) {
+  // Attach to either the haul photos (field='photo_paths') or receipts
+  // (field='receipt_paths') of a purchase.
+  async function attachPhotos(row, files, field) {
     const list = Array.from(files || []);
     if (!list.length) return;
-    setAttaching(row.id);
+    setAttaching(`${row.id}:${field}`);
     setError("");
     try {
       const sb = createClient();
       const { data: { user } } = await sb.auth.getUser();
       const added = [];
       for (const f of list) added.push(await uploadOne(sb, f, user.id));
-      const next = [...(row.photo_paths || []), ...added];
-      const { error: err } = await sb.from("purchases").update({ photo_paths: next }).eq("id", row.id);
+      const next = [...(row[field] || []), ...added];
+      const { error: err } = await sb.from("purchases").update({ [field]: next }).eq("id", row.id);
       if (err) throw new Error(err.message);
       await load();
     } catch (err) {
-      setError(err.message || "Couldn't attach that photo.");
+      setError(err.message || "Couldn't attach that image.");
     }
     setAttaching(null);
   }
 
-  async function deletePhoto(row, path) {
+  async function deletePhoto(row, field, path) {
     const sb = createClient();
-    const next = (row.photo_paths || []).filter((p) => p !== path);
-    await sb.from("purchases").update({ photo_paths: next }).eq("id", row.id);
+    const next = (row[field] || []).filter((p) => p !== path);
+    await sb.from("purchases").update({ [field]: next }).eq("id", row.id);
     await sb.storage.from(BUCKET).remove([path]).catch(() => {});
     await load();
     if (next.length === 0) setGallery(null);
@@ -221,7 +229,8 @@ export default function Buy() {
     if (!confirm("Delete this purchase?")) return;
     const sb = createClient();
     await sb.from("purchases").delete().eq("id", row.id); // deal_cards cascade
-    if ((row.photo_paths || []).length) await sb.storage.from(BUCKET).remove(row.photo_paths).catch(() => {});
+    const all = [...(row.photo_paths || []), ...(row.receipt_paths || [])];
+    if (all.length) await sb.storage.from(BUCKET).remove(all).catch(() => {});
     setRows((r) => (r || []).filter((x) => x.id !== row.id));
   }
 
@@ -254,28 +263,36 @@ export default function Buy() {
 
   const periodLabel = period === "month" ? "this month" : period === "year" ? "this year" : "all time";
   const galRow = gallery ? (rows || []).find((r) => r.id === gallery.rowId) : null;
-  const galPaths = galRow ? galRow.photo_paths || [] : [];
+  const galField = gallery ? gallery.field : "photo_paths";
+  const galPaths = galRow ? galRow[galField] || [] : [];
   const galIdx = gallery ? Math.min(gallery.index, Math.max(0, galPaths.length - 1)) : 0;
+  const galIsReceipt = galField === "receipt_paths";
 
   // Cards for a deal row (from deal_cards, or a 1-card fallback for legacy rows).
   const cardsFor = (r) => dealCards[r.id] || [{ id: "legacy", name: r.description, amount_pence: r.amount_pence, quantity: r.quantity || 1 }];
 
-  const photoTray = (
+  const tray = (items, setter, label, hint, icon) => (
     <div className="buy-field buy-photo-field">
-      <span>Photos of the haul <span className="buy-opt">(optional — add as many as you like)</span></span>
+      <span>{label} <span className="buy-opt">{hint}</span></span>
       <div className="buy-photo-tray">
-        {formPhotos.map((p, i) => (
+        {items.map((p, i) => (
           <div className="buy-photo-preview" key={i}>
             <img src={p.url} alt={`Preview ${i + 1}`} />
-            <button type="button" className="buy-photo-x" onClick={() => removeFormPhoto(i)} aria-label="Remove photo">✕</button>
+            <button type="button" className="buy-photo-x" onClick={() => removePhoto(setter, i)} aria-label="Remove">✕</button>
           </div>
         ))}
         <label className="buy-photo-btn">
-          📷 <span>{formPhotos.length ? "Add another" : "Snap or upload"}</span>
-          <input type="file" accept="image/*" multiple hidden onChange={onPickFormPhotos} />
+          {icon} <span>{items.length ? "Add another" : "Snap or upload"}</span>
+          <input type="file" accept="image/*" multiple hidden onChange={(e) => onPickPhotos(setter, e)} />
         </label>
       </div>
     </div>
+  );
+  const attachments = (
+    <>
+      {tray(formHaul, setFormHaul, "Photos of the haul", "(optional — a snap of what you took in)", "📷")}
+      {tray(formReceipts, setFormReceipts, "Receipt / invoice", "(optional — proof of purchase: receipt, Amazon invoice, PayPal…)", "🧾")}
+    </>
   );
 
   return (
@@ -348,7 +365,7 @@ export default function Buy() {
               </div>
             </div>
 
-            {photoTray}
+            {attachments}
             <div className="buy-actions">
               <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : "+ Add deal"}</button>
             </div>
@@ -381,7 +398,7 @@ export default function Buy() {
               <span>Note <span className="buy-opt">(optional)</span></span>
               <input type="text" value={expense.note} onChange={(e) => setExpense((x) => ({ ...x, note: e.target.value }))} placeholder="Anything worth remembering" />
             </label>
-            {photoTray}
+            {attachments}
             <div className="buy-actions">
               <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : "+ Add spend"}</button>
             </div>
@@ -406,32 +423,39 @@ export default function Buy() {
           <div className="table-wrap">
             <table className="itbl">
               <thead>
-                <tr><th aria-label="Photos"></th><th>Date</th><th>Type</th><th>Description</th><th>Cards</th><th>From</th><th>Amount</th><th></th></tr>
+                <tr><th aria-label="Haul photo"></th><th aria-label="Receipt"></th><th>Date</th><th>Type</th><th>Description</th><th>Cards</th><th>From</th><th>Amount</th><th></th></tr>
               </thead>
               <tbody>
                 {inPeriod.map((r) => {
                   const isDeal = r.kind === "card";
-                  const photos = r.photo_paths || [];
-                  const cover = photos.find((p) => photoUrls[p]);
                   const cards = isDeal ? cardsFor(r) : null;
                   const cardCount = isDeal ? (r.quantity || cards.reduce((s, c) => s + (c.quantity || 1), 0)) : null;
                   const isOpen = expanded.has(r.id);
+                  const photoCell = (field, icon, addTitle) => {
+                    const paths = r[field] || [];
+                    const cover = paths.find((p) => photoUrls[p]);
+                    const busy = attaching === `${r.id}:${field}`;
+                    return (
+                      <td className="buy-photo-cell">
+                        {cover ? (
+                          <button type="button" className="buy-thumb" onClick={() => setGallery({ rowId: r.id, field, index: 0 })} title={`View ${paths.length} ${addTitle}(s)`}>
+                            <img src={photoUrls[cover]} alt={addTitle} loading="lazy" />
+                            {paths.length > 1 ? <span className="buy-thumb-badge">{paths.length}</span> : null}
+                          </button>
+                        ) : (
+                          <label className="buy-thumb-add" title={`Add ${addTitle}`}>
+                            {busy ? <span className="spinner" /> : icon}
+                            <input type="file" accept="image/*" multiple hidden disabled={busy} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachPhotos(r, fs, field); }} />
+                          </label>
+                        )}
+                      </td>
+                    );
+                  };
                   return (
                     <Fragment key={r.id}>
                       <tr>
-                        <td className="buy-photo-cell">
-                          {cover ? (
-                            <button type="button" className="buy-thumb" onClick={() => setGallery({ rowId: r.id, index: 0 })} title={`View ${photos.length} photo(s)`}>
-                              <img src={photoUrls[cover]} alt="Purchase" loading="lazy" />
-                              {photos.length > 1 ? <span className="buy-thumb-badge">{photos.length}</span> : null}
-                            </button>
-                          ) : (
-                            <label className="buy-thumb-add" title="Add photo(s)">
-                              {attaching === r.id ? <span className="spinner" /> : "📷"}
-                              <input type="file" accept="image/*" multiple hidden disabled={attaching === r.id} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachPhotos(r, fs); }} />
-                            </label>
-                          )}
-                        </td>
+                        {photoCell("photo_paths", "📷", "photo")}
+                        {photoCell("receipt_paths", "🧾", "receipt")}
                         <td className="mono">{fmtDate(r.purchased_at)}</td>
                         <td>{isDeal ? <span className="badge2">Deal</span> : <span className="badge2 badge-muted">{r.category || "Spend"}</span>}</td>
                         <td className="itbl-title">
@@ -452,6 +476,7 @@ export default function Buy() {
                       </tr>
                       {isDeal && isOpen ? (
                         <tr className="deal-detail-row">
+                          <td></td>
                           <td></td>
                           <td colSpan={7}>
                             <div className="deal-cards-list">
@@ -478,24 +503,24 @@ export default function Buy() {
       )}
 
       {galRow && galPaths.length ? (
-        <div className="buy-lightbox" onClick={() => setGallery(null)} role="dialog" aria-label="Purchase photos">
+        <div className="buy-lightbox" onClick={() => setGallery(null)} role="dialog" aria-label={galIsReceipt ? "Receipts" : "Purchase photos"}>
           <button className="buy-lightbox-x" onClick={() => setGallery(null)} aria-label="Close">✕</button>
           <div className="buy-lightbox-stage" onClick={(e) => e.stopPropagation()}>
             {galPaths.length > 1 ? (
               <button className="buy-lb-nav prev" onClick={() => setGallery((g) => ({ ...g, index: (galIdx - 1 + galPaths.length) % galPaths.length }))} aria-label="Previous">‹</button>
             ) : null}
-            <img src={photoUrls[galPaths[galIdx]]} alt={`Purchase photo ${galIdx + 1}`} />
+            <img src={photoUrls[galPaths[galIdx]]} alt={`${galIsReceipt ? "Receipt" : "Purchase photo"} ${galIdx + 1}`} />
             {galPaths.length > 1 ? (
               <button className="buy-lb-nav next" onClick={() => setGallery((g) => ({ ...g, index: (galIdx + 1) % galPaths.length }))} aria-label="Next">›</button>
             ) : null}
           </div>
           <div className="buy-lb-bar" onClick={(e) => e.stopPropagation()}>
-            <span className="buy-lb-count">{galIdx + 1} / {galPaths.length}</span>
+            <span className="buy-lb-count">{galIsReceipt ? "Receipt" : "Photo"} {galIdx + 1} / {galPaths.length}</span>
             <label className="btn btn-ghost buy-lb-add">
-              {attaching === galRow.id ? "Uploading…" : "＋ Add photo"}
-              <input type="file" accept="image/*" multiple hidden disabled={attaching === galRow.id} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachPhotos(galRow, fs); }} />
+              {attaching === `${galRow.id}:${galField}` ? "Uploading…" : (galIsReceipt ? "＋ Add receipt" : "＋ Add photo")}
+              <input type="file" accept="image/*" multiple hidden disabled={attaching === `${galRow.id}:${galField}`} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachPhotos(galRow, fs, galField); }} />
             </label>
-            <button className="btn btn-ghost buy-lb-del" onClick={() => { if (confirm("Delete this photo?")) deletePhoto(galRow, galPaths[galIdx]); }}>🗑 Delete</button>
+            <button className="btn btn-ghost buy-lb-del" onClick={() => { if (confirm(`Delete this ${galIsReceipt ? "receipt" : "photo"}?`)) deletePhoto(galRow, galField, galPaths[galIdx]); }}>🗑 Delete</button>
           </div>
         </div>
       ) : null}

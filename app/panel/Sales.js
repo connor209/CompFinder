@@ -3,9 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
-import { resizeImage } from "@/lib/resizeImage";
 
-const RECEIPT_BUCKET = "purchase-photos"; // private per-user bucket, reused for sale receipts
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 function fmtDate(iso) {
   if (!iso) return "—";
@@ -25,63 +23,17 @@ export default function Sales() {
   const [syncing, setSyncing] = useState(false);
   const [note, setNote] = useState("");
   const [needsReconnect, setNeedsReconnect] = useState(false);
-  const [receiptUrls, setReceiptUrls] = useState({}); // path -> signed URL
-  const [attaching, setAttaching] = useState(null); // line_item_id uploading
-  const [gallery, setGallery] = useState(null); // { key, index }
 
   async function load() {
     const supabase = createClient();
     const { data } = await supabase
       .from("ebay_sales")
-      .select("line_item_id,ebay_item_id,sku,title,quantity,sold_pence,currency,sold_date,receipt_paths")
+      .select("line_item_id,ebay_item_id,sku,title,quantity,sold_pence,currency,sold_date")
       .order("sold_date", { ascending: false })
       .limit(500);
     setSales(data || []);
     const { data: costRows } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
     setCosts(new Map((costRows || []).map((r) => [r.ebay_item_id, r.cost_pence])));
-    const paths = (data || []).flatMap((s) => s.receipt_paths || []);
-    if (paths.length) {
-      const { data: signed } = await supabase.storage.from(RECEIPT_BUCKET).createSignedUrls(paths, 3600);
-      const m = {};
-      for (const s of signed || []) if (s.signedUrl && !s.error) m[s.path] = s.signedUrl;
-      setReceiptUrls(m);
-    } else {
-      setReceiptUrls({});
-    }
-  }
-
-  async function attachReceipts(row, files) {
-    const list = Array.from(files || []);
-    if (!list.length) return;
-    setAttaching(row.line_item_id);
-    try {
-      const sb = createClient();
-      const { data: { user } } = await sb.auth.getUser();
-      const added = [];
-      for (const f of list) {
-        const blob = await resizeImage(f);
-        const path = `${user.id}/${crypto.randomUUID()}.jpg`;
-        const { error: upErr } = await sb.storage.from(RECEIPT_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: false });
-        if (upErr) throw new Error(upErr.message);
-        added.push(path);
-      }
-      const next = [...(row.receipt_paths || []), ...added];
-      await sb.from("ebay_sales").update({ receipt_paths: next }).eq("line_item_id", row.line_item_id);
-      await load();
-    } catch (e) {
-      setNote(e.message || "Couldn't attach the receipt.");
-    }
-    setAttaching(null);
-  }
-
-  async function deleteReceipt(row, path) {
-    const sb = createClient();
-    const next = (row.receipt_paths || []).filter((p) => p !== path);
-    await sb.from("ebay_sales").update({ receipt_paths: next }).eq("line_item_id", row.line_item_id);
-    await sb.storage.from(RECEIPT_BUCKET).remove([path]).catch(() => {});
-    await load();
-    if (next.length === 0) setGallery(null);
-    else setGallery((g) => (g ? { ...g, index: Math.min(g.index, next.length - 1) } : g));
   }
 
   useEffect(() => {
@@ -184,27 +136,11 @@ export default function Sales() {
           <div className="table-wrap">
             <table className="itbl">
               <thead>
-                <tr><th aria-label="Receipt"></th><th>Date</th><th>Item</th><th>SKU</th><th>Qty</th><th>Sold</th><th>Fees</th><th>Cost</th><th>Profit</th></tr>
+                <tr><th>Date</th><th>Item</th><th>SKU</th><th>Qty</th><th>Sold</th><th>Fees</th><th>Cost</th><th>Profit</th></tr>
               </thead>
               <tbody>
-                {rows.map((r) => {
-                  const receipts = r.receipt_paths || [];
-                  const cover = receipts.find((p) => receiptUrls[p]);
-                  return (
+                {rows.map((r) => (
                   <tr key={r.line_item_id}>
-                    <td className="buy-photo-cell">
-                      {cover ? (
-                        <button type="button" className="buy-thumb" onClick={() => setGallery({ key: r.line_item_id, index: 0 })} title={`${receipts.length} receipt(s)`}>
-                          <img src={receiptUrls[cover]} alt="Receipt" loading="lazy" />
-                          {receipts.length > 1 ? <span className="buy-thumb-badge">{receipts.length}</span> : null}
-                        </button>
-                      ) : (
-                        <label className="buy-thumb-add" title="Attach a receipt / screenshot">
-                          {attaching === r.line_item_id ? <span className="spinner" /> : "🧾"}
-                          <input type="file" accept="image/*" multiple hidden disabled={attaching === r.line_item_id} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachReceipts(r, fs); }} />
-                        </label>
-                      )}
-                    </td>
                     <td className="mono">{fmtDate(r.sold_date)}</td>
                     <td className="itbl-title">{r.title}</td>
                     <td className="mono">{r.sku || "—"}</td>
@@ -214,39 +150,12 @@ export default function Sales() {
                     <td className="mono">{r.hasCost ? pounds(r.cost) : "—"}</td>
                     <td className={`mono ${r.profit > 0 ? "pos" : r.profit < 0 ? "neg" : ""}`}>{r.profit != null ? pounds(r.profit) : "—"}</td>
                   </tr>
-                  );
-                })}
+                ))}
               </tbody>
             </table>
           </div>
         </div>
       )}
-
-      {(() => {
-        if (!gallery) return null;
-        const row = rows.find((r) => r.line_item_id === gallery.key);
-        const paths = row ? row.receipt_paths || [] : [];
-        if (!paths.length) return null;
-        const idx = Math.min(gallery.index, paths.length - 1);
-        return (
-          <div className="buy-lightbox" onClick={() => setGallery(null)} role="dialog" aria-label="Receipts">
-            <button className="buy-lightbox-x" onClick={() => setGallery(null)} aria-label="Close">✕</button>
-            <div className="buy-lightbox-stage" onClick={(e) => e.stopPropagation()}>
-              {paths.length > 1 ? <button className="buy-lb-nav prev" onClick={() => setGallery((g) => ({ ...g, index: (idx - 1 + paths.length) % paths.length }))} aria-label="Previous">‹</button> : null}
-              <img src={receiptUrls[paths[idx]]} alt={`Receipt ${idx + 1}`} />
-              {paths.length > 1 ? <button className="buy-lb-nav next" onClick={() => setGallery((g) => ({ ...g, index: (idx + 1) % paths.length }))} aria-label="Next">›</button> : null}
-            </div>
-            <div className="buy-lb-bar" onClick={(e) => e.stopPropagation()}>
-              <span className="buy-lb-count">{idx + 1} / {paths.length}</span>
-              <label className="btn btn-ghost buy-lb-add">
-                {attaching === row.line_item_id ? "Uploading…" : "＋ Add receipt"}
-                <input type="file" accept="image/*" multiple hidden disabled={attaching === row.line_item_id} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachReceipts(row, fs); }} />
-              </label>
-              <button className="btn btn-ghost buy-lb-del" onClick={() => { if (confirm("Delete this receipt?")) deleteReceipt(row, paths[idx]); }}>🗑 Delete</button>
-            </div>
-          </div>
-        );
-      })()}
     </>
   );
 }
