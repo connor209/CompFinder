@@ -24,6 +24,7 @@ function numKey(n) {
 export async function GET(request) {
   const params = new URL(request.url).searchParams;
   const expansion = (params.get("expansion") || "").trim();
+  const code = (params.get("code") || "").trim();
   const game = (params.get("game") || "").trim();
   const category = (params.get("category") || "card").trim(); // "card" | "all"
   const page = Math.max(0, parseInt(params.get("page") || "0", 10) || 0);
@@ -31,21 +32,31 @@ export async function GET(request) {
 
   const supabase = await createClient();
   const from = page * PAGE_SIZE;
+  // Fetch one extra row so "is there a next page?" is exact (avoids a phantom
+  // empty page when a set is an exact multiple of PAGE_SIZE).
   let query = supabase
     .from("card_catalog")
     .select("cardmarket_id,name,collector_number,rarity,category")
     .order("collector_number", { ascending: true })
-    .range(from, from + PAGE_SIZE - 1);
+    .range(from, from + PAGE_SIZE);
 
   if (game) query = query.eq("game", game);
   if (category === "card") query = query.eq("category", "card");
   if (expansion === PSEUDO_SET) query = query.or("expansion.is.null,expansion.eq.");
-  else query = query.eq("expansion", expansion);
+  else {
+    query = query.eq("expansion", expansion);
+    // Two expansions can share a name with different codes (they're distinct
+    // rows in cm_sets); scope to the exact code so the drill-down matches.
+    if (code) query = query.eq("expansion_code", code);
+  }
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ ok: true, available: false, cards: [] });
 
-  const cards = (data || [])
+  const rows = data || [];
+  const hasMore = rows.length > PAGE_SIZE;      // the +1 sentinel row was returned
+  const pageRows = hasMore ? rows.slice(0, PAGE_SIZE) : rows;
+  const cards = pageRows
     .map((c) => ({
       id: `cm-${c.cardmarket_id}`,
       cardmarketId: c.cardmarket_id,
@@ -59,5 +70,5 @@ export async function GET(request) {
       const kb = numKey(b.number);
       return ka.num - kb.num || ka.s.localeCompare(kb.s) || a.name.localeCompare(b.name);
     });
-  return NextResponse.json({ ok: true, available: true, cards, hasMore: (data || []).length === PAGE_SIZE });
+  return NextResponse.json({ ok: true, available: true, cards, hasMore });
 }

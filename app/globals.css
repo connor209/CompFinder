@@ -289,14 +289,19 @@ a { color:var(--accent-2); }
 .brw-exp-name { font-size:13.5px; color:var(--ink); font-weight:600; }
 .brw-exp-meta { display:flex; align-items:center; gap:6px; flex:none; }
 .brw-code { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
-.brw-sel { display:flex; align-items:center; gap:12px; margin-bottom:12px; }
-.brw-sel-name { font-family:var(--font-display); font-weight:700; font-size:16px; color:var(--ink); }
 .brw-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:6px; max-height:460px; overflow:auto; }
-.brw-card { display:flex; align-items:baseline; gap:8px; text-align:left; background:var(--surface-2); border:1px solid var(--line); border-radius:9px; padding:9px 11px; cursor:pointer; transition:border-color .12s, background .12s; }
+.brw-card { display:flex; align-items:center; gap:8px; text-align:left; background:var(--surface-2); border:1px solid var(--line); border-radius:9px; padding:9px 11px; cursor:pointer; transition:border-color .12s, background .12s; }
 .brw-card:hover { border-color:var(--accent); background:var(--surface); }
-.brw-card-no { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); min-width:34px; }
+.brw-card-no { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); min-width:34px; flex:none; }
 .brw-card-name { font-size:13px; color:var(--ink); font-weight:600; flex:1; }
 .brw-card-rar { font-size:10.5px; color:var(--ink-faint); }
+.brw-retry { background:transparent; border:0; padding:0; color:var(--accent-2); font-weight:600; font:inherit; cursor:pointer; text-decoration:underline; }
+.brw-filter-note { margin-top:8px; }
+/* On touch/small screens let the lists grow with the page instead of trapping
+   scroll inside a short inner window. */
+@media (max-width:720px) {
+  .brw-exps, .brw-cards { max-height:none; overflow:visible; }
+}
 
 /* Browse module — games grid, breadcrumbs, set counts, card categories */
 .brw-games { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; margin-top:12px; }

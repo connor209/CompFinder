@@ -11,6 +11,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
  */
 const CATEGORY_LABEL = { token: "Token", code: "Code card", oversized: "Oversized", tip: "Tip card" };
 
+// Sort by collector number numerically (the DB paginates on the text column, so
+// merged pages must be re-sorted here for a stable "2 before 10" order).
+function numKey(n) {
+  const s = String(n || "");
+  const m = s.match(/\d+/);
+  return { num: m ? parseInt(m[0], 10) : Number.MAX_SAFE_INTEGER, s };
+}
+function byNumber(a, b) {
+  const ka = numKey(a.number), kb = numKey(b.number);
+  return ka.num - kb.num || ka.s.localeCompare(kb.s) || a.name.localeCompare(b.name);
+}
+async function getJson(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
 export default function Browse({ onDeepDive }) {
   const [games, setGames] = useState(null);
   const [available, setAvailable] = useState(true);
@@ -18,23 +35,26 @@ export default function Browse({ onDeepDive }) {
 
   // sets for the chosen game
   const [sets, setSets] = useState(null);
+  const [setsError, setSetsError] = useState(false);
   const [setQ, setSetQ] = useState("");
 
   // cards for the chosen set
   const [set, setSet] = useState(null);
   const [cards, setCards] = useState([]);
   const [cardsLoading, setCardsLoading] = useState(false);
+  const [cardsError, setCardsError] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(0);
   const [cardQ, setCardQ] = useState("");
   const [showExtras, setShowExtras] = useState(false);
-  const seq = useRef(0);
+  const gameSeq = useRef(0);
+  const cardSeq = useRef(0);
 
   // ---- load games once ----
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/catalog/games").then((r) => r.json());
+        const res = await getJson("/api/catalog/games");
         setAvailable(res.available !== false);
         setGames(res.games || []);
       } catch {
@@ -45,35 +65,42 @@ export default function Browse({ onDeepDive }) {
 
   // ---- pick a game -> load its sets ----
   async function openGame(g) {
+    const mine = ++gameSeq.current;
     setGame(g);
     setSet(null);
     setSets(null);
+    setSetsError(false);
     setSetQ("");
     try {
-      const res = await fetch(`/api/catalog/sets?game=${encodeURIComponent(g.slug)}`).then((r) => r.json());
+      const res = await getJson(`/api/catalog/sets?game=${encodeURIComponent(g.slug)}`);
+      if (mine !== gameSeq.current) return; // superseded by a newer game click
+      if (res.available === false) { setSetsError(true); setSets([]); return; }
       setSets(res.sets || []);
     } catch {
-      setSets([]);
+      if (mine === gameSeq.current) { setSetsError(true); setSets([]); }
     }
   }
 
   // ---- pick a set -> load its cards (page 0) ----
   async function openSet(s, pageNum = 0, extras = showExtras) {
-    const mine = ++seq.current;
+    const mine = ++cardSeq.current;
     setSet(s);
     setCardsLoading(true);
+    setCardsError(false);
     if (pageNum === 0) setCards([]);
     try {
-      const url = `/api/catalog/cards?expansion=${encodeURIComponent(s.name)}&game=${encodeURIComponent(game.slug)}&category=${extras ? "all" : "card"}&page=${pageNum}`;
-      const res = await fetch(url).then((r) => r.json());
-      if (mine !== seq.current) return; // a newer request superseded this one
-      setCards((prev) => (pageNum === 0 ? res.cards || [] : [...prev, ...(res.cards || [])]));
+      const url = `/api/catalog/cards?expansion=${encodeURIComponent(s.name)}&code=${encodeURIComponent(s.code || "")}` +
+        `&game=${encodeURIComponent(game.slug)}&category=${extras ? "all" : "card"}&page=${pageNum}`;
+      const res = await getJson(url);
+      if (mine !== cardSeq.current) return; // a newer request superseded this one
+      if (res.available === false) { setCardsError(true); return; }
+      setCards((prev) => (pageNum === 0 ? res.cards || [] : [...prev, ...(res.cards || [])]).slice().sort(byNumber));
       setHasMore(!!res.hasMore);
       setPage(pageNum);
     } catch {
-      if (mine === seq.current) setCards([]);
+      if (mine === cardSeq.current) setCardsError(true);
     }
-    if (mine === seq.current) setCardsLoading(false);
+    if (mine === cardSeq.current) setCardsLoading(false);
   }
 
   function toggleExtras(next) {
@@ -84,8 +111,7 @@ export default function Browse({ onDeepDive }) {
   const filteredSets = useMemo(() => {
     if (!sets) return [];
     const q = setQ.trim().toLowerCase();
-    const list = q ? sets.filter((s) => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)) : sets;
-    return list;
+    return q ? sets.filter((s) => s.name.toLowerCase().includes(q) || s.code.toLowerCase().includes(q)) : sets;
   }, [sets, setQ]);
 
   const filteredCards = useMemo(() => {
@@ -138,14 +164,16 @@ export default function Browse({ onDeepDive }) {
           <div className="brw-crumbs">
             <button className="brw-crumb-link" onClick={() => setGame(null)}>Games</button>
             <span className="brw-crumb-sep">›</span>
-            <span className="brw-crumb-cur">{g_icon(game)} {game.name}</span>
+            <span className="brw-crumb-cur"><span aria-hidden="true">{game.icon} </span>{game.name}</span>
           </div>
           <div className="dd-inp brw-inp">
             <span className="mag" aria-hidden="true">🔍</span>
-            <input value={setQ} onChange={(e) => setSetQ(e.target.value)} placeholder={`Find a set in ${game.shortName || game.name}…`} aria-label="Find a set" autoFocus />
+            <input value={setQ} onChange={(e) => setSetQ(e.target.value)} placeholder={`Find a set in ${game.shortName || game.name}…`} aria-label="Find a set" />
           </div>
           {sets === null ? (
             <p className="hint hint-small"><span className="spinner" /> &nbsp;Loading sets…</p>
+          ) : setsError ? (
+            <p className="hint hint-small">Couldn’t load sets — <button className="brw-retry" onClick={() => openGame(game)}>try again</button>.</p>
           ) : filteredSets.length === 0 ? (
             <p className="hint hint-small">{setQ ? `No sets match “${setQ}”.` : "No sets found."}</p>
           ) : (
@@ -171,6 +199,7 @@ export default function Browse({ onDeepDive }) {
   }
 
   // LEVEL 3 — cards in the chosen set
+  const filtering = cardQ.trim().length > 0;
   return (
     <div className="rise-group">
       <div className="panel">
@@ -195,8 +224,10 @@ export default function Browse({ onDeepDive }) {
 
         {cardsLoading && cards.length === 0 ? (
           <p className="hint hint-small"><span className="spinner" /> &nbsp;Loading cards…</p>
+        ) : cardsError && cards.length === 0 ? (
+          <p className="hint hint-small">Couldn’t load cards — <button className="brw-retry" onClick={() => openSet(set, 0)}>try again</button>.</p>
         ) : filteredCards.length === 0 ? (
-          <p className="hint hint-small">{cardQ ? `No cards match “${cardQ}”.` : "No cards found in this set."}</p>
+          <p className="hint hint-small">{filtering ? `No loaded cards match “${cardQ}”.${hasMore ? " Load more below to search the rest." : ""}` : "No cards found in this set."}</p>
         ) : (
           <>
             <div className="brw-cards">
@@ -222,7 +253,10 @@ export default function Browse({ onDeepDive }) {
                 </button>
               ))}
             </div>
-            {hasMore && !cardQ ? (
+            {filtering ? (
+              <p className="hint hint-small brw-filter-note">Filtering {cards.length.toLocaleString()} loaded card{cards.length === 1 ? "" : "s"}{hasMore ? " — load more to search the whole set." : "."}</p>
+            ) : null}
+            {hasMore ? (
               <div className="brw-more">
                 <button className="btn btn-ghost" disabled={cardsLoading} onClick={() => openSet(set, page + 1)}>
                   {cardsLoading ? "Loading…" : "Load more"}
@@ -234,8 +268,4 @@ export default function Browse({ onDeepDive }) {
       </div>
     </div>
   );
-}
-
-function g_icon(g) {
-  return <span aria-hidden="true">{g.icon} </span>;
 }
