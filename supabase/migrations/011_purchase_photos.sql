@@ -1,13 +1,13 @@
 -- Comp Finder — purchase photos (visual record of a haul)
 --
--- Adds an optional photo to a purchase so you can snap a picture of the stack
--- of cards you bought instead of writing out "one of this, two of that". The
--- image itself lives in a PRIVATE Supabase Storage bucket, one folder per user;
--- the purchases row just stores the object path. Run once in the Supabase SQL
+-- Adds optional photos to a purchase so you can snap pictures of the stack of
+-- cards you bought instead of writing out "one of this, two of that". The
+-- images live in a PRIVATE Supabase Storage bucket, one folder per user; the
+-- purchases row just stores the object paths. Run once in the Supabase SQL
 -- editor.
 
--- 1. Path to the stored image (bucket-relative), e.g. "<user-id>/<uuid>.jpg".
-alter table public.purchases add column if not exists photo_path text;
+-- 1. Bucket-relative image paths, e.g. {"<user-id>/<uuid>.jpg", ...}.
+alter table public.purchases add column if not exists photo_paths text[] not null default '{}';
 
 -- 2. Private bucket for the images.
 insert into storage.buckets (id, name, public)
