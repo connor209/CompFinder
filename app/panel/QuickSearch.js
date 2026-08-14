@@ -3,6 +3,7 @@
 import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
 import { detectLanguage } from "@/lib/catalog.js";
+import { cleanSearchName } from "@/lib/cardname.js";
 import { createClient } from "@/lib/supabase/client";
 import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
@@ -22,14 +23,6 @@ function median(nums) {
   const s = [...nums].sort((a, b) => a - b);
   const m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-// Cardmarket jams the Mega prefix onto the name — "MRayquaza EX", "MCharizard EX
-// (Y)" — which doesn't match how eBay lists them ("M Rayquaza EX"). Split a
-// leading "M" that's followed by an uppercase letter (a Mega); names like
-// "Mimikyu"/"Mewtwo" (M + lowercase) are left alone. Purely for the eBay search
-// text + display; the catalogue data is untouched.
-function normalizeMegaName(name) {
-  return (name || "").replace(/^M([A-Z])/, "M $1");
 }
 
 /**
@@ -360,10 +353,9 @@ export default function QuickSearch({ seed }) {
     if (dd.card && mapped) {
       setQ(dd.query);
       const g = mapped;
-      // "other" games price from name text only, so fold the collector number
-      // into the name to keep the search specific (e.g. "Luffy OP01-001").
-      let card = dd.card;
-      if (g === "other" && card.number) card = { ...card, name: `${card.name} ${card.number}`.trim() };
+      // runDeepDive cleans the name and folds the number into the query per
+      // game, so pass the card through as-is.
+      const card = dd.card;
       const lang = g === "pokemon" ? detectLanguage(card.set) : "English";
       const l = lang === "English" ? "" : lang;
       setLanguage(l);
@@ -385,9 +377,9 @@ export default function QuickSearch({ seed }) {
     setListing(false);
     setMine({ loading: true, configured: true, error: "", listings: [] });
     const isPokemon = gameArg === "pokemon";
-    // Normalise the Cardmarket Mega prefix so the eBay search + header read
-    // "M Rayquaza EX", not "MRayquaza EX".
-    if (isPokemon) card = { ...card, name: normalizeMegaName(card.name) };
+    // Strip Cardmarket naming noise (Mega prefix, [format] tags, (foil/version)
+    // annotations) so the eBay search + header match real listings.
+    card = { ...card, name: cleanSearchName(card.name, gameArg) };
 
     // Pokémon catalog cards carry no art — pull the English card image from
     // pokemontcg.io in the background to fill the header (non-English prints
@@ -410,7 +402,9 @@ export default function QuickSearch({ seed }) {
     } else if (gameArg === "mtg") {
       query = `${card.name} ${card.set || ""}`.replace(/\s+/g, " ").trim();
     } else {
-      query = card.name.trim();
+      // Other games: name + collector number keeps the search specific
+      // (e.g. "Luffy OP01-001") without over-filtering on set.
+      query = `${card.name} ${card.number || ""}`.replace(/\s+/g, " ").trim();
     }
 
     // "Already listed on eBay?" — fire-and-forget, fills in when ready. We pass
