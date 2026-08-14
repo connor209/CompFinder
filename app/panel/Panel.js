@@ -13,6 +13,7 @@ import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import Buy from "./Buy";
+import Accounts from "./Accounts";
 import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
 import ThemeSeg from "./ThemeSeg";
@@ -30,7 +31,8 @@ const STREAM_SLUG = {
   arbitrage: "arbitrage",
   sales: "sales",
   stacks: "stacks",
-  pull: "pull"
+  pull: "pull",
+  accounts: "accounts"
 };
 const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) => [v, k]));
 
@@ -59,6 +61,7 @@ const MODULES = [
       { key: "pull", label: "Pull sheet" }
     ]
   },
+  { key: "accounts", label: "Accounts", icon: "📒", sections: [{ key: "accounts", label: "P&L" }] },
   { key: "arbitrage", label: "Arbitrage", icon: "📊", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
 ];
 const moduleForStream = (s) => MODULES.find((m) => m.sections.some((sec) => sec.key === s)) || MODULES[0];
@@ -627,6 +630,7 @@ export default function Panel({ initialSection = "dashboard" }) {
       {stream === "stacks" && <Stacks />}
       {stream === "pull" && <PullSheet />}
       {stream === "buy" && <Buy />}
+      {stream === "accounts" && <Accounts />}
       {stream === "batch" && (
         <>
       <div className="status-strip">

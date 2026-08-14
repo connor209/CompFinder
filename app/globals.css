@@ -467,6 +467,20 @@ a { color:var(--accent-2); }
 .deal-sum-warn { font-size:13px; color:var(--bad-ink); font-weight:600; }
 .deal-card-tag { font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface); border:1px solid var(--line); border-radius:5px; padding:1px 5px; }
 
+/* Accounts — P&L report */
+.pnl-lines { display:flex; flex-direction:column; margin:6px 0 4px; }
+.pnl-row { display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding:9px 2px; border-bottom:1px solid var(--line); font-size:14px; }
+.pnl-row:last-child { border-bottom:0; }
+.pnl-row.strong { font-weight:700; border-top:1.5px solid var(--line-strong); border-bottom:1.5px solid var(--line-strong); margin-top:2px; font-size:15px; }
+.pnl-label { color:var(--ink-soft); }
+.pnl-row.strong .pnl-label { color:var(--ink); }
+.pnl-sub { color:var(--ink-faint); font-size:12px; }
+.pnl-val { font-family:var(--font-mono); font-variant-numeric:tabular-nums; color:var(--ink); }
+.pnl-val.neg { color:var(--ink-soft); }
+.pnl-group { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-faint); font-weight:700; padding:12px 2px 4px; }
+.pnl-fee { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--ink-soft); margin-top:12px; padding-top:12px; border-top:1px dashed var(--line-strong); flex-wrap:wrap; }
+.pnl-fee input { width:70px; border:1px solid var(--line-strong); border-radius:8px; padding:6px 8px; font-size:13px; background:var(--surface-2); color:var(--ink); }
+
 /* Pull sheet — variation/loose picks grouped by set */
 .ps-section-head { margin:6px 0 10px; }
 .loose-set { border-left:3px solid var(--accent); }
