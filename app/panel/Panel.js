@@ -13,6 +13,7 @@ import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import Buy from "./Buy";
+import BulkListModal from "./BulkListModal";
 import ThemeSeg from "./ThemeSeg";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -185,6 +186,7 @@ export default function Panel({ initialSection = "dashboard" }) {
   const [activeByIndex, setActiveByIndex] = useState({});
 
   // Results filters
+  const [showBulkList, setShowBulkList] = useState(false);
   const [resultsSearch, setResultsSearch] = useState("");
   const [confidenceFilter, setConfidenceFilter] = useState("");
   const [reasonFilter, setReasonFilter] = useState("");
@@ -742,8 +744,35 @@ export default function Panel({ initialSection = "dashboard" }) {
       <section className="panel results-panel">
         <div className="panel-head">
           <span className="eyebrow">Results</span>
-          <button className="btn btn-ghost" disabled={results.length === 0} onClick={exportCsv}>Export CSV</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(() => {
+              const pricedCount = results.filter((r) => r.rec && r.rec.finalPence != null).length;
+              return (
+                <button className="btn btn-primary" disabled={pricedCount === 0} onClick={() => setShowBulkList(true)}>
+                  🏷️ List on eBay{pricedCount ? ` (${pricedCount})` : ""}
+                </button>
+              );
+            })()}
+            <button className="btn btn-ghost" disabled={results.length === 0} onClick={exportCsv}>Export CSV</button>
+          </div>
         </div>
+
+        {showBulkList ? (
+          <BulkListModal
+            cards={results
+              .filter((r) => r.rec && r.rec.finalPence != null)
+              .map((r) => ({
+                baseTitle: r.title,
+                name: (r.nameTokens && r.nameTokens.join(" ")) || r.title,
+                number: r.cardNumber || "",
+                set: r.set || "",
+                sku: r.sku || "",
+                pricePence: r.rec.finalPence
+              }))}
+            onClose={() => setShowBulkList(false)}
+            onDone={() => {}}
+          />
+        ) : null}
 
         <div className="results-toolbar">
           <input type="text" placeholder="Filter by title, SKU, or query…" value={resultsSearch} onChange={(e) => setResultsSearch(e.target.value)} />

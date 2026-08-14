@@ -461,6 +461,29 @@ a { color:var(--accent-2); }
 .buy-lb-add, .buy-lb-del { cursor:pointer; }
 .buy-lb-del { color:var(--bad-ink); }
 
+/* Bulk list-to-eBay modal */
+.bulk-overlay { position:fixed; inset:0; z-index:70; background:rgba(3,7,8,.6); display:flex; align-items:flex-start; justify-content:center; padding:24px 14px; overflow-y:auto; animation:fadein .14s ease; }
+.bulk-modal { width:100%; max-width:940px; background:var(--surface); border:1px solid var(--line-strong); border-radius:18px; box-shadow:var(--shadow-2); padding:18px 20px 16px; margin:auto; }
+.bulk-head { display:flex; justify-content:space-between; align-items:flex-start; gap:14px; margin-bottom:14px; }
+.bulk-shared { border:1px solid var(--line); border-radius:14px; padding:14px; background:var(--surface-2); display:flex; flex-direction:column; gap:12px; margin-bottom:14px; }
+.bulk-shared .field textarea { border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:10px 12px; font-family:var(--font-body); font-size:13px; background:var(--surface); color:var(--ink); resize:vertical; }
+.bulk-shared-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
+.bulk-rows { max-height:46vh; overflow:auto; border:1px solid var(--line); border-radius:12px; }
+.bulk-rows table { min-width:640px; }
+.bulk-row-off { opacity:.45; }
+.bulk-title-inp { width:100%; min-width:180px; border:1px solid var(--line-strong); border-radius:8px; padding:6px 9px; font-size:12.5px; background:var(--surface); color:var(--ink); }
+.bulk-img-inp { width:100%; min-width:180px; border:1px solid var(--line); border-radius:8px; padding:5px 9px; font-size:11px; background:var(--surface-2); color:var(--ink-soft); margin-top:4px; }
+.bulk-price-inp { width:78px; border:1px solid var(--line-strong); border-radius:8px; padding:6px 8px; font-family:var(--font-mono); font-size:13px; background:var(--surface); color:var(--ink); }
+.bulk-qty-inp { width:58px; border:1px solid var(--line-strong); border-radius:8px; padding:6px 8px; font-size:13px; background:var(--surface); color:var(--ink); }
+.bulk-rows select { border:1px solid var(--line-strong); border-radius:8px; padding:6px 8px; font-size:12.5px; background:var(--surface); color:var(--ink); }
+.bulk-status { white-space:nowrap; font-size:12px; }
+.bulk-ok { color:var(--conf-high); font-weight:600; text-decoration:none; }
+.bulk-err { color:var(--bad-ink); font-weight:600; }
+.bulk-idle { color:var(--ink-faint); }
+.bulk-foot { display:flex; justify-content:space-between; align-items:center; gap:14px; margin-top:14px; flex-wrap:wrap; }
+.bulk-foot-actions { display:flex; gap:8px; margin-left:auto; }
+.bulk-wide { width:100%; }
+
 /* Graded-sale chip in the Recent sales list */
 .sale-grade { display:inline-flex; align-items:center; gap:4px; font-size:10.5px; font-weight:800; letter-spacing:.02em; color:#fff; padding:2px 7px; border-radius:6px; margin-right:8px; vertical-align:1px; white-space:nowrap; background:var(--ink-faint); }
 .sale-grade.grade-psa { background:#C0392B; }
