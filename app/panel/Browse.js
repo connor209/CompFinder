@@ -205,7 +205,13 @@ export default function Browse({ onDeepDive }) {
                   key={c.id}
                   className="brw-card"
                   title={onDeepDive ? "Price this card in Quick Search" : c.name}
-                  onClick={() => onDeepDive && onDeepDive(`${c.name} ${c.number}`.trim())}
+                  onClick={() =>
+                    onDeepDive &&
+                    onDeepDive(`${c.name} ${c.number}`.trim(), {
+                      game: game.slug,
+                      card: { name: c.name, number: c.number, set: set.name, series: set.code, rarity: c.rarity, image: null }
+                    })
+                  }
                 >
                   <span className="brw-card-no">{c.number || "—"}</span>
                   <span className="brw-card-name">{c.name}</span>

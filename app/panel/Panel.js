@@ -175,9 +175,12 @@ export default function Panel({ initialSection = "dashboard" }) {
     lastByModule.current[moduleForStream(stream).key] = stream;
   }, [stream]);
 
-  const deepDiveCard = useCallback((query) => {
+  // Deep dive a card in Quick Search. `opts` may carry { game, card } so a jump
+  // from Browse lands on the right game (pokemon/mtg/other) and prices the exact
+  // card (name + number + set), not just a text string.
+  const deepDiveCard = useCallback((query, opts = {}) => {
     seedNonce.current += 1;
-    setSeed({ query, nonce: seedNonce.current });
+    setSeed({ query, nonce: seedNonce.current, game: opts.game || null, card: opts.card || null });
     go("single");
   }, [go]);
 

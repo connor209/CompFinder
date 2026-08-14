@@ -328,10 +328,30 @@ export default function QuickSearch({ seed }) {
     runQuery(q);
   }
 
-  // Deep dive triggered from another stream (e.g. "My listings" → Quick Search).
-  // seed carries { query, nonce }; the nonce forces a re-run for repeat clicks.
+  // Deep dive triggered from another stream (e.g. "My listings" or Browse →
+  // Quick Search). seed carries { query, nonce, game?, card? }; the nonce forces
+  // a re-run for repeat clicks. When Browse supplies a game + card we set the
+  // right game pill and price the exact card, rather than re-parsing text
+  // through the default (Pokémon) pipeline.
   useEffect(() => {
-    if (seed && seed.query) {
+    if (!seed || !seed.query) return;
+    // Map a catalogue game slug to Quick Search's game modes.
+    const mapped = seed.game
+      ? seed.game === "pokemon" ? "pokemon" : seed.game === "magic" ? "mtg" : "other"
+      : null;
+    if (mapped && mapped !== game) setGame(mapped);
+    if (seed.card && mapped) {
+      setQ(seed.query);
+      const g = mapped;
+      // "other" games price from name text only, so fold the collector number
+      // into the name to keep the search specific (e.g. "Luffy OP01-001").
+      let card = seed.card;
+      if (g === "other" && card.number) card = { ...card, name: `${card.name} ${card.number}`.trim() };
+      const lang = g === "pokemon" ? detectLanguage(card.set) : "English";
+      const l = lang === "English" ? "" : lang;
+      setLanguage(l);
+      runDeepDive(card, l, g);
+    } else {
       setQ(seed.query);
       runQuery(seed.query);
     }
