@@ -328,32 +328,41 @@ export default function QuickSearch({ seed }) {
     runQuery(q);
   }
 
-  // Deep dive triggered from another stream (e.g. "My listings" or Browse →
-  // Quick Search). seed carries { query, nonce, game?, card? }; the nonce forces
-  // a re-run for repeat clicks. When Browse supplies a game + card we set the
-  // right game pill and price the exact card, rather than re-parsing text
-  // through the default (Pokémon) pipeline.
+  // Deep dive triggered from another stream (e.g. "My listings", Browse or a
+  // batch result → Quick Search). The payload is read from the seed prop when it
+  // survived navigation, otherwise from sessionStorage (set by deepDiveCard),
+  // which is robust to the route re-rendering and losing the prop. Runs once per
+  // jump on mount; the nonce dep re-fires it for repeat clicks while mounted.
   useEffect(() => {
-    if (!seed || !seed.query) return;
+    let dd = seed && seed.query ? seed : null;
+    if (!dd) {
+      try {
+        const raw = sessionStorage.getItem("cf-deepdive");
+        if (raw) dd = JSON.parse(raw);
+      } catch { /* ignore */ }
+    }
+    if (!dd || !dd.query) return;
+    try { sessionStorage.removeItem("cf-deepdive"); } catch { /* ignore */ }
+
     // Map a catalogue game slug to Quick Search's game modes.
-    const mapped = seed.game
-      ? seed.game === "pokemon" ? "pokemon" : seed.game === "magic" ? "mtg" : "other"
+    const mapped = dd.game
+      ? dd.game === "pokemon" ? "pokemon" : dd.game === "magic" ? "mtg" : "other"
       : null;
     if (mapped && mapped !== game) setGame(mapped);
-    if (seed.card && mapped) {
-      setQ(seed.query);
+    if (dd.card && mapped) {
+      setQ(dd.query);
       const g = mapped;
       // "other" games price from name text only, so fold the collector number
       // into the name to keep the search specific (e.g. "Luffy OP01-001").
-      let card = seed.card;
+      let card = dd.card;
       if (g === "other" && card.number) card = { ...card, name: `${card.name} ${card.number}`.trim() };
       const lang = g === "pokemon" ? detectLanguage(card.set) : "English";
       const l = lang === "English" ? "" : lang;
       setLanguage(l);
       runDeepDive(card, l, g);
     } else {
-      setQ(seed.query);
-      runQuery(seed.query);
+      setQ(dd.query);
+      runQuery(dd.query);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce]);

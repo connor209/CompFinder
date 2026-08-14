@@ -178,9 +178,16 @@ export default function Panel({ initialSection = "dashboard" }) {
   // Deep dive a card in Quick Search. `opts` may carry { game, card } so a jump
   // from Browse lands on the right game (pokemon/mtg/other) and prices the exact
   // card (name + number + set), not just a text string.
+  //
+  // The payload is stashed in sessionStorage as well as React state: navigating
+  // to /panel/search re-renders the route, which can reset this component's
+  // state before Quick Search reads the prop — sessionStorage survives that, so
+  // the search always fires. Quick Search consumes and clears it on mount.
   const deepDiveCard = useCallback((query, opts = {}) => {
     seedNonce.current += 1;
-    setSeed({ query, nonce: seedNonce.current, game: opts.game || null, card: opts.card || null });
+    const payload = { query, nonce: seedNonce.current, game: opts.game || null, card: opts.card || null };
+    try { sessionStorage.setItem("cf-deepdive", JSON.stringify(payload)); } catch { /* private mode */ }
+    setSeed(payload);
     go("single");
   }, [go]);
 
