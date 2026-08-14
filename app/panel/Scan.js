@@ -55,6 +55,17 @@ export default function Scan({ onDeepDive }) {
     }
   }, []);
 
+  // Attach the stream once the <video> actually exists. On first start the
+  // video isn't rendered yet (camera === "starting"), so startCamera can't set
+  // srcObject — this effect runs when camera flips to "live" and the element
+  // has mounted, which is what makes the feed appear instead of staying black.
+  useEffect(() => {
+    if (camera === "live" && videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [camera]);
+
   useEffect(() => {
     mountedRef.current = true;
     startCamera();
