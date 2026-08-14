@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
 
 const CONDITIONS = [
   { l: "Near Mint", v: "400010" },
@@ -77,7 +78,22 @@ export default function BulkListModal({ cards, onClose, onDone }) {
   );
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
+  const [linkedPolicy, setLinkedPolicy] = useState(null); // {fulfillmentName,...} when the seller linked eBay policies
   const artDone = useRef(false);
+
+  // Reflect linked eBay Business Policies — when set, eBay applies the policy's
+  // shipping/return terms and the inline postage fields below are ignored.
+  useEffect(() => {
+    (async () => {
+      try {
+        const sb = createClient();
+        const { data: { user } } = await sb.auth.getUser();
+        const { data: profile } = await sb.from("profiles").select("settings").eq("id", user.id).single();
+        const p = profile?.settings?.ebayPolicies;
+        if (p && p.fulfillmentPolicyId) setLinkedPolicy(p);
+      } catch { /* best-effort */ }
+    })();
+  }, []);
 
   // Auto-fetch stock art per card (best-effort, small concurrency pool).
   useEffect(() => {
@@ -193,6 +209,12 @@ export default function BulkListModal({ cards, onClose, onDone }) {
             <span>Description boilerplate</span>
             <textarea rows={3} value={descTmpl} onChange={(e) => setDescTmpl(e.target.value)} />
           </label>
+          {linkedPolicy ? (
+            <p className="hint hint-small" style={{ margin: 0, color: "var(--accent-2)" }}>
+              📦 Using your linked eBay policies — shipping: <b>{linkedPolicy.fulfillmentName || "selected"}</b>
+              {linkedPolicy.returnName ? <>, returns: <b>{linkedPolicy.returnName}</b></> : null}. Postage fields hidden.
+            </p>
+          ) : null}
           <div className="bulk-shared-grid">
             <label className="field"><span>Default condition</span>
               <select value={conditionId} onChange={(e) => setAllConditions(e.target.value)}>
@@ -201,20 +223,24 @@ export default function BulkListModal({ cards, onClose, onDone }) {
             </label>
             <label className="field"><span>Category ID</span><input type="text" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} /></label>
             <label className="field"><span>Postcode</span><input type="text" value={postcode} onChange={(e) => setPostcode(e.target.value)} placeholder="SW1A 1AA" /></label>
-            <label className="field"><span>Dispatch (days)</span><input type="number" min="0" value={dispatchDays} onChange={(e) => setDispatchDays(e.target.value)} /></label>
-            <label className="field"><span>Postage</span>
-              <select value={shippingService} onChange={(e) => setShippingService(e.target.value)}>
-                {SHIPPING.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-              </select>
-            </label>
-            <label className="field"><span>Postage £</span><input type="number" min="0" step="0.01" value={shippingCost} onChange={(e) => setShippingCost(e.target.value)} /></label>
-            <label className="field"><span>Returns</span>
-              <select value={returnsDays} onChange={(e) => setReturnsDays(e.target.value)}>
-                <option value="30">30 days</option>
-                <option value="14">14 days</option>
-                <option value="">No returns</option>
-              </select>
-            </label>
+            {linkedPolicy ? null : (
+              <>
+                <label className="field"><span>Dispatch (days)</span><input type="number" min="0" value={dispatchDays} onChange={(e) => setDispatchDays(e.target.value)} /></label>
+                <label className="field"><span>Postage</span>
+                  <select value={shippingService} onChange={(e) => setShippingService(e.target.value)}>
+                    {SHIPPING.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                  </select>
+                </label>
+                <label className="field"><span>Postage £</span><input type="number" min="0" step="0.01" value={shippingCost} onChange={(e) => setShippingCost(e.target.value)} /></label>
+                <label className="field"><span>Returns</span>
+                  <select value={returnsDays} onChange={(e) => setReturnsDays(e.target.value)}>
+                    <option value="30">30 days</option>
+                    <option value="14">14 days</option>
+                    <option value="">No returns</option>
+                  </select>
+                </label>
+              </>
+            )}
             <div className="field" style={{ justifyContent: "flex-end" }}>
               <button className="btn btn-ghost" type="button" onClick={applyTemplateToAll} style={{ marginTop: "auto" }}>↻ Re-apply title template</button>
             </div>

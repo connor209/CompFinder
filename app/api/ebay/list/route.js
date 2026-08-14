@@ -26,6 +26,15 @@ export async function POST(request) {
     const token = await getValidUserAccessToken(admin, user.id);
     if (!token) return NextResponse.json({ ok: false, error: "eBay account not connected." }, { status: 400 });
 
+    // Apply the seller's linked Business Policies (if they've set any) unless
+    // the caller passed its own. When present, eBay uses the policy's shipping/
+    // return/payment terms and the inline flat-postage fields are ignored.
+    if (!L.policies) {
+      const { data: profile } = await supabase.from("profiles").select("settings").eq("id", user.id).single();
+      const p = profile?.settings?.ebayPolicies;
+      if (p && p.fulfillmentPolicyId) L.policies = p;
+    }
+
     const result = await addFixedPriceListing(token, L);
     // Bring the new listing into the cache. Bulk callers pass skipSync and run
     // a single sync at the end instead of one per item.

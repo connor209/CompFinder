@@ -146,7 +146,7 @@ export default function ListForm({ card, suggestedPence, language, imageUrl, onC
 
           <p className="hint hint-small">
             Category & condition IDs are eBay-validated — the defaults suit UK Pokémon singles, but if eBay rejects them,
-            adjust here. Uses inline flat postage (no business policies needed).
+            adjust here. If you&apos;ve linked eBay business policies in <a href="/settings">Settings</a>, those are applied and these postage/returns fields are ignored.
           </p>
 
           {result && !result.ok ? <p className="compfinder-error" style={{ marginTop: 8 }}>{result.error}</p> : null}

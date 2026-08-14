@@ -3,6 +3,7 @@ import SettingsForm from "./SettingsForm";
 import EbayConnect from "./EbayConnect";
 import AccountData from "./AccountData";
 import DashboardPrefs from "./DashboardPrefs";
+import ListingPolicies from "./ListingPolicies";
 import CompFinderPricing from "@/lib/pricing.js";
 
 const EBAY_FLASH = {
@@ -46,6 +47,7 @@ export default async function SettingsPage({ searchParams }) {
       <SettingsForm initialApiKey={profile?.soldcomps_api_key || ""} initialSettings={settings} />
       <DashboardPrefs initialSettings={settings} />
       <EbayConnect flash={flash} />
+      <ListingPolicies initialSettings={settings} />
       <AccountData email={user.email} />
     </div>
   );
