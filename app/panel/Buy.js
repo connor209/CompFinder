@@ -46,7 +46,7 @@ export default function Buy() {
   const [formReceipts, setFormReceipts] = useState([]); // proof of purchase
   const [attaching, setAttaching] = useState(null); // `${id}:${field}`
   const [gallery, setGallery] = useState(null); // { rowId, field, index }
-  const [camSetter, setCamSetter] = useState(null); // which tray's setter the in-app camera feeds
+  const [camTarget, setCamTarget] = useState(null); // {mode:'form',setter} | {mode:'row',row,field}
   const [expanded, setExpanded] = useState(new Set());
 
   async function load() {
@@ -101,11 +101,16 @@ export default function Buy() {
     setter((prev) => { prev.forEach((p) => URL.revokeObjectURL(p.url)); return []; });
   }
   // In-app camera (works inside the iOS Home Screen app, unlike the native
-  // capture). Stash the target tray's setter, then push the captured File.
-  function openCamera(setter) { setCamSetter(() => setter); }
-  function onCameraCapture(file) {
-    if (camSetter) camSetter((prev) => [...prev, { file, url: URL.createObjectURL(file) }]);
-    setCamSetter(null);
+  // capture). Targets either a form tray (stash locally, uploaded on save) or a
+  // ledger row (uploaded immediately via attachPhotos).
+  function openFormCamera(setter) { setCamTarget({ mode: "form", setter }); }
+  function openRowCamera(row, field) { setCamTarget({ mode: "row", row, field }); }
+  async function onCameraCapture(file) {
+    const t = camTarget;
+    setCamTarget(null);
+    if (!t) return;
+    if (t.mode === "form") t.setter((prev) => [...prev, { file, url: URL.createObjectURL(file) }]);
+    else if (t.mode === "row") await attachPhotos(t.row, [file], t.field);
   }
 
   // Derived deal maths (live). Agreed per-card prices stand; any card left blank
@@ -290,7 +295,7 @@ export default function Buy() {
             <button type="button" className="buy-photo-x" onClick={() => removePhoto(setter, i)} aria-label="Remove">✕</button>
           </div>
         ))}
-        <button type="button" className="buy-photo-btn" onClick={() => openCamera(setter)}>
+        <button type="button" className="buy-photo-btn" onClick={() => openFormCamera(setter)}>
           📷 <span>Camera</span>
         </button>
         <label className="buy-photo-btn">
@@ -309,8 +314,8 @@ export default function Buy() {
 
   return (
     <div className="rise-group">
-      {camSetter ? (
-        <CameraCapture label="Snap the receipt or haul" onCapture={onCameraCapture} onClose={() => setCamSetter(null)} />
+      {camTarget ? (
+        <CameraCapture label="Snap the receipt or haul" onCapture={onCameraCapture} onClose={() => setCamTarget(null)} />
       ) : null}
       <div className="stat-row">
         <div className="stat"><div className="k">Spend ({periodLabel})</div><div className="v">{pounds(totals.spend)}</div></div>
@@ -458,10 +463,15 @@ export default function Buy() {
                             {paths.length > 1 ? <span className="buy-thumb-badge">{paths.length}</span> : null}
                           </button>
                         ) : (
-                          <label className="buy-thumb-add" title={`Add ${addTitle}`}>
-                            {busy ? <span className="spinner" /> : icon}
-                            <input type="file" accept="image/*" multiple hidden disabled={busy} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachPhotos(r, fs, field); }} />
-                          </label>
+                          <div className="buy-thumb-adds">
+                            <button type="button" className="buy-thumb-mini" title={`Take ${addTitle}`} disabled={busy} onClick={() => openRowCamera(r, field)}>
+                              {busy ? <span className="spinner" /> : icon}
+                            </button>
+                            <label className="buy-thumb-mini" title={`Upload ${addTitle}`}>
+                              🖼️
+                              <input type="file" accept="image/*" multiple hidden disabled={busy} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachPhotos(r, fs, field); }} />
+                            </label>
+                          </div>
                         )}
                       </td>
                     );
@@ -531,8 +541,9 @@ export default function Buy() {
           </div>
           <div className="buy-lb-bar" onClick={(e) => e.stopPropagation()}>
             <span className="buy-lb-count">{galIsReceipt ? "Receipt" : "Photo"} {galIdx + 1} / {galPaths.length}</span>
+            <button type="button" className="btn btn-ghost buy-lb-add" disabled={attaching === `${galRow.id}:${galField}`} onClick={() => openRowCamera(galRow, galField)}>📷 Camera</button>
             <label className="btn btn-ghost buy-lb-add">
-              {attaching === `${galRow.id}:${galField}` ? "Uploading…" : (galIsReceipt ? "＋ Add receipt" : "＋ Add photo")}
+              {attaching === `${galRow.id}:${galField}` ? "Uploading…" : "🖼️ Upload"}
               <input type="file" accept="image/*" multiple hidden disabled={attaching === `${galRow.id}:${galField}`} onChange={(e) => { const fs = e.target.files; e.target.value = ""; attachPhotos(galRow, fs, galField); }} />
             </label>
             <button className="btn btn-ghost buy-lb-del" onClick={() => { if (confirm(`Delete this ${galIsReceipt ? "receipt" : "photo"}?`)) deletePhoto(galRow, galField, galPaths[galIdx]); }}>🗑 Delete</button>

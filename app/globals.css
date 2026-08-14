@@ -582,6 +582,10 @@ html, body { overflow-x: clip; max-width: 100%; }
 .buy-thumb-badge { position:absolute; bottom:2px; right:2px; min-width:16px; height:16px; padding:0 4px; border-radius:8px; background:rgba(0,0,0,.72); color:#fff; font-size:10px; font-weight:700; line-height:16px; text-align:center; }
 .buy-thumb-add { display:grid; place-items:center; width:40px; height:40px; border:1px dashed var(--line-strong); border-radius:9px; color:var(--ink-faint); font-size:15px; cursor:pointer; background:var(--surface-2); transition:.14s; }
 .buy-thumb-add:hover { color:var(--accent-2); border-color:var(--accent); }
+.buy-thumb-adds { display:flex; flex-direction:column; gap:3px; }
+.buy-thumb-mini { display:grid; place-items:center; width:40px; height:19px; padding:0; border:1px dashed var(--line-strong); border-radius:7px; color:var(--ink-faint); font-size:12px; cursor:pointer; background:var(--surface-2); transition:.14s; }
+.buy-thumb-mini:hover { color:var(--accent-2); border-color:var(--accent); }
+.buy-thumb-mini:disabled { opacity:.6; cursor:default; }
 .buy-lightbox { position:fixed; inset:0; z-index:80; background:rgba(3,7,8,.88); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:20px; animation:fadein .14s ease; }
 .buy-lightbox-stage { position:relative; display:flex; align-items:center; justify-content:center; max-width:100%; max-height:78vh; }
 .buy-lightbox-stage img { max-width:100%; max-height:78vh; border-radius:12px; box-shadow:0 30px 70px -20px rgba(0,0,0,.7); }

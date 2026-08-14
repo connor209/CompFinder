@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import CompFinderPricing from "@/lib/pricing.js";
+import { openRearCameraStream } from "@/lib/camera.js";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
@@ -62,24 +63,11 @@ export default function Scan({ onDeepDive }) {
       setDiag("The camera needs a secure (https) connection.");
       return;
     }
-    // Force the REAR camera: { ideal: "environment" } is only a hint and iOS
-    // frequently hands back the selfie cam, so try exact rear first, then a soft
-    // rear preference, then any camera as a last resort.
-    let stream;
-    const attempts = [
-      { video: { facingMode: { exact: "environment" } }, audio: false },
-      { video: { facingMode: "environment" }, audio: false },
-      { video: true, audio: false }
-    ];
-    let lastErr;
-    for (const constraints of attempts) {
-      try {
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        break;
-      } catch (e) {
-        lastErr = e;
-      }
-    }
+    // Force the REAR camera (iOS ignores facingMode hints and even { exact:
+    // "environment" } is unreliable, so the helper enumerates and picks the
+    // back-facing device explicitly).
+    let stream, lastErr;
+    try { stream = await openRearCameraStream(); } catch (e) { lastErr = e; }
     if (!stream) {
       failCamera(lastErr);
       return;

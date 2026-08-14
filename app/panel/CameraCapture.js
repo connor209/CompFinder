@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { openRearCameraStream } from "@/lib/camera.js";
 
 /**
  * In-app camera capture (getUserMedia) — a full-screen overlay that returns a
@@ -15,6 +16,7 @@ export default function CameraCapture({ onCapture, onClose, label = "Take a phot
   const [state, setState] = useState("prompt"); // prompt | starting | live | error
   const [needsTap, setNeedsTap] = useState(false);
   const [diag, setDiag] = useState("");
+  const [dbg, setDbg] = useState("");
 
   const stop = useCallback(() => {
     if (streamRef.current) {
@@ -41,16 +43,8 @@ export default function CameraCapture({ onCapture, onClose, label = "Take a phot
       setState("error"); setDiag("The camera needs a secure (https) connection."); return;
     }
     setState("starting");
-    // Force the rear camera, degrading gracefully.
-    const attempts = [
-      { video: { facingMode: { exact: "environment" } }, audio: false },
-      { video: { facingMode: "environment" }, audio: false },
-      { video: true, audio: false }
-    ];
     let stream, lastErr;
-    for (const c of attempts) {
-      try { stream = await navigator.mediaDevices.getUserMedia(c); break; } catch (e) { lastErr = e; }
-    }
+    try { stream = await openRearCameraStream(); } catch (e) { lastErr = e; }
     if (!mountedRef.current) { stream?.getTracks().forEach((t) => t.stop()); return; }
     if (!stream) {
       const name = lastErr?.name || "";
@@ -81,6 +75,17 @@ export default function CameraCapture({ onCapture, onClose, label = "Take a phot
 
   useEffect(() => { if (state === "live") attach(); }, [state, attach]);
 
+  useEffect(() => {
+    if (state !== "live") { setDbg(""); return; }
+    const id = setInterval(() => {
+      const v = videoRef.current;
+      const t = streamRef.current?.getVideoTracks?.()[0];
+      const st = t?.getSettings ? t.getSettings() : {};
+      setDbg(`track:${t ? t.readyState : "none"} muted:${t ? t.muted : "-"} · cam:${st.facingMode || (t?.label ? t.label.slice(0, 14) : "?")} · video ${v ? v.videoWidth : 0}x${v ? v.videoHeight : 0} paused:${v ? v.paused : "-"}`);
+    }, 600);
+    return () => clearInterval(id);
+  }, [state]);
+
   function snap() {
     const v = videoRef.current;
     if (!v || !v.videoWidth) { setDiag("Camera not ready — give it a second."); return; }
@@ -106,6 +111,7 @@ export default function CameraCapture({ onCapture, onClose, label = "Take a phot
         {state === "live" ? (
           <>
             <video ref={videoRef} className="cam-video" playsInline muted autoPlay onLoadedMetadata={() => attach()} />
+            {dbg ? <div className="scan-dbg">{dbg}</div> : null}
             {needsTap ? <button className="scan-tap" onClick={attach}>▶ Tap to start the camera</button> : null}
           </>
         ) : state === "starting" ? (
