@@ -17,6 +17,21 @@ function numKey(s) {
 }
 
 /**
+ * Order stack labels like spreadsheet columns rather than a dictionary:
+ * A, B, C … Z, then AA, AB … (shorter labels first, then alpha), so a pile
+ * "AE" sorts after "Z" instead of jumping in right after "A". Falls back to a
+ * plain locale compare for anything that isn't a simple letter label.
+ */
+function pileCompare(a, b) {
+  const na = String(a || "").trim();
+  const nb = String(b || "").trim();
+  const letterA = /^[A-Za-z]+$/.test(na);
+  const letterB = /^[A-Za-z]+$/.test(nb);
+  if (letterA && letterB && na.length !== nb.length) return na.length - nb.length;
+  return na.localeCompare(nb, undefined, { numeric: true, sensitivity: "base" });
+}
+
+/**
  * Pull sheet — the daily picking workflow. Lists unshipped eBay orders matched
  * to their stack + live position. You pick a card, tick it, and any other
  * sheet items in the same stack re-rank live (a working preview). Nothing hits
@@ -106,7 +121,7 @@ export default function PullSheet() {
     active.sort((a, b) => {
       const na = nameMap.get(a.stackId) || "";
       const nb = nameMap.get(b.stackId) || "";
-      if (na !== nb) return na.localeCompare(nb);
+      if (na !== nb) return pileCompare(na, nb);
       return (idxByCard.get(a.cardId) ?? 0) - (idxByCard.get(b.cardId) ?? 0);
     });
     unm.sort((a, b) => a.nk - b.nk);
