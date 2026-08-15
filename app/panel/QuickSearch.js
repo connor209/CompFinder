@@ -150,6 +150,14 @@ function TrendChart({ sales, medianPence }) {
 // Quick Search's pricing mode -> catalogue game slug for the Cardmarket link.
 const MODE_TO_SLUG = { pokemon: "pokemon", mtg: "magic", other: null };
 
+// A card's set code disambiguates same-numbered cards across languages/regions
+// (English 151 is "MEW"; Japanese is "SV2a"), so we fold it into the search.
+// Cardmarket prefixes some variant sub-sets with a lowercase "x" (xsv2a) that
+// no eBay listing uses — strip that so it still matches "sv2a".
+function setCodeForSearch(series) {
+  return (series || "").trim().replace(/^x(?=[a-z])/, "");
+}
+
 export default function QuickSearch({ seed }) {
   const [q, setQ] = useState("");
   const [sugs, setSugs] = useState([]);
@@ -411,16 +419,20 @@ export default function QuickSearch({ seed }) {
     // (dropped for non-English prints, which number differently). Magic: name +
     // set name (the same card reprints at very different prices across sets, so
     // the set is what pins the value). Other: just the name/typed text.
+    const setCode = setCodeForSearch(card.series);
     let query;
     if (isPokemon) {
+      // Include the set code for context — critical for non-English prints,
+      // where the number is dropped and the code (e.g. SV2a) is what tells a
+      // Japanese 151 card apart from the English one.
       const numberPart = lang ? "" : card.number || "";
-      query = `${card.name} ${numberPart} ${lang}`.replace(/\s+/g, " ").trim();
+      query = `${card.name} ${numberPart} ${setCode} ${lang}`.replace(/\s+/g, " ").trim();
     } else if (gameArg === "mtg") {
       query = `${card.name} ${card.set || ""}`.replace(/\s+/g, " ").trim();
     } else {
-      // Other games: name + collector number keeps the search specific
-      // (e.g. "Luffy OP01-001") without over-filtering on set.
-      query = `${card.name} ${card.number || ""}`.replace(/\s+/g, " ").trim();
+      // Other games: name + collector number (+ set code) keeps the search
+      // specific (e.g. "Luffy OP01-001 OP06") without over-filtering on set.
+      query = `${card.name} ${card.number || ""} ${setCode}`.replace(/\s+/g, " ").trim();
     }
 
     // "Already listed on eBay?" — fire-and-forget, fills in when ready. We pass
@@ -749,7 +761,8 @@ export default function QuickSearch({ seed }) {
               <div className="dd-actions">
                 <button className="btn btn-ghost" onClick={() => setListing((v) => !v)} aria-pressed={listing}>🏷️ List on eBay</button>
                 {(() => {
-                  const baseQ = `${view.card.name} ${view.card.number || ""}`.replace(/\s+/g, " ").trim();
+                  const code = setCodeForSearch(view.card.series);
+                  const baseQ = `${view.card.name} ${view.card.number || ""} ${code}`.replace(/\s+/g, " ").trim();
                   const ebayQ = `${baseQ} ${language}`.replace(/\s+/g, " ").trim();
                   const cmUrl = cardmarketBestUrl({ cardmarketId: view.card.cardmarketId, query: baseQ, gameSlug: sourceGame });
                   return (
