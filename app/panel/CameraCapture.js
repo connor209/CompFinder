@@ -17,6 +17,7 @@ export default function CameraCapture({ onCapture, onClose, label = "Take a phot
   const [needsTap, setNeedsTap] = useState(false);
   const [diag, setDiag] = useState("");
   const [dbg, setDbg] = useState("");
+  const [dbgCams, setDbgCams] = useState("");
 
   const stop = useCallback(() => {
     if (streamRef.current) {
@@ -76,6 +77,14 @@ export default function CameraCapture({ onCapture, onClose, label = "Take a phot
   useEffect(() => { if (state === "live") attach(); }, [state, attach]);
 
   useEffect(() => {
+    if (state !== "live") { setDbgCams(""); return; }
+    navigator.mediaDevices?.enumerateDevices?.().then((ds) => {
+      const cams = ds.filter((d) => d.kind === "videoinput").map((d) => d.label || "(no label)");
+      setDbgCams(`${cams.length} cam(s): ${cams.join(" | ")}`);
+    }).catch(() => setDbgCams("enumerate failed"));
+  }, [state]);
+
+  useEffect(() => {
     if (state !== "live") { setDbg(""); return; }
     const id = setInterval(() => {
       const v = videoRef.current;
@@ -111,7 +120,7 @@ export default function CameraCapture({ onCapture, onClose, label = "Take a phot
         {state === "live" ? (
           <>
             <video ref={videoRef} className="cam-video" playsInline muted autoPlay onLoadedMetadata={() => attach()} />
-            {dbg ? <div className="scan-dbg">{dbg}</div> : null}
+            {dbg ? <div className="scan-dbg">{dbg}{dbgCams ? <><br />{dbgCams}</> : null}</div> : null}
             {needsTap ? <button className="scan-tap" onClick={attach}>▶ Tap to start the camera</button> : null}
           </>
         ) : state === "starting" ? (
