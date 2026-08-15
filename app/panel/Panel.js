@@ -18,6 +18,7 @@ import Browse from "./Browse";
 import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
 import MarketLinks from "./MarketLinks";
+import { Icon } from "./icons";
 import ThemeSeg from "./ThemeSeg";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
@@ -43,11 +44,11 @@ const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) 
 // contextual description shown on hover (as a rail tooltip for single-section
 // modules, and as a subtitle in the flyout for multi-section ones).
 const MODULES = [
-  { key: "dashboard", label: "Dashboard", icon: "🏠", desc: "Your portfolio & activity at a glance", sections: [{ key: "dashboard", label: "Dashboard" }] },
+  { key: "dashboard", label: "Dashboard", icon: "home", desc: "Your portfolio & activity at a glance", sections: [{ key: "dashboard", label: "Dashboard" }] },
   {
     key: "pricing",
     label: "Pricing",
-    icon: "🔍",
+    icon: "search",
     desc: "Search, scan or batch-price cards",
     sections: [
       { key: "single", label: "Quick search", desc: "Price a single card fast" },
@@ -55,12 +56,12 @@ const MODULES = [
       { key: "batch", label: "Batch", desc: "Price a whole list or CSV at once" }
     ]
   },
-  { key: "browse", label: "Browse", icon: "📚", desc: "Explore every game, set & card", sections: [{ key: "browse", label: "Browse" }] },
-  { key: "buy", label: "Buy", icon: "🛒", desc: "Log deals & purchases you take in", sections: [{ key: "buy", label: "Buy" }] },
+  { key: "browse", label: "Browse", icon: "grid", desc: "Explore every game, set & card", sections: [{ key: "browse", label: "Browse" }] },
+  { key: "buy", label: "Buy", icon: "cart", desc: "Log deals & purchases you take in", sections: [{ key: "buy", label: "Buy" }] },
   {
     key: "ebay",
     label: "eBay",
-    icon: "🏷️",
+    icon: "tag",
     desc: "List, sell & fulfil on eBay",
     sections: [
       { key: "inventory", label: "My listings", desc: "Your live eBay listings & repricing" },
@@ -69,8 +70,8 @@ const MODULES = [
       { key: "pull", label: "Pull sheet", desc: "Pick & pack the day's orders" }
     ]
   },
-  { key: "accounts", label: "Accounts", icon: "📒", desc: "Profit & loss and tax-ready reports", sections: [{ key: "accounts", label: "P&L" }] },
-  { key: "arbitrage", label: "Arbitrage", icon: "📊", desc: "Spot underpriced buying opportunities", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
+  { key: "accounts", label: "Accounts", icon: "chart", desc: "Profit & loss and tax-ready reports", sections: [{ key: "accounts", label: "P&L" }] },
+  { key: "arbitrage", label: "Arbitrage", icon: "trend", desc: "Spot underpriced buying opportunities", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
 ];
 const moduleForStream = (s) => MODULES.find((m) => m.sections.some((sec) => sec.key === s)) || MODULES[0];
 
@@ -627,7 +628,7 @@ export default function Panel({ initialSection = "dashboard" }) {
                   aria-expanded={multi ? open : undefined}
                   onClick={() => { if (multi) setOpenModule((o) => (o === m.key ? null : m.key)); else nav(m.sections[0].key); }}
                 >
-                  <span className="rail-ic" aria-hidden="true">{m.icon}</span>
+                  <span className="rail-ic" aria-hidden="true"><Icon name={m.icon} size={22} /></span>
                 </button>
                 {/* Single-section modules reveal a description tooltip on hover;
                     multi-section ones show theirs in the flyout header below. */}
@@ -908,7 +909,7 @@ export default function Panel({ initialSection = "dashboard" }) {
                     className={`nav-i${active ? " on" : ""}`}
                     onClick={() => { if (!multi) nav(m.sections[0].key); }}
                   >
-                    <span className="ic" aria-hidden="true">{m.icon}</span> {m.label}
+                    <span className="ic" aria-hidden="true"><Icon name={m.icon} size={19} /></span> {m.label}
                   </button>
                   {multi ? (
                     <div className="subs">

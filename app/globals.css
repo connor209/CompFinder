@@ -905,9 +905,19 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
   .wm-t { font-size:18px; }
   .appbar { grid-template-columns:40px 1fr 40px; }
   .icobtn { width:40px; height:40px; }
-  .workspace { gap:10px; }
-  .rail { width:50px; }
-  .rail-item > button { width:38px; height:38px; font-size:17px; }
+  /* Nav moves from a left column to a top strip so the content gets the full
+     width. Icons spread across the bar; flyouts drop down; the active marker
+     becomes a bottom bar. */
+  .workspace { flex-direction:column; gap:12px; }
+  .rail { flex-direction:row; width:100%; position:relative; gap:4px; padding:5px 8px; border-radius:14px; justify-content:space-between; }
+  .rail-item { flex:1 1 0; min-width:0; position:static; }
+  .rail-item > button { width:100%; height:42px; }
+  .rail-ic svg { width:22px; height:22px; }
+  .rail-item > button.on::before { left:20%; right:20%; top:auto; bottom:-5px; width:auto; height:3px; border-radius:3px 3px 0 0; }
+  /* Flyout becomes a full-width dropdown under the strip so it never clips. */
+  .rail-fly { left:8px; right:8px; top:calc(100% + 8px); margin-left:0; min-width:0; }
+  .rail-fly::before { left:0; right:0; top:-10px; bottom:auto; width:auto; height:12px; }
+  .rail-tip { display:none; }
   /* Scrollable tab strip — 6 tabs won't fit squished, so let them keep their
      full labels and swipe horizontally instead. */
   .stream { display:flex; flex-wrap:nowrap; max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; scroll-snap-type:x proximity; }
