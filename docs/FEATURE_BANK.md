@@ -32,11 +32,6 @@ inline flat postage (`profiles.settings.ebayPolicies`).
 
 ## 🐞 Known rough edges
 
-- 🔵 **Stack sort assumes letter labels** — piles order A, B, C … Z, AA, AE
-  (spreadsheet-style). A word-named stack ("ACE", "GRADED") sorts by length
-  first, so it lands among the multi-letter piles rather than where you'd
-  expect. Worth refining if you start naming stacks.
-  `app/panel/PullSheet.js` → `pileCompare`
 - 🔵 **Print layout not re-checked** since variation picks were regrouped by
   set. The printed pull sheet may need its own pass.
 
