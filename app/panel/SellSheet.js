@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import {
@@ -8,6 +8,9 @@ import {
   getFormat, formatForGame, flagsForFormat,
   buildSheetCsv, sheetFilename, sheetNumber
 } from "@/lib/sellsheet";
+import {
+  EBAY_DEFAULTS, CONDITION_IDS, buildEbayVariationCsv, variationValue
+} from "@/lib/ebayvariation";
 
 /**
  * Sell sheets — build the CSV that Cardmarket-family listing tools import.
@@ -40,6 +43,11 @@ export default function SellSheet() {
   const [entries, setEntries] = useState({}); // cardmarket_id -> { qty }
   const [filter, setFilter] = useState("");
   const [msg, setMsg] = useState("");
+  const [target, setTarget] = useState("cardmarket"); // cardmarket | ebay
+  const [ebay, setEbay] = useState(EBAY_DEFAULTS);
+  const [ebayOpen, setEbayOpen] = useState(false);
+  const [rarityPrice, setRarityPrice] = useState({});
+  const profileSettings = useRef({});
 
   // Defaults applied to every exported row.
   const [condition, setCondition] = useState("NM");
@@ -53,7 +61,11 @@ export default function SellSheet() {
   // foil, Pokémon calls it reverse holo. Whichever the format has becomes a
   // SECOND quantity column, since one card can be listed both ways; the rest
   // of the flags stay as whole-export defaults.
-  const foilCol = fmt.columns.find((c) => c === "isFoil" || c === "isReverseHolo") || null;
+  // Only for Cardmarket sheets: an eBay variation listing is all one finish
+  // (the title says so), so a second count column there would mislead.
+  const foilCol = target === "cardmarket"
+    ? fmt.columns.find((c) => c === "isFoil" || c === "isReverseHolo") || null
+    : null;
   const foilMeta = foilCol ? FLAG_COLUMNS[foilCol] : null;
   const fmtFlags = flagsForFormat(fmt).filter((f) => f.column !== foilCol);
 
@@ -64,8 +76,31 @@ export default function SellSheet() {
         if (!res.available) { setUnavailable(true); return; }
         setGames(res.games || []);
       } catch { setUnavailable(true); }
+      // Listing boilerplate (location, policies, description…) is the same
+      // every time, so it's stored once rather than retyped.
+      try {
+        const sb = createClient();
+        const { data: { user } } = await sb.auth.getUser();
+        const { data: profile } = await sb.from("profiles").select("settings").eq("id", user.id).single();
+        profileSettings.current = profile?.settings || {};
+        if (profile?.settings?.ebayVariation) setEbay((p) => ({ ...p, ...profile.settings.ebayVariation }));
+      } catch { /* defaults are fine */ }
     })();
   }, []);
+
+  async function saveEbaySettings() {
+    try {
+      const sb = createClient();
+      const { data: { user } } = await sb.auth.getUser();
+      // Title and set name change per listing — everything else is boilerplate.
+      const { title, setName, setSize, ...keep } = ebay;
+      const next = { ...profileSettings.current, ebayVariation: keep };
+      profileSettings.current = next;
+      await sb.from("profiles").update({ settings: next }).eq("id", user.id);
+      setMsg("Listing settings saved — they'll be prefilled next time.");
+    } catch (e) { setMsg(e.message || "Couldn't save settings."); }
+  }
+  const setEbayField = (k, v) => setEbay((p) => ({ ...p, [k]: v }));
 
   async function pickGame(slug) {
     setGame(slug);
@@ -113,6 +148,16 @@ export default function SellSheet() {
       return String(a.collector_number || "").localeCompare(String(b.collector_number || ""), undefined, { numeric: true });
     });
     setCards(real);
+    // Seed the rarity price table and the eBay set fields from what loaded.
+    const rarities = [...new Set(real.map((r) => r.rarity).filter(Boolean))];
+    setRarityPrice((prev) => Object.fromEntries(rarities.map((r) => [r, prev[r] ?? ""])));
+    const first = real[0];
+    setEbay((p) => ({
+      ...p,
+      setName: p.setName || chosen[0] || "",
+      setCode: p.setCode || first?.expansion_code || "",
+      setSize: p.setSize || String(real.length)
+    }));
     setLoadingCards(false);
   }
 
@@ -154,6 +199,32 @@ export default function SellSheet() {
     }
     return n;
   }, [cards, entries, foilCol]);
+
+  // ---- eBay variation listing ------------------------------------------
+  // One listing, one row per card. Zero-stock cards stay in as greyed-out
+  // variations, so only cards you deliberately leave out are excluded.
+  function downloadEbay(onlyCounted) {
+    const source = onlyCounted
+      ? cards.filter((c) => (entries[c.cardmarket_id]?.qty || 0) > 0)
+      : cards;
+    if (source.length === 0) { setMsg("No cards to list."); return; }
+    if (!ebay.title.trim()) { setMsg("Give the listing a title first."); return; }
+    const items = source.map((card) => ({ card, qty: entries[card.cardmarket_id]?.qty || 0 }));
+    const { csv, rows } = buildEbayVariationCsv(
+      items,
+      (card) => rarityPrice[card.rarity] || price,
+      ebay,
+      Date.now()
+    );
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = sheetFilename("eBay-variation", [ebay.setName || chosen[0] || "set"], todayStr());
+    a.click();
+    URL.revokeObjectURL(url);
+    setMsg(`Exported an eBay variation listing — 1 parent + ${rows - 1} variations.`);
+  }
 
   function download(onlyWithQty) {
     const base = { condition, language, price, comment: "", ...flags };
@@ -205,13 +276,20 @@ export default function SellSheet() {
           carries the right Cardmarket product id, so nothing needs matching by hand.
         </p>
 
+        <div className="pills" role="group" aria-label="Destination" style={{ marginBottom: 12 }}>
+          <button aria-pressed={target === "cardmarket"} onClick={() => setTarget("cardmarket")}>Cardmarket tools</button>
+          <button aria-pressed={target === "ebay"} onClick={() => setTarget("ebay")}>eBay variation listing</button>
+        </div>
+
         <div className="ss-row">
-          <label className="buy-field">
-            <span>Format</span>
-            <select value={formatKey} onChange={(e) => setFormatKey(e.target.value)}>
-              {SHEET_FORMATS.map((f) => <option key={f.key} value={f.key}>{f.name}</option>)}
-            </select>
-          </label>
+          {target === "cardmarket" ? (
+            <label className="buy-field">
+              <span>Format</span>
+              <select value={formatKey} onChange={(e) => setFormatKey(e.target.value)}>
+                {SHEET_FORMATS.map((f) => <option key={f.key} value={f.key}>{f.name}</option>)}
+              </select>
+            </label>
+          ) : null}
           <label className="buy-field">
             <span>Game</span>
             <select value={game} onChange={(e) => pickGame(e.target.value)}>
@@ -220,11 +298,18 @@ export default function SellSheet() {
             </select>
           </label>
         </div>
-        <p className="hint hint-small">
-          Columns follow the game — <code>{fmt.columns.join(", ")}</code>.
-          {" "}UTF-8 with BOM, CRLF line endings.
-          {!fmt.verified ? " ⚠ No example export for this game yet — send one and I'll pin the columns down." : ""}
-        </p>
+        {target === "cardmarket" ? (
+          <p className="hint hint-small">
+            Columns follow the game — <code>{fmt.columns.join(", ")}</code>.
+            {" "}UTF-8 with BOM, CRLF line endings.
+            {!fmt.verified ? " ⚠ No example export for this game yet — send one and I'll pin the columns down." : ""}
+          </p>
+        ) : (
+          <p className="hint hint-small">
+            One eBay File Exchange listing: a parent row plus a variation per card, priced by
+            rarity. Matches the <code>fx_category_template_EBAY_GB</code> layout exactly.
+          </p>
+        )}
       </div>
 
       {game ? (
@@ -258,26 +343,142 @@ export default function SellSheet() {
 
       {cards.length > 0 ? (
         <>
+          {target === "ebay" ? (
+            <div className="panel">
+              <div className="panel-head">
+                <span className="eyebrow">Listing</span>
+                <button className="btn btn-ghost" onClick={() => setEbayOpen((v) => !v)}>
+                  {ebayOpen ? "Hide settings" : "Listing settings…"}
+                </button>
+              </div>
+              <div className="ss-row">
+                <label className="buy-field" style={{ flex: "1 1 100%" }}>
+                  <span>Title <span className="buy-opt">(80 chars max on eBay)</span></span>
+                  <input type="text" maxLength={80} value={ebay.title}
+                    onChange={(e) => setEbayField("title", e.target.value)}
+                    placeholder="e.g. Perfect Order Reverse Holo Mix &amp; Match - BUY 5 GET 5 FREE - Pokemon TCG" />
+                </label>
+                <label className="buy-field">
+                  <span>Set name <span className="buy-opt">(C:Set)</span></span>
+                  <input type="text" value={ebay.setName || ""} onChange={(e) => setEbayField("setName", e.target.value)} />
+                </label>
+                <label className="buy-field">
+                  <span>Set size <span className="buy-opt">— the /88</span></span>
+                  <input type="number" min="1" value={ebay.setSize || ""} onChange={(e) => setEbayField("setSize", e.target.value)} />
+                </label>
+                <label className="buy-field">
+                  <span>Variation label</span>
+                  <input type="text" value={ebay.variationLabel} onChange={(e) => setEbayField("variationLabel", e.target.value)} />
+                </label>
+              </div>
+
+              <div className="ss-row">
+                <label className="buy-field" style={{ flex: "1 1 320px" }}>
+                  <span>Gallery photo URL <span className="buy-opt">(the listing's main image)</span></span>
+                  <input type="url" value={ebay.parentImageUrl} onChange={(e) => setEbayField("parentImageUrl", e.target.value)} placeholder="https://…" />
+                </label>
+                <label className="buy-field" style={{ flex: "1 1 320px" }}>
+                  <span>Card image URL template <span className="buy-opt">— per variation</span></span>
+                  <input type="text" value={ebay.imageTemplate} onChange={(e) => setEbayField("imageTemplate", e.target.value)}
+                    placeholder="https://…/{setcode}_en_{num3}_std.jpg" />
+                </label>
+              </div>
+              <p className="hint hint-small" style={{ marginTop: 0 }}>
+                Template tokens: <code>{"{num}"}</code> as printed, <code>{"{num2}"}</code>/<code>{"{num3}"}</code> zero-padded,
+                {" "}<code>{"{setcode}"}</code>, <code>{"{setcode_lower}"}</code>, <code>{"{name}"}</code>.
+                {" "}Set code for this set: <b>{ebay.setCode || "—"}</b>. Leave blank to let every variation use the gallery photo.
+              </p>
+
+              {ebayOpen ? (
+                <>
+                  <div className="ss-row" style={{ borderTop: "1px solid var(--line)", paddingTop: 12, marginTop: 4 }}>
+                    <label className="buy-field"><span>Category ID</span>
+                      <input type="text" value={ebay.categoryId} onChange={(e) => setEbayField("categoryId", e.target.value)} /></label>
+                    <label className="buy-field" style={{ flex: "1 1 260px" }}><span>Category name</span>
+                      <input type="text" value={ebay.categoryName} onChange={(e) => setEbayField("categoryName", e.target.value)} /></label>
+                    <label className="buy-field"><span>Condition</span>
+                      <select value={ebay.conditionId} onChange={(e) => setEbayField("conditionId", e.target.value)}>
+                        {CONDITION_IDS.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                      </select></label>
+                    <label className="buy-field" style={{ flex: "1 1 220px" }}><span>Card condition descriptor</span>
+                      <input type="text" value={ebay.cardCondition} onChange={(e) => setEbayField("cardCondition", e.target.value)} /></label>
+                  </div>
+                  <div className="ss-row">
+                    <label className="buy-field"><span>Franchise</span>
+                      <input type="text" value={ebay.franchise} onChange={(e) => setEbayField("franchise", e.target.value)} placeholder="Pokémon" /></label>
+                    <label className="buy-field"><span>TV show <span className="buy-opt">(optional)</span></span>
+                      <input type="text" value={ebay.tvShow} onChange={(e) => setEbayField("tvShow", e.target.value)} placeholder="Pokemon" /></label>
+                    <label className="buy-field"><span>Location</span>
+                      <input type="text" value={ebay.location} onChange={(e) => setEbayField("location", e.target.value)} placeholder="Town,County" /></label>
+                    <label className="buy-field"><span>Dispatch days</span>
+                      <input type="number" min="0" value={ebay.dispatchDays} onChange={(e) => setEbayField("dispatchDays", e.target.value)} /></label>
+                  </div>
+                  <div className="ss-row">
+                    <label className="buy-field" style={{ flex: "1 1 260px" }}><span>Shipping service</span>
+                      <input type="text" value={ebay.shippingService} onChange={(e) => setEbayField("shippingService", e.target.value)} /></label>
+                    <label className="buy-field"><span>Shipping cost</span>
+                      <input type="number" min="0" step="0.01" value={ebay.shippingCost} onChange={(e) => setEbayField("shippingCost", e.target.value)} /></label>
+                    <label className="buy-field"><span>Returns within</span>
+                      <input type="text" value={ebay.returnsWithin} onChange={(e) => setEbayField("returnsWithin", e.target.value)} /></label>
+                    <label className="buy-field"><span>Return postage</span>
+                      <select value={ebay.returnShippingPaidBy} onChange={(e) => setEbayField("returnShippingPaidBy", e.target.value)}>
+                        <option value="Seller">Seller</option><option value="Buyer">Buyer</option>
+                      </select></label>
+                  </div>
+                  <label className="buy-field buy-desc">
+                    <span>Description HTML</span>
+                    <textarea rows={4} value={ebay.description} onChange={(e) => setEbayField("description", e.target.value)}
+                      placeholder="Paste the HTML description used on your listings" />
+                  </label>
+                  <button className="btn btn-ghost" onClick={saveEbaySettings} style={{ marginTop: 10 }}>Save these settings</button>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="panel">
-            <div className="panel-head"><span className="eyebrow">Applies to every row</span></div>
+            <div className="panel-head">
+              <span className="eyebrow">{target === "ebay" ? "Price by rarity" : "Applies to every row"}</span>
+            </div>
+            {target === "ebay" ? (
+              <>
+                <div className="ss-row">
+                  {Object.keys(rarityPrice).sort().map((r) => (
+                    <label className="buy-field" key={r} style={{ flex: "0 1 150px" }}>
+                      <span>{r}</span>
+                      <input type="number" min="0" step="0.01" value={rarityPrice[r]}
+                        onChange={(e) => setRarityPrice((p) => ({ ...p, [r]: e.target.value }))}
+                        placeholder={price} />
+                    </label>
+                  ))}
+                </div>
+                <p className="hint hint-small" style={{ marginTop: 0 }}>
+                  Each rarity in this set gets its own price. Blank falls back to the default below ({price}).
+                </p>
+              </>
+            ) : null}
             <div className="ss-row">
+              {target === "cardmarket" ? (
+                <>
+                  <label className="buy-field">
+                    <span>Condition</span>
+                    <select value={condition} onChange={(e) => setCondition(e.target.value)}>
+                      {CM_CONDITIONS.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
+                    </select>
+                  </label>
+                  <label className="buy-field">
+                    <span>Language</span>
+                    <select value={language} onChange={(e) => setLanguage(e.target.value)}>
+                      {CM_LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
+                    </select>
+                  </label>
+                </>
+              ) : null}
               <label className="buy-field">
-                <span>Condition</span>
-                <select value={condition} onChange={(e) => setCondition(e.target.value)}>
-                  {CM_CONDITIONS.map((c) => <option key={c.code} value={c.code}>{c.code} — {c.label}</option>)}
-                </select>
-              </label>
-              <label className="buy-field">
-                <span>Language</span>
-                <select value={language} onChange={(e) => setLanguage(e.target.value)}>
-                  {CM_LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
-                </select>
-              </label>
-              <label className="buy-field">
-                <span>Price</span>
+                <span>{target === "ebay" ? "Fallback price" : "Price"}</span>
                 <input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
               </label>
-              {fmtFlags.map((fl) => (
+              {(target === "cardmarket" ? fmtFlags : []).map((fl) => (
                 <label className="sd-toggle" key={fl.key} style={{ alignSelf: "end", paddingBottom: 10 }}>
                   <input
                     type="checkbox"
@@ -289,16 +490,34 @@ export default function SellSheet() {
               ))}
             </div>
             <div className="ps-actions" style={{ marginTop: 12, flexWrap: "wrap" }}>
-              <button className="btn btn-primary" onClick={() => download(false)}>
-                ⤓ Export template ({cards.length} rows)
-              </button>
-              <button className="btn btn-ghost" onClick={() => download(true)} disabled={countedRows === 0}>
-                ⤓ Export counted only ({countedRows})
-              </button>
+              {target === "ebay" ? (
+                <>
+                  <button className="btn btn-primary" onClick={() => downloadEbay(false)}>
+                    ⤓ Export listing ({cards.length} variations)
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => downloadEbay(true)} disabled={countedRows === 0}>
+                    ⤓ Only cards in stock ({cards.filter((c) => (entries[c.cardmarket_id]?.qty || 0) > 0).length})
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="btn btn-primary" onClick={() => download(false)}>
+                    ⤓ Export template ({cards.length} rows)
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => download(true)} disabled={countedRows === 0}>
+                    ⤓ Export counted only ({countedRows})
+                  </button>
+                </>
+              )}
             </div>
             <p className="hint hint-small">
-              <b>Template</b> = every card with blank quantities, to fill in a spreadsheet.
-              <b> Counted only</b> = just the cards you've given a quantity below.
+              {target === "ebay" ? (
+                <>Every card becomes a variation; zero-stock ones stay in the listing greyed out, ready to restock.
+                  {" "}First variation reads <code>{cards[0] ? `${ebay.variationLabel}=${variationValue(cards[0], ebay.setSize)}` : ""}</code>.</>
+              ) : (
+                <><b>Template</b> = every card with blank quantities, to fill in a spreadsheet.
+                  <b> Counted only</b> = just the cards you&apos;ve given a quantity below.</>
+              )}
             </p>
             {msg ? <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>{msg}</p> : null}
           </div>

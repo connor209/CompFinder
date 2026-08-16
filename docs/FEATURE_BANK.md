@@ -72,6 +72,11 @@ Anything you think of goes here first. Newest at the top.
 
 <!-- New items get added below this line -->
 
+- 🔵 **Set image URLs** — eBay variation listings build each card's photo from a
+  URL template per set (`{setcode}`/`{num3}` tokens), which works while a game
+  has a predictable image host. Storing a real image URL per set (or per card)
+  in the catalogue would cover the games that don't.
+  `lib/ebayvariation.js` → `imageFromTemplate`
 - 🔵 **Sell sheets — verify One Piece `setCode` on a real import** — every
   game's columns are matched to its sample, but two One Piece details were
   inferred from a single row: the set code is hyphenated (`OP01` → `OP-01`)
