@@ -32,12 +32,6 @@ inline flat postage (`profiles.settings.ebayPolicies`).
 
 ## 🐞 Known rough edges
 
-- ⛔ **Rear camera only exposes the front lens** — your device reported
-  `1 cam(s): Front Camera`, which is why the in-app camera stays on selfie.
-  Suspected device state (screen recording / call active). *Next step:* retest
-  with recording and calls off. If it's still front-only, fall back to the
-  native camera in Safari for card scanning.
-  `lib/camera.js`, `app/panel/CameraCapture.js`
 - 🔵 **Stack sort assumes letter labels** — piles order A, B, C … Z, AA, AE
   (spreadsheet-style). A word-named stack ("ACE", "GRADED") sorts by length
   first, so it lands among the multi-letter piles rather than where you'd
