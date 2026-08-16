@@ -33,7 +33,8 @@ inline flat postage (`profiles.settings.ebayPolicies`).
 ## 🐞 Known rough edges
 
 - 🔵 **Print layout not re-checked** since variation picks were regrouped by
-  set. The printed pull sheet may need its own pass.
+  set. *Low priority — the print feature hasn't been used yet.* Worth a pass
+  before the first time you rely on a printed sheet.
 
 ---
 
@@ -55,10 +56,6 @@ inline flat postage (`profiles.settings.ebayPolicies`).
 
 Natural next steps from things just built — not committed to, just noted.
 
-- 🔵 **Recommend show stock by *market* value, not list price** — it currently
-  ranks by your eBay asking price. Ranking by sold-comp value, or by "listed
-  longest without selling", might pick better show stock.
-  `app/panel/ShowDesk.js` → `buildRecs`
 - 🔵 **Per-show takings report** — every checkout is tagged with an event name,
   but nothing reports on it. A "London Expo: 23 sold, £1,240" summary would
   make shows measurable, and could feed Accounts as its own income line.
