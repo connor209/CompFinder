@@ -773,6 +773,14 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-bulkbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px solid var(--line); margin-bottom:4px; }
 .sd-bulkbar .ps-actions { flex-wrap:wrap; }
 .sd-backpicker { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid var(--line); }
+/* A stack that can't take the whole batch — still pickable, just flagged. */
+.stack-tab.sd-tight { opacity:.6; }
+.sd-plan { border:1px solid color-mix(in srgb,var(--accent) 35%, var(--line)); background:var(--accent-soft); border-radius:var(--radius); padding:12px 14px; margin:10px 0; }
+.sd-plan-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+.sd-plan-rows { display:flex; flex-direction:column; gap:2px; margin-bottom:6px; }
+.sd-plan-row { display:flex; align-items:center; gap:10px; padding:6px 0; border-top:1px solid color-mix(in srgb,var(--accent) 18%, transparent); }
+.sd-plan-row:first-child { border-top:0; }
+.sd-plan-count { font-weight:700; font-size:13.5px; color:var(--ink); flex:none; }
 .sd-rowacts { display:flex; gap:6px; flex:none; margin-left:auto; }
 .sd-scope .badge2 { white-space:nowrap; }
 @media (max-width: 720px) {

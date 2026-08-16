@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
-import { checkoutStackCard, unhideListing, nextStackName, HIDE_MODES, getHideMode, setHideMode } from "@/lib/checkout";
+import {
+  checkoutStackCard, unhideListing, nextStackName, planReallocation,
+  DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode
+} from "@/lib/checkout";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -54,6 +57,10 @@ export default function ShowDesk() {
   const [recsLoading, setRecsLoading] = useState(false);
   const [recSel, setRecSel] = useState(new Set());
   const [recCount, setRecCount] = useState(20);
+  const [usedByStack, setUsedByStack] = useState(new Map());
+  const [capacity, setCapacity] = useState(DEFAULT_STACK_CAPACITY);
+  const [plan, setPlan] = useState(null); // proposed reallocation, awaiting confirm
+  const profileSettings = useRef({});
 
   const supabase = () => createClient();
 
@@ -76,6 +83,23 @@ export default function ShowDesk() {
     const sb = supabase();
     const { data: st } = await sb.from("card_stacks").select("id,name").order("created_at", { ascending: true });
     setStacks(st || []);
+
+    // Live count per stack (unpulled, not away) — drives the free-space
+    // figures and the reallocation plan.
+    const all = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));
+    const used = new Map();
+    for (const c of all) if (!c.checked_out_at) used.set(c.stack_id, (used.get(c.stack_id) || 0) + 1);
+    setUsedByStack(used);
+
+    // Cards-per-stack is a property of how you physically store them, so it's
+    // a user setting rather than a per-stack column.
+    try {
+      const { data: { user } } = await sb.auth.getUser();
+      const { data: profile } = await sb.from("profiles").select("settings").eq("id", user.id).single();
+      const cap = profile?.settings?.stackCapacity;
+      if (cap) setCapacity(cap);
+      profileSettings.current = profile?.settings || {};
+    } catch { /* falls back to the default */ }
     const { data: away, error } = await sb
       .from("stock_checkouts")
       .select("*")
@@ -218,6 +242,96 @@ export default function ShowDesk() {
     return data && data.length ? data[0].position : 0;
   }
 
+  // Stacks with their live count + free space, in warehouse order.
+  const stacksWithSpace = useMemo(
+    () => stacks.map((s) => {
+      const used = usedByStack.get(s.id) || 0;
+      return { ...s, used, free: Math.max(0, capacity - used) };
+    }),
+    [stacks, usedByStack, capacity]
+  );
+
+  async function saveCapacity(v) {
+    const n = Math.max(1, parseInt(v, 10) || DEFAULT_STACK_CAPACITY);
+    setCapacity(n);
+    setPlan(null);
+    try {
+      const sb = supabase();
+      const { data: { user } } = await sb.auth.getUser();
+      const next = { ...profileSettings.current, stackCapacity: n };
+      profileSettings.current = next;
+      await sb.from("profiles").update({ settings: next }).eq("id", user.id);
+    } catch { /* best-effort — the plan still uses the new number */ }
+  }
+
+  function buildPlan() {
+    setMsg("");
+    setBackPickerOpen(false);
+    setPlan(planReallocation(selected.length, stacksWithSpace, capacity));
+  }
+
+  // Execute a reallocation plan: each group takes the next slice of the batch.
+  async function applyPlan() {
+    const groups = plan?.groups || [];
+    if (!groups.length || selected.length === 0) return;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const { data: { user } } = await sb.auth.getUser();
+
+    const warnings = [];
+    let cursor = 0;
+    let placed = 0;
+    for (const g of groups) {
+      let stackId = g.stackId;
+      if (!stackId) {
+        const { data: created } = await sb.from("card_stacks").insert({ user_id: user.id, name: g.name }).select("id").single();
+        if (!created) { warnings.push(`couldn't create stack ${g.name}`); cursor += g.count; continue; }
+        stackId = created.id;
+      }
+      const base = await maxPosition(sb, stackId);
+      const slice = selected.slice(cursor, cursor + g.count);
+      cursor += g.count;
+      for (let i = 0; i < slice.length; i++) {
+        setProgress(`Filing ${placed + 1} of ${selected.length}…`);
+        const w = await restoreOne(sb, slice[i], { stack_id: stackId, position: base + 1 + i }, "back", stackId);
+        warnings.push(...w);
+        placed += 1;
+      }
+    }
+
+    setProgress("");
+    setBusy(false);
+    setPlan(null);
+    const where = groups.map((g) => `${g.name} (${g.count})`).join(", ");
+    setMsg(`Filed ${placed} card(s) into ${where}.${warnings.length ? ` ⚠ ${warnings.join(" · ")}` : ""}`);
+    await load();
+  }
+
+  // Return one card to stock: clear the away flag (optionally moving it),
+  // un-hide its listing, and close the checkout row. Returns any warnings.
+  async function restoreOne(sb, co, patch, returnMode, returnStackId) {
+    const warnings = [];
+    if (co.stack_card_id) {
+      await sb.from("stack_cards").update({ checked_out_at: null, ...patch }).eq("id", co.stack_card_id);
+    } else {
+      warnings.push(`${co.sku || "?"}: its stack card no longer exists — add it back by hand.`);
+    }
+    const u = await unhideListing(co);
+    if (u.error) warnings.push(`${co.sku || "?"}: ${u.error}`);
+    if (u.newItemId && co.stack_card_id) {
+      await sb.from("stack_cards").update({ ebay_item_id: u.newItemId }).eq("id", co.stack_card_id);
+    }
+    await sb.from("stock_checkouts").update({
+      resolved_at: new Date().toISOString(),
+      resolution: "returned",
+      return_mode: returnMode,
+      return_stack_id: returnStackId,
+      relisted_item_id: u.newItemId || null
+    }).eq("id", co.id);
+    return warnings;
+  }
+
   async function checkin(items, mode, chosenStackId = null) {
     if (items.length === 0) return;
     setBusy(true);
@@ -243,31 +357,9 @@ export default function ShowDesk() {
     for (let i = 0; i < items.length; i++) {
       const co = items[i];
       setProgress(`Checking in ${i + 1} of ${items.length}…`);
-
-      // Put the card back in a stack.
-      if (co.stack_card_id) {
-        const patch = mode === "spot"
-          ? { checked_out_at: null }
-          : { checked_out_at: null, stack_id: stackId, position: base + 1 + i };
-        await sb.from("stack_cards").update(patch).eq("id", co.stack_card_id);
-      } else {
-        warnings.push(`${co.sku || "?"}: its stack card no longer exists — add it back by hand.`);
-      }
-
-      // Bring the listing back (best-effort).
-      const u = await unhideListing(co);
-      if (u.error) warnings.push(`${co.sku || "?"}: ${u.error}`);
-      if (u.newItemId && co.stack_card_id) {
-        await sb.from("stack_cards").update({ ebay_item_id: u.newItemId }).eq("id", co.stack_card_id);
-      }
-
-      await sb.from("stock_checkouts").update({
-        resolved_at: new Date().toISOString(),
-        resolution: "returned",
-        return_mode: mode,
-        return_stack_id: mode === "spot" ? co.stack_id : stackId,
-        relisted_item_id: u.newItemId || null
-      }).eq("id", co.id);
+      const patch = mode === "spot" ? {} : { stack_id: stackId, position: base + 1 + i };
+      const w = await restoreOne(sb, co, patch, mode, mode === "spot" ? co.stack_id : stackId);
+      warnings.push(...w);
       restored += 1;
     }
     setProgress("");
@@ -471,16 +563,66 @@ export default function ShowDesk() {
                 {sel.size > 0 ? `${sel.size} selected` : "All"}
               </label>
               <div className="ps-actions">
-                <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy}>↩ Return to spots ({selCount})</button>
-                <button className="btn btn-ghost" onClick={() => setBackPickerOpen((v) => !v)} disabled={busy}>⤵ To back of stack…</button>
-                <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy}>✚ New stack ({selCount})</button>
+                <button className="btn btn-primary" onClick={buildPlan} disabled={busy}>✨ Reallocate ({selCount})</button>
+                <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy}>↩ Return to spots</button>
+                <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy}>⤵ Pick a stack…</button>
+                <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy}>✚ New stack</button>
               </div>
             </div>
+
+            {plan ? (
+              <div className="sd-plan">
+                <div className="sd-plan-head">
+                  <b>Filing plan for {selCount} card(s)</b>
+                  <label className="sd-toggle">
+                    stack holds
+                    <input className="sd-count" type="number" min="1" max="5000" value={capacity}
+                      onChange={(e) => setCapacity(e.target.value)}
+                      onBlur={(e) => saveCapacity(e.target.value)} />
+                    cards
+                  </label>
+                </div>
+                <div className="sd-plan-rows">
+                  {plan.groups.map((g, i) => (
+                    <div className="sd-plan-row" key={i}>
+                      <span className="badge2">{g.name}</span>
+                      <span className="sd-plan-count">{g.count} card{g.count === 1 ? "" : "s"}</span>
+                      <span className="hint-small">
+                        {g.isNew ? "new stack" : `${g.freeBefore} free → ${g.freeBefore - g.count} after`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="hint hint-small" style={{ marginTop: 0 }}>
+                  {plan.groups.length === 1 && !plan.groups[0].isNew
+                    ? `${plan.groups[0].name} has room for the lot — the tightest fit, so your roomier stacks stay free.`
+                    : plan.newStacks > 0
+                      ? `Fills the roomiest stacks first, then opens ${plan.newStacks} new one${plan.newStacks === 1 ? "" : "s"}.`
+                      : "Spread across the roomiest stacks — no new stacks needed."}
+                  {" "}Cards go to the back in order; SKUs are unchanged.
+                </p>
+                <div className="ps-actions">
+                  <button className="btn btn-primary" onClick={applyPlan} disabled={busy}>
+                    {busy ? progress || "Filing…" : "Confirm & file"}
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => setPlan(null)} disabled={busy}>Cancel</button>
+                </div>
+              </div>
+            ) : null}
+
             {backPickerOpen ? (
               <div className="sd-backpicker">
                 <span className="hint-small">Add {selCount} card(s), in order, to the back of:</span>
-                {stacks.map((s) => (
-                  <button key={s.id} className="stack-tab" onClick={() => checkin(selected, "back", s.id)} disabled={busy}>{s.name}</button>
+                {stacksWithSpace.map((s) => (
+                  <button
+                    key={s.id}
+                    className={`stack-tab${s.free < selCount ? " sd-tight" : ""}`}
+                    onClick={() => checkin(selected, "back", s.id)}
+                    disabled={busy}
+                    title={`${s.used}/${capacity} used · ${s.free} free`}
+                  >
+                    {s.name} <span className="stack-count">{s.free} free</span>
+                  </button>
                 ))}
               </div>
             ) : null}
