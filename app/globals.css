@@ -748,7 +748,9 @@ html, body { overflow-x: clip; max-width: 100%; }
 .ss-sets .stack-tab.on { background:var(--accent); color:var(--accent-ink); border-color:transparent; }
 .ss-sets .stack-tab.on .loose-set-code { background:color-mix(in srgb,#fff 25%, transparent); color:var(--accent-ink); }
 .ss-qty { width:72px; border:1px solid var(--line-strong); border-radius:var(--input-radius); padding:5px 8px; background:var(--surface); color:var(--ink); font-family:var(--font-mono); font-size:13px; }
-.ss-qty:focus { outline:none; border-color:var(--accent); }
+.ss-qty:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+/* Foil/reverse-holo count — tinted so the two columns don't blur together. */
+.ss-qty-foil { border-color:color-mix(in srgb,var(--accent) 40%, var(--line-strong)); background:var(--accent-soft); }
 
 /* Theme (skin) picker */
 .skin-row { display:flex; gap:6px; flex-wrap:wrap; }

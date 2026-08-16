@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import {
-  SHEET_FORMATS, CM_CONDITIONS, CM_LANGUAGES, getFormat, formatForGame, flagsForFormat,
+  SHEET_FORMATS, CM_CONDITIONS, CM_LANGUAGES, FLAG_COLUMNS,
+  getFormat, formatForGame, flagsForFormat,
   buildSheetCsv, sheetFilename, sheetNumber
 } from "@/lib/sellsheet";
 
@@ -48,7 +49,13 @@ export default function SellSheet() {
   const [flags, setFlags] = useState({});
 
   const fmt = getFormat(formatKey);
-  const fmtFlags = flagsForFormat(fmt);
+  // The "premium" variant differs by game — Magic/Lorcana/DBZ/Riftbound call it
+  // foil, Pokémon calls it reverse holo. Whichever the format has becomes a
+  // SECOND quantity column, since one card can be listed both ways; the rest
+  // of the flags stay as whole-export defaults.
+  const foilCol = fmt.columns.find((c) => c === "isFoil" || c === "isReverseHolo") || null;
+  const foilMeta = foilCol ? FLAG_COLUMNS[foilCol] : null;
+  const fmtFlags = flagsForFormat(fmt).filter((f) => f.column !== foilCol);
 
   useEffect(() => {
     (async () => {
@@ -109,10 +116,24 @@ export default function SellSheet() {
     setLoadingCards(false);
   }
 
-  const setQty = (id, v) => {
+  const setQty = (id, field, v) => {
     const n = Math.max(0, parseInt(v, 10) || 0);
-    setEntries((prev) => ({ ...prev, [id]: { qty: n } }));
+    setEntries((prev) => ({ ...prev, [id]: { ...prev[id], [field]: n } }));
   };
+
+  /**
+   * Counting a set means running down one column, so Down (and Enter) moves to
+   * the SAME box one row lower rather than scrolling the page — and on a number
+   * input it would otherwise decrement the value, which is worse than useless
+   * here. Up goes back; Tab still steps sideways as normal.
+   */
+  function onCellKey(e, rowIdx, col) {
+    const dir = e.key === "ArrowDown" || e.key === "Enter" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+    if (!dir) return;
+    e.preventDefault();
+    const next = document.querySelector(`[data-cell="${rowIdx + dir}-${col}"]`);
+    if (next) { next.focus(); next.select(); }
+  }
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -123,15 +144,31 @@ export default function SellSheet() {
     );
   }, [cards, filter]);
 
-  const withQty = useMemo(() => cards.filter((c) => (entries[c.cardmarket_id]?.qty || 0) > 0), [cards, entries]);
+  // A card counted in both boxes becomes two listings, so count rows not cards.
+  const countedRows = useMemo(() => {
+    let n = 0;
+    for (const c of cards) {
+      const e = entries[c.cardmarket_id] || {};
+      if ((e.qty || 0) > 0) n += 1;
+      if (foilCol && (e.foilQty || 0) > 0) n += 1;
+    }
+    return n;
+  }, [cards, entries, foilCol]);
 
   function download(onlyWithQty) {
-    const items = cards.map((card) => ({
-      card,
-      entry: { qty: entries[card.cardmarket_id]?.qty || 0, condition, language, price, comment: "", ...flags }
-    }));
+    const base = { condition, language, price, comment: "", ...flags };
+    const items = [];
+    for (const card of cards) {
+      const e = entries[card.cardmarket_id] || {};
+      // Standard row. The template is one row per card (matching a real
+      // export); foil rows only appear once you've actually counted some.
+      items.push({ card, entry: { ...base, qty: e.qty || 0, ...(foilCol ? { [foilMeta.key]: false } : {}) } });
+      if (foilCol && (e.foilQty || 0) > 0) {
+        items.push({ card, entry: { ...base, qty: e.foilQty, [foilMeta.key]: true } });
+      }
+    }
     const csv = buildSheetCsv(items, formatKey, { onlyWithQty });
-    const count = onlyWithQty ? withQty.length : items.length;
+    const count = onlyWithQty ? countedRows : cards.length;
     if (count === 0) { setMsg("Nothing to export — enter a quantity on at least one card, or export the full template."); return; }
     const gameName = games.find((g) => g.slug === game)?.name || game;
     // The BOM is already in the string; a plain text/csv blob keeps it intact.
@@ -255,8 +292,8 @@ export default function SellSheet() {
               <button className="btn btn-primary" onClick={() => download(false)}>
                 ⤓ Export template ({cards.length} rows)
               </button>
-              <button className="btn btn-ghost" onClick={() => download(true)} disabled={withQty.length === 0}>
-                ⤓ Export counted only ({withQty.length})
+              <button className="btn btn-ghost" onClick={() => download(true)} disabled={countedRows === 0}>
+                ⤓ Export counted only ({countedRows})
               </button>
             </div>
             <p className="hint hint-small">
@@ -269,8 +306,14 @@ export default function SellSheet() {
           <div className="panel">
             <div className="panel-head">
               <h3>Cards</h3>
-              <span className="badge2">{withQty.length} counted</span>
+              <span className="badge2">{countedRows} row{countedRows === 1 ? "" : "s"} counted</span>
             </div>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>
+              {foilCol
+                ? <>Count normals in <b>Qty</b> and {foilMeta.label.toLowerCase()}s in the second box — a card with both exports as two listings. </>
+                : null}
+              <b>↓</b> / <b>Enter</b> moves to the same box in the next row, <b>↑</b> back up.
+            </p>
             <input className="pack-search" type="search" value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter by name or number…" aria-label="Filter cards" />
             {visible.length > ROW_LIMIT ? (
               <p className="hint hint-small">Showing the first {ROW_LIMIT} of {visible.length} — filter to narrow, or use the template export for the full set.</p>
@@ -278,10 +321,14 @@ export default function SellSheet() {
             <div className="table-wrap">
               <table className="itbl">
                 <thead>
-                  <tr><th>No</th><th>Name</th><th>Set</th><th>Rarity</th><th style={{ width: 90 }}>Qty</th></tr>
+                  <tr>
+                    <th>No</th><th>Name</th><th>Set</th><th>Rarity</th>
+                    <th style={{ width: 90 }}>Qty</th>
+                    {foilCol ? <th style={{ width: 100 }}>{foilMeta.label}</th> : null}
+                  </tr>
                 </thead>
                 <tbody>
-                  {visible.slice(0, ROW_LIMIT).map((c) => (
+                  {visible.slice(0, ROW_LIMIT).map((c, i) => (
                     <tr key={c.cardmarket_id}>
                       <td className="mono">{sheetNumber(c.collector_number)}</td>
                       <td className="itbl-title">{c.name}</td>
@@ -292,11 +339,27 @@ export default function SellSheet() {
                           className="ss-qty"
                           type="number"
                           min="0"
+                          data-cell={`${i}-qty`}
                           value={entries[c.cardmarket_id]?.qty || ""}
-                          onChange={(e) => setQty(c.cardmarket_id, e.target.value)}
+                          onChange={(e) => setQty(c.cardmarket_id, "qty", e.target.value)}
+                          onKeyDown={(e) => onCellKey(e, i, "qty")}
                           aria-label={`Quantity for ${c.name}`}
                         />
                       </td>
+                      {foilCol ? (
+                        <td>
+                          <input
+                            className="ss-qty ss-qty-foil"
+                            type="number"
+                            min="0"
+                            data-cell={`${i}-foil`}
+                            value={entries[c.cardmarket_id]?.foilQty || ""}
+                            onChange={(e) => setQty(c.cardmarket_id, "foilQty", e.target.value)}
+                            onKeyDown={(e) => onCellKey(e, i, "foil")}
+                            aria-label={`${foilMeta.label} quantity for ${c.name}`}
+                          />
+                        </td>
+                      ) : null}
                     </tr>
                   ))}
                 </tbody>
