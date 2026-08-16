@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
-import { checkoutStackCard } from "@/lib/checkout";
+import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -258,7 +258,7 @@ export default function Stacks() {
   async function checkOut(card) {
     if (!confirm(`Check out "${card.sku}" to a show?\n\nIt leaves the live numbering (everything behind moves up one) and its eBay listing is hidden. Bring it back — or mark it sold — from the Show desk.`)) return;
     setBusy(true);
-    const r = await checkoutStackCard(supabase(), { card, stackName: sel?.name || null, event: null, hideOnEbay: true });
+    const r = await checkoutStackCard(supabase(), { card, stackName: sel?.name || null, event: null, hideMode: getHideMode() });
     setBusy(false);
     if (!r.ok) {
       setMsg(`Couldn't check out ${card.sku}: ${r.error}`);

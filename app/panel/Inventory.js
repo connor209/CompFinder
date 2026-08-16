@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import EbayActivity from "./EbayActivity";
 import MarketLinks from "./MarketLinks";
+import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 
@@ -476,6 +477,33 @@ export default function Inventory({ onDeepDive }) {
     }
   }
 
+  // Check a group's cards out to a show (Show desk) — matched by SKU.
+  async function showOut(g) {
+    const skus = g._items.map((it) => it.sku).filter(Boolean);
+    if (skus.length === 0) {
+      setNote("No SKU on this listing — check it out from Stacks or the Show desk instead.");
+      return;
+    }
+    const what = skus.length === 1 ? `"${skus[0]}"` : `${skus.length} cards`;
+    if (!confirm(`Check ${what} out to a show?\n\nEach card leaves its stack's live numbering and the listing is taken off sale (per your Show desk hide setting). Manage them from the Show desk.`)) return;
+    setUpdating((prev) => new Map(prev).set(g.key, { loading: true }));
+    const sb = createClient();
+    const { data: stacks } = await sb.from("card_stacks").select("id,name");
+    const stackNm = new Map((stacks || []).map((s) => [s.id, s.name]));
+    let ok = 0;
+    const errs = [];
+    for (const sku of skus) {
+      const { data: matches } = await sb.from("stack_cards").select("*").ilike("sku", sku);
+      const card = (matches || []).find((c) => !c.pulled_at && !c.checked_out_at);
+      if (!card) { errs.push(`${sku}: not in your stacks`); continue; }
+      const r = await checkoutStackCard(sb, { card, stackName: stackNm.get(card.stack_id) || null, event: null, hideMode: getHideMode() });
+      if (r.ok) ok += 1;
+      else { errs.push(`${sku}: ${r.error}`); if (r.needsMigration) break; }
+    }
+    setUpdating((prev) => { const n = new Map(prev); n.delete(g.key); return n; });
+    setNote(`Checked out ${ok} card(s) to the Show desk.${errs.length ? ` ⚠ ${errs.join(" · ")}` : ""}`);
+  }
+
   // Bulk write-back: update every selected (priced) card to its market price,
   // with a single confirm and drastic-change items skipped rather than forced.
   async function updateSelectedToMarket() {
@@ -826,6 +854,7 @@ export default function Inventory({ onDeepDive }) {
                     {onDeepDive ? (
                       <button className="inv-act" onClick={() => onDeepDive(g.title)}>Deep dive ↗</button>
                     ) : null}
+                    <button className="inv-act" onClick={() => showOut(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
                     <MarketLinks query={g.title} gameSlug="pokemon" label={g.title} />
                   </div>
                   {(() => {

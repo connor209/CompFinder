@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { checkoutStackCard, unhideListing, nextStackName } from "@/lib/checkout";
+import { pagedSelect } from "@/lib/pagedSelect";
+import { checkoutStackCard, unhideListing, nextStackName, HIDE_MODES, getHideMode, setHideMode } from "@/lib/checkout";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -14,7 +15,6 @@ import { checkoutStackCard, unhideListing, nextStackName } from "@/lib/checkout"
  */
 
 const EVENT_KEY = "cf-show-event";
-const HIDE_KEY = "cf-show-hide";
 
 const pounds = (pence) => `£${((pence || 0) / 100).toFixed(2)}`;
 
@@ -40,7 +40,7 @@ export default function ShowDesk() {
   const [open, setOpen] = useState([]); // unresolved checkouts, oldest first
   const [history, setHistory] = useState([]);
   const [event, setEvent] = useState("");
-  const [hideOnEbay, setHideOnEbay] = useState(true);
+  const [hideMode, setHideModeState] = useState("auto");
   const [sku, setSku] = useState("");
   const [bulk, setBulk] = useState("");
   const [showBulk, setShowBulk] = useState(false);
@@ -50,22 +50,26 @@ export default function ShowDesk() {
   const [msg, setMsg] = useState("");
   const [sel, setSel] = useState(new Set());
   const [backPickerOpen, setBackPickerOpen] = useState(false);
+  const [recs, setRecs] = useState(null); // null = closed; [] = built, empty
+  const [recsLoading, setRecsLoading] = useState(false);
+  const [recSel, setRecSel] = useState(new Set());
+  const [recCount, setRecCount] = useState(20);
 
   const supabase = () => createClient();
 
   useEffect(() => {
     try {
       setEvent(localStorage.getItem(EVENT_KEY) || "");
-      setHideOnEbay(localStorage.getItem(HIDE_KEY) !== "0");
     } catch { /* storage unavailable */ }
+    setHideModeState(getHideMode());
   }, []);
   function saveEvent(v) {
     setEvent(v);
     try { localStorage.setItem(EVENT_KEY, v); } catch { /* best-effort */ }
   }
-  function saveHide(v) {
-    setHideOnEbay(v);
-    try { localStorage.setItem(HIDE_KEY, v ? "1" : "0"); } catch { /* best-effort */ }
+  function saveHideMode(v) {
+    setHideModeState(v);
+    setHideMode(v);
   }
 
   async function load() {
@@ -99,32 +103,21 @@ export default function ShowDesk() {
 
   // ---- Checkout ------------------------------------------------------------
 
-  async function doCheckout(skus) {
-    const list = skus.map((s) => s.trim()).filter(Boolean);
-    if (list.length === 0) return;
-    setBusy(true);
-    setMsg("");
-    const results = [];
+  // Core: check out concrete stack_cards rows, one by one, with feedback.
+  async function checkoutCards(cards) {
     const sb = supabase();
-    for (let i = 0; i < list.length; i++) {
-      const s = list[i];
-      setProgress(list.length > 1 ? `Checking out ${i + 1} of ${list.length}…` : "Checking out…");
-      const { data: matches } = await sb.from("stack_cards").select("*").ilike("sku", s);
-      const candidates = (matches || []).filter((c) => !c.pulled_at && !c.checked_out_at);
-      if (candidates.length === 0) {
-        const gone = (matches || []).some((c) => c.checked_out_at && !c.pulled_at);
-        results.push({ sku: s, ok: false, text: gone ? "already checked out" : "no unpulled card with that SKU" });
-        continue;
-      }
-      const card = candidates[0];
+    const results = [];
+    for (let i = 0; i < cards.length; i++) {
+      const card = cards[i];
+      setProgress(cards.length > 1 ? `Checking out ${i + 1} of ${cards.length}…` : "Checking out…");
       const r = await checkoutStackCard(sb, {
         card,
         stackName: stackName.get(card.stack_id) || null,
         event: event.trim() || null,
-        hideOnEbay
+        hideMode
       });
       if (!r.ok) {
-        results.push({ sku: s, ok: false, text: r.error });
+        results.push({ sku: card.sku, ok: false, text: r.error });
         if (r.needsMigration) { setNeedsMigration(true); break; }
         continue;
       }
@@ -135,11 +128,74 @@ export default function ShowDesk() {
         : r.itemId ? "listing left live" : "no listing found";
       results.push({ sku: card.sku, ok: true, text: `out of ${stackName.get(card.stack_id) || "stack"} · ${hideText}` });
     }
-    setFeedback(results);
+    return results;
+  }
+
+  async function doCheckout(skus) {
+    const list = skus.map((s) => s.trim()).filter(Boolean);
+    if (list.length === 0) return;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const cards = [];
+    const misses = [];
+    for (const s of list) {
+      const { data: matches } = await sb.from("stack_cards").select("*").ilike("sku", s);
+      const candidates = (matches || []).filter((c) => !c.pulled_at && !c.checked_out_at);
+      if (candidates.length === 0) {
+        const gone = (matches || []).some((c) => c.checked_out_at && !c.pulled_at);
+        misses.push({ sku: s, ok: false, text: gone ? "already checked out" : "no unpulled card with that SKU" });
+      } else {
+        cards.push(candidates[0]);
+      }
+    }
+    const results = await checkoutCards(cards);
+    setFeedback([...results, ...misses]);
     setProgress("");
     setBusy(false);
     setSku("");
     setBulk("");
+    await load();
+  }
+
+  // ---- Recommended picks ---------------------------------------------------
+  // Suggest show stock by value: live stack cards ranked by their listing
+  // price. The user unticks anything they'd rather leave home.
+
+  async function buildRecs() {
+    setRecsLoading(true);
+    setRecs(null);
+    setMsg("");
+    const sb = supabase();
+    const [cards, listings] = await Promise.all([
+      pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null)),
+      pagedSelect(() => sb.from("ebay_listings").select("sku,price_value,price_currency").not("sku", "is", null))
+    ]);
+    const priceBySku = new Map();
+    for (const l of listings) {
+      const k = String(l.sku).toLowerCase();
+      if (l.price_value != null && !priceBySku.has(k)) priceBySku.set(k, Math.round(Number(l.price_value) * 100));
+    }
+    const ranked = cards
+      .filter((c) => !c.checked_out_at && c.sku && priceBySku.has(String(c.sku).toLowerCase()))
+      .map((c) => ({ card: c, pricePence: priceBySku.get(String(c.sku).toLowerCase()) }))
+      .sort((a, b) => b.pricePence - a.pricePence)
+      .slice(0, Math.max(1, Math.min(200, Number(recCount) || 20)));
+    setRecs(ranked);
+    setRecSel(new Set(ranked.map((r) => r.card.id)));
+    setRecsLoading(false);
+  }
+
+  async function checkoutRecs() {
+    const chosen = (recs || []).filter((r) => recSel.has(r.card.id)).map((r) => r.card);
+    if (chosen.length === 0) return;
+    setBusy(true);
+    setMsg("");
+    const results = await checkoutCards(chosen);
+    setFeedback(results);
+    setProgress("");
+    setBusy(false);
+    setRecs(null);
     await load();
   }
 
@@ -300,9 +356,11 @@ export default function ShowDesk() {
             placeholder="Show / event name (optional — tags each checkout)"
             aria-label="Show name"
           />
-          <label className="sd-toggle">
-            <input type="checkbox" checked={hideOnEbay} onChange={(e) => saveHide(e.target.checked)} />
-            Hide listings on eBay
+          <label className="sd-toggle" title="How each card's eBay listing is taken off sale while it's at the show">
+            Hide on eBay:
+            <select className="sd-select" value={hideMode} onChange={(e) => saveHideMode(e.target.value)}>
+              {HIDE_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
           </label>
         </div>
         {showBulk ? (
@@ -329,6 +387,16 @@ export default function ShowDesk() {
             </button>
           </div>
         )}
+        <div className="sd-recbar">
+          <button className="btn btn-ghost" onClick={buildRecs} disabled={busy || recsLoading}>
+            {recsLoading ? "Ranking your stock…" : "★ Recommend show stock"}
+          </button>
+          <label className="sd-toggle">
+            top
+            <input className="sd-count" type="number" min="1" max="200" value={recCount} onChange={(e) => setRecCount(e.target.value)} />
+            by value
+          </label>
+        </div>
         {feedback.length > 0 ? (
           <div className="sd-feedback">
             {feedback.map((f, i) => (
@@ -339,6 +407,48 @@ export default function ShowDesk() {
           </div>
         ) : null}
       </div>
+
+      {recs !== null ? (
+        <div className="panel">
+          <div className="panel-head">
+            <span className="eyebrow">Recommended show stock — highest value first</span>
+            <button className="btn btn-ghost" onClick={() => setRecs(null)}>Close</button>
+          </div>
+          {recs.length === 0 ? (
+            <p className="dd-empty">No stack cards matched a live listing price. Sync your eBay listings, then try again.</p>
+          ) : (
+            <>
+              <p className="hint hint-small" style={{ marginTop: 0 }}>
+                Your live stock ranked by listing price. Untick anything staying home, then check the rest out in one go.
+              </p>
+              <div className="stack-list">
+                {recs.map(({ card, pricePence }) => (
+                  <label className="ps-row" key={card.id}>
+                    <input
+                      type="checkbox"
+                      checked={recSel.has(card.id)}
+                      onChange={() => setRecSel((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
+                    />
+                    <span className="stack-sku">{card.sku}</span>
+                    <span className="stack-title">{card.title || <em>—</em>}</span>
+                    <span className="badge2">{stackName.get(card.stack_id) || "—"}</span>
+                    <span className="sd-price">{pounds(pricePence)}</span>
+                  </label>
+                ))}
+              </div>
+              {(() => {
+                const chosen = recs.filter((r) => recSel.has(r.card.id));
+                const total = chosen.reduce((t, r) => t + r.pricePence, 0);
+                return (
+                  <button className="btn btn-primary" onClick={checkoutRecs} disabled={busy || chosen.length === 0} style={{ marginTop: 10 }}>
+                    {busy ? progress || "Checking out…" : `Check out ${chosen.length} card(s) · ${pounds(total)}`}
+                  </button>
+                );
+              })()}
+            </>
+          )}
+        </div>
+      ) : null}
 
       {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)", marginTop: -6 }}>{msg}</p> : null}
 
