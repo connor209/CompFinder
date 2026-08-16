@@ -23,7 +23,7 @@ your database.
 | | Item | What to do |
 |---|---|---|
 | ✅ | **Migrations 012 – 016** | Applied 16 Aug via `supabase/APPLY_PENDING.sql`. That file is a safely re-runnable superset of all five — paste it again any time without worrying. |
-| 🔵 | **Catalogue import** | Only needed if HEALTH_CHECK query 2 shows missing games or a `(stale — pre-015 rows)` row. Migration 015 backfills existing rows to `game = 'pokemon'`, so a Pokémon-only catalogue keeps working — the other nine games just won't appear. Cleaned CSVs can be regenerated from the Cardmarket exports on request. |
+| ✅ | **Catalogue import** | Verified 16 Aug: all ten games present, 308,707 rows, every set carrying its code. Nothing to do — **do not run the truncate**. |
 | ⛔ | **Reconnect eBay** | Picks up the fulfilment + account-read scopes. No way to check this in SQL — the app tells you: if Pull sheet or Sales shows a "Reconnect to enable…" banner, it's needed; if they load normally, it's already done. |
 
 ---
