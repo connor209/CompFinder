@@ -14,15 +14,17 @@ point is to capture the thought before it evaporates.
 
 ## ⛔ Blocked on you
 
-Nothing here needs code — these are actions only you can take. Everything below
-is built and waiting.
+Nothing here needs code — these are actions only you can take.
+
+**Check before doing anything:** run `supabase/HEALTH_CHECK.sql` (read-only) to
+see what's actually applied. Don't work from this list alone — it can't see
+your database.
 
 | | Item | What to do |
 |---|---|---|
-| ⛔ | **Migrations 012 / 013 / 014** | Run in the Supabase SQL editor: `012_listing_photos`, `013_deals`, `014_purchase_receipts`. Re-running an already-applied one is harmless (the `create policy` lines throw, nothing else happens). |
-| ⛔ | **Migration 016 — Show desk** | `016_show_checkouts.sql`. Until it runs, the Show desk shows a setup notice; everything else works. |
-| ⛔ | **Catalogue import** | `015_catalog_multigame.sql`, then `truncate table public.card_catalog;`, then import the 10 per-game CSVs. Unlocks Browse for all games **and** the set names/codes on the pull sheet. |
-| ⛔ | **Reconnect eBay** | Picks up the newer scopes (fulfilment + account read) used by orders, sales and business policies. |
+| ✅ | **Migrations 012 – 016** | Applied 16 Aug via `supabase/APPLY_PENDING.sql`. That file is a safely re-runnable superset of all five — paste it again any time without worrying. |
+| 🔵 | **Catalogue import** | Only needed if HEALTH_CHECK query 2 shows missing games or a `(stale — pre-015 rows)` row. Migration 015 backfills existing rows to `game = 'pokemon'`, so a Pokémon-only catalogue keeps working — the other nine games just won't appear. Cleaned CSVs can be regenerated from the Cardmarket exports on request. |
+| ⛔ | **Reconnect eBay** | Picks up the fulfilment + account-read scopes. No way to check this in SQL — the app tells you: if Pull sheet or Sales shows a "Reconnect to enable…" banner, it's needed; if they load normally, it's already done. |
 
 ---
 
