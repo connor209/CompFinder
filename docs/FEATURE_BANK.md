@@ -14,17 +14,18 @@ point is to capture the thought before it evaporates.
 
 ## ⛔ Blocked on you
 
-Nothing here needs code — these are actions only you can take.
+**Verified clear on 16 Aug 2026** — schema and catalogue both confirmed by
+`supabase/HEALTH_CHECK.sql` (read-only, one query, run it any time):
 
-**Check before doing anything:** run `supabase/HEALTH_CHECK.sql` (read-only) to
-see what's actually applied. Don't work from this list alone — it can't see
-your database.
+- Migrations 012 – 016 → all present
+- Catalogue → all ten games, 308,707 rows, set codes on every set
+- **Do not run the catalogue truncate.** The data is good.
+
+One thing left, and it may already be fine:
 
 | | Item | What to do |
 |---|---|---|
-| ✅ | **Migrations 012 – 016** | Applied 16 Aug via `supabase/APPLY_PENDING.sql`. That file is a safely re-runnable superset of all five — paste it again any time without worrying. |
-| ✅ | **Catalogue import** | Verified 16 Aug: all ten games present, 308,707 rows, every set carrying its code. Nothing to do — **do not run the truncate**. |
-| ⛔ | **Reconnect eBay** | Picks up the fulfilment + account-read scopes. No way to check this in SQL — the app tells you: if Pull sheet or Sales shows a "Reconnect to enable…" banner, it's needed; if they load normally, it's already done. |
+| 🔵 | **eBay business-policy scope** | The account connected **14 Aug**, the same day `sell.account.readonly` was added (09:53), so it's genuinely ambiguous. `sell.fulfillment.readonly` (13 Aug) is proven working — the pull sheet pulls live orders. **Test:** open the List-to-eBay form. If business policies load, nothing to do. If it prompts to reconnect, do so — takes 30 seconds and closes it for good. |
 
 ---
 
