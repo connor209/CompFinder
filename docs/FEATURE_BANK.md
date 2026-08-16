@@ -72,4 +72,12 @@ Anything you think of goes here first. Newest at the top.
 
 <!-- New items get added below this line -->
 
-_Empty — first idea goes here._
+- 🟢 **Listing tool — Cardmarket / CardCompanion CSV import formats**
+  Build listings on the platform and export them as the CSV each tool expects
+  for bulk import. Formats differ per game/tool, so it needs a per-format
+  profile (columns, headers, condition and language codes) rather than one
+  hard-coded exporter. *Waiting on:* example CSVs — Riftbound → CardCompanion
+  first, more to follow.
+- 🔵 **Per-stack capacity override** — capacity is currently one number for all
+  stacks (`profiles.settings.stackCapacity`). Fine while storage is uniform;
+  if some boxes hold more than others, add a per-stack column.
