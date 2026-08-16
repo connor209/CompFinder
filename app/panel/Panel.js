@@ -21,6 +21,7 @@ import BulkListModal from "./BulkListModal";
 import MarketLinks from "./MarketLinks";
 import { Icon } from "./icons";
 import ThemeSeg from "./ThemeSeg";
+import SkinPicker from "./SkinPicker";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 
@@ -940,6 +941,10 @@ export default function Panel({ initialSection = "dashboard" }) {
             <div className="ctx-theme">
               <div className="ctx-theme-l">Appearance</div>
               <ThemeSeg />
+            </div>
+            <div className="ctx-theme">
+              <div className="ctx-theme-l">Theme</div>
+              <SkinPicker />
             </div>
             <div className="ctx-sep" />
             <a className="ctx-row" href="/settings"><span className="ic" aria-hidden="true">⚙</span> Settings</a>

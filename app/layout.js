@@ -35,12 +35,12 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var t=localStorage.getItem('cf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}})();"
+              "(function(){try{var t=localStorage.getItem('cf-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);var s=localStorage.getItem('cf-skin');if(s&&/^(holo|tabletop|vintage|glacier)$/.test(s))document.documentElement.setAttribute('data-skin',s);}catch(e){}})();"
           }}
         />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
