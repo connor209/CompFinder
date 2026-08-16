@@ -12,20 +12,21 @@ point is to capture the thought before it evaporates.
 
 ---
 
-## ⛔ Blocked on you
+## ✅ Setup — all clear
 
-**Verified clear on 16 Aug 2026** — schema and catalogue both confirmed by
-`supabase/HEALTH_CHECK.sql` (read-only, one query, run it any time):
+**Verified 16 Aug 2026. Nothing is blocked.** Re-check any time with
+`supabase/HEALTH_CHECK.sql` (read-only, one query).
 
 - Migrations 012 – 016 → all present
 - Catalogue → all ten games, 308,707 rows, set codes on every set
 - **Do not run the catalogue truncate.** The data is good.
+- eBay → connected with every scope: `sell.fulfillment.readonly` proven by the
+  pull sheet loading live orders, `sell.account.readonly` proven by business
+  policies loading in Settings. No reconnect needed.
 
-One thing left, and it may already be fine:
-
-| | Item | What to do |
-|---|---|---|
-| 🔵 | **eBay business-policy scope** | The account connected **14 Aug**, the same day `sell.account.readonly` was added (09:53), so it's genuinely ambiguous. `sell.fulfillment.readonly` (13 Aug) is proven working — the pull sheet pulls live orders. **Test:** open the List-to-eBay form. If business policies load, nothing to do. If it prompts to reconnect, do so — takes 30 seconds and closes it for good. |
+Optional: in **Settings → eBay listing policies**, the dropdowns only take
+effect once **Save policies** is pressed. Unsaved, new listings fall back to
+inline flat postage (`profiles.settings.ebayPolicies`).
 
 ---
 
