@@ -72,12 +72,18 @@ Anything you think of goes here first. Newest at the top.
 
 <!-- New items get added below this line -->
 
-- 🔵 **Sell sheets — more formats** — the TCG PowerTools / CardCompanion
-  Cardmarket-style sheet is built and verified byte-identical against a real
-  Riftbound export. Adding another tool or a game with different columns is a
-  new profile in `SHEET_FORMATS` (columns + row builder + BOM/EOL), not new
-  code. *Send an example export for each format you want.*
+- 🔵 **Sell sheets — verify One Piece `setCode` on a real import** — every
+  game's columns are matched to its sample, but two One Piece details were
+  inferred from a single row: the set code is hyphenated (`OP01` → `OP-01`)
+  and `cn` is recovered from the card name (`OP01-013`) since the catalogue
+  holds only the digits. Both are cosmetic — the importer matches on the
+  product id — but worth eyeballing the first real One Piece import.
   `lib/sellsheet.js`
+- 🔵 **Sell sheets — per-row condition / flags** — condition, language, price
+  and the flags currently apply to the whole export. Their Magic sample lists
+  the same card twice at different conditions, so per-row values (and multiple
+  listings per card) would be the natural next step.
+  `app/panel/SellSheet.js`
 - 🔵 **Per-stack capacity override** — capacity is currently one number for all
   stacks (`profiles.settings.stackCapacity`). Fine while storage is uniform;
   if some boxes hold more than others, add a per-stack column.

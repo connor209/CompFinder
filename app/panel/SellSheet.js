@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import {
-  SHEET_FORMATS, CM_CONDITIONS, CM_LANGUAGES,
+  SHEET_FORMATS, CM_CONDITIONS, CM_LANGUAGES, getFormat, formatForGame, flagsForFormat,
   buildSheetCsv, sheetFilename, sheetNumber
 } from "@/lib/sellsheet";
 
@@ -44,9 +44,11 @@ export default function SellSheet() {
   const [condition, setCondition] = useState("NM");
   const [language, setLanguage] = useState("English");
   const [price, setPrice] = useState("0.2");
-  const [foil, setFoil] = useState(false);
+  // Optional per-format flags (foil / playset / signed / first ed / reverse holo).
+  const [flags, setFlags] = useState({});
 
-  const fmt = SHEET_FORMATS.find((f) => f.key === formatKey) || SHEET_FORMATS[0];
+  const fmt = getFormat(formatKey);
+  const fmtFlags = flagsForFormat(fmt);
 
   useEffect(() => {
     (async () => {
@@ -64,6 +66,9 @@ export default function SellSheet() {
     setCards([]);
     setEntries({});
     setSets([]);
+    setFlags({});
+    // Each game has its own column set, so follow it automatically.
+    if (slug) setFormatKey(formatForGame(slug).key);
     if (!slug) return;
     setLoadingSets(true);
     try {
@@ -89,7 +94,7 @@ export default function SellSheet() {
     const sb = createClient();
     const rows = await pagedSelect(() =>
       sb.from("card_catalog")
-        .select("cardmarket_id,name,collector_number,rarity,expansion,category")
+        .select("cardmarket_id,name,collector_number,rarity,expansion,expansion_code,category")
         .eq("game", game)
         .in("expansion", chosen)
     );
@@ -123,10 +128,7 @@ export default function SellSheet() {
   function download(onlyWithQty) {
     const items = cards.map((card) => ({
       card,
-      entry: {
-        qty: entries[card.cardmarket_id]?.qty || 0,
-        condition, language, foil, price, comment: ""
-      }
+      entry: { qty: entries[card.cardmarket_id]?.qty || 0, condition, language, price, comment: "", ...flags }
     }));
     const csv = buildSheetCsv(items, formatKey, { onlyWithQty });
     const count = onlyWithQty ? withQty.length : items.length;
@@ -181,7 +183,11 @@ export default function SellSheet() {
             </select>
           </label>
         </div>
-        <p className="hint hint-small">{fmt.hint}</p>
+        <p className="hint hint-small">
+          Columns follow the game — <code>{fmt.columns.join(", ")}</code>.
+          {" "}UTF-8 with BOM, CRLF line endings.
+          {!fmt.verified ? " ⚠ No example export for this game yet — send one and I'll pin the columns down." : ""}
+        </p>
       </div>
 
       {game ? (
@@ -234,10 +240,16 @@ export default function SellSheet() {
                 <span>Price</span>
                 <input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} />
               </label>
-              <label className="sd-toggle" style={{ alignSelf: "end", paddingBottom: 10 }}>
-                <input type="checkbox" checked={foil} onChange={(e) => setFoil(e.target.checked)} />
-                Foil
-              </label>
+              {fmtFlags.map((fl) => (
+                <label className="sd-toggle" key={fl.key} style={{ alignSelf: "end", paddingBottom: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={!!flags[fl.key]}
+                    onChange={(e) => setFlags((p) => ({ ...p, [fl.key]: e.target.checked }))}
+                  />
+                  {fl.label}
+                </label>
+              ))}
             </div>
             <div className="ps-actions" style={{ marginTop: 12, flexWrap: "wrap" }}>
               <button className="btn btn-primary" onClick={() => download(false)}>
