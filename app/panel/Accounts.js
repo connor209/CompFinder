@@ -45,6 +45,7 @@ function expenseLine(r) {
  */
 export default function Accounts() {
   const [sales, setSales] = useState(null);
+  const [showSales, setShowSales] = useState([]);
   const [purchases, setPurchases] = useState([]);
   const [settings, setSettings] = useState({});
   const [businessType, setBusinessType] = useState("sole_trader");
@@ -56,16 +57,19 @@ export default function Accounts() {
   async function load() {
     const sb = createClient();
     const { data: { user } } = await sb.auth.getUser();
-    const [{ data: profile }, s, p] = await Promise.all([
+    const [{ data: profile }, s, p, sh] = await Promise.all([
       sb.from("profiles").select("settings").eq("id", user.id).single(),
       pagedSelect(() => sb.from("ebay_sales").select("sold_pence,sold_date,quantity")),
-      pagedSelect(() => sb.from("purchases").select("kind,category,amount_pence,purchased_at"))
+      pagedSelect(() => sb.from("purchases").select("kind,category,amount_pence,purchased_at")),
+      // Cash sales made at shows (Show desk) — table may not exist yet.
+      pagedSelect(() => sb.from("stock_checkouts").select("sold_price_pence,resolved_at").eq("resolution", "sold")).catch(() => [])
     ]);
     const st = profile?.settings || {};
     setSettings(st);
     if (st.accounts?.businessType) setBusinessType(st.accounts.businessType);
     if (st.accounts?.feePct != null) setFeePct(st.accounts.feePct);
     setSales(s || []);
+    setShowSales(sh || []);
     setPurchases(p || []);
   }
   useEffect(() => { load(); }, []);
@@ -95,18 +99,22 @@ export default function Accounts() {
   const report = useMemo(() => {
     if (sales === null) return null;
     const inRange = (dstr) => { const d = (dstr || "").slice(0, 10); return d >= range.from && d <= range.to; };
-    let income = 0, unitsSold = 0;
-    for (const s of sales) if (inRange(s.sold_date)) { income += s.sold_pence || 0; unitsSold += s.quantity || 1; }
+    let ebayIncome = 0, unitsSold = 0;
+    for (const s of sales) if (inRange(s.sold_date)) { ebayIncome += s.sold_pence || 0; unitsSold += s.quantity || 1; }
+    // Cash sales at shows — count as turnover but attract no marketplace fee.
+    let showIncome = 0;
+    for (const s of showSales) if (inRange(s.resolved_at)) { showIncome += s.sold_price_pence || 0; unitsSold += 1; }
+    const income = ebayIncome + showIncome;
     const lines = { stock: 0, postage: 0, packaging: 0, subs: 0, other: 0 };
     for (const r of purchases) if (inRange(r.purchased_at)) lines[expenseLine(r)] += r.amount_pence || 0;
-    const sellingFees = Math.round(income * (Number(feePct) || 0) / 100);
+    const sellingFees = Math.round(ebayIncome * (Number(feePct) || 0) / 100);
     const expensesTotal = lines.stock + lines.postage + lines.packaging + lines.subs + lines.other + sellingFees;
     const netProfit = income - expensesTotal;
     const costOfSales = lines.stock + sellingFees;
     const grossProfit = income - costOfSales;
     const overheads = lines.postage + lines.packaging + lines.subs + lines.other;
-    return { income, unitsSold, ...lines, sellingFees, expensesTotal, netProfit, costOfSales, grossProfit, overheads };
-  }, [sales, purchases, range, feePct]);
+    return { income, ebayIncome, showIncome, unitsSold, ...lines, sellingFees, expensesTotal, netProfit, costOfSales, grossProfit, overheads };
+  }, [sales, showSales, purchases, range, feePct]);
 
   function exportCsv() {
     if (!report) return;
@@ -117,6 +125,7 @@ export default function Accounts() {
       [],
       ["Line", "Amount (£)"],
       ["Income (sales)", (report.income / 100).toFixed(2)],
+      ...(report.showIncome > 0 ? [["  of which show/cash sales", (report.showIncome / 100).toFixed(2)]] : []),
       ["Cost of goods (stock)", (report.stock / 100).toFixed(2)],
       ["Selling fees (est.)", (report.sellingFees / 100).toFixed(2)],
       ["Postage", (report.postage / 100).toFixed(2)],
@@ -194,7 +203,7 @@ export default function Accounts() {
           <>
             <div className="panel-head"><h3>Profit &amp; loss — {range.label}</h3></div>
             <div className="pnl-lines">
-              <Row label="Money in (sales)" value={report.income} />
+              <Row label="Money in (sales)" sub={report.showIncome > 0 ? `(incl. ${pounds(report.showIncome)} at shows)` : null} value={report.income} />
               <Row label="Money out (all costs)" value={report.expensesTotal} neg />
               <Row label="Profit" value={report.netProfit} strong />
             </div>
@@ -206,7 +215,7 @@ export default function Accounts() {
           <>
             <div className="panel-head"><h3>Self-employment summary — {range.label}</h3></div>
             <div className="pnl-lines">
-              <Row label="Turnover (sales income)" value={report.income} strong />
+              <Row label="Turnover (sales income)" sub={report.showIncome > 0 ? `(incl. ${pounds(report.showIncome)} at shows)` : null} value={report.income} strong />
               <div className="pnl-group">Allowable expenses</div>
               <Row label="Cost of stock bought" value={report.stock} neg />
               <Row label="Selling fees" sub="(eBay/marketplace, est.)" value={report.sellingFees} neg />
@@ -225,7 +234,7 @@ export default function Accounts() {
           <>
             <div className="panel-head"><h3>Trading summary — {range.label}</h3></div>
             <div className="pnl-lines">
-              <Row label="Turnover" value={report.income} strong />
+              <Row label="Turnover" sub={report.showIncome > 0 ? `(incl. ${pounds(report.showIncome)} at shows)` : null} value={report.income} strong />
               <div className="pnl-group">Cost of sales</div>
               <Row label="Stock / cost of goods" value={report.stock} neg />
               <Row label="Selling fees" sub="(est.)" value={report.sellingFees} neg />
@@ -245,7 +254,7 @@ export default function Accounts() {
 
         <label className="pnl-fee">
           Selling-fee estimate
-          <input type="number" min="0" max="30" step="0.1" value={feePct} onChange={(e) => saveFee(Number(e.target.value))} /> % of sales income
+          <input type="number" min="0" max="30" step="0.1" value={feePct} onChange={(e) => saveFee(Number(e.target.value))} /> % of eBay sales income (show/cash sales aren&apos;t fee&apos;d)
         </label>
       </div>
     </div>

@@ -42,6 +42,7 @@ export default function PullSheet() {
   const [rows, setRows] = useState([]); // active pick rows
   const [doneCount, setDoneCount] = useState(0); // already-pulled (picked earlier)
   const [unmatched, setUnmatched] = useState([]);
+  const [away, setAway] = useState([]); // ordered on eBay but checked out to a show
   const [stackName, setStackName] = useState(new Map());
   const [stackOrder, setStackOrder] = useState(new Map()); // stackId -> [{id,position}]
   const [indexByCard, setIndexByCard] = useState(new Map());
@@ -83,15 +84,20 @@ export default function PullSheet() {
     const sb = supabase();
     const { data: stacks } = await sb.from("card_stacks").select("id,name");
     const nameMap = new Map((stacks || []).map((s) => [s.id, s.name]));
-    const cards = await pagedSelect(() => sb.from("stack_cards").select("id,sku,stack_id,position,pulled_at"));
+    const cards = await pagedSelect(() => sb.from("stack_cards").select("*"));
 
     const unpulledBySku = new Map();
     const pulledSkus = new Set();
+    const awaySkus = new Set(); // checked out to a show — physically not here
     const order = new Map();
     for (const c of cards) {
       const skl = c.sku ? String(c.sku).toLowerCase() : null;
       if (c.pulled_at) {
         if (skl) pulledSkus.add(skl);
+        continue;
+      }
+      if (c.checked_out_at) {
+        if (skl) awaySkus.add(skl);
         continue;
       }
       if (skl && !unpulledBySku.has(skl)) unpulledBySku.set(skl, c);
@@ -104,12 +110,17 @@ export default function PullSheet() {
 
     const active = [];
     const unm = [];
+    const awayLines = [];
     let done = 0;
     for (const l of lines) {
       const skl = l.sku ? l.sku.toLowerCase() : null;
       const card = skl ? unpulledBySku.get(skl) : null;
       if (card) {
         active.push({ key: l.lineItemId, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, buyer: l.buyer });
+      } else if (skl && awaySkus.has(skl)) {
+        // Ordered on eBay while the card is checked out to a show — it can't
+        // be picked from a stack. Needs a human call (it's in the show case).
+        awayLines.push({ key: l.lineItemId, sku: l.sku, title: l.title });
       } else if (skl && pulledSkus.has(skl)) {
         done += 1;
       } else {
@@ -154,7 +165,7 @@ export default function PullSheet() {
     pack.sort((a, b) => {
       if (a.matched !== b.matched) return a.matched ? -1 : 1; // loose (no stack) last
       if (a.matched) {
-        if (a.stackNm !== b.stackNm) return a.stackNm.localeCompare(b.stackNm);
+        if (a.stackNm !== b.stackNm) return pileCompare(a.stackNm, b.stackNm);
         return (a.position ?? 0) - (b.position ?? 0);
       }
       return a.nk - b.nk; // loose picks by card number
@@ -165,6 +176,7 @@ export default function PullSheet() {
     setIndexByCard(idxByCard);
     setRows(active);
     setUnmatched(unm);
+    setAway(awayLines);
     setDoneCount(done);
     setPicked(new Set());
     setLoosePicked(new Set());
@@ -322,7 +334,20 @@ export default function PullSheet() {
       {note ? <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>{note}</p> : null}
       {error ? <p className="compfinder-error">{error}</p> : null}
 
-      {total === 0 && unmatched.length === 0 ? (
+      {away.length > 0 ? (
+        <div className="mine-banner">
+          <span className="mine-ic" aria-hidden="true">⚠</span>
+          <div>
+            <strong>{away.length} ordered card(s) are checked out to a show</strong>
+            <p className="hint hint-small" style={{ marginTop: 4 }}>
+              {away.map((a) => a.sku || a.title).filter(Boolean).join(" · ")} — sold on eBay but currently in your show case.
+              Ship from the case, then mark them sold or pulled from the Show desk.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {total === 0 && unmatched.length === 0 && away.length === 0 ? (
         <div className="panel"><p className="dd-empty">No orders waiting to be picked. 🎉</p></div>
       ) : null}
 

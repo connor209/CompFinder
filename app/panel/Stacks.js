@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
+import { checkoutStackCard } from "@/lib/checkout";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -25,6 +26,7 @@ export default function Stacks() {
   const [finderMsg, setFinderMsg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [pulled, setPulled] = useState([]);
+  const [awayCount, setAwayCount] = useState(0);
   const [showPulled, setShowPulled] = useState(false);
   const [msg, setMsg] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -40,10 +42,11 @@ export default function Stacks() {
     const sb = supabase();
     const { data: st } = await sb.from("card_stacks").select("id,name,created_at").order("created_at", { ascending: true });
     setStacks(st || []);
-    // live counts per stack (unpulled only) — paged past the 1000-row cap
-    const rows = await pagedSelect(() => sb.from("stack_cards").select("stack_id").is("pulled_at", null));
+    // live counts per stack (unpulled, not away at a show) — paged past the
+    // 1000-row cap. select("*") so the away-flag arrives when the column exists.
+    const rows = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));
     const c = new Map();
-    rows.forEach((r) => c.set(r.stack_id, (c.get(r.stack_id) || 0) + 1));
+    rows.filter((r) => !r.checked_out_at).forEach((r) => c.set(r.stack_id, (c.get(r.stack_id) || 0) + 1));
     setCounts(c);
     // eBay listing SKU→title for auto-fill
     const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title").not("sku", "is", null));
@@ -53,14 +56,17 @@ export default function Stacks() {
   }
 
   async function loadCards(stackId) {
-    if (!stackId) return setCards([]);
+    if (!stackId) { setAwayCount(0); return setCards([]); }
     const { data } = await supabase()
       .from("stack_cards")
-      .select("id,position,sku,title,ebay_item_id,pulled_at")
+      .select("*")
       .eq("stack_id", stackId)
       .is("pulled_at", null)
       .order("position", { ascending: true });
-    setCards(data || []);
+    // Checked-out cards are physically away — live numbering skips them.
+    const rows = data || [];
+    setCards(rows.filter((c) => !c.checked_out_at));
+    setAwayCount(rows.filter((c) => c.checked_out_at).length);
   }
 
   async function loadPulled(stackId) {
@@ -143,9 +149,11 @@ export default function Stacks() {
     const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date").not("sku", "is", null));
     const saleMap = new Map();
     sales.forEach((s) => { const k = String(s.sku).toLowerCase(); if (!saleMap.has(k)) saleMap.set(k, s.sold_date); });
-    const cards = await pagedSelect(() => sb.from("stack_cards").select("id,sku,stack_id,title").is("pulled_at", null));
+    const cards = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));
     const nameMap = new Map(stacks.map((s) => [s.id, s.name]));
     const cand = cards
+      // Checked-out cards were delisted on purpose — don't flag them here.
+      .filter((c) => !c.checked_out_at)
       .filter((c) => c.sku && !activeSet.has(String(c.sku).toLowerCase()))
       .map((c) => {
         const sold = saleMap.get(String(c.sku).toLowerCase());
@@ -247,6 +255,25 @@ export default function Stacks() {
     addCards(entries);
   }
 
+  async function checkOut(card) {
+    if (!confirm(`Check out "${card.sku}" to a show?\n\nIt leaves the live numbering (everything behind moves up one) and its eBay listing is hidden. Bring it back — or mark it sold — from the Show desk.`)) return;
+    setBusy(true);
+    const r = await checkoutStackCard(supabase(), { card, stackName: sel?.name || null, event: null, hideOnEbay: true });
+    setBusy(false);
+    if (!r.ok) {
+      setMsg(`Couldn't check out ${card.sku}: ${r.error}`);
+      return;
+    }
+    const hideText = r.hideError
+      ? `⚠ listing not hidden: ${r.hideError}`
+      : r.hideMethod === "quantity" ? "listing hidden"
+      : r.hideMethod === "ended" ? "listing ended — relists at check-in"
+      : r.itemId ? "listing left live" : "no listing found";
+    setMsg(`Checked out ${card.sku} to the Show desk · ${hideText}.`);
+    await loadCards(selId);
+    await loadStacks();
+  }
+
   async function pullCard(card) {
     if (!confirm(`Mark "${card.sku}" as pulled? Everything behind it moves up one.`)) return;
     setBusy(true);
@@ -265,11 +292,17 @@ export default function Stacks() {
     setFinderMsg(null);
     if (!q) return;
     const sb = supabase();
-    const { data: hits } = await sb
+    const { data: rawHits } = await sb
       .from("stack_cards")
-      .select("sku,title,position,stack_id")
+      .select("*")
       .is("pulled_at", null)
       .ilike("sku", `%${q}%`);
+    const away = (rawHits || []).filter((h) => h.checked_out_at);
+    const hits = (rawHits || []).filter((h) => !h.checked_out_at);
+    if (hits.length === 0 && away.length > 0) {
+      setFinderMsg({ ok: false, text: `“${find}” is checked out to a show — see the Show desk.` });
+      return;
+    }
     if (!hits || hits.length === 0) {
       setFinderMsg({ ok: false, text: `No unpulled card matches SKU “${find}”.` });
       return;
@@ -278,8 +311,8 @@ export default function Stacks() {
     const stackIds = [...new Set(hits.map((h) => h.stack_id))];
     const positionsByStack = new Map();
     for (const sid of stackIds) {
-      const { data: all } = await sb.from("stack_cards").select("position").eq("stack_id", sid).is("pulled_at", null);
-      positionsByStack.set(sid, (all || []).map((a) => a.position).filter((v) => v != null).sort((a, b) => a - b));
+      const { data: all } = await sb.from("stack_cards").select("*").eq("stack_id", sid).is("pulled_at", null);
+      positionsByStack.set(sid, (all || []).filter((a) => !a.checked_out_at).map((a) => a.position).filter((v) => v != null).sort((a, b) => a - b));
     }
     const byStack = new Map(stacks.map((s) => [s.id, s.name]));
     const lines = hits.slice(0, 5).map((h) => {
@@ -431,7 +464,10 @@ export default function Stacks() {
               <h3>{sel.name}</h3>
               <span className="badge2">{cards.length} in stack</span>
             </div>
-            <p className="hint hint-small" style={{ marginTop: 0 }}>Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up.</p>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>
+              Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up.
+              {awayCount > 0 ? <> &nbsp;<b>{awayCount} checked out to a show</b> — numbering skips them (see Show desk).</> : null}
+            </p>
             {cards.length === 0 ? (
               <p className="dd-empty">No cards in this stack yet.</p>
             ) : (
@@ -441,6 +477,7 @@ export default function Stacks() {
                     <span className="stack-pos" title="Live position (count from top)">{idx + 1}</span>
                     <span className="stack-sku">{c.sku}</span>
                     <span className="stack-title">{c.title || <em>—</em>}</span>
+                    <button className="stack-pull" onClick={() => checkOut(c)} disabled={busy} title="Take to a show — hides the listing, numbering re-flows">⤴ Show</button>
                     <button className="stack-pull" onClick={() => pullCard(c)} disabled={busy}>Pull</button>
                   </div>
                 ))}

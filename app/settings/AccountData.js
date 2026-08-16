@@ -23,13 +23,14 @@ export default function AccountData({ email }) {
         data: { user }
       } = await sb.auth.getUser();
       const { data: profile } = await sb.from("profiles").select("settings,created_at").eq("id", user.id).single();
-      const [priceChecks, listings, costs, sales, stacks, stackCards] = await Promise.all([
+      const [priceChecks, listings, costs, sales, stacks, stackCards, checkouts] = await Promise.all([
         pagedSelect(() => sb.from("price_checks").select("*")),
         pagedSelect(() => sb.from("ebay_listings").select("*")),
         pagedSelect(() => sb.from("listing_costs").select("*")),
         pagedSelect(() => sb.from("ebay_sales").select("*")),
         pagedSelect(() => sb.from("card_stacks").select("*")),
-        pagedSelect(() => sb.from("stack_cards").select("*"))
+        pagedSelect(() => sb.from("stack_cards").select("*")),
+        pagedSelect(() => sb.from("stock_checkouts").select("*")).catch(() => [])
       ]);
       const payload = {
         exportedAt: new Date().toISOString(),
@@ -40,7 +41,8 @@ export default function AccountData({ email }) {
         costs,
         sales,
         stacks,
-        stackCards
+        stackCards,
+        checkouts
       };
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);

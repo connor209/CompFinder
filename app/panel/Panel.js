@@ -12,6 +12,7 @@ import Dashboard from "./Dashboard";
 import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
+import ShowDesk from "./ShowDesk";
 import Buy from "./Buy";
 import Accounts from "./Accounts";
 import Browse from "./Browse";
@@ -36,6 +37,7 @@ const STREAM_SLUG = {
   sales: "sales",
   stacks: "stacks",
   pull: "pull",
+  shows: "shows",
   accounts: "accounts"
 };
 const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) => [v, k]));
@@ -67,7 +69,8 @@ const MODULES = [
       { key: "inventory", label: "My listings", desc: "Your live eBay listings & repricing" },
       { key: "sales", label: "Sales", desc: "Completed sales, fees & profit" },
       { key: "stacks", label: "Stacks", desc: "Group inventory into sellable stacks" },
-      { key: "pull", label: "Pull sheet", desc: "Pick & pack the day's orders" }
+      { key: "pull", label: "Pull sheet", desc: "Pick & pack the day's orders" },
+      { key: "shows", label: "Show desk", desc: "Check stock out to shows & back in" }
     ]
   },
   { key: "accounts", label: "Accounts", icon: "chart", desc: "Profit & loss and tax-ready reports", sections: [{ key: "accounts", label: "P&L" }] },
@@ -669,6 +672,7 @@ export default function Panel({ initialSection = "dashboard" }) {
       {stream === "sales" && <Sales />}
       {stream === "stacks" && <Stacks />}
       {stream === "pull" && <PullSheet />}
+      {stream === "shows" && <ShowDesk />}
       {stream === "buy" && <Buy />}
       {stream === "browse" && <Browse onDeepDive={deepDiveCard} />}
       {stream === "accounts" && <Accounts />}

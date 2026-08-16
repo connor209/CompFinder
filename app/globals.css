@@ -436,6 +436,22 @@ html, body { overflow-x: clip; max-width: 100%; }
 .ps-row.done { opacity:.5; }
 .ps-row.done .stack-title, .ps-row.done .stack-sku { text-decoration:line-through; }
 
+/* Show desk — checkout / check-in */
+.sd-opts { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px; }
+.sd-opts .stack-title-inp { flex:1 1 220px; height:40px; }
+.sd-toggle { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft); cursor:pointer; white-space:nowrap; }
+.sd-toggle input[type="checkbox"] { width:18px; height:18px; accent-color:var(--accent); cursor:pointer; }
+.sd-feedback { margin-top:10px; border-top:1px solid var(--line); padding-top:8px; max-height:180px; overflow-y:auto; }
+.sd-bulkbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px solid var(--line); margin-bottom:4px; }
+.sd-bulkbar .ps-actions { flex-wrap:wrap; }
+.sd-backpicker { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid var(--line); }
+.sd-rowacts { display:flex; gap:6px; flex:none; margin-left:auto; }
+.sd-scope .badge2 { white-space:nowrap; }
+@media (max-width: 720px) {
+  .sd-scope .ps-row, .sd-scope .stack-row { flex-wrap:wrap; row-gap:6px; }
+  .sd-scope .stack-title { flex:1 1 55%; }
+}
+
 /* Pull sheet — pack mode */
 .pack-piles { display:grid; grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px; margin-top:10px; }
 .pack-pile { border:1px solid var(--line-strong); border-radius:12px; padding:11px 12px; background:var(--surface-2); position:relative; overflow:hidden; }
