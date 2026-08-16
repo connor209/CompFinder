@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
+import { fallbackSetName } from "@/lib/setmatch";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -58,6 +59,11 @@ export default function PullSheet() {
   // Default: last-pulled card on top of the hand (LIFO), so we deal in reverse
   // pull order. Toggle for anyone who holds the stack the other way up.
   const [packReverse, setPackReverse] = useState(true);
+  // Pack-mode filters — a 100+ card deal is unreadable as one flat list.
+  const [packPile, setPackPile] = useState(null); // pile number, or null for all
+  const [packQuery, setPackQuery] = useState(""); // buyer / card / set search
+  const [packType, setPackType] = useState("all"); // all | stack | loose
+  const [packHideDone, setPackHideDone] = useState(false);
 
   const supabase = () => createClient();
 
@@ -80,6 +86,28 @@ export default function PullSheet() {
       return;
     }
     const lines = ordersRes.lines || [];
+
+    // Resolve each listing title to a catalogue set (name + code). eBay sends
+    // no item specifics with an order, so the set is read out of the title —
+    // it's what the variation picks get grouped and alphabetised by.
+    const titles = [...new Set(lines.map((l) => l.title).filter(Boolean))];
+    let setByTitle = new Map();
+    if (titles.length) {
+      try {
+        const res = await fetch("/api/catalog/match-sets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ titles })
+        }).then((r) => r.json());
+        if (res.ok && res.matches) setByTitle = new Map(Object.entries(res.matches));
+      } catch {
+        /* set names are a nicety — the sheet still works without them */
+      }
+    }
+    const setInfo = (title) => {
+      const hit = setByTitle.get(title || "");
+      return hit ? { setName: hit.name, setCode: hit.code || "" } : { setName: fallbackSetName(title), setCode: "" };
+    };
 
     const sb = supabase();
     const { data: stacks } = await sb.from("card_stacks").select("id,name");
@@ -126,7 +154,7 @@ export default function PullSheet() {
       } else {
         // Loose / variation pick — no stack match. Sort these by card number so
         // they're a single pass through numbered storage (2, 4, 17, 101…).
-        unm.push({ key: l.lineItemId, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku) });
+        unm.push({ key: l.lineItemId, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku), ...setInfo(l.title) });
       }
     }
     active.sort((a, b) => {
@@ -135,7 +163,13 @@ export default function PullSheet() {
       if (na !== nb) return pileCompare(na, nb);
       return (idxByCard.get(a.cardId) ?? 0) - (idxByCard.get(b.cardId) ?? 0);
     });
-    unm.sort((a, b) => a.nk - b.nk);
+    // Loose picks are walked set-by-set (alphabetically, matching the shelves),
+    // then by card number within each set.
+    const bySetThenNumber = (a, b) => {
+      const s = (a.setName || "").localeCompare(b.setName || "", undefined, { numeric: true, sensitivity: "base" });
+      return s !== 0 ? s : a.nk - b.nk;
+    };
+    unm.sort(bySetThenNumber);
 
     // ---- Pack data: every order line in PULL order (stack, then position;
     // loose/variation picks by card number, last). Piles are numbered later
@@ -159,7 +193,8 @@ export default function PullSheet() {
         stackNm: card ? nameMap.get(card.stack_id) || "" : "",
         position: card ? card.position : null,
         nk: numKey(l.variation || l.title || l.sku),
-        matched: !!card
+        matched: !!card,
+        ...setInfo(l.title)
       };
     });
     pack.sort((a, b) => {
@@ -168,7 +203,7 @@ export default function PullSheet() {
         if (a.stackNm !== b.stackNm) return pileCompare(a.stackNm, b.stackNm);
         return (a.position ?? 0) - (b.position ?? 0);
       }
-      return a.nk - b.nk; // loose picks by card number
+      return bySetThenNumber(a, b); // loose picks: same set-by-set walk as the pick list
     });
 
     setStackName(nameMap);
@@ -254,9 +289,29 @@ export default function PullSheet() {
     }
     const byOrder = new Map(pileList.map((p) => [p.orderId, p]));
     for (const it of seq) byOrder.get(it.orderId).count += 1;
-    const items = seq.map((it) => ({ ...it, pileNo: orderPile.get(it.orderId) }));
+    // seqNo is the card's place in the FULL deal sequence — it stays stable
+    // when filters hide rows, so "card 47" is still card 47 in your hand.
+    const items = seq.map((it, i) => ({ ...it, pileNo: orderPile.get(it.orderId), seqNo: i + 1 }));
     return { items, piles: pileList };
   }, [packItems, packReverse]);
+
+  // Filtered view of the deal sequence — with 100+ cards the flat list is
+  // unreadable, so you can narrow to one pile, one buyer, or just the loose
+  // picks, without disturbing the underlying order.
+  const packVisible = useMemo(() => {
+    const q = packQuery.trim().toLowerCase();
+    return packView.items.filter((it) => {
+      if (packPile != null && it.pileNo !== packPile) return false;
+      if (packType === "stack" && !it.matched) return false;
+      if (packType === "loose" && it.matched) return false;
+      if (packHideDone && placed.has(it.key)) return false;
+      if (!q) return true;
+      return [it.buyer, it.deliveryName, it.variation, it.sku, it.setName, it.setCode, it.title]
+        .some((v) => String(v || "").toLowerCase().includes(q));
+    });
+  }, [packView.items, packPile, packType, packQuery, packHideDone, placed]);
+
+  const packFiltered = packVisible.length !== packView.items.length;
 
   // group active rows by stack for display
   const groups = useMemo(() => {
@@ -268,18 +323,21 @@ export default function PullSheet() {
     return [...g.entries()];
   }, [rows]);
 
-  // Group loose/variation picks by SET (the listing title) — for variation
-  // listings you go to the set in the warehouse, then pick its cards by number.
+  // Group loose/variation picks by SET, A–Z — shelves are ordered by set name,
+  // so the sheet walks them in shelf order (Ascended Heroes → Destined Rivals →
+  // Journey Together…), each set's cards then sorted by collector number.
   const looseGroups = useMemo(() => {
     const g = new Map();
     for (const u of unmatched) {
-      const key = u.title || "Other";
-      if (!g.has(key)) g.set(key, []);
-      g.get(key).push(u);
+      const key = u.setName || u.title || "Other";
+      if (!g.has(key)) g.set(key, { setName: key, setCode: u.setCode || "", items: [] });
+      const grp = g.get(key);
+      if (!grp.setCode && u.setCode) grp.setCode = u.setCode;
+      grp.items.push(u);
     }
-    return [...g.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([title, items]) => ({ title, items: items.slice().sort((a, b) => a.nk - b.nk) }));
+    return [...g.values()]
+      .sort((a, b) => a.setName.localeCompare(b.setName, undefined, { numeric: true, sensitivity: "base" }))
+      .map((grp) => ({ ...grp, items: grp.items.slice().sort((a, b) => a.nk - b.nk) }));
   }, [unmatched]);
 
   if (loading) return <div className="panel"><span className="spinner" /> &nbsp;Loading pull sheet…</div>;
@@ -377,13 +435,16 @@ export default function PullSheet() {
       {unmatched.length > 0 ? (
         <>
           <div className="ps-section-head">
-            <span className="eyebrow">Variation / loose picks — by set ({unmatched.length})</span>
-            <p className="hint hint-small" style={{ margin: "4px 0 0" }}>Grouped by set, then sorted by card number — go to each set and pick its cards in one pass.</p>
+            <span className="eyebrow">Variation / loose picks — by set, A–Z ({unmatched.length})</span>
+            <p className="hint hint-small" style={{ margin: "4px 0 0" }}>Sets in shelf order (A–Z), each set&apos;s cards by collector number — one pass down the shelves.</p>
           </div>
           {looseGroups.map((grp, gi) => (
             <div className="panel loose-set" key={gi}>
               <div className="panel-head">
-                <h3 className="loose-set-name">{grp.title}</h3>
+                <h3 className="loose-set-name">
+                  {grp.setName}
+                  {grp.setCode ? <span className="loose-set-code">{grp.setCode}</span> : null}
+                </h3>
                 <span className="badge2">{grp.items.filter((u) => !loosePicked.has(u.key)).length} to pick</span>
               </div>
               <div className="stack-list">
@@ -425,13 +486,21 @@ export default function PullSheet() {
               {packView.piles.map((p) => {
                 const got = placedInPile(p.pileNo);
                 const full = got >= p.count;
+                const on = packPile === p.pileNo;
                 return (
-                  <div className={`pack-pile${full ? " full" : ""}`} key={p.pileNo}>
+                  <button
+                    type="button"
+                    className={`pack-pile${full ? " full" : ""}${on ? " on" : ""}`}
+                    key={p.pileNo}
+                    aria-pressed={on}
+                    onClick={() => setPackPile(on ? null : p.pileNo)}
+                    title={on ? "Show all piles" : `Show only pile ${p.pileNo}`}
+                  >
                     <div className="pack-pile-no">Pile {p.pileNo}</div>
                     <div className="pack-pile-buyer">{p.deliveryName || p.buyer || "Buyer"}</div>
                     {p.deliveryName && p.buyer ? <div className="pack-pile-user">@{p.buyer}</div> : null}
                     <div className="pack-pile-meta">{got}/{p.count} card{p.count === 1 ? "" : "s"}{full ? " ✓" : ""}</div>
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -443,26 +512,68 @@ export default function PullSheet() {
               <span className="badge2">{packReverse ? "last pulled first" : "first pulled first"}</span>
             </div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>Take each card off the top and drop it into the pile shown. Tick as you go.</p>
-            <div className="stack-list">
-              {packView.items.map((it, i) => {
-                const done = placed.has(it.key);
-                return (
-                  <label className={`ps-row pack-row${done ? " done" : ""}`} key={it.key}>
-                    <input type="checkbox" checked={done} onChange={() => togglePlaced(it.key)} />
-                    <span className="stack-pos">{i + 1}</span>
-                    <span className="pack-card">
-                      <span className="stack-sku">{it.variation || it.sku || "no SKU"}</span>
-                      <span className="stack-title">{it.title || <em>—</em>}</span>
-                      {it.matched ? null : <span className="loc-flag"> · loose / variation</span>}
-                    </span>
-                    <span className="pack-dest" aria-label={`Pile ${it.pileNo}, ${it.deliveryName || it.buyer}`}>
-                      <span className="pack-dest-no">Pile {it.pileNo}</span>
-                      <span className="pack-dest-buyer">{it.deliveryName || it.buyer || "Buyer"}</span>
-                    </span>
-                  </label>
-                );
-              })}
+
+            <div className="pack-filters">
+              <div className="pills" role="group" aria-label="Card type">
+                <button aria-pressed={packType === "all"} onClick={() => setPackType("all")}>All</button>
+                <button aria-pressed={packType === "stack"} onClick={() => setPackType("stack")}>Stack</button>
+                <button aria-pressed={packType === "loose"} onClick={() => setPackType("loose")}>Variations</button>
+              </div>
+              <input
+                className="pack-search"
+                type="search"
+                value={packQuery}
+                onChange={(e) => setPackQuery(e.target.value)}
+                placeholder="Filter by buyer, card or set…"
+                aria-label="Filter pack list"
+              />
+              <label className="sd-toggle">
+                <input type="checkbox" checked={packHideDone} onChange={(e) => setPackHideDone(e.target.checked)} />
+                Hide sorted
+              </label>
+              {packFiltered ? (
+                <button className="btn btn-ghost" onClick={() => { setPackPile(null); setPackQuery(""); setPackType("all"); setPackHideDone(false); }}>
+                  ✕ Clear filters
+                </button>
+              ) : null}
             </div>
+            {packFiltered ? (
+              <p className="hint hint-small" style={{ margin: "0 0 6px" }}>
+                Showing <b>{packVisible.length}</b> of {packView.items.length}
+                {packPile != null ? ` · pile ${packPile} only` : ""} — numbers stay in full deal order.
+              </p>
+            ) : null}
+
+            {packVisible.length === 0 ? (
+              <p className="dd-empty">Nothing matches those filters.</p>
+            ) : (
+              <div className="stack-list">
+                {packVisible.map((it) => {
+                  const done = placed.has(it.key);
+                  return (
+                    <label className={`ps-row pack-row${done ? " done" : ""}`} key={it.key}>
+                      <input type="checkbox" checked={done} onChange={() => togglePlaced(it.key)} />
+                      <span className="stack-pos">{it.seqNo}</span>
+                      <span className="pack-card">
+                        <span className="stack-sku">{it.variation || it.sku || "no SKU"}</span>
+                        {it.matched ? (
+                          <span className="stack-title">{it.title || <em>—</em>}</span>
+                        ) : (
+                          <span className="pack-set">
+                            {it.setName || <em>—</em>}
+                            {it.setCode ? <span className="loose-set-code">{it.setCode}</span> : null}
+                          </span>
+                        )}
+                      </span>
+                      <span className="pack-dest" aria-label={`Pile ${it.pileNo}, ${it.deliveryName || it.buyer}`}>
+                        <span className="pack-dest-no">Pile {it.pileNo}</span>
+                        <span className="pack-dest-buyer">{it.deliveryName || it.buyer || "Buyer"}</span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {placedCount === packView.items.length ? (
