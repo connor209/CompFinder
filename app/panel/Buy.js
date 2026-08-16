@@ -6,6 +6,7 @@ import CompFinderPricing from "@/lib/pricing.js";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { resizeImage } from "@/lib/resizeImage";
 import CameraCapture from "./CameraCapture";
+import Icon from "./icons";
 
 const BUCKET = "purchase-photos";
 const toPence = CompFinderPricing.toPence;
@@ -424,8 +425,8 @@ export default function Buy() {
       {addTarget ? (
         <div className="buy-sheet-backdrop" onClick={() => setAddTarget(null)}>
           <div className="buy-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Add a photo">
-            <button type="button" className="buy-sheet-btn" onClick={chooseCamera}>📷 Take a photo</button>
-            <button type="button" className="buy-sheet-btn" onClick={chooseUpload}>🖼️ Upload from device</button>
+            <button type="button" className="buy-sheet-btn" onClick={chooseCamera}><Icon name="camera" size={20} /> Take a photo</button>
+            <button type="button" className="buy-sheet-btn" onClick={chooseUpload}><Icon name="upload" size={20} /> Upload from device</button>
             <button type="button" className="buy-sheet-cancel" onClick={() => setAddTarget(null)}>Cancel</button>
           </div>
         </div>

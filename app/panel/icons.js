@@ -55,6 +55,21 @@ const ICONS = {
       <path d="M3.5 16.5 9.5 10.5l3.4 3.4L20.5 6.3" />
       <path d="M15.8 6.3h4.7V11" />
     </>
+  ),
+  // Take a photo — a camera.
+  camera: (
+    <>
+      <path d="M4.5 7.5h3l1.4-2.2a1 1 0 0 1 .84-.46h4.52a1 1 0 0 1 .84.46l1.4 2.2h3a1 1 0 0 1 1 1v9.7a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1V8.5a1 1 0 0 1 1-1Z" />
+      <circle cx="12" cy="13" r="3.4" />
+    </>
+  ),
+  // Upload from device — an arrow rising out of a tray.
+  upload: (
+    <>
+      <path d="M12 14.5V4.8" />
+      <path d="m7.9 8.6 4.1-4 4.1 4" />
+      <path d="M4.5 15.5v3.2a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1v-3.2" />
+    </>
   )
 };
 
