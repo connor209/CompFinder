@@ -63,6 +63,14 @@ const ICONS = {
       <circle cx="12" cy="13" r="3.4" />
     </>
   ),
+  // Sell sheets — a spreadsheet with an export arrow.
+  sheet: (
+    <>
+      <rect x="3.6" y="4.2" width="16.8" height="15.6" rx="1.8" />
+      <path d="M3.6 9.2h16.8" />
+      <path d="M9.4 9.2v10.6" />
+    </>
+  ),
   // Upload from device — an arrow rising out of a tray.
   upload: (
     <>

@@ -740,6 +740,16 @@ html, body { overflow-x: clip; max-width: 100%; }
 .ps-row.done { opacity:.5; }
 .ps-row.done .stack-title, .ps-row.done .stack-sku { text-decoration:line-through; }
 
+/* Sell sheets — CSV builder for external listing tools */
+.ss-row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; }
+.ss-row .buy-field { flex:1 1 180px; min-width:0; }
+.ss-sets { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; max-height:230px; overflow-y:auto; padding:2px; }
+.ss-sets .stack-tab { display:inline-flex; align-items:center; gap:7px; }
+.ss-sets .stack-tab.on { background:var(--accent); color:var(--accent-ink); border-color:transparent; }
+.ss-sets .stack-tab.on .loose-set-code { background:color-mix(in srgb,#fff 25%, transparent); color:var(--accent-ink); }
+.ss-qty { width:72px; border:1px solid var(--line-strong); border-radius:var(--input-radius); padding:5px 8px; background:var(--surface); color:var(--ink); font-family:var(--font-mono); font-size:13px; }
+.ss-qty:focus { outline:none; border-color:var(--accent); }
+
 /* Theme (skin) picker */
 .skin-row { display:flex; gap:6px; flex-wrap:wrap; }
 .skin-btn { display:flex; flex-direction:column; align-items:center; gap:4px; background:none; border:0; cursor:pointer; padding:3px 2px; font-size:10.5px; font-family:var(--font-body); color:var(--ink-soft); border-radius:8px; }

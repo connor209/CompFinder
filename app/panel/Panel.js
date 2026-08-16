@@ -13,6 +13,7 @@ import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import ShowDesk from "./ShowDesk";
+import SellSheet from "./SellSheet";
 import Buy from "./Buy";
 import Accounts from "./Accounts";
 import Browse from "./Browse";
@@ -39,6 +40,7 @@ const STREAM_SLUG = {
   stacks: "stacks",
   pull: "pull",
   shows: "shows",
+  sheets: "sheets",
   accounts: "accounts"
 };
 const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) => [v, k]));
@@ -74,6 +76,7 @@ const MODULES = [
       { key: "shows", label: "Show desk", desc: "Check stock out to shows & back in" }
     ]
   },
+  { key: "sheets", label: "Sell sheets", icon: "sheet", desc: "Build CSV imports for Cardmarket listing tools", sections: [{ key: "sheets", label: "Sell sheets" }] },
   { key: "accounts", label: "Accounts", icon: "chart", desc: "Profit & loss and tax-ready reports", sections: [{ key: "accounts", label: "P&L" }] },
   { key: "arbitrage", label: "Arbitrage", icon: "trend", desc: "Spot underpriced buying opportunities", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
 ];
@@ -674,6 +677,7 @@ export default function Panel({ initialSection = "dashboard" }) {
       {stream === "stacks" && <Stacks />}
       {stream === "pull" && <PullSheet />}
       {stream === "shows" && <ShowDesk />}
+      {stream === "sheets" && <SellSheet />}
       {stream === "buy" && <Buy />}
       {stream === "browse" && <Browse onDeepDive={deepDiveCard} />}
       {stream === "accounts" && <Accounts />}
