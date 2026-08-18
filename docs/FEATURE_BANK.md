@@ -17,8 +17,10 @@ point is to capture the thought before it evaporates.
 **Verified 16 Aug 2026. Nothing is blocked.** Re-check any time with
 `supabase/HEALTH_CHECK.sql` (read-only, one query).
 
-- Migrations 012 – 016 → all present
-- Catalogue → all ten games, 308,707 rows, set codes on every set
+- Migrations 012 – 018 → all applied
+- Catalogue → **eleven** games. The original ten (308,707 rows) plus Yu-Gi-Oh!
+  (86,484 rows / 1,174 sets), imported 18 Aug.
+- Price sources → all eleven configured in `cm_price_sources`
 - **Do not run the catalogue truncate.** The data is good.
 - eBay → connected with every scope: `sell.fulfillment.readonly` proven by the
   pull sheet loading live orders, `sell.account.readonly` proven by business
@@ -78,9 +80,11 @@ Anything you think of goes here first. Newest at the top.
   eBay-variation prices from `suggestPrice()`, and valuing stacks/inventory at
   market instead of ask.
   `lib/priceguide.js`, `cm_card_prices` view
-- 🔵 **Price sources for the other eight games** — `cm_price_sources` holds a
-  URL per game; only Pokémon and Riftbound are seeded. Paste each game's JSON
-  link from the Cardmarket price-guide page and the nightly job picks it up.
+- 🟡 **First price pull not yet run** — schema and all eleven URLs are in, but
+  no prices have been fetched. Trigger one game in a browser
+  (`/api/cron/prices?game=pokemon`) and check `latest` comes back around
+  77,000; if it's much smaller, the Pokémon URL wants `price_guide_6_2.json`
+  rather than `price_guide_6.json`. After that the 04:30 cron runs itself.
 - 🔵 **Set image URLs** — eBay variation listings build each card's photo from a
   URL template per set (`{setcode}`/`{num3}` tokens), which works while a game
   has a predictable image host. Storing a real image URL per set (or per card)
