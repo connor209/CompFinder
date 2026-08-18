@@ -740,6 +740,23 @@ html, body { overflow-x: clip; max-width: 100%; }
 .ps-row.done { opacity:.5; }
 .ps-row.done .stack-title, .ps-row.done .stack-sku { text-decoration:line-through; }
 
+/* Browse — card table */
+.brw-tbl { font-size:13.5px; }
+.brw-th { cursor:pointer; user-select:none; white-space:nowrap; }
+.brw-th:hover { color:var(--ink); }
+.brw-num { text-align:right; }
+.brw-td-no { color:var(--ink-soft); white-space:nowrap; }
+.brw-name-btn { background:none; border:0; padding:0; font:inherit; color:var(--ink); font-weight:600; cursor:pointer; text-align:left; }
+.brw-name-btn:hover { color:var(--accent-2); text-decoration:underline; }
+.brw-price { font-weight:700; color:var(--ink); white-space:nowrap; }
+.brw-price-p { color:var(--accent-2); white-space:nowrap; }
+.brw-tbl .brw-card-acts { display:flex; gap:4px; justify-content:flex-end; }
+.brw-pricenote { margin-top:8px; }
+@media (max-width: 720px) {
+  .brw-tbl { font-size:12.5px; }
+  .brw-tbl th, .brw-tbl td { padding:7px 6px; }
+}
+
 /* Sell sheets — CSV builder for external listing tools */
 .ss-row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; }
 .ss-row .buy-field { flex:1 1 180px; min-width:0; }

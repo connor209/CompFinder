@@ -74,12 +74,13 @@ Anything you think of goes here first. Newest at the top.
 
 <!-- New items get added below this line -->
 
-- 🟡 **Surface market prices in the app** — the nightly Cardmarket ingest fills
-  `cm_price_latest` / `cm_price_history`, but nothing reads them yet. Obvious
-  homes: a market column + price chart in Browse, prefilling the sell-sheet and
-  eBay-variation prices from `suggestPrice()`, and valuing stacks/inventory at
+- 🟡 **Surface market prices — Browse done, two left** — Browse now shows
+  market + premium columns, sortable. Still to do: prefill the sell-sheet and
+  eBay-variation prices from `suggestPrice()`, and value stacks/inventory at
   market instead of ask.
   `lib/priceguide.js`, `cm_card_prices` view
+- 🔵 **Price history charts** — `cm_price_history` is filling daily but nothing
+  plots it. Worth revisiting once there are a couple of weeks of data.
 - ✅ **Price pipeline live** — first pull confirmed working 18 Aug via
   Settings → Market prices. The 04:30 cron keeps every configured game current;
   that panel shows each game's last run and can trigger one by hand.

@@ -49,6 +49,10 @@ export default function Browse({ onDeepDive }) {
   const [page, setPage] = useState(0);
   const [cardQ, setCardQ] = useState("");
   const [showExtras, setShowExtras] = useState(false);
+  const [pricedAsOf, setPricedAsOf] = useState(null);
+  // Collector order is how a set is normally read; the price columns are there
+  // for "what's actually worth something in here".
+  const [sort, setSort] = useState({ key: "number", dir: "asc" });
   const gameSeq = useRef(0);
   const cardSeq = useRef(0);
 
@@ -99,6 +103,7 @@ export default function Browse({ onDeepDive }) {
       setCards((prev) => (pageNum === 0 ? res.cards || [] : [...prev, ...(res.cards || [])]).slice().sort(byNumber));
       setHasMore(!!res.hasMore);
       setPage(pageNum);
+      if (res.pricedAsOf) setPricedAsOf(res.pricedAsOf);
     } catch {
       if (mine === cardSeq.current) setCardsError(true);
     }
@@ -118,9 +123,42 @@ export default function Browse({ onDeepDive }) {
 
   const filteredCards = useMemo(() => {
     const q = cardQ.trim().toLowerCase();
-    if (!q) return cards;
-    return cards.filter((c) => c.name.toLowerCase().includes(q) || String(c.number).toLowerCase().includes(q));
-  }, [cards, cardQ]);
+    const base = q
+      ? cards.filter((c) => c.name.toLowerCase().includes(q) || String(c.number).toLowerCase().includes(q))
+      : cards;
+    const { key, dir } = sort;
+    if (key === "number") return dir === "asc" ? base : [...base].reverse();
+    const mul = dir === "asc" ? 1 : -1;
+    return [...base].sort((a, b) => {
+      if (key === "name") return mul * a.name.localeCompare(b.name);
+      if (key === "rarity") return mul * String(a.rarity || "").localeCompare(String(b.rarity || "")) || byNumber(a, b);
+      // Unpriced cards always sit at the bottom, whichever way you sort.
+      const av = a[key], bv = b[key];
+      if (av == null && bv == null) return byNumber(a, b);
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      return mul * (av - bv);
+    });
+  }, [cards, cardQ, sort]);
+
+  const anyPrices = useMemo(() => cards.some((c) => c.market != null || c.marketPremium != null), [cards]);
+  const premiumLabel = useMemo(() => {
+    const k = cards.find((c) => c.premiumKind)?.premiumKind;
+    return k ? k.charAt(0).toUpperCase() + k.slice(1) : "Foil";
+  }, [cards]);
+  const setValue = useMemo(
+    () => cards.reduce((t, c) => t + (c.market || 0), 0),
+    [cards]
+  );
+
+  function sortBy(key) {
+    setSort((p) => (p.key === key
+      ? { key, dir: p.dir === "asc" ? "desc" : "asc" }
+      // Money reads best highest-first; names and numbers ascending.
+      : { key, dir: key === "market" || key === "marketPremium" ? "desc" : "asc" }));
+  }
+  const sortIcon = (key) => (sort.key !== key ? "" : sort.dir === "asc" ? " ▲" : " ▼");
+  const money = (v) => (v == null ? "—" : `£${Number(v).toFixed(2)}`);
 
   // -------------------- render --------------------
   if (games === null) return <div className="panel"><span className="spinner" /> &nbsp;Loading catalogue…</div>;
@@ -232,38 +270,70 @@ export default function Browse({ onDeepDive }) {
           <p className="hint hint-small">{filtering ? `No loaded cards match “${cardQ}”.${hasMore ? " Load more below to search the rest." : ""}` : "No cards found in this set."}</p>
         ) : (
           <>
-            <div className="brw-cards">
-              {filteredCards.map((c) => {
-                const ebayUrl = ebaySearchUrl(`${cleanSearchName(c.name, game.slug)} ${c.number}`.trim(), { sold: true });
-                const cmUrl = cardmarketBestUrl({ cardmarketId: c.cardmarketId, query: `${c.name} ${c.number}`.trim(), gameSlug: game.slug });
-                return (
-                  <div key={c.id} className="brw-card">
-                    <button
-                      className="brw-card-main"
-                      title={onDeepDive ? "Price this card in Quick Search" : c.name}
-                      onClick={() =>
-                        onDeepDive &&
-                        onDeepDive(`${c.name} ${c.number}`.trim(), {
-                          game: game.slug,
-                          card: { name: c.name, number: c.number, set: set.name, series: set.code, rarity: c.rarity, image: null, cardmarketId: c.cardmarketId }
-                        })
-                      }
-                    >
-                      <span className="brw-card-no">{c.number || "—"}</span>
-                      <span className="brw-card-name">{c.name}</span>
-                      <span className="brw-card-tags">
-                        {c.category !== "card" ? <span className="brw-card-cat">{CATEGORY_LABEL[c.category] || c.category}</span> : null}
-                        {c.rarity ? <span className="brw-card-rar">{c.rarity}</span> : null}
-                      </span>
-                    </button>
-                    <div className="brw-card-acts">
-                      <a className="brw-act" href={ebayUrl} target="_blank" rel="noopener noreferrer" title="eBay sold listings ↗" aria-label={`${c.name} — eBay sold listings`}>🔍</a>
-                      {cmUrl ? <a className="brw-act" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Cardmarket page ↗" aria-label={`${c.name} — Cardmarket page`}>🛒</a> : null}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="table-wrap">
+              <table className="itbl brw-tbl">
+                <thead>
+                  <tr>
+                    <th className="brw-th" onClick={() => sortBy("number")} role="button" tabIndex={0}>No{sortIcon("number")}</th>
+                    <th className="brw-th" onClick={() => sortBy("name")} role="button" tabIndex={0}>Name{sortIcon("name")}</th>
+                    <th className="brw-th" onClick={() => sortBy("rarity")} role="button" tabIndex={0}>Rarity{sortIcon("rarity")}</th>
+                    {anyPrices ? (
+                      <>
+                        <th className="brw-th brw-num" onClick={() => sortBy("market")} role="button" tabIndex={0} title="Cardmarket trend price">Market{sortIcon("market")}</th>
+                        <th className="brw-th brw-num" onClick={() => sortBy("marketPremium")} role="button" tabIndex={0} title={`${premiumLabel} trend price`}>{premiumLabel}{sortIcon("marketPremium")}</th>
+                      </>
+                    ) : null}
+                    <th aria-label="Links"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCards.map((c) => {
+                    const ebayUrl = ebaySearchUrl(`${cleanSearchName(c.name, game.slug)} ${c.number}`.trim(), { sold: true });
+                    const cmUrl = cardmarketBestUrl({ cardmarketId: c.cardmarketId, query: `${c.name} ${c.number}`.trim(), gameSlug: game.slug });
+                    return (
+                      <tr key={c.id}>
+                        <td className="mono brw-td-no">{c.number || "—"}</td>
+                        <td className="itbl-title">
+                          <button
+                            className="brw-name-btn"
+                            title={onDeepDive ? "Price this card in Quick Search" : c.name}
+                            onClick={() =>
+                              onDeepDive &&
+                              onDeepDive(`${c.name} ${c.number}`.trim(), {
+                                game: game.slug,
+                                card: { name: c.name, number: c.number, set: set.name, series: set.code, rarity: c.rarity, image: null, cardmarketId: c.cardmarketId }
+                              })
+                            }
+                          >
+                            {c.name}
+                          </button>
+                          {c.category !== "card" ? <span className="brw-card-cat">{CATEGORY_LABEL[c.category] || c.category}</span> : null}
+                        </td>
+                        <td className="muted">{c.rarity || "—"}</td>
+                        {anyPrices ? (
+                          <>
+                            <td className="mono brw-num brw-price">{money(c.market)}</td>
+                            <td className="mono brw-num brw-price-p">{money(c.marketPremium)}</td>
+                          </>
+                        ) : null}
+                        <td>
+                          <div className="brw-card-acts">
+                            <a className="brw-act" href={ebayUrl} target="_blank" rel="noopener noreferrer" title="eBay sold listings ↗" aria-label={`${c.name} — eBay sold listings`}>🔍</a>
+                            {cmUrl ? <a className="brw-act" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Cardmarket page ↗" aria-label={`${c.name} — Cardmarket page`}>🛒</a> : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
+            {anyPrices ? (
+              <p className="hint hint-small brw-pricenote">
+                Cardmarket trend prices{pricedAsOf ? ` · ${pricedAsOf}` : ""} · {cards.length.toLocaleString()} loaded card{cards.length === 1 ? "" : "s"} total <b>{money(setValue)}</b>
+                {hasMore ? " (so far)" : ""}
+              </p>
+            ) : null}
             {filtering ? (
               <p className="hint hint-small brw-filter-note">Filtering {cards.length.toLocaleString()} loaded card{cards.length === 1 ? "" : "s"}{hasMore ? " — load more to search the whole set." : "."}</p>
             ) : null}
