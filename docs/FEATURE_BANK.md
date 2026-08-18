@@ -80,11 +80,9 @@ Anything you think of goes here first. Newest at the top.
   eBay-variation prices from `suggestPrice()`, and valuing stacks/inventory at
   market instead of ask.
   `lib/priceguide.js`, `cm_card_prices` view
-- 🟡 **First price pull not yet run** — schema and all eleven URLs are in, but
-  no prices have been fetched. Trigger one game in a browser
-  (`/api/cron/prices?game=pokemon`) and check `latest` comes back around
-  77,000; if it's much smaller, the Pokémon URL wants `price_guide_6_2.json`
-  rather than `price_guide_6.json`. After that the 04:30 cron runs itself.
+- ✅ **Price pipeline live** — first pull confirmed working 18 Aug via
+  Settings → Market prices. The 04:30 cron keeps every configured game current;
+  that panel shows each game's last run and can trigger one by hand.
 - 🔵 **Set image URLs** — eBay variation listings build each card's photo from a
   URL template per set (`{setcode}`/`{num3}` tokens), which works while a game
   has a predictable image host. Storing a real image URL per set (or per card)
