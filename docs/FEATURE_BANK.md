@@ -72,6 +72,15 @@ Anything you think of goes here first. Newest at the top.
 
 <!-- New items get added below this line -->
 
+- 🟡 **Surface market prices in the app** — the nightly Cardmarket ingest fills
+  `cm_price_latest` / `cm_price_history`, but nothing reads them yet. Obvious
+  homes: a market column + price chart in Browse, prefilling the sell-sheet and
+  eBay-variation prices from `suggestPrice()`, and valuing stacks/inventory at
+  market instead of ask.
+  `lib/priceguide.js`, `cm_card_prices` view
+- 🔵 **Price sources for the other eight games** — `cm_price_sources` holds a
+  URL per game; only Pokémon and Riftbound are seeded. Paste each game's JSON
+  link from the Cardmarket price-guide page and the nightly job picks it up.
 - 🔵 **Set image URLs** — eBay variation listings build each card's photo from a
   URL template per set (`{setcode}`/`{num3}` tokens), which works while a game
   has a predictable image host. Storing a real image URL per set (or per card)
