@@ -31,12 +31,45 @@ alter table public.cm_price_sources enable row level security;
 drop policy if exists "Price sources are readable" on public.cm_price_sources;
 create policy "Price sources are readable" on public.cm_price_sources for select using (true);
 
--- Seeded from the two files supplied; the rest get added from the page.
--- VERIFY the host against a real download link before the first run.
-insert into public.cm_price_sources (game, url) values
-  ('pokemon',   'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_6_2.json'),
-  ('riftbound', 'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_22.json')
-on conflict (game) do nothing;
+-- ===========================================================================
+--  ▼▼▼  PASTE YOUR PRICE-GUIDE URLS HERE  ▼▼▼
+--
+--  From https://www.cardmarket.com/en/Magic/Data/Price-Guide (switch game via
+--  the site's game menu), copy each game's JSON download link and replace the
+--  matching PASTE_URL_HERE below. The file names follow the pattern
+--  `price_guide_<idGame>.json` — the two supplied were `price_guide_6_2.json`
+--  (Pokémon) and `price_guide_22.json` (Riftbound), so the host is the part
+--  worth copying exactly.
+--
+--  You do NOT have to fill them all in now. Any line still saying
+--  PASTE_URL_HERE is skipped, and re-running this file later adds or updates
+--  whichever ones you've filled since — so it's safe to run as often as you
+--  like as you collect the rest.
+--
+--  Only these ten slugs are valid (they're the games in the catalogue).
+--  Cardmarket also publish Yu-Gi-Oh!, but we hold no Yu-Gi-Oh! cards, so
+--  there's nothing for its prices to join to.
+-- ===========================================================================
+insert into public.cm_price_sources (game, url, enabled)
+select g.game, g.url, true
+from (values
+  ('pokemon',       'PASTE_URL_HERE'),
+  ('magic',         'PASTE_URL_HERE'),
+  ('lorcana',       'PASTE_URL_HERE'),
+  ('onepiece',      'PASTE_URL_HERE'),
+  ('dragonball',    'PASTE_URL_HERE'),
+  ('digimon',       'PASTE_URL_HERE'),
+  ('fleshandblood', 'PASTE_URL_HERE'),
+  ('riftbound',     'PASTE_URL_HERE'),
+  ('vanguard',      'PASTE_URL_HERE'),
+  ('weissschwarz',  'PASTE_URL_HERE')
+) as g(game, url)
+where g.url not like 'PASTE\_URL\_HERE'          -- unfilled lines are ignored
+  and g.url ~ '^https?://'                       -- and anything that isn't a URL
+on conflict (game) do update
+  set url = excluded.url,
+      enabled = true,
+      last_error = null;                         -- a corrected URL clears the old failure
 
 -- ---------------------------------------------------------------------------
 -- Latest price per product
@@ -134,3 +167,41 @@ grant select on public.cm_card_prices to anon, authenticated;
 grant select on public.cm_price_latest to anon, authenticated;
 grant select on public.cm_price_history to anon, authenticated;
 grant select on public.cm_price_sources to anon, authenticated;
+
+
+-- ===========================================================================
+--  Where things stand — this is the last statement, so its result is what the
+--  SQL editor shows you. One row per game: "ready to pull" once a URL is in.
+-- ===========================================================================
+select
+  g.slug                                as game,
+  g.name,
+  case
+    when s.game is null      then '— no URL yet'
+    when s.last_error is not null then '⚠ last run failed: ' || s.last_error
+    when s.last_rows is null      then '✅ ready to pull'
+    else '✅ ' || s.last_rows || ' prices as of ' || coalesce(s.last_as_of::text, '?')
+  end                                   as status,
+  s.url
+from public.cm_games g
+left join public.cm_price_sources s on s.game = g.slug
+order by (s.game is null), g.sort_order;
+
+
+-- ===========================================================================
+--  Afterwards
+--
+--  1. Test ONE game before the nightly job runs for real:
+--       GET /api/cron/prices?game=pokemon
+--     (add `Authorization: Bearer <CRON_SECRET>` if that's set)
+--
+--  2. Check it landed:
+--       select count(*), max(as_of) from public.cm_price_latest;
+--       select * from public.cm_card_prices order by market desc nulls last limit 20;
+--
+--  3. The nightly cron (04:30, see vercel.json) then keeps every configured
+--     game current on its own.
+--
+--  To pause a game without deleting its URL:
+--       update public.cm_price_sources set enabled = false where game = 'magic';
+-- ===========================================================================
