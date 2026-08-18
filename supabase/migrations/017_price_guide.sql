@@ -32,37 +32,30 @@ drop policy if exists "Price sources are readable" on public.cm_price_sources;
 create policy "Price sources are readable" on public.cm_price_sources for select using (true);
 
 -- ===========================================================================
---  ▼▼▼  PASTE YOUR PRICE-GUIDE URLS HERE  ▼▼▼
+--  ▼▼▼  PRICE-GUIDE URLS  ▼▼▼
 --
---  From https://www.cardmarket.com/en/Magic/Data/Price-Guide (switch game via
---  the site's game menu), copy each game's JSON download link and replace the
---  matching PASTE_URL_HERE below. The file names follow the pattern
---  `price_guide_<idGame>.json` — the two supplied were `price_guide_6_2.json`
---  (Pokémon) and `price_guide_22.json` (Riftbound), so the host is the part
---  worth copying exactly.
+--  Filled in from the Cardmarket price-guide page. The pattern is
+--  `price_guide_<idGame>.json` on the downloads host.
 --
---  You do NOT have to fill them all in now. Any line still saying
---  PASTE_URL_HERE is skipped, and re-running this file later adds or updates
---  whichever ones you've filled since — so it's safe to run as often as you
---  like as you collect the rest.
+--  Re-running is safe: a changed URL updates in place and clears any previous
+--  failure, and a line left as PASTE_URL_HERE is skipped entirely.
 --
---  Only these ten slugs are valid (they're the games in the catalogue).
---  Cardmarket also publish Yu-Gi-Oh!, but we hold no Yu-Gi-Oh! cards, so
---  there's nothing for its prices to join to.
+--  Yu-Gi-Oh! is added separately in migration 018, since the game itself has
+--  to exist in cm_games before its prices can reference it.
 -- ===========================================================================
 insert into public.cm_price_sources (game, url, enabled)
 select g.game, g.url, true
 from (values
-  ('pokemon',       'PASTE_URL_HERE'),
-  ('magic',         'PASTE_URL_HERE'),
-  ('lorcana',       'PASTE_URL_HERE'),
-  ('onepiece',      'PASTE_URL_HERE'),
-  ('dragonball',    'PASTE_URL_HERE'),
-  ('digimon',       'PASTE_URL_HERE'),
-  ('fleshandblood', 'PASTE_URL_HERE'),
-  ('riftbound',     'PASTE_URL_HERE'),
-  ('vanguard',      'PASTE_URL_HERE'),
-  ('weissschwarz',  'PASTE_URL_HERE')
+  ('pokemon',       'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_6.json'),
+  ('magic',         'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_1.json'),
+  ('lorcana',       'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_19.json'),
+  ('onepiece',      'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_18.json'),
+  ('dragonball',    'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_13.json'),
+  ('digimon',       'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_17.json'),
+  ('fleshandblood', 'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_16.json'),
+  ('riftbound',     'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_22.json'),
+  ('vanguard',      'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_8.json'),
+  ('weissschwarz',  'https://downloads.s3.cardmarket.com/productCatalog/priceGuide/price_guide_10.json')
 ) as g(game, url)
 where g.url not like 'PASTE\_URL\_HERE'          -- unfilled lines are ignored
   and g.url ~ '^https?://'                       -- and anything that isn't a URL
