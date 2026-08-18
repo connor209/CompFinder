@@ -74,6 +74,18 @@ Anything you think of goes here first. Newest at the top.
 
 <!-- New items get added below this line -->
 
+- 🔵 **Column picker on the remaining tables** — Browse and My Listings both
+  have **Columns ▾** now (shared `app/panel/ColumnPicker.js`, choice saved per
+  table in `localStorage`). Sell sheets, the pull sheet and Show desk still
+  have fixed columns; same hook drops straight in when they need it.
+- 🔵 **Why some Cardmarket trends look wrong** — a trend that's 10× the
+  cheapest listing (or 5× the 30-day average) now shows ⚠ in Browse with the
+  reason on hover. The cause sits on Cardmarket's side: sales of graded/slabbed
+  copies land on the same product as the raw card. Two possible follow-ups:
+  prefer the 30-day average when pricing flagged cards, and exclude flagged
+  rows from set-value totals.
+  `lib/priceguide.js` → `priceWarning`
+
 - 🟡 **Surface market prices — Browse done, two left** — Browse now shows
   market + premium columns, sortable. Still to do: prefill the sell-sheet and
   eBay-variation prices from `suggestPrice()`, and value stacks/inventory at

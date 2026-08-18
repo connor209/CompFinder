@@ -65,7 +65,7 @@ export async function GET(request) {
   if (pageRows.length) {
     const { data: prices } = await supabase
       .from("cm_price_latest")
-      .select("cardmarket_id,as_of,trend,avg7,avg30,avg,low,premium_kind,p_trend,p_avg7,p_low")
+      .select("cardmarket_id,as_of,trend,avg7,avg30,avg,low,premium_kind,p_trend,p_avg7,p_avg30,p_low")
       .in("cardmarket_id", pageRows.map((c) => c.cardmarket_id));
     for (const p of prices || []) {
       priceById.set(p.cardmarket_id, p);
@@ -92,7 +92,15 @@ export async function GET(request) {
         market: p ? pick(p.trend, p.avg7, p.avg30, p.avg, p.low) : null,
         marketPremium: p ? pick(p.p_trend, p.p_avg7, p.p_low) : null,
         premiumKind: p?.premium_kind || null,
-        low: p ? pick(p.low) : null
+        // The raw series behind those two, so the table can show where a
+        // figure came from (and flag one that doesn't match its neighbours).
+        low: p ? pick(p.low) : null,
+        trend: p ? pick(p.trend) : null,
+        avg7: p ? pick(p.avg7) : null,
+        avg30: p ? pick(p.avg30) : null,
+        premiumLow: p ? pick(p.p_low) : null,
+        premiumAvg7: p ? pick(p.p_avg7) : null,
+        premiumAvg30: p ? pick(p.p_avg30) : null
       };
     })
     .sort((a, b) => {

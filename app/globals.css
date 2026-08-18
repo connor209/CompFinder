@@ -751,6 +751,7 @@ html, body { overflow-x: clip; max-width: 100%; }
 .brw-price { font-weight:700; color:var(--ink); white-space:nowrap; }
 .brw-price-p { color:var(--accent-2); white-space:nowrap; }
 .brw-tbl .brw-card-acts { display:flex; gap:4px; justify-content:flex-end; }
+.brw-warn { margin-left:4px; font-size:11px; color:var(--warn); cursor:help; }
 .brw-pricenote { margin-top:8px; }
 @media (max-width: 720px) {
   .brw-tbl { font-size:12.5px; }
@@ -1092,6 +1093,9 @@ html, body { overflow-x: clip; max-width: 100%; }
 .col-menu label:hover { background:var(--surface-sink); }
 .col-menu label.is-locked { opacity:.6; cursor:default; }
 .col-menu input { accent-color:var(--accent); }
+.col-menu-reset { margin-top:4px; border:0; border-top:1px solid var(--line); background:none; color:var(--ink-faint); font:inherit; font-size:12px; text-align:left; padding:7px 8px 3px; cursor:pointer; }
+.col-menu-reset:hover { color:var(--ink); }
+.col-count { display:inline-block; min-width:16px; padding:0 4px; margin-left:2px; border-radius:6px; background:var(--surface-sink); color:var(--ink-faint); font-size:11px; }
 .itbl { width:100%; border-collapse:collapse; font-size:13px; }
 .itbl th { text-align:left; font-weight:var(--label-weight); font-size:11px; letter-spacing:var(--label-spacing-sm); text-transform:var(--label-transform); color:var(--ink-faint); padding:8px 10px; border-bottom:1px solid var(--line-strong); white-space:nowrap; }
 .itbl td { padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:middle; color:var(--ink); }

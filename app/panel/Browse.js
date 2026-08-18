@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cleanSearchName } from "@/lib/cardname.js";
 import { ebaySearchUrl, cardmarketBestUrl } from "@/lib/marketplace.js";
+import { premiumLabel as premiumLabelFor, priceWarning } from "@/lib/priceguide.js";
+import ColumnPicker, { useColumns } from "./ColumnPicker";
 
 /**
  * Browse — explore the whole card catalogue across every supported game:
@@ -12,6 +14,21 @@ import { ebaySearchUrl, cardmarketBestUrl } from "@/lib/marketplace.js";
  * Cardmarket exports) via /api/catalog/*.
  */
 const CATEGORY_LABEL = { token: "Token", code: "Code card", oversized: "Oversized", tip: "Tip card" };
+
+// Which columns exist, and which are on to start with. `always` = structural.
+// The price columns only appear once the set actually has prices.
+const BROWSE_COLS = [
+  { key: "number", label: "No", always: true },
+  { key: "name", label: "Name", always: true },
+  { key: "rarity", label: "Rarity" },
+  { key: "market", label: "Market", price: true, hint: "Cardmarket trend price" },
+  { key: "marketPremium", label: "Premium", price: true, hint: "Cardmarket's premium series for this game" },
+  { key: "low", label: "Cheapest", price: true, hint: "Lowest current listing on Cardmarket" },
+  { key: "avg7", label: "7-day avg", price: true, hint: "Average sale price over the last 7 days" },
+  { key: "avg30", label: "30-day avg", price: true, hint: "Average sale price over the last 30 days" },
+  { key: "links", label: "Links" }
+];
+const BROWSE_DEFAULT_COLS = ["rarity", "market", "marketPremium", "links"];
 
 // Sort by collector number numerically (the DB paginates on the text column, so
 // merged pages must be re-sorted here for a stable "2 before 10" order).
@@ -142,10 +159,9 @@ export default function Browse({ onDeepDive }) {
   }, [cards, cardQ, sort]);
 
   const anyPrices = useMemo(() => cards.some((c) => c.market != null || c.marketPremium != null), [cards]);
-  const premiumLabel = useMemo(() => {
-    const k = cards.find((c) => c.premiumKind)?.premiumKind;
-    return k ? k.charAt(0).toUpperCase() + k.slice(1) : "Foil";
-  }, [cards]);
+  const premiumKind = useMemo(() => cards.find((c) => c.premiumKind)?.premiumKind || null, [cards]);
+  const premiumLabel = premiumLabelFor(premiumKind);
+  const premiumHint = premiumLabelFor(premiumKind, "long");
   const setValue = useMemo(
     () => cards.reduce((t, c) => t + (c.market || 0), 0),
     [cards]
@@ -155,10 +171,23 @@ export default function Browse({ onDeepDive }) {
     setSort((p) => (p.key === key
       ? { key, dir: p.dir === "asc" ? "desc" : "asc" }
       // Money reads best highest-first; names and numbers ascending.
-      : { key, dir: key === "market" || key === "marketPremium" ? "desc" : "asc" }));
+      : { key, dir: BROWSE_COLS.find((c) => c.key === key)?.price ? "desc" : "asc" }));
   }
   const sortIcon = (key) => (sort.key !== key ? "" : sort.dir === "asc" ? " ▲" : " ▼");
   const money = (v) => (v == null ? "—" : `£${Number(v).toFixed(2)}`);
+
+  // Columns: the price ones are only offered once the set has prices, and the
+  // premium header is named after whatever this game's premium series is.
+  const columns = useMemo(
+    () =>
+      BROWSE_COLS.filter((c) => !c.price || anyPrices).map((c) =>
+        c.key === "marketPremium" ? { ...c, label: premiumLabel, hint: premiumHint } : c
+      ),
+    [anyPrices, premiumLabel, premiumHint]
+  );
+  const { cols, toggle, reset, visible } = useColumns("cf-brw-cols", BROWSE_DEFAULT_COLS);
+  const shownCols = visible(columns);
+  const showing = (key) => shownCols.some((c) => c.key === key);
 
   // -------------------- render --------------------
   if (games === null) return <div className="panel"><span className="spinner" /> &nbsp;Loading catalogue…</div>;
@@ -260,6 +289,7 @@ export default function Browse({ onDeepDive }) {
             <input type="checkbox" checked={showExtras} onChange={(e) => toggleExtras(e.target.checked)} />
             <span>Include tokens &amp; extras</span>
           </label>
+          <ColumnPicker columns={columns} cols={cols} onToggle={toggle} onReset={reset} />
         </div>
 
         {cardsLoading && cards.length === 0 ? (
@@ -274,26 +304,37 @@ export default function Browse({ onDeepDive }) {
               <table className="itbl brw-tbl">
                 <thead>
                   <tr>
-                    <th className="brw-th" onClick={() => sortBy("number")} role="button" tabIndex={0}>No{sortIcon("number")}</th>
-                    <th className="brw-th" onClick={() => sortBy("name")} role="button" tabIndex={0}>Name{sortIcon("name")}</th>
-                    <th className="brw-th" onClick={() => sortBy("rarity")} role="button" tabIndex={0}>Rarity{sortIcon("rarity")}</th>
-                    {anyPrices ? (
-                      <>
-                        <th className="brw-th brw-num" onClick={() => sortBy("market")} role="button" tabIndex={0} title="Cardmarket trend price">Market{sortIcon("market")}</th>
-                        <th className="brw-th brw-num" onClick={() => sortBy("marketPremium")} role="button" tabIndex={0} title={`${premiumLabel} trend price`}>{premiumLabel}{sortIcon("marketPremium")}</th>
-                      </>
-                    ) : null}
-                    <th aria-label="Links"></th>
+                    {shownCols.map((c) =>
+                      c.key === "links" ? (
+                        <th key={c.key} aria-label="Links"></th>
+                      ) : (
+                        <th
+                          key={c.key}
+                          className={`brw-th${c.price ? " brw-num" : ""}`}
+                          onClick={() => sortBy(c.key)}
+                          role="button"
+                          tabIndex={0}
+                          title={c.hint || ""}
+                        >
+                          {c.label}{sortIcon(c.key)}
+                        </th>
+                      )
+                    )}
                   </tr>
                 </thead>
                 <tbody>
                   {filteredCards.map((c) => {
                     const ebayUrl = ebaySearchUrl(`${cleanSearchName(c.name, game.slug)} ${c.number}`.trim(), { sold: true });
                     const cmUrl = cardmarketBestUrl({ cardmarketId: c.cardmarketId, query: `${c.name} ${c.number}`.trim(), gameSlug: game.slug });
-                    return (
-                      <tr key={c.id}>
-                        <td className="mono brw-td-no">{c.number || "—"}</td>
-                        <td className="itbl-title">
+                    // Trend can sit an order of magnitude from the cheapest
+                    // listing and the 30-day average — usually a graded copy
+                    // sold under the same product. Mark it rather than hide it.
+                    const warn = priceWarning({ trend: c.trend, avg7: c.avg7, avg30: c.avg30, low: c.low });
+                    const warnP = priceWarning({ trend: c.marketPremium, avg7: c.premiumAvg7, avg30: c.premiumAvg30, low: c.premiumLow });
+                    const cell = {
+                      number: <td key="number" className="mono brw-td-no">{c.number || "—"}</td>,
+                      name: (
+                        <td key="name" className="itbl-title">
                           <button
                             className="brw-name-btn"
                             title={onDeepDive ? "Price this card in Quick Search" : c.name}
@@ -309,21 +350,31 @@ export default function Browse({ onDeepDive }) {
                           </button>
                           {c.category !== "card" ? <span className="brw-card-cat">{CATEGORY_LABEL[c.category] || c.category}</span> : null}
                         </td>
-                        <td className="muted">{c.rarity || "—"}</td>
-                        {anyPrices ? (
-                          <>
-                            <td className="mono brw-num brw-price">{money(c.market)}</td>
-                            <td className="mono brw-num brw-price-p">{money(c.marketPremium)}</td>
-                          </>
-                        ) : null}
-                        <td>
+                      ),
+                      rarity: <td key="rarity" className="muted">{c.rarity || "—"}</td>,
+                      market: (
+                        <td key="market" className="mono brw-num brw-price" title={warn ? `Odd figure — ${warn.reasons.join("; ")}` : ""}>
+                          {money(c.market)}{warn ? <span className="brw-warn" aria-label="Check this price">⚠</span> : null}
+                        </td>
+                      ),
+                      marketPremium: (
+                        <td key="marketPremium" className="mono brw-num brw-price-p" title={warnP ? `Odd figure — ${warnP.reasons.join("; ")}` : premiumHint}>
+                          {money(c.marketPremium)}{warnP ? <span className="brw-warn" aria-label="Check this price">⚠</span> : null}
+                        </td>
+                      ),
+                      low: <td key="low" className="mono brw-num muted">{money(c.low)}</td>,
+                      avg7: <td key="avg7" className="mono brw-num muted">{money(c.avg7)}</td>,
+                      avg30: <td key="avg30" className="mono brw-num muted">{money(c.avg30)}</td>,
+                      links: (
+                        <td key="links">
                           <div className="brw-card-acts">
                             <a className="brw-act" href={ebayUrl} target="_blank" rel="noopener noreferrer" title="eBay sold listings ↗" aria-label={`${c.name} — eBay sold listings`}>🔍</a>
                             {cmUrl ? <a className="brw-act" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Cardmarket page ↗" aria-label={`${c.name} — Cardmarket page`}>🛒</a> : null}
                           </div>
                         </td>
-                      </tr>
-                    );
+                      )
+                    };
+                    return <tr key={c.id}>{shownCols.map((col) => cell[col.key])}</tr>;
                   })}
                 </tbody>
               </table>
@@ -332,6 +383,8 @@ export default function Browse({ onDeepDive }) {
               <p className="hint hint-small brw-pricenote">
                 Cardmarket trend prices{pricedAsOf ? ` · ${pricedAsOf}` : ""} · {cards.length.toLocaleString()} loaded card{cards.length === 1 ? "" : "s"} total <b>{money(setValue)}</b>
                 {hasMore ? " (so far)" : ""}
+                {showing("marketPremium") ? <> · <b>{premiumLabel}</b> is {premiumHint.toLowerCase()}</> : null}
+                {" "}· ⚠ marks a trend that doesn’t match the cheapest listing or the 30-day average — usually graded copies sold under the same product. Add the <b>Cheapest</b> and <b>30-day avg</b> columns to see why.
               </p>
             ) : null}
             {filtering ? (

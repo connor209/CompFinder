@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import EbayActivity from "./EbayActivity";
 import MarketLinks from "./MarketLinks";
+import ColumnPicker, { useColumns } from "./ColumnPicker";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -214,31 +215,7 @@ export default function Inventory({ onDeepDive }) {
   const [view, setView] = useState("cards");
   const [showActivity, setShowActivity] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
-  const [colMenu, setColMenu] = useState(false);
-  const [cols, setCols] = useState(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const saved = JSON.parse(localStorage.getItem("cf-inv-cols") || "null");
-        if (Array.isArray(saved) && saved.length) return new Set(saved);
-      } catch {
-        /* ignore */
-      }
-    }
-    return new Set(DEFAULT_COLS);
-  });
-  function toggleCol(k) {
-    setCols((prev) => {
-      const next = new Set(prev);
-      if (next.has(k)) next.delete(k);
-      else next.add(k);
-      try {
-        localStorage.setItem("cf-inv-cols", JSON.stringify([...next]));
-      } catch {
-        /* ignore */
-      }
-      return next;
-    });
-  }
+  const { cols, toggle: toggleCol, reset: resetCols, visible: visibleCols } = useColumns("cf-inv-cols", DEFAULT_COLS);
   const pricedRef = useRef(priced);
   pricedRef.current = priced;
 
@@ -732,22 +709,7 @@ export default function Inventory({ onDeepDive }) {
           <button aria-pressed={view === "table"} onClick={() => setView("table")}>☰ Table</button>
         </div>
         {view === "table" ? (
-          <div className="col-picker">
-            <button className="btn btn-ghost" onClick={() => setColMenu((o) => !o)}>Columns ▾</button>
-            {colMenu ? (
-              <>
-                <div className="col-menu-backdrop" onClick={() => setColMenu(false)} />
-                <div className="col-menu">
-                  {ALL_COLUMNS.map((c) => (
-                    <label key={c.key} className={c.always ? "is-locked" : ""}>
-                      <input type="checkbox" checked={c.always || cols.has(c.key)} disabled={c.always} onChange={() => toggleCol(c.key)} />
-                      {c.label}
-                    </label>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </div>
+          <ColumnPicker columns={ALL_COLUMNS} cols={cols} onToggle={toggleCol} onReset={resetCols} />
         ) : null}
       </div>
 
@@ -778,7 +740,7 @@ export default function Inventory({ onDeepDive }) {
                     onChange={() => toggleSelAll(rows.length > 0 && rows.every((g) => selected.has(g.key)))}
                   />
                 </th>
-                {ALL_COLUMNS.filter((c) => c.always || cols.has(c.key)).map((c) => (
+                {visibleCols(ALL_COLUMNS).map((c) => (
                   <th key={c.key}>{c.label}</th>
                 ))}
               </tr>
@@ -789,7 +751,7 @@ export default function Inventory({ onDeepDive }) {
                   <td className="itbl-selcol">
                     <input type="checkbox" aria-label="Select row" checked={selected.has(g.key)} onChange={() => toggleSel(g.key)} />
                   </td>
-                  {ALL_COLUMNS.filter((c) => c.always || cols.has(c.key)).map((c) => (
+                  {visibleCols(ALL_COLUMNS).map((c) => (
                     <td key={c.key} className={`itbl-${c.key}`}>
                       {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, costs, onSetCost: setCost })}
                     </td>
