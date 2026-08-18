@@ -4,6 +4,7 @@ import EbayConnect from "./EbayConnect";
 import AccountData from "./AccountData";
 import DashboardPrefs from "./DashboardPrefs";
 import ListingPolicies from "./ListingPolicies";
+import PriceSync from "./PriceSync";
 import CompFinderPricing from "@/lib/pricing.js";
 
 const EBAY_FLASH = {
@@ -48,6 +49,7 @@ export default async function SettingsPage({ searchParams }) {
       <DashboardPrefs initialSettings={settings} />
       <EbayConnect flash={flash} />
       <ListingPolicies initialSettings={settings} />
+      <PriceSync />
       <AccountData email={user.email} />
     </div>
   );
