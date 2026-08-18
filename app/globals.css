@@ -752,6 +752,8 @@ html, body { overflow-x: clip; max-width: 100%; }
 .brw-price-p { color:var(--accent-2); white-space:nowrap; }
 .brw-tbl .brw-card-acts { display:flex; gap:4px; justify-content:flex-end; }
 .brw-warn { margin-left:4px; font-size:11px; color:var(--warn); cursor:help; }
+/* A premium price with nothing listed behind it — shown, but never as a value. */
+.brw-price-unbacked { color:var(--ink-faint); opacity:.7; white-space:nowrap; cursor:help; }
 .brw-pricenote { margin-top:8px; }
 @media (max-width: 720px) {
   .brw-tbl { font-size:12.5px; }

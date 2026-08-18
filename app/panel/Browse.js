@@ -41,6 +41,21 @@ function byNumber(a, b) {
   const ka = numKey(a.number), kb = numKey(b.number);
   return ka.num - kb.num || ka.s.localeCompare(kb.s) || a.name.localeCompare(b.name);
 }
+/**
+ * Cardmarket publishes a premium (reverse-holo / foil) price for some cards
+ * that have no such print — sellers tick the flag on the wrong listing, and
+ * the sales stick to the product. The giveaway is that nobody is *selling*
+ * one: 94% of Pokémon commons with a reverse-holo price have one listed,
+ * against 6% of Ultra Rares. So a premium figure with no listing behind it is
+ * shown as unbacked rather than as a valuation.
+ */
+function premiumBacked(c) {
+  return c.marketPremium != null && c.premiumListed;
+}
+function valueOf(c, key) {
+  if (key === "marketPremium") return premiumBacked(c) ? c.marketPremium : null;
+  return c[key];
+}
 async function getJson(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -149,8 +164,9 @@ export default function Browse({ onDeepDive }) {
     return [...base].sort((a, b) => {
       if (key === "name") return mul * a.name.localeCompare(b.name);
       if (key === "rarity") return mul * String(a.rarity || "").localeCompare(String(b.rarity || "")) || byNumber(a, b);
-      // Unpriced cards always sit at the bottom, whichever way you sort.
-      const av = a[key], bv = b[key];
+      // Unpriced cards always sit at the bottom, whichever way you sort — and
+      // an unbacked premium figure counts as unpriced rather than topping it.
+      const av = valueOf(a, key), bv = valueOf(b, key);
       if (av == null && bv == null) return byNumber(a, b);
       if (av == null) return 1;
       if (bv == null) return -1;
@@ -357,9 +373,21 @@ export default function Browse({ onDeepDive }) {
                           {money(c.market)}{warn ? <span className="brw-warn" aria-label="Check this price">⚠</span> : null}
                         </td>
                       ),
-                      marketPremium: (
+                      marketPremium: premiumBacked(c) ? (
                         <td key="marketPremium" className="mono brw-num brw-price-p" title={warnP ? `Odd figure — ${warnP.reasons.join("; ")}` : premiumHint}>
                           {money(c.marketPremium)}{warnP ? <span className="brw-warn" aria-label="Check this price">⚠</span> : null}
+                        </td>
+                      ) : (
+                        <td
+                          key="marketPremium"
+                          className="mono brw-num brw-price-unbacked"
+                          title={
+                            c.marketPremium != null
+                              ? `No ${premiumLabel.toLowerCase()} copies listed on Cardmarket — the ${money(c.marketPremium)} comes from past sales of listings flagged ${premiumLabel.toLowerCase()}, so this card probably has no such print.`
+                              : ""
+                          }
+                        >
+                          {c.marketPremium != null ? <>({money(c.marketPremium)})</> : "—"}
                         </td>
                       ),
                       low: <td key="low" className="mono brw-num muted">{money(c.low)}</td>,
@@ -383,7 +411,9 @@ export default function Browse({ onDeepDive }) {
               <p className="hint hint-small brw-pricenote">
                 Cardmarket trend prices{pricedAsOf ? ` · ${pricedAsOf}` : ""} · {cards.length.toLocaleString()} loaded card{cards.length === 1 ? "" : "s"} total <b>{money(setValue)}</b>
                 {hasMore ? " (so far)" : ""}
-                {showing("marketPremium") ? <> · <b>{premiumLabel}</b> is {premiumHint.toLowerCase()}</> : null}
+                {showing("marketPremium") ? (
+                  <> · <b>{premiumLabel}</b> is {premiumHint}; a figure in (brackets) has no {premiumLabel.toLowerCase()} copy listed behind it, so the card likely has no such print</>
+                ) : null}
                 {" "}· ⚠ marks a trend that doesn’t match the cheapest listing or the 30-day average — usually graded copies sold under the same product. Add the <b>Cheapest</b> and <b>30-day avg</b> columns to see why.
               </p>
             ) : null}

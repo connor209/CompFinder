@@ -98,6 +98,11 @@ export async function GET(request) {
         trend: p ? pick(p.trend) : null,
         avg7: p ? pick(p.avg7) : null,
         avg30: p ? pick(p.avg30) : null,
+        // A premium price with nothing actually listed is the tell for a card
+        // that has no such print: 94% of Pokémon commons with a reverse-holo
+        // price have one for sale, against 6% of Ultra Rares, whose figure is
+        // residue from listings flagged reverse holo by mistake.
+        premiumListed: p ? Number(p.p_low) > 0 : false,
         premiumLow: p ? pick(p.p_low) : null,
         premiumAvg7: p ? pick(p.p_avg7) : null,
         premiumAvg30: p ? pick(p.p_avg30) : null
