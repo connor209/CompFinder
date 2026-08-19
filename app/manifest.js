@@ -1,7 +1,7 @@
 export default function manifest() {
   return {
-    name: "CompFinder",
-    short_name: "CompFinder",
+    name: "CAASI",
+    short_name: "CAASI",
     description: "Real eBay sold-comp pricing and inventory management for card resellers.",
     start_url: "/panel",
     scope: "/",

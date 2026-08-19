@@ -3,8 +3,8 @@ import "./globals.css";
 export const metadata = {
   metadataBase: new URL("https://comp-finder-alpha.vercel.app"),
   title: {
-    default: "CompFinder — Real eBay sold-comp pricing",
-    template: "%s · CompFinder"
+    default: "CAASI",
+    template: "%s · CAASI"
   },
   description:
     "Turn real eBay sold data into instant, recency-weighted prices, sync your live listings, spot repricing opportunities, and never undersell again.",
@@ -24,7 +24,7 @@ export const metadata = {
   },
   appleWebApp: {
     capable: true,
-    title: "CompFinder",
+    title: "CAASI",
     statusBarStyle: "black-translucent"
   }
 };
