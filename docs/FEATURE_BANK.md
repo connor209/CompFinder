@@ -74,6 +74,13 @@ Anything you think of goes here first. Newest at the top.
 
 <!-- New items get added below this line -->
 
+- 🔵 **Stock check — widen it beyond live listings** — batch pricing now flags
+  cards we already sell (SKU first, then card number + name) and what we priced
+  them at last time. Two natural extensions: match against stacks and show-checked-out
+  stock too, not just live listings, and offer "match the listed price" as a
+  one-click action on a flagged row.
+  `lib/stockcheck.js`, `app/panel/Panel.js`
+
 - 🔵 **Column picker on the remaining tables** — Browse and My Listings both
   have **Columns ▾** now (shared `app/panel/ColumnPicker.js`, choice saved per
   table in `localStorage`). Sell sheets, the pull sheet and Show desk still

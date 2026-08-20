@@ -5,6 +5,8 @@ import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@/lib/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
+import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
+import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
 import Arbitrage from "./Arbitrage";
@@ -232,7 +234,56 @@ export default function Panel({ initialSection = "dashboard" }) {
   const [showCurrentPrice, setShowCurrentPrice] = useState(false);
   const [resultsView, setResultsView] = useState("cards");
 
+  // What we already know about these cards: our live eBay listings and our own
+  // past price decisions. Loaded once when the Batch stream is first opened,
+  // so a batch run doesn't wait on it.
+  const [known, setKnown] = useState(null); // { stock, history, listings, checks } | { error }
+  const [stockOnly, setStockOnly] = useState(false);
+  // The uploaded CardUploader CSV, kept verbatim so the eBay export can hand
+  // the same file back with only the prices changed.
+  const [csvRaw, setCsvRaw] = useState(null); // { text, name }
+
   const settings = CompFinderPricing.DEFAULT_SETTINGS;
+
+  // Load our live listings and our own price history once, so every batch row
+  // can say "we already sell this at £X" without another round trip. Failure
+  // is quiet — the stock column just doesn't appear.
+  const loadKnown = useCallback(async () => {
+    try {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const pageSize = 1000;
+      let listings = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabase
+          .from("ebay_listings")
+          .select("ebay_item_id,sku,title,url,price_value,price_currency,quantity")
+          .range(from, from + pageSize - 1);
+        if (error || !data || data.length === 0) break;
+        listings = listings.concat(data);
+        if (data.length < pageSize) break;
+      }
+      const { data: checks } = await supabase
+        .from("price_checks")
+        .select("title,sku,recommended_pence,confidence,created_at")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(2000);
+      setKnown({
+        stock: buildStockIndex(listings),
+        history: buildHistoryIndex(checks || []),
+        listings: listings.length,
+        checks: (checks || []).length
+      });
+    } catch (err) {
+      console.warn("Could not load existing stock:", err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (stream === "batch" && known === null) loadKnown();
+  }, [stream, known, loadKnown]);
 
   const onCsvSelected = useCallback((e) => {
     const file = e.target.files[0];
@@ -240,6 +291,7 @@ export default function Panel({ initialSection = "dashboard" }) {
     const reader = new FileReader();
     reader.onload = () => {
       try {
+        setCsvRaw({ text: String(reader.result), name: file.name });
         const items = CardUploaderCsv.extractItems(reader.result);
         if (items.length === 0) {
           setCsvSummary("No rows with a recognisable Card Name + Card Number found — is this a CardUploader export?");
@@ -546,16 +598,22 @@ export default function Panel({ initialSection = "dashboard" }) {
   }
 
   function exportCsv() {
-    const header = "SKU,Title,Simplified Query,Comps Used,Comps Excluded,Data Source,Confidence,Current Price,Recommended Price,Note\n";
+    const header =
+      "SKU,Title,Simplified Query,Comps Used,Comps Excluded,Data Source,Confidence," +
+      "Already Listed,Listed Price,Last Priced,Current Price,Recommended Price,Note\n";
     const rows = results.map((r) => {
       const currentPrice = r.csvItem && r.csvItem.startPrice ? r.csvItem.startPrice : "";
+      const k = knownFor(r);
+      const listedPence = k?.stock?.match?.pricePence ?? null;
+      const stockCell = k?.stock ? (k.stock.count > 1 ? `yes (${k.stock.count})` : "yes") : "";
+      const listedCell = listedPence != null ? (listedPence / 100).toFixed(2) : "";
+      const lastCell = k?.history ? (k.history.match.pricePence / 100).toFixed(2) : "";
+      const quote = (cells) => cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
       if (!r.rec) {
-        return [r.sku || "", r.title, r.query, "", "", "", "Skipped", currentPrice, "", r.failed]
-          .map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
+        return quote([r.sku || "", r.title, r.query, "", "", "", "Skipped", stockCell, listedCell, lastCell, currentPrice, "", r.failed]);
       }
       const price = r.rec.finalPence != null ? (r.rec.finalPence / 100).toFixed(2) : "";
-      return [r.sku || "", r.title, r.query, r.rec.included.length, r.rec.excluded.length, r.rec.dataSource, r.rec.confidence, currentPrice, price, r.rec.note]
-        .map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
+      return quote([r.sku || "", r.title, r.query, r.rec.included.length, r.rec.excluded.length, r.rec.dataSource, r.rec.confidence, stockCell, listedCell, lastCell, currentPrice, price, r.rec.note]);
     });
     const blob = new Blob([header + rows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -576,17 +634,47 @@ export default function Panel({ initialSection = "dashboard" }) {
   // effect as the extension's dataset-attribute toggling, simpler here
   // since React already re-renders on state change.
   const reasonOptions = [...new Set(results.flatMap((r) => (r.rec ? Object.keys(countReasons(r.rec)) : [])))];
+  // What we already know about each row — computed here so the filter, the
+  // cards, the table and both exports all read the same answer.
+  const knownFor = (r) => (known ? checkRow(r, known) : null);
   const filteredResults = results
-    .map((r, origIndex) => ({ r, origIndex }))
-    .filter(({ r }) => {
+    .map((r, origIndex) => ({ r, origIndex, known: knownFor(r) }))
+    .filter(({ r, known: k }) => {
       const searchText = `${r.sku} ${r.title} ${r.query}`.toLowerCase();
       const matchesSearch = !resultsSearch || searchText.includes(resultsSearch.toLowerCase());
       const confidence = r.rec ? r.rec.confidence : "Low";
       const matchesConfidence = !confidenceFilter || confidence === confidenceFilter;
       const reasons = r.rec ? Object.keys(countReasons(r.rec)) : [];
       const matchesReason = !reasonFilter || reasons.includes(reasonFilter);
-      return matchesSearch && matchesConfidence && matchesReason;
+      const matchesStock = !stockOnly || !!k?.stock;
+      return matchesSearch && matchesConfidence && matchesReason && matchesStock;
     });
+  const inStockCount = known ? results.filter((r) => knownFor(r)?.stock).length : 0;
+
+  /** Hand back the uploaded CardUploader CSV with our prices in it. */
+  function exportEbayCsv() {
+    if (!csvRaw) return;
+    try {
+      const { csv, updated, missing, skipped } = repriceCardUploaderCsv(csvRaw.text, pricedSkuMap(results));
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = csvRaw.name.replace(/\.csv$/i, "") + "-priced.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+      setStatus(
+        `eBay upload file ready: ${updated} row(s) repriced` +
+          (skipped ? `, ${skipped} left at their original price` : "") +
+          (missing.length ? `, ${missing.length} priced SKU(s) weren't in the file` : "") +
+          ". Upload it in eBay Seller Hub → Reports."
+      );
+      setStatusIsError(false);
+    } catch (err) {
+      setStatus(err.message);
+      setStatusIsError(true);
+    }
+  }
 
   return (
     <div id="app" className="shell">
@@ -811,6 +899,16 @@ export default function Panel({ initialSection = "dashboard" }) {
                 </button>
               );
             })()}
+            {csvRaw ? (
+              <button
+                className="btn btn-ghost"
+                disabled={results.length === 0}
+                onClick={exportEbayCsv}
+                title="Your CardUploader CSV with our prices in it, ready for eBay Seller Hub → Reports"
+              >
+                ⬆ eBay upload CSV
+              </button>
+            ) : null}
             <button className="btn btn-ghost" disabled={results.length === 0} onClick={exportCsv}>Export CSV</button>
           </div>
         </div>
@@ -857,6 +955,23 @@ export default function Panel({ initialSection = "dashboard" }) {
               <input type="checkbox" checked={showCurrentPrice} onChange={(e) => setShowCurrentPrice(e.target.checked)} />
               <span>Show current price &amp; highlight big changes</span>
             </label>
+
+            {known ? (
+              inStockCount > 0 ? (
+                <label className="checkbox-field">
+                  <input type="checkbox" checked={stockOnly} onChange={(e) => setStockOnly(e.target.checked)} />
+                  <span>
+                    Only cards we already stock — <b>{inStockCount}</b> of {results.length} matched a live listing
+                  </span>
+                </label>
+              ) : (
+                <p className="hint hint-small">
+                  None of these match a live listing (checked against {known.stock.size.toLocaleString()} of ours).
+                </p>
+              )
+            ) : (
+              <p className="hint hint-small">Checking against our own stock…</p>
+            )}
           </>
         ) : null}
 
@@ -864,10 +979,11 @@ export default function Panel({ initialSection = "dashboard" }) {
           <p className="dd-empty">Run a search or upload a CSV to see priced results here.</p>
         ) : resultsView === "cards" ? (
           <div className="rc-grid rise-grid">
-            {filteredResults.map(({ r, origIndex }) => (
+            {filteredResults.map(({ r, origIndex, known: k }) => (
               <ResultCard
                 key={origIndex}
                 r={r}
+                known={k}
                 showCurrentPrice={showCurrentPrice}
                 active={activeByIndex[origIndex]}
                 onCheckActive={() => fetchActiveFor(r, origIndex)}
@@ -881,14 +997,15 @@ export default function Panel({ initialSection = "dashboard" }) {
               <thead>
                 <tr>
                   <th>SKU</th><th>Title</th><th>Query used</th><th>Comps</th>
-                  <th>Confidence</th><th>Current</th><th>Recommended</th><th>Active</th><th>Note</th>
+                  <th>Confidence</th><th>In stock</th><th>Current</th><th>Recommended</th><th>Active</th><th>Note</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredResults.map(({ r, origIndex }) => (
+                {filteredResults.map(({ r, origIndex, known: k }) => (
                   <ResultRow
                     key={origIndex}
                     r={r}
+                    known={k}
                     showCurrentPrice={showCurrentPrice}
                     active={activeByIndex[origIndex]}
                     onCheckActive={() => fetchActiveFor(r, origIndex)}
@@ -968,7 +1085,47 @@ function countReasons(rec) {
   return counts;
 }
 
-function ResultRow({ r, showCurrentPrice, active, onCheckActive }) {
+/**
+ * What we already know about this card: the live listing we have (if any) and
+ * what we priced it at last time. Shown so a new copy goes up in line with the
+ * one on the shelf instead of accidentally undercutting it.
+ */
+function KnownCell({ known, rec }) {
+  const stock = known?.stock;
+  const hist = known?.history;
+  if (!stock && !hist) return <span className="hint-small">—</span>;
+  const listed = stock?.match?.pricePence ?? null;
+  const gap = priceGap(rec?.finalPence ?? null, listed);
+  return (
+    <span className="kn">
+      {stock ? (
+        <span
+          className={`kn-chip${stock.ambiguous ? " kn-chip-amb" : ""}`}
+          title={
+            (stock.ambiguous
+              ? `${stock.count} of our listings match this card — showing the first. `
+              : "") + `Matched on ${stock.via === "sku" ? "SKU" : "card name & number"}: ${stock.match.title}`
+          }
+        >
+          In stock{stock.count > 1 ? ` ×${stock.count}` : ""}
+          {listed != null ? ` · ${CompFinderPricing.toPoundsStr(listed)}` : ""}
+        </span>
+      ) : null}
+      {gap ? (
+        <span className={`kn-gap ${gap.delta > 0 ? "up" : "down"}${gap.big ? " kn-gap-big" : ""}`}>
+          {gap.delta > 0 ? "▲" : "▼"} {CompFinderPricing.toPoundsStr(Math.abs(gap.delta))} vs listed
+        </span>
+      ) : null}
+      {hist ? (
+        <span className="kn-hist" title={`Last priced ${String(hist.match.created_at).slice(0, 10)} — ${hist.match.title}`}>
+          last {CompFinderPricing.toPoundsStr(hist.match.pricePence)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function ResultRow({ r, known, showCurrentPrice, active, onCheckActive }) {
   const [open, setOpen] = useState(false);
   if (!r.rec) {
     return (
@@ -977,6 +1134,7 @@ function ResultRow({ r, showCurrentPrice, active, onCheckActive }) {
         <td><span className="rr-title">{r.title} <MarketLinks query={r.query || r.title} gameSlug="pokemon" /></span></td>
         <td>{r.query}</td><td>—</td>
         <td><span className="conf-badge conf-low">Skipped</span></td>
+        <td><KnownCell known={known} rec={null} /></td>
         <td>—</td><td>—</td><td>—</td><td>{r.failed}</td>
       </tr>
     );
@@ -1015,20 +1173,21 @@ function ResultRow({ r, showCurrentPrice, active, onCheckActive }) {
           )}
         </td>
         <td><span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span></td>
+        <td><KnownCell known={known} rec={rec} /></td>
         <td>{currentCell}</td><td>{priceStr}</td>
         <td><ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} /></td>
         <td>{rec.note}</td>
       </tr>
       {open && canExpand && (
         <tr className="comps-detail-row">
-          <td colSpan={9}><CompsDetail rec={rec} active={active} /></td>
+          <td colSpan={10}><CompsDetail rec={rec} active={active} /></td>
         </tr>
       )}
     </>
   );
 }
 
-function ResultCard({ r, showCurrentPrice, active, onCheckActive, onDeepDive }) {
+function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepDive }) {
   const [open, setOpen] = useState(false);
 
   if (!r.rec) {
@@ -1068,6 +1227,7 @@ function ResultCard({ r, showCurrentPrice, active, onCheckActive, onDeepDive }) 
         <span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span>
       </div>
       {r.sku ? <div className="rc-sku">SKU {r.sku}</div> : null}
+      {known?.stock || known?.history ? <div className="rc-known"><KnownCell known={known} rec={rec} /></div> : null}
       <div className="rc-q" title={r.query}>“{r.query}”</div>
 
       <div className="rc-prices">

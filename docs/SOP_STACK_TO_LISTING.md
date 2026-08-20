@@ -180,14 +180,19 @@ promo or misprint, a reverse holo not flagged as one, or a card so scarce that
 nothing has sold recently. If nothing genuinely comparable exists, price it
 against the nearest equivalent and note that you did.
 
-**3.7 Check what we already have listed.** Search the card name in **My
-Listings** to see whether we're already selling one, and at what price — you
-generally want your new copy priced in line with the existing one rather than
-undercutting yourself.
+**3.7 Look at the "In stock" column.** CompFinder checks every row against our
+own live eBay listings and our own price history, automatically:
 
-> **How this works today:** that check is a manual look-up in My Listings.
-> CompFinder does not yet automatically match a batch against our own live
-> stock and show the price we used last time.
+- **In stock · £2.50** — we're already selling this card at that price, and the
+  arrow beside it shows how far the new recommendation sits from it.
+- **In stock ×2**, dashed outline — more than one of our listings matches this
+  card. Hover to see which one is shown, and check the rest in My Listings.
+- **last £2.60** — what we priced this card at the last time we ran it.
+
+Price the new copy in line with the one already listed rather than undercutting
+ourselves. Tick **Only cards we already stock** to work through just the
+matches. Matching is on SKU first, then on card number and name — so a card
+with no SKU still matches, and an unsure match is flagged rather than assumed.
 
 **3.8 Export the results.** Press **Export CSV** on the results panel and save
 it into the same Drive folder:
@@ -236,19 +241,18 @@ The CardUploader CSV is already in eBay's File Exchange format — it has the
 `*Title`, `CustomLabel` (the SKU) and `*StartPrice` columns eBay expects. So
 the job is to put CompFinder's prices into it:
 
-1. Open the CardUploader CSV **in a text-safe way** (see the Excel warning
-   above — if you must use a spreadsheet, keep the card-number column formatted
-   as text and check `4/99` still looks like `4/99` before saving).
-2. For each row, replace `*StartPrice` with the recommended price from the
-   CompFinder export. **Match the rows on the SKU** (`CustomLabel`), never on
-   the row order.
-3. Save it into the Drive folder as `260820-001-ebay-upload.csv`.
-4. In **eBay Seller Hub → Reports**, upload that file, then check the upload
-   result report eBay produces for any rejected rows.
+1. Press **⬆ eBay upload CSV** on the results panel. CompFinder hands back the
+   file you uploaded with **only the prices changed** — every column, item
+   specific and category CardUploader set stays exactly as it was, and rows are
+   matched on the SKU (`CustomLabel`), never on row order. It reports how many
+   rows were repriced and how many kept their original price because they
+   weren't priced.
+2. Save it into the Drive folder as `260820-001-ebay-upload.csv`.
+3. In **eBay Seller Hub → Reports**, upload that file, then check the result
+   report eBay produces for any rejected rows.
 
-> **How this works today:** CompFinder's export is a pricing report, not an
-> eBay upload file, so step 2 is a manual merge. A one-click "export as eBay
-> upload file" would remove it — worth asking for if Route B becomes routine.
+> The button only appears when the batch came from a CardUploader CSV — there's
+> no original file to reprice when the titles were pasted in by hand.
 
 ✅ **Stage 4 is done when:** the cards are live on eBay and any rejected rows
 from the upload report have been fixed and re-uploaded.
