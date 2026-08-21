@@ -26,17 +26,24 @@ const TTL_SECONDS = { sold: 24 * 60 * 60, active: 2 * 60 * 60 };
 // cheap for us, but still a signal of automated traffic.
 const MAX_REQUESTS_PER_HOUR = 120;
 
-const QUERY_OPTIONS = { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 };
+const QUERY_OPTIONS = { ebaySite: "ebay.co.uk", itemLocation: "worldwide" };
+
+// How far back to look for sold comps. A longer window finds more comps for a
+// scarce card; a shorter one is more current for a card that's moving. Only
+// these two are accepted — an arbitrary number from the client would fragment
+// the cache into near-duplicate entries that each cost a fresh API call.
+const ALLOWED_SOLD_WINDOWS = [30, 90];
+const DEFAULT_SOLD_WINDOW = 90;
 
 /**
  * Cache key. Normalises the query the same way for everyone — lowercased,
  * collapsed whitespace — so "Charizard  ex 199/165" and "charizard ex 199/165"
  * are one cache entry rather than two API calls.
  */
-function cacheKey(query, sold) {
+function cacheKey(query, sold, soldAfterDays) {
   const normal = String(query).toLowerCase().replace(/\s+/g, " ").trim();
   return createHash("sha256")
-    .update(`${normal}|${QUERY_OPTIONS.ebaySite}|${sold ? "sold" : "active"}|${QUERY_OPTIONS.soldAfterDays}`)
+    .update(`${normal}|${QUERY_OPTIONS.ebaySite}|${sold ? "sold" : "active"}|${soldAfterDays}`)
     .digest("hex");
 }
 
@@ -61,6 +68,11 @@ export async function POST(request) {
 
   const query = typeof body.query === "string" ? body.query.trim() : "";
   const sold = body.sold !== false;
+  // Anything not on the allow-list falls back to the default rather than
+  // erroring — a bad value is a caller bug, not something a visitor can fix.
+  const soldAfterDays = ALLOWED_SOLD_WINDOWS.includes(body.soldAfterDays)
+    ? body.soldAfterDays
+    : DEFAULT_SOLD_WINDOW;
   if (!query) {
     return NextResponse.json({ ok: false, error: "Type a card to price." }, { status: 400 });
   }
@@ -76,7 +88,7 @@ export async function POST(request) {
     return NextResponse.json({ ok: false, error: "Pricing is temporarily unavailable." }, { status: 503 });
   }
 
-  const key = cacheKey(query, sold);
+  const key = cacheKey(query, sold, soldAfterDays);
   const ttl = sold ? TTL_SECONDS.sold : TTL_SECONDS.active;
   const freshAfter = new Date(Date.now() - ttl * 1000).toISOString();
 
@@ -119,7 +131,7 @@ export async function POST(request) {
 
   let parsed;
   try {
-    parsed = await fetchFromSoldComps(apiKey, query, sold);
+    parsed = await fetchFromSoldComps(apiKey, query, sold, soldAfterDays);
   } catch (err) {
     // Upstream detail (quota, key problems) is ours, not the visitor's — it
     // would leak how the service is provisioned and they can't act on it.
@@ -164,11 +176,11 @@ const ATTEMPT_TIMEOUT_MS = 10000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchFromSoldComps(apiKey, query, sold) {
+async function fetchFromSoldComps(apiKey, query, sold, soldAfterDays) {
   let lastError;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
-      return await attemptSoldComps(apiKey, query, sold);
+      return await attemptSoldComps(apiKey, query, sold, soldAfterDays);
     } catch (err) {
       lastError = err;
       const retryable = err.httpStatus && RETRY_STATUSES.has(err.httpStatus);
@@ -180,7 +192,7 @@ async function fetchFromSoldComps(apiKey, query, sold) {
   throw lastError;
 }
 
-async function attemptSoldComps(apiKey, query, sold) {
+async function attemptSoldComps(apiKey, query, sold, soldAfterDays) {
   const url = SoldCompsApi.buildRequestUrl({
     keyword: query,
     count: 240,
@@ -188,7 +200,7 @@ async function attemptSoldComps(apiKey, query, sold) {
     itemLocation: QUERY_OPTIONS.itemLocation,
     // Ignored upstream for active listings, but passing 0 keeps the cache key
     // and the request honest about which mode this is.
-    soldAfterDays: sold ? QUERY_OPTIONS.soldAfterDays : 0,
+    soldAfterDays: sold ? soldAfterDays : 0,
     itemCondition: "any"
   });
   const fullUrl = sold ? url : `${url}&sold=false`;

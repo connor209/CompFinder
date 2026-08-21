@@ -7,6 +7,23 @@ import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import TrendChart from "./TrendChart";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
+
+// The engine's internal reason codes, said out loud. A visitor deserves to know
+// why a listing they can see on eBay isn't in the price.
+const EXCLUSION_LABELS = {
+  nameMismatch: "different card",
+  variantMismatch: "reverse holo",
+  graded: "graded slab",
+  multiCardLot: "multi-card lot",
+  nonUkLocation: "not a UK sale",
+  setMismatch: "different set",
+  catalogSignal: "different product",
+  priceOutlier: "price outlier",
+  postageOutlier: "postage outlier",
+  bundle: "bundle",
+  proxy: "proxy or custom",
+  damaged: "damaged"
+};
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 
 function fmtDate(iso) {
@@ -29,6 +46,13 @@ export default function PriceSearch() {
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
   const [active, setActive] = useState({ loading: false, comps: [] });
+  // Region and condition re-filter comps we already hold, so changing them is
+  // instant and costs no API call. Only the sold window changes the upstream
+  // request, so only that one triggers a re-fetch.
+  const [region, setRegion] = useState("uk");
+  const [condition, setCondition] = useState("any");
+  const [soldWindow, setSoldWindow] = useState(90);
+  const [showExcluded, setShowExcluded] = useState(false);
   const comboRef = useRef(null);
   // Guards against a slow earlier search landing after a newer one and
   // overwriting it — easy to hit when someone types, waits, then picks a
@@ -63,7 +87,33 @@ export default function PriceSearch() {
     return `${card.name} ${card.number || ""} ${card.code || ""}`.replace(/\s+/g, " ").trim();
   }
 
-  async function run(searchText, card = null) {
+  /**
+   * Comps the pricing engine should never see, because the visitor has ruled
+   * them out. Runs before recommend() rather than after, so the price itself
+   * responds to the controls instead of just the list underneath it.
+   */
+  function preFilter(comps, { region, condition }) {
+    return comps
+      .filter((c) => {
+        // itemLocation is null for a UK-domestic seller and set for a
+        // cross-border one (see soldcomps.js), which is what "UK only" means.
+        if (region === "uk" && c.itemLocation) return false;
+        if (condition === "nm" && c.condition !== "NM") return false;
+        if (condition === "nodmg" && (c.condition === "HP" || c.condition === "DMG")) return false;
+        return true;
+      })
+      .map((c) =>
+        // Worldwide is an explicit instruction to price across borders, so the
+        // engine's own non-UK exclusion has to be told to stand down. The real
+        // location is kept for display — only the field the engine reads is
+        // cleared, and only when the visitor asked for it.
+        region === "ww" && c.itemLocation
+          ? { ...c, itemLocation: null, _displayLocation: c.itemLocation }
+          : c
+      );
+  }
+
+  async function run(searchText, card = null, windowDays = soldWindow) {
     const query = (searchText || "").trim();
     if (!query) return;
     const id = ++runId.current;
@@ -76,18 +126,16 @@ export default function PriceSearch() {
 
     // Active listings fetch alongside but never block the price — they fill in
     // the "Buy one now" module once they land.
-    price(query, false)
+    price(query, false, windowDays)
       .then((comps) => { if (id === runId.current) setActive({ loading: false, comps }); })
       .catch(() => { if (id === runId.current) setActive({ loading: false, comps: [] }); });
 
     try {
-      const comps = await price(query, true);
+      const comps = await price(query, true, windowDays);
       if (id !== runId.current) return;
-      const nameTokens = CompFinderPricing.extractNameTokens(
-        CompFinderPricing.simplifyTitle(query, settings.stripWords)
-      );
-      const rec = CompFinderPricing.recommend(comps, settings, nameTokens, "sold", null, null);
-      setData({ card: card || { name: query }, query, rec, comps });
+      // Raw comps are kept as fetched; filtering and scoring happen in the
+      // memo below so the controls can re-run them without a new request.
+      setData({ card: card || { name: query }, query, comps });
     } catch (err) {
       if (id === runId.current) setError(err.message || "Something went wrong pricing that card.");
     } finally {
@@ -95,11 +143,11 @@ export default function PriceSearch() {
     }
   }
 
-  async function price(query, sold) {
+  async function price(query, sold, soldAfterDays) {
     const res = await fetch("/api/price", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, sold })
+      body: JSON.stringify({ query, sold, soldAfterDays })
     }).then((r) => r.json());
     if (!res.ok) throw new Error(res.error || "Pricing request failed.");
     return res.comps || [];
@@ -107,7 +155,21 @@ export default function PriceSearch() {
 
   const view = useMemo(() => {
     if (!data) return null;
-    const { rec, comps } = data;
+    const { card, comps } = data;
+
+    // Name tokens come from the typed query; the collector number and set come
+    // from the catalogue card when one was picked. Passing those is what stops
+    // a search for Giratina V 186 pricing itself off Giratina V 130 comps —
+    // the engine can only filter on a number and set if it is given them.
+    const nameTokens = CompFinderPricing.extractNameTokens(
+      CompFinderPricing.simplifyTitle(data.query, settings.stripWords)
+    );
+    const cardNumber = card.number || null;
+    const cardSet = card.set || null;
+
+    const filtered = preFilter(comps, { region, condition });
+    const rec = CompFinderPricing.recommend(filtered, settings, nameTokens, "sold", cardNumber, cardSet);
+
     const used = rec.included || [];
     const totals = used.map((c) => c.totalPence);
     const med = totals.length ? median(totals) : null;
@@ -117,22 +179,33 @@ export default function PriceSearch() {
       .map((c) => ({ t: new Date(c._source.endedAt).getTime(), v: c.totalPence }))
       .filter((p) => !Number.isNaN(p.t));
 
-    const sales = comps
-      .map((c) => ({
-        price: c.totalPence ?? c.itemPricePence,
-        date: c._source && c._source.endedAt,
-        t: c._source && c._source.endedAt ? new Date(c._source.endedAt).getTime() : 0,
-        title: c.title,
-        url: c._source && c._source.url,
-        loc: c.itemLocation,
-        grade: CompFinderPricing.parseGrade(c.title)
-      }))
-      .sort((a, b) => b.t - a.t)
-      .slice(0, 8);
+    const toRow = (c) => ({
+      price: c.totalPence ?? c.itemPricePence,
+      date: c._source && c._source.endedAt,
+      t: c._source && c._source.endedAt ? new Date(c._source.endedAt).getTime() : 0,
+      title: c.title,
+      url: c._source && c._source.url,
+      loc: c._displayLocation || c.itemLocation,
+      grade: CompFinderPricing.parseGrade(c.title),
+      reason: c.exclusionReason || null
+    });
 
-    // Only listings we can actually link to are worth showing as buyable.
-    const activeRec = active.comps.length
-      ? CompFinderPricing.recommend(active.comps, settings, [], "active", null, null)
+    // Only comps the price was actually built from. Showing every raw comp
+    // here was the bug behind "recent sales don't match" — the list contradicted
+    // the "comps used" count sitting directly above it.
+    const sales = used.map(toRow).sort((a, b) => b.t - a.t).slice(0, 10);
+    const dropped = (rec.excluded || []).map(toRow).sort((a, b) => b.t - a.t).slice(0, 12);
+
+    // Last sold has to come from the comps that were used. Reading it off the
+    // raw list is how a £14.99 Giratina VSTAR ended up quoted under a £557 price.
+    const lastSold = sales.length ? sales[0].price : null;
+
+    // Active listings get the same name/number/set treatment as sold comps.
+    // Scoring them with no tokens at all is why "Buy one now" was offering
+    // £2.60 copies of a different card.
+    const activeFiltered = preFilter(active.comps, { region, condition });
+    const activeRec = activeFiltered.length
+      ? CompFinderPricing.recommend(activeFiltered, settings, nameTokens, "active", cardNumber, cardSet)
       : null;
     const buy = (activeRec?.included || [])
       .filter((c) => c._source && c._source.url)
@@ -141,16 +214,18 @@ export default function PriceSearch() {
       .slice(0, 6);
 
     return {
-      rec, med, chart, sales, buy,
+      rec, med, chart, sales, dropped, buy, lastSold,
       activeMedian: activeRec?.finalPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
-      lastSold: sales.length ? sales[0].price : null,
       lo: totals.length ? Math.min(...totals) : null,
       hi: totals.length ? Math.max(...totals) : null,
       used: used.length,
-      graded: rec.graded || []
+      excludedCount: (rec.excluded || []).length,
+      graded: rec.graded || [],
+      matchedCard: !!(cardNumber || cardSet)
     };
-  }, [data, active]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, active, region, condition]);
 
   return (
     <>
@@ -191,6 +266,52 @@ export default function PriceSearch() {
             {loading ? "Checking…" : "Check price"}
           </button>
         </div>
+
+        <div className="filters">
+          <div className="filter">
+            <span className="flabel">Region</span>
+            <div className="seg" role="group" aria-label="Region">
+              {[["uk", "🇬🇧 UK only"], ["ww", "🌍 Worldwide"]].map(([v, l]) => (
+                <button key={v} aria-pressed={region === v} onClick={() => setRegion(v)}>{l}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="filter">
+            <span className="flabel">Condition</span>
+            <div className="seg" role="group" aria-label="Condition">
+              {[["any", "Any"], ["nodmg", "Exclude damaged"], ["nm", "Near Mint"]].map(([v, l]) => (
+                <button key={v} aria-pressed={condition === v} onClick={() => setCondition(v)}>{l}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="filter">
+            <span className="flabel">Sold within</span>
+            <div className="seg" role="group" aria-label="Sold within">
+              {[[30, "30 days"], [90, "90 days"]].map(([v, l]) => (
+                <button
+                  key={v}
+                  aria-pressed={soldWindow === v}
+                  onClick={() => {
+                    if (soldWindow === v) return;
+                    setSoldWindow(v);
+                    // The only control that changes the upstream request, so
+                    // it's the only one that re-runs the search.
+                    if (data) run(data.query, data.card, v);
+                  }}
+                >
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <p className="fhint">
+          Region and condition re-filter the results instantly. Pick a card from the suggestions rather than
+          typing free text — it lets us match on the collector number and set, which is what keeps a different
+          print of the same card out of the price.
+        </p>
       </section>
 
       {loading && <div className="panel"><span className="spinner" /> &nbsp;Pricing from recent sold listings…</div>}
@@ -276,9 +397,11 @@ export default function PriceSearch() {
             <section className="panel">
               <div className="panel-head">
                 <h3>Recent sales</h3>
-                <span className="badge">{view.used} comps</span>
+                <span className="badge">{view.used} used</span>
                 <span className="spacer" />
-                <span className="hint">Last 90 days · eBay UK</span>
+                <span className="hint">
+                  Last {soldWindow} days · {region === "uk" ? "UK only" : "Worldwide"}
+                </span>
               </div>
               <div className="rows">
                 {view.sales.map((s, i) => (
@@ -295,6 +418,28 @@ export default function PriceSearch() {
                   </div>
                 ))}
               </div>
+              {view.excludedCount > 0 && (
+                <div className="excluded">
+                  <button className="exlink" onClick={() => setShowExcluded((v) => !v)} aria-expanded={showExcluded}>
+                    {showExcluded ? "Hide" : "Show"} {view.excludedCount} listing{view.excludedCount === 1 ? "" : "s"} we didn&rsquo;t count
+                  </button>
+                  {showExcluded && (
+                    <div className="rows exrows">
+                      {view.dropped.map((s2, i) => (
+                        <div className="row" key={i}>
+                          <span className="sp">{pounds(s2.price)}</span>
+                          <span className="sd">{fmtDate(s2.date)}</span>
+                          <span className="st">
+                            <span className="why">{EXCLUSION_LABELS[s2.reason] || s2.reason || "filtered"}</span>
+                            {s2.title}
+                          </span>
+                          <span className="loc">{s2.loc ? s2.loc : "🇬🇧 UK"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
           )}
 
