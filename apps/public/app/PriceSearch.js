@@ -9,6 +9,7 @@ import { buildCompTokens, dropWrongSetTotal } from "@/lib/tokens";
 import { UK, marketsIn, splitByMarket } from "@/lib/markets";
 import { assessAsk } from "@/lib/verdict";
 import { settingsForCard } from "@/lib/settings";
+import { VARIANTS, variantQueryTerms, variantTokens, variantsPresent } from "@/lib/variants";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import TrendChart from "./TrendChart";
 
@@ -62,6 +63,7 @@ export default function PriceSearch() {
   const [choices, setChoices] = useState(null); // set when several cards match
   const [recent, setRecent] = useState([]);
   const [ask, setAsk] = useState("");
+  const [variant, setVariant] = useState("any");
   const comboRef = useRef(null);
   // Guards against a slow earlier search landing after a newer one and
   // overwriting it — easy to hit when someone types, waits, then picks a
@@ -122,8 +124,9 @@ export default function PriceSearch() {
    * not the set code. Sellers write "Lost Origin", never "LOR", and the set
    * name is what makes SoldComps return the right listings in the first place.
    */
-  function queryForCard(card) {
-    return `${card.name} ${card.number || ""} ${card.set || ""}`.replace(/\s+/g, " ").trim();
+  function queryForCard(card, variantKey = variant) {
+    return [card.name, card.number || "", card.set || "", ...variantQueryTerms(variantKey)]
+      .join(" ").replace(/\s+/g, " ").trim();
   }
 
   /**
@@ -188,7 +191,7 @@ export default function PriceSearch() {
     return run(typed);
   }
 
-  async function run(searchText, card = null, windowDays = soldWindow) {
+  async function run(searchText, card = null, windowDays = soldWindow, variantForRun = variant) {
     const query = (searchText || "").trim();
     if (!query) return;
     const id = ++runId.current;
@@ -212,7 +215,7 @@ export default function PriceSearch() {
       // Raw comps are kept as fetched; filtering and scoring happen in the
       // memo below so the controls can re-run them without a new request.
       const resolved = card || { name: query };
-      setData({ card: resolved, query, comps });
+      setData({ card: resolved, query, comps, variant: variantForRun });
       // Recorded from the raw comps rather than the rendered price so the chip
       // still shows something useful if the visitor then changes market or
       // condition, which re-scores but doesn't re-search.
@@ -244,8 +247,12 @@ export default function PriceSearch() {
     // Required words come from the card name plus its collector number — NOT
     // from the search query, which carries a set code that no eBay title
     // contains. See lib/tokens.js.
-    const nameTokens = buildCompTokens(card, data.query);
-    const nameOnlyTokens = buildCompTokens({ name: card.name || data.query }, data.query);
+    // Both halves are needed: the query so the listings are fetched, the tokens
+    // so the engine keeps them. pricing.js drops reverse-holo comps from a
+    // plain search by design, so asking for one without saying so in the
+    // tokens returns nothing at all.
+    const nameTokens = [...buildCompTokens(card, data.query), ...variantTokens(data.variant || "any")];
+    const nameOnlyTokens = [...buildCompTokens({ name: card.name || data.query }, data.query), ...variantTokens(data.variant || "any")];
     const cardNumber = card.number || null;
     const cardSet = card.set || null;
 
@@ -261,6 +268,9 @@ export default function PriceSearch() {
 
     const filtered = dropWrongSetTotal(preFilter(comps, { condition }), cardNumber);
     const markets = marketsIn(filtered);
+    // Offered only where the comps actually contain them: an empty result
+    // behind a tempting button is worse than no button.
+    const variantsHere = variantsPresent(comps);
     const { chosen, rest } = splitByMarket(filtered, market);
 
     // Promo cards need the blanket "promo" exclusion stood down, or every
@@ -401,7 +411,7 @@ export default function PriceSearch() {
     return {
       rec, marketPence, med, chart, sales, dropped, buy, lastSold, liquidity, verdict,
       thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers,
-      markets, market, restPence, restUsed, premium, conditionCounts,
+      markets, market, restPence, restUsed, premium, conditionCounts, variantsHere,
       activeMedian: activeRec?.rawPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
       lo,
@@ -484,6 +494,31 @@ export default function PriceSearch() {
                 ))}
             </div>
           </div>
+
+          {view && Object.keys(view.variantsHere).length > 0 && (
+            <div className="filter">
+              <span className="flabel">Printing</span>
+              <div className="seg" role="group" aria-label="Printing variant">
+                {VARIANTS.filter((v) => v.key === "any" || view.variantsHere[v.key]).slice(0, 4).map((v) => (
+                  <button
+                    key={v.key}
+                    aria-pressed={variant === v.key}
+                    title={v.hint}
+                    onClick={() => {
+                      if (variant === v.key) return;
+                      setVariant(v.key);
+                      // Changing the printing changes the eBay search itself,
+                      // not just how the results are filtered, so this re-runs.
+                      if (data) run(queryForCard(data.card, v.key), data.card, soldWindow, v.key);
+                    }}
+                  >
+                    {v.label}
+                    {view.variantsHere[v.key] ? <span className="segn">{view.variantsHere[v.key]}</span> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="filter">
             <span className="flabel">Condition</span>
