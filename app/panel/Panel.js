@@ -285,8 +285,19 @@ export default function Panel({ initialSection = "dashboard" }) {
     if (stream === "batch" && known === null) loadKnown();
   }, [stream, known, loadKnown]);
 
+  // runBatch is redefined every render, so it closes over the current filter
+  // state. onCsvSelected is memoised with no deps, so calling runBatch from
+  // inside it directly would call the FIRST render's copy and price every CSV
+  // with the default filters, ignoring whatever the user picked. The ref
+  // always points at the latest one.
+  const runBatchRef = useRef(null);
+  useEffect(() => {
+    runBatchRef.current = runBatch;
+  });
+
   const onCsvSelected = useCallback((e) => {
     const file = e.target.files[0];
+    e.target.value = ""; // let the same file be re-selected after a failure
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -307,14 +318,23 @@ export default function Panel({ initialSection = "dashboard" }) {
               ? ` ⚠ ${repairedCount} card number(s) looked like Excel had auto-converted them to dates and were repaired — worth double-checking those rows.`
               : "")
         );
-        runBatch(loaded);
+        // runBatch is async: a rejection here would NOT reach the catch
+        // below, it would just vanish and leave the panel stuck on
+        // "Pricing 1 of N…" forever. Surface it as a status instead.
+        runBatchRef.current(loaded).catch((err) => {
+          setStatus(`Batch failed: ${err.message}`);
+          setStatusIsError(true);
+        });
       } catch (err) {
         setCsvSummary(`Could not read CSV: ${err.message}`);
         setCsvItems(null);
       }
     };
+    reader.onerror = () => {
+      setCsvSummary(`Could not read ${file.name} — the browser could not open that file.`);
+      setCsvItems(null);
+    };
     reader.readAsText(file);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /** Snap-to-search: downscale the photo in the browser (keeps the vision call
@@ -424,6 +444,16 @@ export default function Panel({ initialSection = "dashboard" }) {
     }
 
     setRunning(true);
+    try {
+      await runBatchInner(items);
+    } finally {
+      // Whatever happens — an unexpected throw included — the Run button has
+      // to come back, or the only way out of the page is a reload.
+      setRunning(false);
+    }
+  }
+
+  async function runBatchInner(items) {
     setResults([]);
     setActiveByIndex({});
     let consecutiveFailures = 0;
@@ -438,10 +468,15 @@ export default function Panel({ initialSection = "dashboard" }) {
       const { title, sku } = item;
 
       setStatus(`Pricing ${i + 1} of ${items.length}: "${title}"`);
-      const { query, nameTokens, set, csvItem, cardNumber } = buildQueryForItem(item, settings, includeCondition, useFullTitle);
 
+      let query, nameTokens, set, csvItem, cardNumber;
       let soldComps, apiDiagnostic;
       try {
+        // Inside the try on purpose: a single malformed row must fail that
+        // row like any other error, not reject out of runBatch and leave the
+        // whole batch frozen mid-item with `running` stuck on.
+        ({ query, nameTokens, set, csvItem, cardNumber } = buildQueryForItem(item, settings, includeCondition, useFullTitle));
+
         const result = await fetchSoldCompsWithRetry(query, searchOptions, (attempt, delay) =>
           setStatus(`Item ${i + 1} of ${items.length}: SoldComps rate limit — retry ${attempt} in ${Math.round(delay / 1000)}s…`)
         );
@@ -492,7 +527,7 @@ export default function Panel({ initialSection = "dashboard" }) {
           if (activeRec.included.length > 0) rec = activeRec;
           else rec.note = `No sold or active comps found after exclusions — no price forced.${apiDiagnostic ? " " + apiDiagnostic : ""}`;
         } catch (err) {
-          rec.note += ` (Active-listing fallback also failed: ${err.message})`;
+          rec.note = `${rec.note ? rec.note + " " : ""}(Active-listing fallback also failed: ${err.message})`;
         }
       }
 
