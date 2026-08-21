@@ -162,11 +162,38 @@ export default function PriceSearch() {
     // from the search query, which carries a set code that no eBay title
     // contains. See lib/tokens.js.
     const nameTokens = buildCompTokens(card, data.query);
+    const nameOnlyTokens = buildCompTokens({ name: card.name || data.query }, data.query);
     const cardNumber = card.number || null;
     const cardSet = card.set || null;
 
     const filtered = preFilter(comps, { region, condition });
-    const rec = CompFinderPricing.recommend(filtered, settings, nameTokens, "sold", cardNumber, cardSet);
+    let rec = CompFinderPricing.recommend(filtered, settings, nameTokens, "sold", cardNumber, cardSet);
+
+    // NUMBER FALLBACK. If requiring the collector number rejects every comp but
+    // the name alone matches several, the number is far likelier to be wrong
+    // than the market to be empty — a search for "Glaceon ex 145/131" returns
+    // plenty of Glaceon ex, all numbered 150/131, because 145 doesn't exist.
+    // Reporting "not enough sales" there is the least useful true statement
+    // available. Fall back to the name, and say so rather than quietly
+    // pretending the number was honoured.
+    let numberUnmatched = false;
+    if ((rec.included || []).length === 0 && cardNumber) {
+      const byNameOnly = CompFinderPricing.recommend(filtered, settings, nameOnlyTokens, "sold", null, cardSet);
+      if ((byNameOnly.included || []).length >= 3) {
+        rec = byNameOnly;
+        numberUnmatched = true;
+      }
+    }
+
+    // The numbers actually on those listings, so the warning can name them
+    // instead of only doubting the one that was searched.
+    const seenNumbers = numberUnmatched
+      ? [...new Set(
+          (rec.included || [])
+            .map((c) => (c.title.match(/\b(\d{1,3}\/\d{1,3})\b/) || [])[1])
+            .filter(Boolean)
+        )].slice(0, 3)
+      : [];
 
     const used = rec.included || [];
     const totals = used.map((c) => c.totalPence);
@@ -243,7 +270,7 @@ export default function PriceSearch() {
 
     return {
       rec, med, chart, sales, dropped, buy, lastSold,
-      thinUk, wideUsed, tooBroad, span, askingUnreliable,
+      thinUk, wideUsed, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers,
       activeMedian: activeRec?.finalPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
       lo,
@@ -348,7 +375,7 @@ export default function PriceSearch() {
 
       {view && !loading && (
         <>
-          {(view.thinUk || view.tooBroad) && (
+          {(view.thinUk || view.tooBroad || view.numberUnmatched) && (
             <div className="caveats">
               {view.thinUk && (
                 <div className="caveat">
@@ -356,6 +383,15 @@ export default function PriceSearch() {
                   Most eBay UK listings for cards come from overseas sellers, priced in pounds. Including them
                   gives {view.wideUsed} comps instead.{" "}
                   <button className="exlink" onClick={() => setRegion("ww")}>Switch to worldwide</button>
+                </div>
+              )}
+              {view.numberUnmatched && (
+                <div className="caveat">
+                  <strong>No sales matched that card number.</strong>{" "}
+                  {view.seenNumbers.length
+                    ? <>The listings we found are numbered {view.seenNumbers.join(", ")} — check you have the right one.</>
+                    : <>Check the collector number.</>}{" "}
+                  The price below ignores the number and matches on the card name alone.
                 </div>
               )}
               {view.tooBroad && (
@@ -372,12 +408,21 @@ export default function PriceSearch() {
             <h2 className="heroname">{data.card.name}</h2>
             <div className="priceline">
               <div className="bigprice"><span className="cur">£</span>{view.rec.finalPence != null ? (view.rec.finalPence / 100).toFixed(2) : "—"}</div>
-              <span className={`conf${view.rec.confidence === "Medium" ? " med" : ""}`}>{view.rec.confidence} confidence</span>
+              <span className={`conf${view.rec.confidence === "Medium" ? " med" : ""}`}>
+                {view.rec.finalPence == null && view.graded.length > 0 ? "graded only" : `${view.rec.confidence} confidence`}
+              </span>
             </div>
             <p className="herosub">
-              {view.used > 0
-                ? <>Recency-weighted from <b>{view.used}</b> UK sold comps over the last 90 days · median <b>{pounds(view.med)}</b>.</>
-                : "No sold comps found in the last 90 days for that search — try the card name plus its collector number."}
+              {view.used > 0 ? (
+                <>Recency-weighted from <b>{view.used}</b> sold comps over the last {soldWindow} days · median <b>{pounds(view.med)}</b>.</>
+              ) : view.graded.length > 0 ? (
+                // Some cards — old promos especially — barely trade raw at all.
+                // "No sold comps" is true and useless when we are holding a
+                // dozen graded sales for the same card.
+                <>No <b>raw</b> sales in the last {soldWindow} days — this card almost always sells graded. See the graded prices below.</>
+              ) : (
+                "No sold comps found in the last 90 days for that search — try the card name plus its collector number."
+              )}
               {view.activeMedian != null && !view.askingUnreliable ? (
                 <> Currently listed around <b>{pounds(view.activeMedian)}</b> asking.</>
               ) : null}

@@ -145,7 +145,11 @@ export async function POST(request) {
     return NextResponse.json({
       ok: true,
       comps: hit.payload.comps || [],
-      hasNextPage: !!hit.payload.hasNextPage,
+      // null, not false, when the entry predates this field — "we don't know"
+      // and "there is no next page" lead to opposite conclusions about whether
+      // a result set was capped, and coercing the first into the second makes
+      // a fast-moving card look slow.
+      hasNextPage: hit.payload.hasNextPage ?? null,
       rawItemCount: hit.payload.rawItemCount ?? (hit.payload.comps || []).length,
       cached: true,
       fetchedAt: hit.fetched_at
@@ -209,7 +213,7 @@ export async function POST(request) {
   return NextResponse.json({
     ok: true,
     comps: parsed.comps,
-    hasNextPage: !!parsed.hasNextPage,
+    hasNextPage: parsed.hasNextPage ?? null,
     rawItemCount: parsed.rawItemCount,
     cached: false,
     fetchedAt: new Date().toISOString()
