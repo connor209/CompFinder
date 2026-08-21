@@ -387,6 +387,12 @@ export default function PriceSearch() {
     const span = lo && hi && lo > 0 ? hi / lo : null;
     const tooBroad = span != null && span > 10;
 
+    // One sale is a data point, not a market. The confidence badge already
+    // reads "Low", but a lone £1,400 comp still renders as a firm-looking
+    // number, and 29 of 282 cards in the large audit were priced this way.
+    // Say it in words next to the price rather than leaving it to a badge.
+    const singleComp = used.length === 1;
+
     // 3. Asking prices that bear no relation to sold. On broad searches the
     //    active side fills with cheap listings of other cards, giving
     //    "£7.49 asking" under a £136 sold price. Better to withhold the
@@ -410,7 +416,7 @@ export default function PriceSearch() {
 
     return {
       rec, marketPence, med, chart, sales, dropped, buy, lastSold, liquidity, verdict,
-      thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers,
+      thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers, singleComp,
       markets, market, restPence, restUsed, premium, conditionCounts, variantsHere,
       activeMedian: activeRec?.rawPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
@@ -602,7 +608,7 @@ export default function PriceSearch() {
 
       {view && !loading && (
         <>
-          {(view.thinHere || view.tooBroad || view.numberUnmatched) && (
+          {(view.thinHere || view.tooBroad || view.numberUnmatched || view.singleComp) && (
             <div className="caveats">
               {view.thinHere && (
                 <div className="caveat">
@@ -618,6 +624,13 @@ export default function PriceSearch() {
                     ? <>The listings we found are numbered {view.seenNumbers.join(", ")} — check you have the right one.</>
                     : <>Check the collector number.</>}{" "}
                   The price below ignores the number and matches on the card name alone.
+                </div>
+              )}
+              {view.singleComp && (
+                <div className="caveat">
+                  <strong>Priced from a single sale.</strong>{" "}
+                  One listing isn&rsquo;t a market — treat this as a rough indication, and widen the market or the
+                  time window to see whether it holds up.
                 </div>
               )}
               {view.tooBroad && (
