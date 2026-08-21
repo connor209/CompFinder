@@ -87,7 +87,7 @@ for (const [label, re] of [
   ["custom art / custom-art", /custom[\s-]?art/i],
   ["handmade", /\bhand[\s-]?made\b/i],
   ["fan art", /\bfan[\s-]?art\b/i],
-  ["DIY", /\bdiy\b/i],
+  ["DIY / D-I-Y", /\bd[\s.-]?i[\s.-]?y\b/i],
   ["inspired art / inspired by", /\binspired\b/i],
   ["metal card / gold metal", /\b(gold|silver|metal)\s+metal\b|\bmetal\s+card\b/i],
   ["gold plated / 24k", /\b(gold[\s-]?plated|24k|24\s?carat)\b/i],
@@ -96,6 +96,41 @@ for (const [label, re] of [
   ["sticker", /\bsticker\b/i],
   ["poster / print", /\b(poster|art print)\b/i]
 ]) probe(label, re);
+
+console.log("\n" + "=".repeat(100));
+console.log("FOREIGN-LANGUAGE PRINTS IN AN ENGLISH COMP SET");
+console.log("=".repeat(100));
+for (const [label, re] of [
+  ["Russian", /\brussian\b/i],
+  ["Italian / Italiano", /\b(italian|italiano)\b/i],
+  ["French / Francais / Carte", /\b(french|fran[c\u00e7]ais|carte)\b/i],
+  ["German / Deutsch", /\b(german|deutsch)\b/i],
+  ["Spanish / Espanol", /\b(spanish|espa[n\u00f1]ol)\b/i],
+  ["Portuguese", /\bportugu/i],
+  ["Japanese", /\bjapanese\b|\bjapan\b/i],
+  ["Korean", /\bkorean\b/i],
+  ["Chinese", /\bchinese\b/i],
+  ["Thai / Indonesian", /\b(thai|indonesian)\b/i]
+]) probe(label, re, { sample: 4 });
+
+console.log("\n" + "=".repeat(100));
+console.log("TWO-CARD LOTS THE multiCardLot CHECK MISSES");
+console.log("=".repeat(100));
+// "Latias ex 93/97 & Latios ex 94/97 Holo Lot" survived every existing check:
+// the name/number pair check needs the number to follow the name directly
+// (the "ex" gets in the way) and the shared-denominator check needs the card
+// number to carry its denominator, which the catalogue does not give us -
+// bigset numbers are bare ("94"), so that check is dead on the public page.
+// Requiring a full N/M on each side is what makes this safe: a set name like
+// "Card 151" has no slash and cannot count towards the pair.
+const LOT_PAIR = /\b[A-Z][a-zA-Z']+\s+(?:ex|EX|gx|GX|v|V|vmax|VMAX|vstar|VSTAR)?\s*(\d{1,4})\s*\/\s*\d{1,4}\b/g;
+const lotHits = corpus.filter((c) => {
+  const nums = new Set([...c.title.matchAll(LOT_PAIR)].map((m) => m[1]));
+  return nums.size >= 2;
+});
+console.log(`${lotHits.length} of ${corpus.length} titles carry two or more distinct "Name <N>/<M>" groups`);
+for (const h of lotHits.slice(0, 20)) console.log(`  ${gbp(h.itemPence).padStart(9)}  ${h.title.slice(0, 84)}`);
+if (lotHits.length > 20) console.log(`  \u2026 ${lotHits.length - 20} more`);
 
 console.log("\n" + "=".repeat(100));
 console.log("CANDIDATE graded TERMS — graders the current list misses");
