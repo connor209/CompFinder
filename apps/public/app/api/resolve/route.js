@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPublicClient } from "@/lib/supabase";
 import { cleanSearchName } from "@compfinder/core/cardname.js";
-import { parseQuery, rankCards } from "@/lib/resolve";
+import { parseQuery, rankCards, languageOf } from "@/lib/resolve";
 
 /**
  * Free text -> ranked catalogue cards.
@@ -54,6 +54,9 @@ export async function GET(request) {
       code: row.expansion_code,
       rarity: row.rarity,
       game: row.game,
+      // Shown on the picker: a Japanese print of the same card is a different
+      // product at a different price, and the set name alone doesn't say so.
+      language: languageOf(row),
       score
     }))
   });

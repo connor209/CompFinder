@@ -1,6 +1,40 @@
 import { detectLanguage } from "@compfinder/core/catalog.js";
 
 /**
+ * Language from the EXPANSION CODE, which the set name can't give us.
+ *
+ * catalog.js says so itself: "Japanese sets mostly don't name the language
+ * either, so they fall through to English here". The app compensates with a
+ * manual language toggle; this page has none, so a search for Rayquaza VMAX
+ * was ranking Japanese sets — Nine Colors Gathering, Fearless Terastal, Abyss
+ * Eye — as if they were English, and pricing the wrong card at full
+ * confidence. Across the 512-card test set, 358 came from sets with no English
+ * marker in the name.
+ *
+ * The codes do carry it. Checked against all 132 codes in that set: not one
+ * English code contains a lowercase letter, while every modern Japanese set
+ * does (m5, s6a, sv2a, sm8b, SV3s). Chinese sets end in C with a digit in the
+ * code (CSV3C, CBB2C, 151C) — bare "ASC" for Ascended Heroes has no digit and
+ * stays English.
+ *
+ * Older Japanese sets whose codes are all-caps (XY7, BW7, MA5) are missed.
+ * That's a knowing trade: they matter far less to a modern price checker than
+ * the current sets this does catch, and a wrong guess there costs a ranking
+ * position rather than a wrong price.
+ */
+export function languageOf(row) {
+  const named = detectLanguage(row.expansion);
+  if (named !== "English") return named;
+  const code = String(row.expansion_code || row.code || "");
+  if (!code) return "English";
+  // Chinese first: their codes contain a lowercase letter too (CS4aC), so
+  // testing for lowercase before this would label them Japanese.
+  if (/\d/.test(code) && /C$/.test(code)) return "Chinese";
+  if (/[a-z]/.test(code)) return "Japanese";
+  return "English";
+}
+
+/**
  * Ranking for catalogue lookups.
  *
  * The old suggest endpoint returned whatever Postgres handed back, which meant
@@ -72,9 +106,13 @@ export function scoreCard(row, parsed) {
     else if (rowNum) score -= 25; // they named a number and this isn't it
   }
 
-  // English prints dominate a UK marketplace; other languages are still
-  // reachable, just not the default guess.
-  if (detectLanguage(row.expansion) === "English") score += 25;
+  // English prints dominate a UK marketplace; other languages stay reachable,
+  // just not the default guess. The penalty is larger than the old +25 bonus
+  // because an exact name match on a Japanese set was otherwise outscoring a
+  // near match on the English one.
+  const lang = languageOf(row);
+  if (lang === "English") score += 30;
+  else score -= 45;
 
   // "… : Additionals" are duplicate rows of the same set.
   if (/additional/i.test(row.expansion || "")) score -= 12;

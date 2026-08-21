@@ -427,3 +427,4 @@ footer.site-foot .spacer { flex:1 1 auto; }
 .ask-notes { margin:7px 0 0; padding-left:17px; font-size:12.5px; color:var(--ink-soft); line-height:1.55; }
 .ask-notes li { margin-bottom:3px; }
 .stat .vsm { font-family:var(--font-body); font-size:13.5px; font-weight:600; }
+.pick-lang { background:var(--warn-soft); color:var(--warn-ink); border-radius:5px; padding:1px 6px; font-weight:600; }

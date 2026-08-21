@@ -467,7 +467,7 @@ export default function PriceSearch() {
                     onClick={() => { setQ(queryForCard(c)); run(queryForCard(c), c); }}
                   >
                     <span className="nm">{c.name}</span>
-                    <span className="mt">{c.set}{c.rarity ? ` · ${c.rarity}` : ""}</span>
+                    <span className="mt">{c.set}{c.rarity ? ` · ${c.rarity}` : ""}{c.language && c.language !== "English" ? ` · ${c.language}` : ""}</span>
                     <span className="no">{c.number}</span>
                   </button>
                 ))}
@@ -589,6 +589,7 @@ export default function PriceSearch() {
                 <span className="pick-meta">
                   {c.number ? <span className="mono">#{c.number}</span> : null}
                   {c.rarity ? <span className="pick-rar">{c.rarity}</span> : null}
+                  {c.language && c.language !== "English" ? <span className="pick-lang">{c.language}</span> : null}
                 </span>
               </button>
             ))}
