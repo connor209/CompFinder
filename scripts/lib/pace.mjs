@@ -8,14 +8,22 @@
  * server does push back.
  *
  * That matters beyond our own rate limit. Every cache miss is a live call to
- * SoldComps, whose own documented limit is 60/minute, and hammering a supplier
- * we depend on to prove our own tool works would be a poor trade.
+ * SoldComps, whose own documented limit is 60/minute — one per second — and
+ * hammering a supplier we depend on to prove our own tool works would be a
+ * poor trade. It also produces junk results: overload comes back as upstream
+ * errors that are indistinguishable, from the outside, from the tool failing.
  */
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function createPacer({
-  minGapMs = 400,        // floor between calls; 150/min stays well under SoldComps' 60/min
+  // SoldComps documents 60 requests/minute, so the floor between calls has to
+  // be at least a second. The first version used 400ms and called it "well
+  // under" — that is 150/min, two and a half times over, and a 282-card run at
+  // 350ms failed 155 of 282 with upstream errors that looked like the tool
+  // breaking rather than us flooding a supplier. 1200ms leaves headroom for
+  // the retries, which also count against their limit.
+  minGapMs = 1200,
   maxPerHour = 900,      // our own ceiling, independent of whatever the server allows
   maxRetries = 4,
   onWait = () => {}

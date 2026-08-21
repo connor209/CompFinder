@@ -76,6 +76,13 @@ moment strangers can reach it.
 - [ ] **Set `NEXT_PUBLIC_EPN_CAMPID`** (5339194433). Left unset while we are
       the only ones clicking, since commission on your own purchases ends the
       EPN account.
+- [ ] **Throttle our own calls to SoldComps.** Their documented limit is 60
+      requests/minute across the whole key, and the public page has no global
+      limiter — only a per-IP one. A modest burst of visitors, or one cache
+      cold-start, will exceed it. Measured: a 282-card audit at ~170/min
+      failed 155 of 282 with upstream errors. Needs a queue or a concurrency
+      cap before real traffic, or busy periods return errors that look like
+      the tool being broken.
 - [ ] **Bot protection** on `/api/price` — Turnstile or equivalent. The rate
       limit alone only bounds one IP.
 - [ ] **Consent management** (a Google-certified CMP) before any ad code, and

@@ -24,7 +24,7 @@ const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1
 const BASE = argOf("--url", "https://comp-finder-public.vercel.app").replace(/\/$/, "");
 const LIMIT = Number(argOf("--limit", "9999"));
 const JSON_OUT = argOf("--json", null);
-const pacer = createPacer({ minGapMs: 350, onWait: (m) => console.log(`   ⏳ ${m}`) });
+const pacer = createPacer({ onWait: (m) => console.log(`   ⏳ ${m}`) });
 const gbp = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 
 // Weighted toward the rarities people actually pay for, per the brief to avoid
