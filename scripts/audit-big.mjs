@@ -30,7 +30,7 @@ const gbp = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 // Weighted toward the rarities people actually pay for, per the brief to avoid
 // cheap cards, while keeping enough of the commoner chase tiers to notice if
 // something only breaks there.
-const ALL = JSON.parse(readFileSync(join(HERE, "bigset.json"), "utf8"));
+const ALL = JSON.parse(readFileSync(process.env.BIGSET || join(HERE, "bigset.json"), "utf8"));
 const TIER = (r) => /special illustration|secret|hyper|amazing|shiny/i.test(r) ? 0
   : /illustration rare|art rare/i.test(r) ? 1
   : /ultra rare|rare ultra/i.test(r) ? 2 : 3;

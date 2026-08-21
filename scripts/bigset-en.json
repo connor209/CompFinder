@@ -1,0 +1,2714 @@
+[
+ {
+  "name": "Umbreon ex",
+  "number": "060",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805449
+ },
+ {
+  "name": "Umbreon ex",
+  "number": "161",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805555
+ },
+ {
+  "name": "Umbreon ex",
+  "number": "091",
+  "set": "Golden Sky, Silvery Ocean",
+  "code": "PCG4",
+  "rarity": "Ultra Rare",
+  "id": 782796
+ },
+ {
+  "name": "Sylveon ex",
+  "number": "041",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805430
+ },
+ {
+  "name": "Sylveon ex",
+  "number": "156",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805550
+ },
+ {
+  "name": "Espeon ex",
+  "number": "034",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805423
+ },
+ {
+  "name": "Espeon ex",
+  "number": "155",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805549
+ },
+ {
+  "name": "Espeon ex",
+  "number": "041",
+  "set": "Golden Sky, Silvery Ocean",
+  "code": "PCG4",
+  "rarity": "Ultra Rare",
+  "id": 782746
+ },
+ {
+  "name": "Leafeon ex",
+  "number": "006",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805395
+ },
+ {
+  "name": "Leafeon ex",
+  "number": "144",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805538
+ },
+ {
+  "name": "Glaceon ex",
+  "number": "026",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805415
+ },
+ {
+  "name": "Glaceon ex",
+  "number": "150",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805544
+ },
+ {
+  "name": "Flareon ex",
+  "number": "014",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805403
+ },
+ {
+  "name": "Flareon ex",
+  "number": "146",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805540
+ },
+ {
+  "name": "Vaporeon ex",
+  "number": "023",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805412
+ },
+ {
+  "name": "Vaporeon ex",
+  "number": "149",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805543
+ },
+ {
+  "name": "Jolteon ex",
+  "number": "030",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805419
+ },
+ {
+  "name": "Jolteon ex",
+  "number": "153",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805547
+ },
+ {
+  "name": "Eevee ex",
+  "number": "075",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805465
+ },
+ {
+  "name": "Eevee ex",
+  "number": "167",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805561
+ },
+ {
+  "name": "Umbreon VMAX",
+  "number": "095",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Ultra Rare",
+  "id": 574143
+ },
+ {
+  "name": "Umbreon VMAX",
+  "number": "214",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574272
+ },
+ {
+  "name": "Umbreon VMAX",
+  "number": "215",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574273
+ },
+ {
+  "name": "Rayquaza VMAX",
+  "number": "111",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Ultra Rare",
+  "id": 574159
+ },
+ {
+  "name": "Rayquaza VMAX",
+  "number": "217",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574275
+ },
+ {
+  "name": "Rayquaza VMAX",
+  "number": "218",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574276
+ },
+ {
+  "name": "Sylveon VMAX",
+  "number": "075",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Ultra Rare",
+  "id": 574123
+ },
+ {
+  "name": "Sylveon VMAX",
+  "number": "211",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574269
+ },
+ {
+  "name": "Sylveon VMAX",
+  "number": "212",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574270
+ },
+ {
+  "name": "Espeon VMAX",
+  "number": "065",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Ultra Rare",
+  "id": 574113
+ },
+ {
+  "name": "Espeon VMAX",
+  "number": "270",
+  "set": "Fusion Strike",
+  "code": "FST",
+  "rarity": "Secret Rare",
+  "id": 583020
+ },
+ {
+  "name": "Glaceon VMAX",
+  "number": "041",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Ultra Rare",
+  "id": 574065
+ },
+ {
+  "name": "Glaceon VMAX",
+  "number": "208",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574266
+ },
+ {
+  "name": "Glaceon VMAX",
+  "number": "209",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574267
+ },
+ {
+  "name": "Leafeon VMAX",
+  "number": "008",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Ultra Rare",
+  "id": 574032
+ },
+ {
+  "name": "Leafeon VMAX",
+  "number": "204",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574262
+ },
+ {
+  "name": "Leafeon VMAX",
+  "number": "205",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Secret Rare",
+  "id": 574263
+ },
+ {
+  "name": "Flareon VMAX",
+  "number": "018",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Ultra Rare",
+  "id": 574042
+ },
+ {
+  "name": "Jolteon VMAX",
+  "number": "051",
+  "set": "Evolving Skies",
+  "code": "EVS",
+  "rarity": "Ultra Rare",
+  "id": 574075
+ },
+ {
+  "name": "Umbreon",
+  "number": "86",
+  "set": "Undaunted",
+  "code": "UD",
+  "rarity": "Ultra Rare",
+  "id": 279339
+ },
+ {
+  "name": "M Rayquaza EX",
+  "number": "095",
+  "set": "Bandit Ring",
+  "code": "XY7",
+  "rarity": "Secret Rare",
+  "id": 563607
+ },
+ {
+  "name": "M Rayquaza EX",
+  "number": "062",
+  "set": "Emerald Break",
+  "code": "XY6",
+  "rarity": "Double Rare",
+  "id": 563671
+ },
+ {
+  "name": "Espeon",
+  "number": "81",
+  "set": "Undaunted",
+  "code": "UD",
+  "rarity": "Ultra Rare",
+  "id": 279334
+ },
+ {
+  "name": "Charizard",
+  "number": "077",
+  "set": "Plasma Gale",
+  "code": "BW7",
+  "rarity": "Secret Rare",
+  "id": 568366
+ },
+ {
+  "name": "Charizard",
+  "number": "146",
+  "set": "Skyridge",
+  "code": "SK",
+  "rarity": "Secret Rare",
+  "id": 275404
+ },
+ {
+  "name": "Charizard",
+  "number": "136",
+  "set": "Plasma Storm",
+  "code": "PLS",
+  "rarity": "Secret Rare",
+  "id": 280876
+ },
+ {
+  "name": "Charizard",
+  "number": "5",
+  "set": "Detective Pikachu",
+  "code": "DET",
+  "rarity": "Ultra Rare",
+  "id": 370770
+ },
+ {
+  "name": "Charizard LV.X",
+  "number": "143",
+  "set": "Supreme Victors",
+  "code": "SV",
+  "rarity": "Ultra Rare",
+  "id": 278834
+ },
+ {
+  "name": "Charizard VMAX",
+  "number": "20",
+  "set": "Darkness Ablaze",
+  "code": "DAA",
+  "rarity": "Ultra Rare",
+  "id": 482974
+ },
+ {
+  "name": "Charizard VMAX",
+  "number": "74",
+  "set": "Champion’s Path",
+  "code": "CPA",
+  "rarity": "Secret Rare",
+  "id": 500225
+ },
+ {
+  "name": "Charizard VMAX",
+  "number": "SV107",
+  "set": "Shining Fates",
+  "code": "SHF",
+  "rarity": "Secret Rare",
+  "id": 539923
+ },
+ {
+  "name": "Charizard VSTAR",
+  "number": "018",
+  "set": "Brilliant Stars",
+  "code": "BRS",
+  "rarity": "Ultra Rare",
+  "id": 608462
+ },
+ {
+  "name": "Charizard VSTAR",
+  "number": "174",
+  "set": "Brilliant Stars",
+  "code": "BRS",
+  "rarity": "Secret Rare",
+  "id": 608720
+ },
+ {
+  "name": "Charizard VSTAR",
+  "number": "019",
+  "set": "Crown Zenith",
+  "code": "CRZ",
+  "rarity": "Ultra Rare",
+  "id": 691736
+ },
+ {
+  "name": "Mew ex",
+  "number": "151",
+  "set": "WCD 2025",
+  "code": "WCD25",
+  "rarity": "Double Rare",
+  "id": 883864
+ },
+ {
+  "name": "Blastoise ex",
+  "number": "009",
+  "set": "151",
+  "code": "MEW",
+  "rarity": "Double Rare",
+  "id": 733604
+ },
+ {
+  "name": "Venusaur ex",
+  "number": "003",
+  "set": "151",
+  "code": "MEW",
+  "rarity": "Double Rare",
+  "id": 733598
+ },
+ {
+  "name": "Moltres ex",
+  "number": "024",
+  "set": "Flight of Legends",
+  "code": "PCG1",
+  "rarity": "Ultra Rare",
+  "id": 783665
+ },
+ {
+  "name": "Moltres ex",
+  "number": "115",
+  "set": "EX FireRed & LeafGreen",
+  "code": "FL",
+  "rarity": "Ultra Rare",
+  "id": 276291
+ },
+ {
+  "name": "Moltres EX",
+  "number": "14",
+  "set": "Plasma Storm",
+  "code": "PLS",
+  "rarity": "Ultra Rare",
+  "id": 280754
+ },
+ {
+  "name": "Moltres ex",
+  "number": "009",
+  "set": "PLAY Promos",
+  "code": "PLAY",
+  "rarity": "Promo",
+  "id": 570936
+ },
+ {
+  "name": "Moltres ex",
+  "number": "31",
+  "set": "Nintendo Black Star Promos",
+  "code": "NP",
+  "rarity": "Promo",
+  "id": 275504
+ },
+ {
+  "name": "Articuno ex",
+  "number": "036",
+  "set": "Flight of Legends",
+  "code": "PCG1",
+  "rarity": "Ultra Rare",
+  "id": 783677
+ },
+ {
+  "name": "Articuno ex",
+  "number": "114",
+  "set": "EX FireRed & LeafGreen",
+  "code": "FL",
+  "rarity": "Ultra Rare",
+  "id": 276290
+ },
+ {
+  "name": "Articuno EX",
+  "number": "072",
+  "set": "Plasma Gale",
+  "code": "BW7",
+  "rarity": "Secret Rare",
+  "id": 568361
+ },
+ {
+  "name": "Articuno EX",
+  "number": "25",
+  "set": "Plasma Storm",
+  "code": "PLS",
+  "rarity": "Ultra Rare",
+  "id": 280765
+ },
+ {
+  "name": "Articuno EX",
+  "number": "132",
+  "set": "Plasma Storm",
+  "code": "PLS",
+  "rarity": "Ultra Rare",
+  "id": 280872
+ },
+ {
+  "name": "Pikachu ex",
+  "number": "028",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805417
+ },
+ {
+  "name": "Pikachu ex",
+  "number": "179",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Secret Rare",
+  "id": 805573
+ },
+ {
+  "name": "Flying Pikachu V",
+  "number": "006",
+  "set": "Celebrations",
+  "code": "CEL",
+  "rarity": "Ultra Rare",
+  "id": 576751
+ },
+ {
+  "name": "Flying Pikachu VMAX",
+  "number": "007",
+  "set": "Celebrations",
+  "code": "CEL",
+  "rarity": "Ultra Rare",
+  "id": 576752
+ },
+ {
+  "name": "Pikachu VMAX",
+  "number": "44",
+  "set": "Vivid Voltage",
+  "code": "VIV",
+  "rarity": "Ultra Rare",
+  "id": 511640
+ },
+ {
+  "name": "Pikachu VMAX",
+  "number": "188",
+  "set": "Vivid Voltage",
+  "code": "VIV",
+  "rarity": "Secret Rare",
+  "id": 512650
+ },
+ {
+  "name": "Pikachu VMAX",
+  "number": "TG17",
+  "set": "Lost Origin",
+  "code": "LOR",
+  "rarity": "Ultra Rare",
+  "id": 674235
+ },
+ {
+  "name": "Pikachu VMAX",
+  "number": "TG29",
+  "set": "Lost Origin",
+  "code": "LOR",
+  "rarity": "Secret Rare",
+  "id": 674244
+ },
+ {
+  "name": "Raichu ex",
+  "number": "023",
+  "set": "Miracle of the Desert",
+  "code": "ADV2",
+  "rarity": "Ultra Rare",
+  "id": 784397
+ },
+ {
+  "name": "Raichu ex",
+  "number": "98",
+  "set": "EX Sandstorm",
+  "code": "SS",
+  "rarity": "Ultra Rare",
+  "id": 275875
+ },
+ {
+  "name": "Raichu ex",
+  "number": "97",
+  "set": "EX Emerald",
+  "code": "EM",
+  "rarity": "Ultra Rare",
+  "id": 276608
+ },
+ {
+  "name": "Mewtwo ex",
+  "number": "058",
+  "set": "Paradox Rift",
+  "code": "PAR",
+  "rarity": "Double Rare",
+  "id": 740549
+ },
+ {
+  "name": "Mewtwo ex",
+  "number": "026",
+  "set": "ADV Expansion Pack",
+  "code": "ADV1",
+  "rarity": "Ultra Rare",
+  "id": 784510
+ },
+ {
+  "name": "Mewtwo ex",
+  "number": "101",
+  "set": "EX Ruby & Sapphire",
+  "code": "RS",
+  "rarity": "Ultra Rare",
+  "id": 275749
+ },
+ {
+  "name": "Mewtwo EX",
+  "number": "050",
+  "set": "Expansion Pack 20th Anniversary",
+  "code": "CP6",
+  "rarity": "Double Rare",
+  "id": 562506
+ },
+ {
+  "name": "Mewtwo EX",
+  "number": "095",
+  "set": "Expansion Pack 20th Anniversary",
+  "code": "CP6",
+  "rarity": "Secret Rare",
+  "id": 562551
+ },
+ {
+  "name": "Mewtwo",
+  "number": "12",
+  "set": "Detective Pikachu",
+  "code": "DET",
+  "rarity": "Ultra Rare",
+  "id": 370775
+ },
+ {
+  "name": "Mewtwo VSTAR",
+  "number": "031",
+  "set": "Pokémon GO",
+  "code": "PGO",
+  "rarity": "Ultra Rare",
+  "id": 665267
+ },
+ {
+  "name": "Mewtwo VSTAR",
+  "number": "079",
+  "set": "Pokémon GO",
+  "code": "PGO",
+  "rarity": "Secret Rare",
+  "id": 665690
+ },
+ {
+  "name": "Mewtwo VSTAR",
+  "number": "086",
+  "set": "Pokémon GO",
+  "code": "PGO",
+  "rarity": "Secret Rare",
+  "id": 665697
+ },
+ {
+  "name": "Lugia VSTAR",
+  "number": "139",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Ultra Rare",
+  "id": 682186
+ },
+ {
+  "name": "Lugia VSTAR",
+  "number": "202",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Secret Rare",
+  "id": 682250
+ },
+ {
+  "name": "Lugia VSTAR",
+  "number": "211",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Secret Rare",
+  "id": 682260
+ },
+ {
+  "name": "Ho-Oh V",
+  "number": "140",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Ultra Rare",
+  "id": 682187
+ },
+ {
+  "name": "Ho-Oh V",
+  "number": "187",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Ultra Rare",
+  "id": 682235
+ },
+ {
+  "name": "Giratina VSTAR",
+  "number": "131",
+  "set": "Lost Origin",
+  "code": "LOR",
+  "rarity": "Ultra Rare",
+  "id": 674143
+ },
+ {
+  "name": "Giratina VSTAR",
+  "number": "201",
+  "set": "Lost Origin",
+  "code": "LOR",
+  "rarity": "Secret Rare",
+  "id": 674207
+ },
+ {
+  "name": "Giratina VSTAR",
+  "number": "212",
+  "set": "Lost Origin",
+  "code": "LOR",
+  "rarity": "Secret Rare",
+  "id": 674218
+ },
+ {
+  "name": "Arceus VSTAR",
+  "number": "123",
+  "set": "Brilliant Stars",
+  "code": "BRS",
+  "rarity": "Ultra Rare",
+  "id": 608669
+ },
+ {
+  "name": "Arceus VSTAR",
+  "number": "176",
+  "set": "Brilliant Stars",
+  "code": "BRS",
+  "rarity": "Secret Rare",
+  "id": 608722
+ },
+ {
+  "name": "Arceus VSTAR",
+  "number": "184",
+  "set": "Brilliant Stars",
+  "code": "BRS",
+  "rarity": "Secret Rare",
+  "id": 608730
+ },
+ {
+  "name": "Bloodmoon Ursaluna ex",
+  "number": "168",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805562
+ },
+ {
+  "name": "Terapagos ex",
+  "number": "092",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805484
+ },
+ {
+  "name": "Terapagos ex",
+  "number": "169",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805563
+ },
+ {
+  "name": "Terapagos ex",
+  "number": "180",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Secret Rare",
+  "id": 805574
+ },
+ {
+  "name": "Terapagos ex",
+  "number": "179",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869790
+ },
+ {
+  "name": "Hydrapple ex",
+  "number": "011",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805400
+ },
+ {
+  "name": "Pecharunt ex",
+  "number": "163",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805557
+ },
+ {
+  "name": "Fezandipiti ex",
+  "number": "142",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869753
+ },
+ {
+  "name": "Fezandipiti ex",
+  "number": "288",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Special Illustration Rare",
+  "id": 869899
+ },
+ {
+  "name": "Latias ex",
+  "number": "076",
+  "set": "WCD 2025",
+  "code": "WCD25",
+  "rarity": "Double Rare",
+  "id": 884299
+ },
+ {
+  "name": "Latios ex",
+  "number": "94",
+  "set": "EX Dragon",
+  "code": "DR",
+  "rarity": "Ultra Rare",
+  "id": 275971
+ },
+ {
+  "name": "Latios EX",
+  "number": "048",
+  "set": "Emerald Break",
+  "code": "XY6",
+  "rarity": "Double Rare",
+  "id": 563657
+ },
+ {
+  "name": "Latios EX",
+  "number": "082",
+  "set": "Emerald Break",
+  "code": "XY6",
+  "rarity": "Secret Rare",
+  "id": 563691
+ },
+ {
+  "name": "Latios EX",
+  "number": "86",
+  "set": "Plasma Freeze",
+  "code": "PLF",
+  "rarity": "Ultra Rare",
+  "id": 280964
+ },
+ {
+  "name": "Latios EX",
+  "number": "113",
+  "set": "Plasma Freeze",
+  "code": "PLF",
+  "rarity": "Ultra Rare",
+  "id": 280991
+ },
+ {
+  "name": "Roaring Moon ex",
+  "number": "162",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805556
+ },
+ {
+  "name": "Iron Valiant ex",
+  "number": "157",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805551
+ },
+ {
+  "name": "Iron Crown ex",
+  "number": "158",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805552
+ },
+ {
+  "name": "Walking Wake ex",
+  "number": "178",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Secret Rare",
+  "id": 805572
+ },
+ {
+  "name": "Gardevoir ex",
+  "number": "086",
+  "set": "WCD 2025",
+  "code": "WCD25",
+  "rarity": "Double Rare",
+  "id": 883858
+ },
+ {
+  "name": "Miraidon ex",
+  "number": "073",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869684
+ },
+ {
+  "name": "Koraidon ex",
+  "number": "121",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869732
+ },
+ {
+  "name": "Gholdengo ex",
+  "number": "164",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805558
+ },
+ {
+  "name": "Gholdengo ex",
+  "number": "139",
+  "set": "WCD 2025",
+  "code": "WCD25",
+  "rarity": "Double Rare",
+  "id": 884291
+ },
+ {
+  "name": "Dragapult ex",
+  "number": "073",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805462
+ },
+ {
+  "name": "Dragapult ex",
+  "number": "165",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Special Illustration Rare",
+  "id": 805559
+ },
+ {
+  "name": "Dragapult ex",
+  "number": "160",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869771
+ },
+ {
+  "name": "Feraligatr ex",
+  "number": "103",
+  "set": "EX Unseen Forces",
+  "code": "UF",
+  "rarity": "Ultra Rare",
+  "id": 276749
+ },
+ {
+  "name": "Mega Feraligatr ex",
+  "number": "043",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869654
+ },
+ {
+  "name": "Mega Feraligatr ex",
+  "number": "274",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Special Illustration Rare",
+  "id": 869885
+ },
+ {
+  "name": "Mega Feraligatr ex",
+  "number": "172",
+  "set": "Void Blast",
+  "code": "MA4",
+  "rarity": "Special Illustration Rare",
+  "id": 882965
+ },
+ {
+  "name": "Meganium ex",
+  "number": "106",
+  "set": "EX Unseen Forces",
+  "code": "UF",
+  "rarity": "Ultra Rare",
+  "id": 276752
+ },
+ {
+  "name": "Mega Meganium ex",
+  "number": "010",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869621
+ },
+ {
+  "name": "Mega Meganium ex",
+  "number": "272",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Special Illustration Rare",
+  "id": 869883
+ },
+ {
+  "name": "Mega Meganium ex",
+  "number": "169",
+  "set": "Void Blast",
+  "code": "MA4",
+  "rarity": "Special Illustration Rare",
+  "id": 882962
+ },
+ {
+  "name": "Typhlosion ex",
+  "number": "013",
+  "set": "Miracle of the Desert",
+  "code": "ADV2",
+  "rarity": "Ultra Rare",
+  "id": 784387
+ },
+ {
+  "name": "Typhlosion ex",
+  "number": "99",
+  "set": "EX Sandstorm",
+  "code": "SS",
+  "rarity": "Ultra Rare",
+  "id": 275876
+ },
+ {
+  "name": "Typhlosion ex",
+  "number": "110",
+  "set": "EX Unseen Forces",
+  "code": "UF",
+  "rarity": "Ultra Rare",
+  "id": 276756
+ },
+ {
+  "name": "Snorlax ex",
+  "number": "076",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805466
+ },
+ {
+  "name": "Rocket's Snorlax ex",
+  "number": "062",
+  "set": "Rocket Gang Strikes Back",
+  "code": "PCG3",
+  "rarity": "Ultra Rare",
+  "id": 783415
+ },
+ {
+  "name": "Rocket's Snorlax ex",
+  "number": "104",
+  "set": "EX Team Rocket Returns",
+  "code": "TRR",
+  "rarity": "Ultra Rare",
+  "id": 276396
+ },
+ {
+  "name": "Lapras ex",
+  "number": "022",
+  "set": "Perfect Order",
+  "code": "POR",
+  "rarity": "Double Rare",
+  "id": 877434
+ },
+ {
+  "name": "Gengar ex",
+  "number": "104",
+  "set": "Temporal Forces",
+  "code": "TEF",
+  "rarity": "Double Rare",
+  "id": 760734
+ },
+ {
+  "name": "Gengar ex",
+  "number": "193",
+  "set": "Temporal Forces",
+  "code": "TEF",
+  "rarity": "Ultra Rare",
+  "id": 760823
+ },
+ {
+  "name": "Gengar ex",
+  "number": "048",
+  "set": "Flight of Legends",
+  "code": "PCG1",
+  "rarity": "Ultra Rare",
+  "id": 783689
+ },
+ {
+  "name": "Machamp EX",
+  "number": "037",
+  "set": "Bandit Ring",
+  "code": "XY7",
+  "rarity": "Double Rare",
+  "id": 563549
+ },
+ {
+  "name": "Machamp EX",
+  "number": "088",
+  "set": "Bandit Ring",
+  "code": "XY7",
+  "rarity": "Secret Rare",
+  "id": 563600
+ },
+ {
+  "name": "Machamp EX",
+  "number": "37",
+  "set": "Ancient Origins",
+  "code": "AOR",
+  "rarity": "Ultra Rare",
+  "id": 284218
+ },
+ {
+  "name": "Machamp EX",
+  "number": "90",
+  "set": "Ancient Origins",
+  "code": "AOR",
+  "rarity": "Ultra Rare",
+  "id": 284271
+ },
+ {
+  "name": "Machamp EX",
+  "number": "286",
+  "set": "XY Promos",
+  "code": "XY-P",
+  "rarity": "Promo",
+  "id": 554148
+ },
+ {
+  "name": "Machamp EX",
+  "number": "108",
+  "set": "XY Black Star Promos",
+  "code": "XYPR",
+  "rarity": "Promo",
+  "id": 289558
+ },
+ {
+  "name": "Tyranitar ex",
+  "number": "064",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805453
+ },
+ {
+  "name": "Salamence ex",
+  "number": "114",
+  "set": "Journey Together",
+  "code": "JTG",
+  "rarity": "Double Rare",
+  "id": 817266
+ },
+ {
+  "name": "Salamence ex",
+  "number": "177",
+  "set": "Journey Together",
+  "code": "JTG",
+  "rarity": "Ultra Rare",
+  "id": 817330
+ },
+ {
+  "name": "Salamence ex",
+  "number": "187",
+  "set": "Journey Together",
+  "code": "JTG",
+  "rarity": "Special Illustration Rare",
+  "id": 817340
+ },
+ {
+  "name": "Metagross ex",
+  "number": "068",
+  "set": "World Champions Pack",
+  "code": "WCP",
+  "rarity": "Ultra Rare",
+  "id": 765743
+ },
+ {
+  "name": "Metagross ex",
+  "number": "071",
+  "set": "Undone Seal",
+  "code": "ADV4",
+  "rarity": "Ultra Rare",
+  "id": 784086
+ },
+ {
+  "name": "Metagross ex",
+  "number": "95",
+  "set": "EX Hidden Legends",
+  "code": "HL",
+  "rarity": "Ultra Rare",
+  "id": 276169
+ },
+ {
+  "name": "Metagross ex",
+  "number": "95",
+  "set": "EX Power Keepers",
+  "code": "PK",
+  "rarity": "Ultra Rare",
+  "id": 277401
+ },
+ {
+  "name": "Metagross EX",
+  "number": "101",
+  "set": "XY Promos",
+  "code": "XY-P",
+  "rarity": "Promo",
+  "id": 553224
+ },
+ {
+  "name": "Metagross EX",
+  "number": "34",
+  "set": "XY Black Star Promos",
+  "code": "XYPR",
+  "rarity": "Promo",
+  "id": 289697
+ },
+ {
+  "name": "Lucario ex",
+  "number": "051",
+  "set": "Prismatic Evolutions",
+  "code": "PRE",
+  "rarity": "Double Rare",
+  "id": 805440
+ },
+ {
+  "name": "Lucario ex",
+  "number": "082",
+  "set": "Stellar Crown",
+  "code": "SCR",
+  "rarity": "Double Rare",
+  "id": 785936
+ },
+ {
+  "name": "Lucario EX",
+  "number": "052",
+  "set": "Rising Fist",
+  "code": "XY3",
+  "rarity": "Double Rare",
+  "id": 564107
+ },
+ {
+  "name": "Lucario EX",
+  "number": "099",
+  "set": "Rising Fist",
+  "code": "XY3",
+  "rarity": "Secret Rare",
+  "id": 564154
+ },
+ {
+  "name": "Lucario EX",
+  "number": "54",
+  "set": "Furious Fists",
+  "code": "FFI",
+  "rarity": "Ultra Rare",
+  "id": 281718
+ },
+ {
+  "name": "N's Zoroark ex",
+  "number": "098",
+  "set": "Journey Together",
+  "code": "JTG",
+  "rarity": "Double Rare",
+  "id": 817250
+ },
+ {
+  "name": "Hydreigon ex",
+  "number": "067",
+  "set": "White Flare",
+  "code": "WHT",
+  "rarity": "Double Rare",
+  "id": 836027
+ },
+ {
+  "name": "Hydreigon ex",
+  "number": "161",
+  "set": "White Flare",
+  "code": "WHT",
+  "rarity": "Ultra Rare",
+  "id": 836201
+ },
+ {
+  "name": "Hydreigon ex",
+  "number": "169",
+  "set": "White Flare",
+  "code": "WHT",
+  "rarity": "Special Illustration Rare",
+  "id": 836216
+ },
+ {
+  "name": "Kyurem ex",
+  "number": "028",
+  "set": "Black Bolt",
+  "code": "BLK",
+  "rarity": "Double Rare",
+  "id": 835955
+ },
+ {
+  "name": "Kyurem ex",
+  "number": "157",
+  "set": "Black Bolt",
+  "code": "BLK",
+  "rarity": "Ultra Rare",
+  "id": 836231
+ },
+ {
+  "name": "Kyurem ex",
+  "number": "165",
+  "set": "Black Bolt",
+  "code": "BLK",
+  "rarity": "Special Illustration Rare",
+  "id": 836239
+ },
+ {
+  "name": "Mega Charizard X ex",
+  "number": "013",
+  "set": "Phantasmal Flames",
+  "code": "PFL",
+  "rarity": "Double Rare",
+  "id": 857588
+ },
+ {
+  "name": "Mega Charizard X ex",
+  "number": "109",
+  "set": "Phantasmal Flames",
+  "code": "PFL",
+  "rarity": "Ultra Rare",
+  "id": 857684
+ },
+ {
+  "name": "Mega Charizard Y ex",
+  "number": "022",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869633
+ },
+ {
+  "name": "Mega Charizard Y ex",
+  "number": "294",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Secret Rare",
+  "id": 869905
+ },
+ {
+  "name": "Mega Charizard Y ex",
+  "number": "180",
+  "set": "Void Blast",
+  "code": "MA4",
+  "rarity": "Secret Rare",
+  "id": 882973
+ },
+ {
+  "name": "Mega Charizard Y ex",
+  "number": "ASC 022",
+  "set": "Play! Pokémon Prize Pack Series Nine",
+  "code": "PPS9",
+  "rarity": "Double Rare",
+  "id": 894146
+ },
+ {
+  "name": "Mega Gengar ex",
+  "number": "056",
+  "set": "Phantasmal Flames",
+  "code": "PFL",
+  "rarity": "Double Rare",
+  "id": 857631
+ },
+ {
+  "name": "Mega Gengar ex",
+  "number": "125",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869736
+ },
+ {
+  "name": "Mega Gengar ex",
+  "number": "269",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Ultra Rare",
+  "id": 869880
+ },
+ {
+  "name": "Mega Gengar ex",
+  "number": "284",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Special Illustration Rare",
+  "id": 869895
+ },
+ {
+  "name": "Mega Gardevoir ex",
+  "number": "060",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Double Rare",
+  "id": 851131
+ },
+ {
+  "name": "Mega Gardevoir ex",
+  "number": "159",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Ultra Rare",
+  "id": 851230
+ },
+ {
+  "name": "Mega Lucario ex",
+  "number": "077",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Double Rare",
+  "id": 851148
+ },
+ {
+  "name": "Mega Lucario ex",
+  "number": "160",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Ultra Rare",
+  "id": 851231
+ },
+ {
+  "name": "Mega Venusaur ex",
+  "number": "003",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Double Rare",
+  "id": 851074
+ },
+ {
+  "name": "Mega Venusaur ex",
+  "number": "155",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Ultra Rare",
+  "id": 851226
+ },
+ {
+  "name": "Mega Venusaur ex",
+  "number": "177",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Special Illustration Rare",
+  "id": 851248
+ },
+ {
+  "name": "Mega Dragonite ex",
+  "number": "152",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Double Rare",
+  "id": 869763
+ },
+ {
+  "name": "Mega Dragonite ex",
+  "number": "271",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Ultra Rare",
+  "id": 869882
+ },
+ {
+  "name": "Mega Darkrai ex",
+  "number": "199",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894361
+ },
+ {
+  "name": "Mega Darkrai ex",
+  "number": "229",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Special Illustration Rare",
+  "id": 894392
+ },
+ {
+  "name": "Mega Zeraora ex",
+  "number": "194",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894356
+ },
+ {
+  "name": "Mega Zeraora ex",
+  "number": "226",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Special Illustration Rare",
+  "id": 894389
+ },
+ {
+  "name": "Mega Zeraora ex",
+  "number": "027",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Double Rare",
+  "id": 895787
+ },
+ {
+  "name": "Mega Chandelure ex",
+  "number": "195",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894357
+ },
+ {
+  "name": "Mega Chandelure ex",
+  "number": "227",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Special Illustration Rare",
+  "id": 894390
+ },
+ {
+  "name": "Mega Chandelure ex",
+  "number": "038",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Double Rare",
+  "id": 895786
+ },
+ {
+  "name": "Mega Excadrill ex",
+  "number": "201",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894363
+ },
+ {
+  "name": "Mega Excadrill ex",
+  "number": "065",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Double Rare",
+  "id": 895785
+ },
+ {
+  "name": "Mega Excadrill ex",
+  "number": "103",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Ultra Rare",
+  "id": 895888
+ },
+ {
+  "name": "Mega Greninja ex",
+  "number": "022",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Double Rare",
+  "id": 886414
+ },
+ {
+  "name": "Mega Greninja ex",
+  "number": "100",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Ultra Rare",
+  "id": 886492
+ },
+ {
+  "name": "Mega Pyroar ex",
+  "number": "015",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Double Rare",
+  "id": 886407
+ },
+ {
+  "name": "Mega Pyroar ex",
+  "number": "099",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Ultra Rare",
+  "id": 886491
+ },
+ {
+  "name": "Mega Pyroar ex",
+  "number": "191",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894353
+ },
+ {
+  "name": "Mega Absol ex",
+  "number": "086",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Double Rare",
+  "id": 851157
+ },
+ {
+  "name": "Mega Absol ex",
+  "number": "161",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Ultra Rare",
+  "id": 851232
+ },
+ {
+  "name": "Mega Absol ex",
+  "number": "180",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Special Illustration Rare",
+  "id": 851251
+ },
+ {
+  "name": "Mega Kangaskhan ex",
+  "number": "104",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Double Rare",
+  "id": 851175
+ },
+ {
+  "name": "Mega Kangaskhan ex",
+  "number": "164",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Ultra Rare",
+  "id": 851235
+ },
+ {
+  "name": "Mega Kangaskhan ex",
+  "number": "182",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Special Illustration Rare",
+  "id": 851253
+ },
+ {
+  "name": "Morpeko ex",
+  "number": "200",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894362
+ },
+ {
+  "name": "Morpeko ex",
+  "number": "230",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Special Illustration Rare",
+  "id": 894393
+ },
+ {
+  "name": "Morpeko ex",
+  "number": "055",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Double Rare",
+  "id": 895840
+ },
+ {
+  "name": "Salazzle ex",
+  "number": "016",
+  "set": "Perfect Order",
+  "code": "POR",
+  "rarity": "Double Rare",
+  "id": 877428
+ },
+ {
+  "name": "Salazzle ex",
+  "number": "101",
+  "set": "Perfect Order",
+  "code": "POR",
+  "rarity": "Ultra Rare",
+  "id": 877518
+ },
+ {
+  "name": "Salazzle ex",
+  "number": "150",
+  "set": "Void Blast",
+  "code": "MA4",
+  "rarity": "Ultra Rare",
+  "id": 882943
+ },
+ {
+  "name": "Lurantis ex",
+  "number": "190",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894352
+ },
+ {
+  "name": "Lurantis ex",
+  "number": "004",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Double Rare",
+  "id": 895792
+ },
+ {
+  "name": "Lurantis ex",
+  "number": "096",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Ultra Rare",
+  "id": 895881
+ },
+ {
+  "name": "Rampardos ex",
+  "number": "198",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894360
+ },
+ {
+  "name": "Rampardos ex",
+  "number": "045",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Double Rare",
+  "id": 895831
+ },
+ {
+  "name": "Rampardos ex",
+  "number": "100",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Ultra Rare",
+  "id": 895885
+ },
+ {
+  "name": "Wailord ex",
+  "number": "192",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894354
+ },
+ {
+  "name": "Wailord ex",
+  "number": "016",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Double Rare",
+  "id": 895804
+ },
+ {
+  "name": "Wailord ex",
+  "number": "097",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Ultra Rare",
+  "id": 895882
+ },
+ {
+  "name": "Wailord ex",
+  "number": "021",
+  "set": "Miracle of the Desert",
+  "code": "ADV2",
+  "rarity": "Ultra Rare",
+  "id": 784395
+ },
+ {
+  "name": "Gourgeist ex",
+  "number": "041",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Double Rare",
+  "id": 886433
+ },
+ {
+  "name": "Gourgeist ex",
+  "number": "102",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Ultra Rare",
+  "id": 886494
+ },
+ {
+  "name": "Gourgeist ex",
+  "number": "197",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894359
+ },
+ {
+  "name": "Cinccino ex",
+  "number": "073",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Double Rare",
+  "id": 886465
+ },
+ {
+  "name": "Cinccino ex",
+  "number": "105",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Ultra Rare",
+  "id": 886497
+ },
+ {
+  "name": "Cinccino ex",
+  "number": "119",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Special Illustration Rare",
+  "id": 886512
+ },
+ {
+  "name": "Beedrill ex",
+  "number": "003",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Double Rare",
+  "id": 886395
+ },
+ {
+  "name": "Beedrill ex",
+  "number": "098",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Ultra Rare",
+  "id": 886490
+ },
+ {
+  "name": "Beedrill ex",
+  "number": "189",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894351
+ },
+ {
+  "name": "Lucario VSTAR",
+  "number": "214",
+  "set": "SWSH Black Star Promos",
+  "code": "SWSH",
+  "rarity": "Promo",
+  "id": 606784
+ },
+ {
+  "name": "Blastoise",
+  "number": "078",
+  "set": "Plasma Gale",
+  "code": "BW7",
+  "rarity": "Secret Rare",
+  "id": 568367
+ },
+ {
+  "name": "Blastoise",
+  "number": "137",
+  "set": "Plasma Storm",
+  "code": "PLS",
+  "rarity": "Secret Rare",
+  "id": 280877
+ },
+ {
+  "name": "Flying Pikachu",
+  "number": "110",
+  "set": "Evolutions",
+  "code": "EVO",
+  "rarity": "Secret Rare",
+  "id": 293472
+ },
+ {
+  "name": "Flying Pikachu Lv.12",
+  "number": "113",
+  "set": "Rising Rivals",
+  "code": "RR",
+  "rarity": "Secret Rare",
+  "id": 278687
+ },
+ {
+  "name": "Gengar",
+  "number": "015",
+  "set": "Lost Link",
+  "code": "LL",
+  "rarity": "Ultra Rare",
+  "id": 668949
+ },
+ {
+  "name": "Gengar",
+  "number": "94",
+  "set": "Triumphant",
+  "code": "TM",
+  "rarity": "Ultra Rare",
+  "id": 279624
+ },
+ {
+  "name": "Snorlax",
+  "number": "224",
+  "set": "Chilling Reign",
+  "code": "CRE",
+  "rarity": "Secret Rare",
+  "id": 567332
+ },
+ {
+  "name": "Gyarados",
+  "number": "123",
+  "set": "HeartGold & SoulSilver",
+  "code": "HS",
+  "rarity": "Ultra Rare",
+  "id": 279095
+ },
+ {
+  "name": "Alakazam",
+  "number": "138",
+  "set": "Mega Evolution ID/TH",
+  "code": "MA1",
+  "rarity": "Illustration Rare",
+  "id": 860060
+ },
+ {
+  "name": "Machamp",
+  "number": "045",
+  "set": "Clash at the Summit",
+  "code": "L3",
+  "rarity": "Ultra Rare",
+  "id": 668830
+ },
+ {
+  "name": "Machamp",
+  "number": "95",
+  "set": "Triumphant",
+  "code": "TM",
+  "rarity": "Ultra Rare",
+  "id": 279625
+ },
+ {
+  "name": "Articuno",
+  "number": "161",
+  "set": "Journey Together",
+  "code": "JTG",
+  "rarity": "Illustration Rare",
+  "id": 817313
+ },
+ {
+  "name": "Ninetales",
+  "number": "199",
+  "set": "Obsidian Flames",
+  "code": "OBF",
+  "rarity": "Illustration Rare",
+  "id": 725279
+ },
+ {
+  "name": "Dondozo",
+  "number": "207",
+  "set": "Scarlet & Violet",
+  "code": "SVI",
+  "rarity": "Illustration Rare",
+  "id": 702503
+ },
+ {
+  "name": "Meltan",
+  "number": "179",
+  "set": "Temporal Forces",
+  "code": "TEF",
+  "rarity": "Illustration Rare",
+  "id": 760809
+ },
+ {
+  "name": "Horsea",
+  "number": "067",
+  "set": "Shrouded Fable",
+  "code": "SFA",
+  "rarity": "Illustration Rare",
+  "id": 780962
+ },
+ {
+  "name": "Spearow",
+  "number": "151",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Illustration Rare",
+  "id": 851222
+ },
+ {
+  "name": "Spearow",
+  "number": "147",
+  "set": "Mega Evolution ID/TH",
+  "code": "MA1",
+  "rarity": "Illustration Rare",
+  "id": 860069
+ },
+ {
+  "name": "Snorunt",
+  "number": "227",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Illustration Rare",
+  "id": 869838
+ },
+ {
+  "name": "Snorunt",
+  "number": "188",
+  "set": "Paradox Rift",
+  "code": "PAR",
+  "rarity": "Illustration Rare",
+  "id": 740731
+ },
+ {
+  "name": "Scorbunny",
+  "number": "225",
+  "set": "Ascended Heroes",
+  "code": "ASC",
+  "rarity": "Illustration Rare",
+  "id": 869836
+ },
+ {
+  "name": "Scorbunny",
+  "number": "129",
+  "set": "Void Blast",
+  "code": "MA4",
+  "rarity": "Illustration Rare",
+  "id": 882922
+ },
+ {
+  "name": "Scorbunny",
+  "number": "SV15",
+  "set": "Shining Fates",
+  "code": "SHF",
+  "rarity": "Secret Rare",
+  "id": 539463
+ },
+ {
+  "name": "Froakie",
+  "number": "088",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Illustration Rare",
+  "id": 886480
+ },
+ {
+  "name": "Froakie",
+  "number": "170",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894327
+ },
+ {
+  "name": "Froakie",
+  "number": "SV11",
+  "set": "Hidden Fates",
+  "code": "HIF",
+  "rarity": "Secret Rare",
+  "id": 396742
+ },
+ {
+  "name": "Xerneas",
+  "number": "091",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Illustration Rare",
+  "id": 886483
+ },
+ {
+  "name": "Xerneas",
+  "number": "176",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894338
+ },
+ {
+  "name": "Ampharos",
+  "number": "090",
+  "set": "Chaos Rising",
+  "code": "CRI",
+  "rarity": "Illustration Rare",
+  "id": 886482
+ },
+ {
+  "name": "Ampharos",
+  "number": "173",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894336
+ },
+ {
+  "name": "Ampharos",
+  "number": "034",
+  "set": "HeartGold Collection",
+  "code": "L1HG",
+  "rarity": "Ultra Rare",
+  "id": 669948
+ },
+ {
+  "name": "Ampharos",
+  "number": "105",
+  "set": "HeartGold & SoulSilver",
+  "code": "HS",
+  "rarity": "Ultra Rare",
+  "id": 279077
+ },
+ {
+  "name": "Clefairy",
+  "number": "094",
+  "set": "Perfect Order",
+  "code": "POR",
+  "rarity": "Illustration Rare",
+  "id": 877511
+ },
+ {
+  "name": "Clefairy",
+  "number": "134",
+  "set": "Void Blast",
+  "code": "MA4",
+  "rarity": "Illustration Rare",
+  "id": 882927
+ },
+ {
+  "name": "Slowbro",
+  "number": "175",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894337
+ },
+ {
+  "name": "Slowbro",
+  "number": "090",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895874
+ },
+ {
+  "name": "Goldeen",
+  "number": "169",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894326
+ },
+ {
+  "name": "Goldeen",
+  "number": "087",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895871
+ },
+ {
+  "name": "Primarina",
+  "number": "172",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894335
+ },
+ {
+  "name": "Primarina",
+  "number": "088",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895872
+ },
+ {
+  "name": "Manectric",
+  "number": "174",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 897552
+ },
+ {
+  "name": "Manectric",
+  "number": "089",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895873
+ },
+ {
+  "name": "Armarouge",
+  "number": "168",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894325
+ },
+ {
+  "name": "Armarouge",
+  "number": "086",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895870
+ },
+ {
+  "name": "Armarouge",
+  "number": "203",
+  "set": "Scarlet & Violet",
+  "code": "SVI",
+  "rarity": "Illustration Rare",
+  "id": 702499
+ },
+ {
+  "name": "Silvally",
+  "number": "188",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894350
+ },
+ {
+  "name": "Silvally",
+  "number": "095",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895880
+ },
+ {
+  "name": "Toucannon",
+  "number": "187",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894349
+ },
+ {
+  "name": "Toucannon",
+  "number": "094",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895879
+ },
+ {
+  "name": "Bastiodon",
+  "number": "183",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894345
+ },
+ {
+  "name": "Bastiodon",
+  "number": "093",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895878
+ },
+ {
+  "name": "Dhelmise",
+  "number": "177",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894339
+ },
+ {
+  "name": "Dhelmise",
+  "number": "091",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895875
+ },
+ {
+  "name": "Fomantis",
+  "number": "166",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894323
+ },
+ {
+  "name": "Fomantis",
+  "number": "085",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895869
+ },
+ {
+  "name": "Thievul",
+  "number": "180",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Illustration Rare",
+  "id": 894342
+ },
+ {
+  "name": "Thievul",
+  "number": "092",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Illustration Rare",
+  "id": 895876
+ },
+ {
+  "name": "Thievul",
+  "number": "SV82",
+  "set": "Shining Fates",
+  "code": "SHF",
+  "rarity": "Secret Rare",
+  "id": 539798
+ },
+ {
+  "name": "Xurkitree",
+  "number": "SV14",
+  "set": "Hidden Fates",
+  "code": "HIF",
+  "rarity": "Secret Rare",
+  "id": 394817
+ },
+ {
+  "name": "Jirachi",
+  "number": "97",
+  "set": "EX Team Magma vs Team Aqua",
+  "code": "MA",
+  "rarity": "Secret Rare",
+  "id": 276074
+ },
+ {
+  "name": "Celebi V",
+  "number": "007",
+  "set": "Chilling Reign",
+  "code": "CRE",
+  "rarity": "Ultra Rare",
+  "id": 567087
+ },
+ {
+  "name": "Tornadus VMAX",
+  "number": "125",
+  "set": "Chilling Reign",
+  "code": "CRE",
+  "rarity": "Ultra Rare",
+  "id": 567233
+ },
+ {
+  "name": "Tornadus VMAX",
+  "number": "209",
+  "set": "Chilling Reign",
+  "code": "CRE",
+  "rarity": "Secret Rare",
+  "id": 567317
+ },
+ {
+  "name": "Regieleki VMAX",
+  "number": "058",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Ultra Rare",
+  "id": 682105
+ },
+ {
+  "name": "Regieleki VMAX",
+  "number": "198",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Secret Rare",
+  "id": 682246
+ },
+ {
+  "name": "Chesnaught V",
+  "number": "015",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Ultra Rare",
+  "id": 682056
+ },
+ {
+  "name": "Chesnaught V",
+  "number": "171",
+  "set": "Silver Tempest",
+  "code": "SIT",
+  "rarity": "Ultra Rare",
+  "id": 682218
+ },
+ {
+  "name": "Misty's Vitality",
+  "number": "216",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894379
+ },
+ {
+  "name": "Misty's Vitality",
+  "number": "111",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Ultra Rare",
+  "id": 895896
+ },
+ {
+  "name": "Gladion's Final Battle",
+  "number": "217",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Ultra Rare",
+  "id": 894380
+ },
+ {
+  "name": "Gladion's Final Battle",
+  "number": "234",
+  "set": "Shadow Threat",
+  "code": "MA5",
+  "rarity": "Special Illustration Rare",
+  "id": 894397
+ },
+ {
+  "name": "Gladion's Final Battle",
+  "number": "108",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Ultra Rare",
+  "id": 895893
+ },
+ {
+  "name": "Gladion's Final Battle",
+  "number": "118",
+  "set": "Pitch Black",
+  "code": "PBL",
+  "rarity": "Special Illustration Rare",
+  "id": 895903
+ },
+ {
+  "name": "Brock's Scouting",
+  "number": "179",
+  "set": "Journey Together",
+  "code": "JTG",
+  "rarity": "Ultra Rare",
+  "id": 817332
+ },
+ {
+  "name": "Team Rocket's Persian ex",
+  "number": "150",
+  "set": "Destined Rivals",
+  "code": "DRI",
+  "rarity": "Double Rare",
+  "id": 826024
+ },
+ {
+  "name": "Team Rocket's Persian ex",
+  "number": "219",
+  "set": "Destined Rivals",
+  "code": "DRI",
+  "rarity": "Ultra Rare",
+  "id": 826093
+ },
+ {
+  "name": "Team Rocket's Mewtwo ex",
+  "number": "081",
+  "set": "Destined Rivals",
+  "code": "DRI",
+  "rarity": "Double Rare",
+  "id": 825955
+ },
+ {
+  "name": "Team Rocket's Mewtwo ex",
+  "number": "213",
+  "set": "Destined Rivals",
+  "code": "DRI",
+  "rarity": "Ultra Rare",
+  "id": 826087
+ },
+ {
+  "name": "N's Zoroark ex",
+  "number": "175",
+  "set": "Journey Together",
+  "code": "JTG",
+  "rarity": "Ultra Rare",
+  "id": 817328
+ },
+ {
+  "name": "Iono",
+  "number": "254",
+  "set": "Paldea Evolved",
+  "code": "PAL",
+  "rarity": "Ultra Rare",
+  "id": 715729
+ },
+ {
+  "name": "Iono",
+  "number": "269",
+  "set": "Paldea Evolved",
+  "code": "PAL",
+  "rarity": "Special Illustration Rare",
+  "id": 715744
+ },
+ {
+  "name": "Erika's Invitation",
+  "number": "196",
+  "set": "151",
+  "code": "MEW",
+  "rarity": "Ultra Rare",
+  "id": 733791
+ },
+ {
+  "name": "Erika's Invitation",
+  "number": "203",
+  "set": "151",
+  "code": "MEW",
+  "rarity": "Special Illustration Rare",
+  "id": 733798
+ },
+ {
+  "name": "Air Balloon",
+  "number": "166",
+  "set": "Mega Evolution",
+  "code": "MEG",
+  "rarity": "Ultra Rare",
+  "id": 851237
+ },
+ {
+  "name": "Air Balloon",
+  "number": "167",
+  "set": "Mega Evolution ID/TH",
+  "code": "MA1",
+  "rarity": "Ultra Rare",
+  "id": 860089
+ },
+ {
+  "name": "Air Balloon",
+  "number": "213",
+  "set": "Sword & Shield",
+  "code": "SSH",
+  "rarity": "Secret Rare",
+  "id": 439503
+ },
+ {
+  "name": "Firebreather",
+  "number": "119",
+  "set": "Phantasmal Flames",
+  "code": "PFL",
+  "rarity": "Ultra Rare",
+  "id": 857694
+ },
+ {
+  "name": "Firebreather",
+  "number": "134",
+  "set": "Indigo Flame",
+  "code": "MA2",
+  "rarity": "Ultra Rare",
+  "id": 864537
+ },
+ {
+  "name": "Galarian Rapidash",
+  "number": "SV48",
+  "set": "Shining Fates",
+  "code": "SHF",
+  "rarity": "Secret Rare",
+  "id": 539623
+ },
+ {
+  "name": "Meganium",
+  "number": "009",
+  "set": "SoulSilver Collection",
+  "code": "L1SS",
+  "rarity": "Ultra Rare",
+  "id": 670002
+ },
+ {
+  "name": "Meganium",
+  "number": "109",
+  "set": "HeartGold & SoulSilver",
+  "code": "HS",
+  "rarity": "Ultra Rare",
+  "id": 279081
+ },
+ {
+  "name": "Tyranitar",
+  "number": "044",
+  "set": "Reviving Legends",
+  "code": "L2",
+  "rarity": "Ultra Rare",
+  "id": 669046
+ },
+ {
+  "name": "Tyranitar",
+  "number": "222",
+  "set": "Paldea Evolved",
+  "code": "PAL",
+  "rarity": "Illustration Rare",
+  "id": 715697
+ },
+ {
+  "name": "Tyranitar",
+  "number": "88",
+  "set": "Unleashed",
+  "code": "UL",
+  "rarity": "Ultra Rare",
+  "id": 279244
+ },
+ {
+  "name": "Metagross",
+  "number": "178",
+  "set": "Temporal Forces",
+  "code": "TEF",
+  "rarity": "Illustration Rare",
+  "id": 760808
+ },
+ {
+  "name": "Garchomp",
+  "number": "120",
+  "set": "Plasma Freeze",
+  "code": "PLF",
+  "rarity": "Secret Rare",
+  "id": 280998
+ },
+ {
+  "name": "Garchomp",
+  "number": "SV40",
+  "set": "Hidden Fates",
+  "code": "HIF",
+  "rarity": "Secret Rare",
+  "id": 396857
+ },
+ {
+  "name": "Lucario",
+  "number": "SV22",
+  "set": "Hidden Fates",
+  "code": "HIF",
+  "rarity": "Secret Rare",
+  "id": 396782
+ },
+ {
+  "name": "Kingdra",
+  "number": "015",
+  "set": "Reviving Legends",
+  "code": "L2",
+  "rarity": "Ultra Rare",
+  "id": 669012
+ },
+ {
+  "name": "Kingdra",
+  "number": "148",
+  "set": "Aquapolis",
+  "code": "AQ",
+  "rarity": "Secret Rare",
+  "id": 275224
+ },
+ {
+  "name": "Kingdra",
+  "number": "85",
+  "set": "Unleashed",
+  "code": "UL",
+  "rarity": "Ultra Rare",
+  "id": 279241
+ }
+]

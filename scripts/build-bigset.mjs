@@ -11,8 +11,10 @@
  * pricing quota at all.
  */
 import { writeFileSync } from "node:fs";
+import { languageOf } from "../apps/public/lib/resolve.js";
 
 const BASE = "https://comp-finder-public.vercel.app";
+const OUT = process.env.BIGSET_OUT || "scripts/bigset.json";
 
 // Chase cards: the ex/V/VMAX/VSTAR/GX line and the alt arts people pay for.
 // Deliberately no bulk commons or trainers — the brief was higher-value cards.
@@ -56,9 +58,15 @@ for (const [i, name] of NAMES.entries()) {
   process.stdout.write(`\r[${i + 1}/${NAMES.length}] ${name.padEnd(30)}`);
   try {
     const res = await fetch(`${BASE}/api/resolve?q=${encodeURIComponent(name)}`).then((r) => r.json());
-    for (const c of (res.candidates || []).slice(0, 3)) {
+    for (const c of (res.candidates || []).slice(0, 6)) {
       if (!c.number || !c.set) continue;
       if (!CHASE.test(c.rarity || "")) continue;
+      // English only. The first build took the top three candidates per name
+      // and 358 of 512 came back from Japanese and Chinese sets, because the
+      // set NAME can't distinguish them — so the audit was largely measuring
+      // how we price foreign prints on a UK marketplace, which is a different
+      // question from the one being asked.
+      if (languageOf({ expansion: c.set, expansion_code: c.code }) !== "English") continue;
       const key = `${c.name}|${c.number}|${c.set}`.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -73,5 +81,5 @@ const byRarity = {};
 for (const c of out) byRarity[c.rarity] = (byRarity[c.rarity] || 0) + 1;
 console.log(Object.entries(byRarity).sort((a,b)=>b[1]-a[1]).slice(0,12).map(([k,v])=>`  ${String(v).padStart(3)} ${k}`).join("\n"));
 
-writeFileSync("scripts/bigset.json", JSON.stringify(out, null, 1));
-console.log(`\nwrote scripts/bigset.json`);
+writeFileSync(OUT, JSON.stringify(out, null, 1));
+console.log(`\nwrote ${OUT}`);
