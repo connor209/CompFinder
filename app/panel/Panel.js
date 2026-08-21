@@ -427,8 +427,9 @@ export default function Panel({ initialSection = "dashboard" }) {
         continue;
       }
 
-      const next = incrementLocalBudget();
-      setBudget(next);
+      // Deliberately NOT counted: SoldComps confirm (2026-08-21) that failed
+      // requests don't count against the monthly quota, so counting them here
+      // would inflate this estimate exactly when things are going wrong.
       const e = new Error((response && response.error) || "Unknown error calling SoldComps.");
       e.isAuthError = response && response.isAuthError;
       e.isQuotaExceeded = response && response.isQuotaExceeded;
@@ -463,6 +464,22 @@ export default function Panel({ initialSection = "dashboard" }) {
 
     const searchOptions = { ebaySite, itemLocation, itemCondition, minPrice: minPrice || null, maxPrice: maxPrice || null, soldAfterDays: Number(soldWithin) };
 
+    // SoldComps' sold-listings endpoint can be down while their active-
+    // listings endpoint keeps working (their own status note, 2026-08-21:
+    // "active listing endpoint is still working, and failed requests do not
+    // count against your request quota"). So a failed sold lookup is worth
+    // retrying as an active lookup rather than writing the card off — and
+    // once sold has failed this many times in a row, stop paying for it on
+    // every remaining card and go straight to active for the rest of the run.
+    const SOLD_DOWN_STREAK = 3;
+    let soldFailStreak = 0;
+    let soldEndpointDown = false;
+
+    const priceFromActive = (q, tokens, num, st) =>
+      fetchSoldCompsWithRetry(q, { ...searchOptions, sold: false }).then((r) =>
+        CompFinderPricing.recommend(r.comps, settings, tokens, "active", num, st)
+      );
+
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const { title, sku } = item;
@@ -477,6 +494,10 @@ export default function Panel({ initialSection = "dashboard" }) {
         // whole batch frozen mid-item with `running` stuck on.
         ({ query, nameTokens, set, csvItem, cardNumber } = buildQueryForItem(item, settings, includeCondition, useFullTitle));
 
+        if (soldEndpointDown) {
+          throw new Error(`Sold-listing lookup skipped — it failed on the first ${SOLD_DOWN_STREAK} cards of this run.`);
+        }
+
         const result = await fetchSoldCompsWithRetry(query, searchOptions, (attempt, delay) =>
           setStatus(`Item ${i + 1} of ${items.length}: SoldComps rate limit — retry ${attempt} in ${Math.round(delay / 1000)}s…`)
         );
@@ -488,6 +509,7 @@ export default function Panel({ initialSection = "dashboard" }) {
               : `SoldComps returned 0 raw results for this exact query.`;
         }
         consecutiveFailures = 0;
+        soldFailStreak = 0;
       } catch (err) {
         if (err.isAuthError || err.isQuotaExceeded) {
           stoppedEarly = true;
@@ -498,6 +520,40 @@ export default function Panel({ initialSection = "dashboard" }) {
           setStatusIsError(true);
           break;
         }
+
+        // The sold lookup failed (or was skipped). Before writing the card
+        // off, try the active-listings endpoint — it can be up while sold is
+        // down, and SoldComps confirm failed requests aren't billed, so the
+        // attempt is free when sold is the thing that's broken.
+        soldFailStreak++;
+        let salvaged = null;
+        if (query) {
+          setStatus(`Item ${i + 1} of ${items.length}: sold lookup failed — trying active listings…`);
+          try {
+            const activeRec = await priceFromActive(query, nameTokens, cardNumber, set);
+            if (activeRec.included.length > 0) {
+              activeRec.note = `Priced from active listings (asking prices), not sold comps — the sold lookup failed: ${err.message}`;
+              salvaged = activeRec;
+            }
+          } catch {
+            /* active is down too — fall through to the normal failure path */
+          }
+        }
+
+        if (salvaged) {
+          // A priced card, just from a weaker source — the row is labelled
+          // "active" in the results, so it doesn't get read as a sold price.
+          if (!soldEndpointDown && soldFailStreak >= SOLD_DOWN_STREAK) {
+            soldEndpointDown = true;
+            setStatus(`SoldComps' sold-listing endpoint is failing — pricing the rest of this run from active listings instead.`);
+          }
+          consecutiveFailures = 0;
+          collected.push({ title, sku, query, csvItem, rec: salvaged, nameTokens, set, cardNumber });
+          setResults([...collected]);
+          if (i < items.length - 1) await new Promise((r) => setTimeout(r, Math.min(settings.interItemDelayMs, 1200)));
+          continue;
+        }
+
         consecutiveFailures++;
         collected.push({ title, sku, query, csvItem, rec: null, failed: err.message });
         setResults([...collected]);
