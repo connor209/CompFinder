@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import SoldCompsApi from "@compfinder/core/soldcomps.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { buildCompTokens, dropWrongSetTotal } from "@/lib/tokens";
@@ -94,11 +95,31 @@ export default function PriceSearch() {
    * them out. Runs before recommend() rather than after, so the price itself
    * responds to the controls instead of just the list underneath it.
    */
+  /**
+   * Condition, read from the LISTING TITLE rather than eBay's condition field.
+   *
+   * eBay only offers sellers "New" / "Pre-Owned" for cards — measured across
+   * 197 comps it was 74% Pre-Owned, 26% New (Other), and never once NM or LP.
+   * soldcomps.js does `apiItem.condition || inferCondition(title)`, and since
+   * eBay always supplies something the title inference never ran, so filtering
+   * on it matched nothing at all.
+   *
+   * The title is the only real signal, and it is sparse: on a typical card
+   * about a fifth of sellers state a condition. Enough to offer "sellers who
+   * said Near Mint" as a separate figure, nowhere near enough for a full
+   * NM/LP/MP/HP ladder — so we don't pretend to one.
+   */
+  function conditionOf(comp) {
+    return SoldCompsApi.inferCondition(comp.title || "");
+  }
+
   /** Condition only — the market split is handled separately, by splitByMarket. */
   function preFilter(comps, { condition }) {
+    if (condition === "any") return comps;
     return comps.filter((c) => {
-      if (condition === "nm" && c.condition !== "NM") return false;
-      if (condition === "nodmg" && (c.condition === "HP" || c.condition === "DMG")) return false;
+      const k = conditionOf(c);
+      if (condition === "nm") return k === "NM";
+      if (condition === "nodmg") return k !== "HP" && k !== "DMG";
       return true;
     });
   }
@@ -158,6 +179,13 @@ export default function PriceSearch() {
     // Numerators repeat across sets, so the set total in a title is what tells
     // 223/165 from 223/197. Applied before the market split so both sides are
     // scored on the same card.
+    const conditionCounts = { any: comps.length, nm: 0, nodmg: 0 };
+    for (const c of comps) {
+      const k = conditionOf(c);
+      if (k === "NM") conditionCounts.nm++;
+      if (k !== "HP" && k !== "DMG") conditionCounts.nodmg++;
+    }
+
     const filtered = dropWrongSetTotal(preFilter(comps, { condition }), cardNumber);
     const markets = marketsIn(filtered);
     const { chosen, rest } = splitByMarket(filtered, market);
@@ -274,7 +302,7 @@ export default function PriceSearch() {
     return {
       rec, med, chart, sales, dropped, buy, lastSold,
       thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers,
-      markets, market, restPence, restUsed, premium,
+      markets, market, restPence, restUsed, premium, conditionCounts,
       activeMedian: activeRec?.finalPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
       lo,
@@ -346,9 +374,24 @@ export default function PriceSearch() {
           <div className="filter">
             <span className="flabel">Condition</span>
             <div className="seg" role="group" aria-label="Condition">
-              {[["any", "Any"], ["nodmg", "Exclude damaged"], ["nm", "Near Mint"]].map(([v, l]) => (
-                <button key={v} aria-pressed={condition === v} onClick={() => setCondition(v)}>{l}</button>
-              ))}
+              {[["any", "Any"], ["nodmg", "Not played"], ["nm", "Says NM"]].map(([v, l]) => {
+                // Most sellers don't state a condition, so an option backed by
+                // one or two comps would produce a confident-looking price
+                // built on nothing. Disable rather than let it be picked.
+                const n = view ? view.conditionCounts[v] : 0;
+                const thin = view && v !== "any" && n < 3;
+                return (
+                  <button
+                    key={v}
+                    aria-pressed={condition === v}
+                    disabled={thin}
+                    title={thin ? "Too few listings state this to price it" : undefined}
+                    onClick={() => setCondition(v)}
+                  >
+                    {l}{view && v !== "any" ? <span className="segn">{n}</span> : null}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

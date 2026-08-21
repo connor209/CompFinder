@@ -364,3 +364,5 @@ footer.site-foot .spacer { flex:1 1 auto; }
 @media (max-width:640px) {
   .pricealt { border-left:0; border-top:1px solid var(--line); padding:10px 0 0; align-self:stretch; width:100%; }
 }
+.seg button[disabled] { opacity:.38; cursor:not-allowed; }
+.seg button[disabled]:hover { color:var(--ink-soft); }
