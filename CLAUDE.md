@@ -63,6 +63,25 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   Arbitrage tab. Commission on your own purchases gets the account terminated.
 - **Leave the campaign ID unset until the public page has real visitors.**
 
+## Before the public page goes live
+
+Things deliberately set for a page with no visitors. Each one is wrong the
+moment strangers can reach it.
+
+- [ ] **Rate limit back to 120/hour.** `apps/public/app/api/price/route.js`
+      currently runs at `TESTING_LIMIT` (2000) so audit runs don't trip it.
+      That endpoint spends real money per cache miss — at 2000 one scraper
+      burns a month of SoldComps quota in an afternoon. Set it to
+      `PUBLIC_LIMIT` and use `AUDIT_TOKEN` for our own runs.
+- [ ] **Set `NEXT_PUBLIC_EPN_CAMPID`** (5339194433). Left unset while we are
+      the only ones clicking, since commission on your own purchases ends the
+      EPN account.
+- [ ] **Bot protection** on `/api/price` — Turnstile or equivalent. The rate
+      limit alone only bounds one IP.
+- [ ] **Consent management** (a Google-certified CMP) before any ad code, and
+      `ads.txt`, for UK/EEA traffic.
+- [ ] **The SoldComps answer below.** Not optional.
+
 ## Open question blocking the public page
 
 SoldComps has not yet confirmed in writing that we may (1) serve anonymous

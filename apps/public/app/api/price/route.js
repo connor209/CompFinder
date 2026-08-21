@@ -21,14 +21,22 @@ import { createServiceClient } from "@/lib/supabase";
 // has already sold is a worse experience than a slightly slower page.
 const TTL_SECONDS = { sold: 24 * 60 * 60, active: 2 * 60 * 60 };
 
-// Generous enough that no real person hits it, tight enough that a scraper
-// can't run up the bill on distinct queries. Tunable without a code change,
-// but the default is the number to keep for real visitors — raising it for
-// everyone to let one trusted caller through would be trading the protection
-// for the convenience. That's what AUDIT_TOKEN below is for instead.
+// ⚠️ RAISED FOR TESTING — REDUCE BEFORE THIS PAGE IS PUBLIC ⚠️
+//
+// 2000/hour is a testing figure, deliberately high enough that hundred-card
+// audit runs don't trip it while the page has no visitors but us. It is NOT a
+// safe public number: this endpoint spends real money per cache miss, so at
+// 2000 a single scraper could burn a month of SoldComps quota in an afternoon.
+//
+// Before going public, set this back to PUBLIC_LIMIT (120) — generous enough
+// that no real person hits it, tight enough to bound the damage — and use
+// AUDIT_TOKEN below for our own runs instead. Tracked in CLAUDE.md's go-live
+// checklist so it can't be forgotten.
+const PUBLIC_LIMIT = 120;
+const TESTING_LIMIT = 2000;
 const MAX_REQUESTS_PER_HOUR = Number(process.env.PUBLIC_RATE_LIMIT_PER_HOUR) > 0
   ? Number(process.env.PUBLIC_RATE_LIMIT_PER_HOUR)
-  : 120;
+  : TESTING_LIMIT;
 
 /**
  * Shared secret that exempts a caller from the per-IP limit — for our own
