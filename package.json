@@ -1,20 +1,15 @@
 {
-  "name": "compfinder-web",
-  "version": "0.1.0",
+  "name": "compfinder-monorepo",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.116.0",
-    "@supabase/ssr": "^0.5.0",
-    "@supabase/supabase-js": "^2.45.0",
-    "fast-xml-parser": "^5.10.1",
-    "next": "^15.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "dev": "npm run dev --workspace apps/app",
+    "build": "npm run build --workspace apps/app",
+    "start": "npm run start --workspace apps/app",
+    "dev:public": "npm run dev --workspace apps/public",
+    "build:public": "npm run build --workspace apps/public"
   }
 }

@@ -7,7 +7,7 @@ with ads, assuming the SoldComps key problem is solved?
 ## TL;DR
 
 - **Technically: yes, and it's a small job** — maybe a week or two. The pricing
-  engine (`lib/pricing.js`) and the catalogue are already source-agnostic and
+  engine (`packages/core/pricing.js`) and the catalogue are already source-agnostic and
   auth-free; the parts that need auth (inventory, eBay write-back, history) are
   cleanly separable from the parts that don't.
 - **The unit economics work, and by more margin than expected.** SoldComps'
@@ -52,11 +52,11 @@ The feature lives in `app/panel/QuickSearch.js` (912 lines). A search does:
 
 | Piece | File | Notes |
 |---|---|---|
-| Pricing engine | `lib/pricing.js` | No auth, no DB, no network. Pure. |
-| SoldComps normalisation | `lib/soldcomps.js` | Already standalone |
+| Pricing engine | `packages/core/pricing.js` | No auth, no DB, no network. Pure. |
+| SoldComps normalisation | `packages/core/soldcomps.js` | Already standalone |
 | Catalogue reads | `app/api/catalog/*` | `card_catalog` is already public-readable (migration 005) |
-| Trend chart | `TrendChart` in `QuickSearch.js` | Self-contained SVG, no deps |
-| Name cleaning, marketplace links | `lib/cardname.js`, `lib/marketplace.js` | Pure |
+| Trend chart | `TrendChart` in `apps/app/app/panel/QuickSearch.js` | Self-contained SVG, no deps |
+| Name cleaning, marketplace links | `packages/core/cardname.js`, `packages/core/marketplace.js` | Pure |
 
 ### What has to be stripped
 
@@ -218,7 +218,7 @@ integration.
 
 **EPN is the priority, not AdSense.** It's approved faster, has no content
 threshold, and pays more per user here. Add it to every outbound eBay link in
-`lib/marketplace.js` and the sold-row links in the deep dive. Do this first,
+`packages/core/marketplace.js` and the sold-row links in the deep dive. Do this first,
 regardless of what happens with display.
 
 ---
@@ -296,7 +296,7 @@ And right now we throw those away. `app/panel/QuickSearch.js` fires the
 sentence from it — *"Currently listed at a median £X asking (N listings)"* —
 while `view.active.included` is sitting there in memory holding N live,
 buyable listings, each with `_source.url` already populated by
-`lib/soldcomps.js`'s `mapItem`.
+`packages/core/soldcomps.js`'s `mapItem`.
 
 **So the single highest-value change in the whole plan is roughly fifteen lines:**
 render the active listings as actual rows, cheapest first, each an EPN link.
@@ -308,7 +308,7 @@ data is already loaded.
 
 | Location | File | EPN? |
 |---|---|---|
-| Active listing rows (**new**) | `QuickSearch.js` active panel, ~line 890 | ✅ the priority |
+| Active listing rows (**new**) | `apps/app/app/panel/QuickSearch.js` active panel, ~line 890 | ✅ the priority |
 | "🔍 eBay ↗" button | `QuickSearch.js:770` via `ebaySearchUrl()` | ✅ |
 | Sold comp rows | `QuickSearch.js:880`, `:140` | ✅ low yield, free to add |
 | Arbitrage results | `Arbitrage.js:243` | ✅ |
@@ -330,12 +330,12 @@ the account holder's.
 
 ### Implementation — built
 
-`lib/epn.js` now exists and the call sites are wired. It is inert until
+`packages/core/epn.js` now exists and the call sites are wired. It is inert until
 `NEXT_PUBLIC_EPN_CAMPID` is set, so it is safe to deploy before approval.
 The shape:
 
 ```js
-// lib/epn.js
+// packages/core/epn.js
 const MKRID = { "ebay.co.uk": "710-53481-19255-0" };  // per-marketplace
 
 export function epnLink(url, { customId, site = "ebay.co.uk" } = {}) {
@@ -358,7 +358,7 @@ Notes on the details:
 
 - **The env-var guard** means you can wire every link site *now* and it stays a
   no-op until the campaign ID exists. No second pass through the codebase.
-- **The hostname check** is deliberate — `lib/marketplace.js` also builds
+- **The hostname check** is deliberate — `packages/core/marketplace.js` also builds
   Cardmarket URLs, and tagging those with eBay params would be nonsense.
 - **`customid` is free reporting.** Use it: `search`, `cardpage`, `arbitrage`,
   or the catalogue ID. Without it you know you earned £40 last month; with it

@@ -1,0 +1,9 @@
+{
+  "name": "@compfinder/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pricing engine and pure helpers shared by the CompFinder app and the public price page.",
+  "//": "No \"type\" field on purpose: pricing.js and soldcomps.js are CommonJS (module.exports) while the rest are ESM. Both are consumed only through a bundler that detects syntax per file, exactly as they were when they lived in apps/app/lib. No \"exports\" map either, so deep paths like @compfinder/core/pricing.js keep resolving straight to the file.",
+  "main": "index.js",
+  "files": ["*.js"]
+}

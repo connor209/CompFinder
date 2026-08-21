@@ -1,5 +1,44 @@
 # Comp Finder — web version — setup
 
+## Repo layout
+
+The repo is an npm workspace with two deployables sharing one pricing engine:
+
+```
+packages/core/   pricing, soldcomps, cardname, marketplace, epn, catalog, setmatch
+apps/app/        CompFinder — the business tool (eBay OAuth, inventory, batch)
+apps/public/     the free public price page (not built yet)
+supabase/        migrations, shared by both apps
+```
+
+`packages/core` is the rule that keeps this honest: nothing in it may import
+React, Next, Supabase, or app code. That's what makes it shareable, and it's
+why extracting it was a file move rather than a rewrite. A second copy of
+`pricing.js` would drift the moment either app touched it.
+
+Run everything from the repo root:
+
+```
+npm install          # installs both workspaces, links @compfinder/core
+npm run dev          # apps/app
+npm run build        # apps/app
+npm run dev:public   # apps/public, once it exists
+```
+
+**Deploying.** Each app is its own Vercel project, both pointed at this repo
+with a different **Root Directory** (`apps/app`, `apps/public`) and
+"Include files outside the root directory" enabled so `packages/core`
+resolves. Set an Ignored Build Step on each so a change to one app doesn't
+rebuild the other. The cron entries in `apps/app/vercel.json` belong to the
+business app only.
+
+**Known wrinkle.** `packages/core` has no `"type"` field, because
+`pricing.js` and `soldcomps.js` are CommonJS while the rest are ESM — exactly
+as they were inside `lib/`. Bundled by Next this is fine. Running one of the
+ESM files under bare `node` prints a MODULE_TYPELESS_PACKAGE_JSON warning;
+harmless, and not worth changing the pricing engine's module semantics to
+silence.
+
 ## What's actually been verified, and what hasn't
 
 Same honesty this whole project has run on, worth stating plainly here
@@ -11,7 +50,8 @@ inspection:
   correctly — checked with the real TypeScript compiler's `transpileModule`
   (found available in this environment), not just eyeballed. The
   transpiled (JSX-removed) output was also independently syntax-checked.
-- `lib/pricing.js`, `lib/carduploader.js`, `lib/soldcomps.js` import and
+- `packages/core/pricing.js`, `apps/app/lib/carduploader.js`,
+  `packages/core/soldcomps.js` import and
   run correctly via `require()`, exactly as they did in the extension —
   confirmed by actually calling them, not assumed from "they're pure JS."
 - The full pricing pipeline was re-run end to end through the new
