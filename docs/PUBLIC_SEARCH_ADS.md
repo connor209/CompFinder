@@ -100,10 +100,13 @@ Custom pricing above 50,000.
 
 Two things cut the per-search cost immediately:
 
-- **Drop the parallel active-listings call** on the public page, or make it a
-  deliberate "check current asking prices" button. That halves the bill on day
-  one. The main deep dive doesn't block on it anyway (`activePromise` fills in
-  separately), so it's a clean removal.
+- ~~**Drop the parallel active-listings call.**~~ **Corrected — keep it.** The
+  first draft of this report suggested dropping it to halve the bill. That was
+  wrong once affiliate revenue is in the picture: the active call is the one
+  that returns *buyable* listings, and those are what EPN actually pays on. It
+  costs £0.0012 and can plausibly return 5–10× that. See the EPN section below.
+  Cache it harder instead (a 1–3h TTL, since asking prices move faster than the
+  90-day sold window).
 - **Cache.** Card searches are extremely head-heavy — Charizard, Umbreon VMAX,
   Moonbreon, the current chase cards. A 6–24h cache keyed on the normalised
   query + marketplace + sold/active should plausibly hit 60–80% at any real
@@ -217,6 +220,157 @@ integration.
 threshold, and pays more per user here. Add it to every outbound eBay link in
 `lib/marketplace.js` and the sold-row links in the deep dive. Do this first,
 regardless of what happens with display.
+
+---
+
+## eBay Partner Network — how it works, and how we'd wire it in
+
+### The mechanics
+
+EPN is eBay's own affiliate programme. You apply, get a **campaign ID** (a
+10-digit number), and from then on any link you send to eBay earns you a cut of
+whatever that visitor buys — provided the tracking parameters are on the URL.
+
+**The link format.** There's no link-shortener or redirect service you have to
+route through; you append query parameters to the ordinary eBay URL you were
+already linking to:
+
+| Param | Value | Notes |
+|---|---|---|
+| `mkevt` | `1` | Event type — 1 = click |
+| `mkcid` | `1` | Channel — 1 = EPN |
+| `mkrid` | `710-53481-19255-0` | Rotation ID, **per marketplace**. This is the eBay UK one. |
+| `campid` | your 10-digit ID | Required |
+| `toolid` | `10001` | Default |
+| `customid` | free text, ≤256 chars | Optional. Your own sub-ID — this is how you find out *which* pages earn. |
+
+```
+https://www.ebay.co.uk/itm/123456789?mkevt=1&mkcid=1&mkrid=710-53481-19255-0&campid=XXXXXXXXXX&toolid=10001&customid=card-sv3pt5-199
+```
+
+That's the whole integration. It works on item URLs, search URLs, category
+URLs — anything on eBay.
+
+**Attribution.** Last click, 24-hour cookie. Practically:
+
+- The visitor doesn't have to buy the card you linked. Anything they buy on
+  eBay in the next 24 hours counts.
+- If they later click someone else's EPN link, that partner takes it — last
+  click wins.
+- Qualifying-transaction windows differ by format: ~24h for Buy It Now, up to
+  10 days for auctions. So an auction they click today and win next week still
+  pays.
+
+**What you're paid.** A percentage of GMB (the purchase amount), by category,
+with a per-transaction earnings cap. Trading cards / collectibles is commonly
+cited around **3%** — verify against the current PDF rate card before modelling
+it, since eBay have changed the basis before (it used to be a share of eBay's
+fee revenue, which is a *much* smaller number).
+
+**Getting paid.** $10 minimum threshold, paid on the 10th of the month for the
+prior month, by bank transfer or PayPal.
+
+### Why it fits this product unusually well
+
+Every other affiliate site has to manufacture purchase intent. We don't:
+someone typing "Charizard 4/102" into a sold-comps tool is already mid-decision
+about buying or selling that exact card, and we're showing them a price and a
+list of listings. The click-through is native to the product, not bolted on.
+
+The maths, once more: 3% of a £35 card is £1.05. At a £2 display RPM that's
+**500 ad impressions from one sale.**
+
+### The important asymmetry: sold links don't pay, active links do
+
+This is the bit that changes what we build.
+
+A **sold** comp links to an *ended* listing. Nobody can buy it. It still earns
+if the visitor then browses on and buys something within 24h — eBay's
+related-items module on ended listings is decent at this — but it's incidental.
+
+An **active** listing links to something with a Buy It Now button. That's the
+revenue.
+
+And right now we throw those away. `app/panel/QuickSearch.js` fires the
+`sold=false` call, runs it through `recommend()`, and renders exactly one
+sentence from it — *"Currently listed at a median £X asking (N listings)"* —
+while `view.active.included` is sitting there in memory holding N live,
+buyable listings, each with `_source.url` already populated by
+`lib/soldcomps.js`'s `mapItem`.
+
+**So the single highest-value change in the whole plan is roughly fifteen lines:**
+render the active listings as actual rows, cheapest first, each an EPN link.
+"Recent sales" tells them what it's worth; a "Buy one now — from £X" module
+right underneath tells them where to get it. That's the money module, and the
+data is already loaded.
+
+### Where the links go
+
+| Location | File | EPN? |
+|---|---|---|
+| Active listing rows (**new**) | `QuickSearch.js` active panel, ~line 890 | ✅ the priority |
+| "🔍 eBay ↗" button | `QuickSearch.js:770` via `ebaySearchUrl()` | ✅ |
+| Sold comp rows | `QuickSearch.js:880`, `:140` | ✅ low yield, free to add |
+| Arbitrage results | `Arbitrage.js:243` | ✅ |
+| Batch comp rows | `Panel.js:1348` | ✅ |
+| **The user's own listings** | `Inventory.js`, my-listings banner, `ListForm.js:122` | ❌ **never** |
+
+That last row matters. Putting affiliate tracking on links to the user's own
+eBay listings is self-referential clicking, and it's the fastest way to get an
+EPN account terminated. Keep EPN strictly on comps and third-party listings.
+
+### Implementation sketch
+
+One small module, since the rule is "append params to any eBay URL, and only an
+eBay URL":
+
+```js
+// lib/epn.js
+const MKRID = { "ebay.co.uk": "710-53481-19255-0" };  // per-marketplace
+
+export function epnLink(url, { customId, site = "ebay.co.uk" } = {}) {
+  if (!process.env.NEXT_PUBLIC_EPN_CAMPID) return url;   // no-op until approved
+  try {
+    const u = new URL(url);
+    if (!/(^|\.)ebay\.[a-z.]+$/.test(u.hostname)) return url;  // never tag non-eBay
+    u.searchParams.set("mkevt", "1");
+    u.searchParams.set("mkcid", "1");
+    u.searchParams.set("mkrid", MKRID[site] || MKRID["ebay.co.uk"]);
+    u.searchParams.set("campid", process.env.NEXT_PUBLIC_EPN_CAMPID);
+    u.searchParams.set("toolid", "10001");
+    if (customId) u.searchParams.set("customid", customId.slice(0, 256));
+    return u.toString();
+  } catch { return url; }
+}
+```
+
+Notes on the details:
+
+- **The env-var guard** means you can wire every link site *now* and it stays a
+  no-op until the campaign ID exists. No second pass through the codebase.
+- **The hostname check** is deliberate — `lib/marketplace.js` also builds
+  Cardmarket URLs, and tagging those with eBay params would be nonsense.
+- **`customid` is free reporting.** Use it: `search`, `cardpage`, `arbitrage`,
+  or the catalogue ID. Without it you know you earned £40 last month; with it
+  you know the card pages earned £38 of it and the arbitrage tab earned £2, and
+  you build accordingly.
+- **`rel="sponsored noopener noreferrer"`** on every EPN anchor. Currently the
+  code uses `rel="noopener noreferrer"`. Adding `sponsored` is Google's stated
+  requirement for affiliate links, and it matters *a lot* here: the plan is to
+  publish hundreds of thousands of card pages each carrying a dozen affiliate
+  links. Untagged, that's a textbook manual-action trigger — it would put the
+  SEO strategy and the affiliate revenue at risk simultaneously.
+- **Disclosure.** UK ASA/CAP rules require it to be clear and up front. A line
+  in the footer plus a short note on the buy module ("We may earn a commission
+  on eBay purchases — it never affects the prices shown") covers it.
+
+### Application
+
+Apply at partnernetwork.ebay.com. They review the site, so apply once the
+public page is live and has a privacy policy and disclosure in place — not
+before. Approval is generally much easier than AdSense: no content-volume
+threshold, and a genuine card-pricing tool is exactly the kind of traffic they
+want. Which is why this should ship **before** display ads, not after.
 
 ---
 
