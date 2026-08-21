@@ -103,7 +103,14 @@ export async function POST(request) {
     .maybeSingle();
 
   if (hit) {
-    return NextResponse.json({ ok: true, comps: hit.payload.comps || [], cached: true, fetchedAt: hit.fetched_at });
+    return NextResponse.json({
+      ok: true,
+      comps: hit.payload.comps || [],
+      hasNextPage: !!hit.payload.hasNextPage,
+      rawItemCount: hit.payload.rawItemCount ?? (hit.payload.comps || []).length,
+      cached: true,
+      fetchedAt: hit.fetched_at
+    });
   }
 
   // --- rate limit, on the path that spends money ---------------------------
@@ -149,7 +156,7 @@ export async function POST(request) {
       query: query.toLowerCase().replace(/\s+/g, " ").trim(),
       ebay_site: QUERY_OPTIONS.ebaySite,
       sold,
-      payload: { comps: parsed.comps },
+      payload: { comps: parsed.comps, hasNextPage: parsed.hasNextPage, rawItemCount: parsed.rawItemCount },
       comp_count: parsed.comps.length,
       fetched_at: new Date().toISOString()
     },
@@ -157,7 +164,14 @@ export async function POST(request) {
   );
   if (writeError) console.error("cache write failed:", writeError.message);
 
-  return NextResponse.json({ ok: true, comps: parsed.comps, cached: false, fetchedAt: new Date().toISOString() });
+  return NextResponse.json({
+    ok: true,
+    comps: parsed.comps,
+    hasNextPage: !!parsed.hasNextPage,
+    rawItemCount: parsed.rawItemCount,
+    cached: false,
+    fetchedAt: new Date().toISOString()
+  });
 }
 
 // SoldComps' scraper returns 5xx on a query often enough that the business
@@ -228,5 +242,11 @@ async function attemptSoldComps(apiKey, query, sold, soldAfterDays) {
     e.httpStatus = response.status;
     throw e;
   }
-  return SoldCompsApi.parseResponse(await response.json(), "GBP");
+  const json = await response.json();
+  const parsed = SoldCompsApi.parseResponse(json, "GBP");
+  // hasNextPage is the difference between "12 sales in 90 days" and "at least
+  // 40" — without it a saturated result set reads as a complete one, and any
+  // volume figure built on it silently understates a fast-moving card.
+  parsed.rawItemCount = Array.isArray(json.items) ? json.items.length : 0;
+  return parsed;
 }

@@ -69,9 +69,23 @@ const CompFinderLiquidity = (() => {
    * @param {number}   [input.windowDays]  how far back the sold search reached
    * @param {number}   [input.now]         injectable clock, for tests
    */
-  function assess({ soldComps = [], activeCount = null, windowDays = 90, now = Date.now() } = {}) {
+  function assess({ soldComps = [], activeCount = null, windowDays = 90, saturated = false, now = Date.now() } = {}) {
     const times = saleTimes(soldComps);
     const sales = times.length;
+
+    // SATURATION. SoldComps returns roughly forty results per page, newest
+    // first, so a fast-moving card doesn't return "all sales in 90 days" — it
+    // returns "the last forty sales", and dividing those by 90 understates the
+    // rate by however much of the window we never saw. Measured live: a Mega
+    // Darkrai ex returned forty sales spanning a single day. Called with 90 it
+    // reads as 3/week; the truth is nearer 40/day.
+    //
+    // When the caller says the set was capped, the period becomes the span the
+    // returned sales actually cover. That turns the cap from a distortion into
+    // a density measurement — the tighter the span, the faster the card moves.
+    const observedSpanDays = sales >= 2 ? Math.max((times[0] - times[times.length - 1]) / DAY_MS, 0.5) : null;
+    const effectiveDays = saturated && observedSpanDays ? observedSpanDays : windowDays;
+    const capped = !!(saturated && observedSpanDays && observedSpanDays < windowDays);
 
     if (sales === 0) {
       return {
@@ -92,7 +106,7 @@ const CompFinderLiquidity = (() => {
       };
     }
 
-    const salesPerWeek = round2((sales / windowDays) * 7);
+    const salesPerWeek = round2((sales / effectiveDays) * 7);
 
     // Banding uses the RECENT half of the window, not the whole of it. A card
     // that sold twelve times in the last five weeks and nothing before is a
@@ -100,10 +114,12 @@ const CompFinderLiquidity = (() => {
     // which is exactly backwards for someone deciding whether to list now.
     // The same rule handles the opposite case honestly: a card whose sales all
     // sit in the older half scores zero here, because nothing is selling now.
-    const halfWindow = windowDays / 2;
+    const halfWindow = effectiveDays / 2;
     const recentCutoff = now - halfWindow * DAY_MS;
     const recentSales = times.filter((t) => t >= recentCutoff).length;
-    const recentPerWeek = round2((recentSales / halfWindow) * 7);
+    // A capped set is entirely recent by construction, so splitting it in half
+    // would just halve a number that already describes current demand.
+    const recentPerWeek = capped ? salesPerWeek : round2((recentSales / halfWindow) * 7);
 
     // Gaps between consecutive sales. More honest than a raw count for thin
     // cards: four sales spread evenly across 90 days is a working market,
@@ -114,7 +130,10 @@ const CompFinderLiquidity = (() => {
 
     // Distinct selling days vs sales. Well under 1 means bunching.
     const distinctDays = new Set(times.map((t) => Math.floor(t / DAY_MS))).size;
-    const concentrated = sales >= 4 && distinctDays / sales < 0.5;
+    // Not meaningful on a capped set: seeing only the most recent page
+    // guarantees the sales look bunched, whether or not one seller is behind
+    // them. Flagging it there would warn on every fast-moving card.
+    const concentrated = !capped && sales >= 4 && distinctDays / sales < 0.5;
 
     // Supply pressure. Sell-through is the share of "card exists on eBay"
     // events that ended in a sale; days-of-supply turns the same two numbers
@@ -123,7 +142,7 @@ const CompFinderLiquidity = (() => {
     let daysOfSupply = null;
     if (typeof activeCount === "number" && activeCount >= 0) {
       sellThrough = sales + activeCount > 0 ? round2(sales / (sales + activeCount)) : null;
-      const perDay = sales / windowDays;
+      const perDay = sales / effectiveDays;
       daysOfSupply = perDay > 0 ? Math.round(activeCount / perDay) : null;
     }
 
@@ -141,7 +160,7 @@ const CompFinderLiquidity = (() => {
     // Is it warming or cooling? Compare the recent half of the window with the
     // older half. Needs enough sales for the split to mean anything.
     let momentum = null;
-    if (sales >= 6) {
+    if (sales >= 6 && !capped) {
       const midpoint = now - (windowDays / 2) * DAY_MS;
       const recent = times.filter((t) => t >= midpoint).length;
       const older = sales - recent;
@@ -164,14 +183,23 @@ const CompFinderLiquidity = (() => {
       sales,
       activeCount,
       windowDays,
-      reasons: explain({ salesPerWeek, recentPerWeek, sellThrough, daysOfSupply, medianGapDays, spread, momentum, concentrated, sales, halfWindow, recentSales })
+      capped,
+      observedSpanDays: observedSpanDays != null ? round1(observedSpanDays) : null,
+      reasons: explain({ salesPerWeek, recentPerWeek, sellThrough, daysOfSupply, medianGapDays, spread, momentum, concentrated, sales, halfWindow, recentSales, capped, observedSpanDays })
     };
   }
 
   /** Plain sentences, so the number never has to be interpreted by the reader. */
-  function explain({ salesPerWeek, recentPerWeek, sellThrough, daysOfSupply, medianGapDays, spread, momentum, concentrated, sales, halfWindow, recentSales }) {
+  function explain({ salesPerWeek, recentPerWeek, sellThrough, daysOfSupply, medianGapDays, spread, momentum, concentrated, sales, halfWindow, recentSales, capped, observedSpanDays }) {
     const out = [];
-    if (recentSales === 0) {
+    if (capped) {
+      const perDay = observedSpanDays ? sales / observedSpanDays : null;
+      out.push(
+        `At least ${sales} sales in the last ${observedSpanDays < 1.5 ? "day" : Math.round(observedSpanDays) + " days"}` +
+        (perDay ? ` — roughly ${perDay >= 1 ? Math.round(perDay) + " a day" : Math.round(perDay * 7) + " a week"}.` : ".")
+      );
+      out.push("That's as far back as one page of results reaches, so the true total is higher.");
+    } else if (recentSales === 0) {
       out.push(`${sales} sale${sales === 1 ? "" : "s"} in the window, but none in the last ${Math.round(halfWindow)} days.`);
     } else if (recentPerWeek >= 1) {
       out.push(`About ${recentPerWeek} sales a week recently${salesPerWeek !== recentPerWeek ? ` (${salesPerWeek}/week across the whole window)` : ""}.`);
@@ -190,7 +218,7 @@ const CompFinderLiquidity = (() => {
       // draft called that "expect to wait".
       out.push(
         daysOfSupply <= 45
-          ? `At the current rate the listings up now would clear in about ${daysOfSupply} days.`
+          ? `At the current rate the listings up now would clear in about ${daysOfSupply} day${daysOfSupply === 1 ? "" : "s"}.`
           : daysOfSupply <= 150
             ? `Roughly ${daysOfSupply} days of supply listed at the current rate.`
             : `Roughly ${daysOfSupply} days of supply listed — heavily oversupplied, expect to wait or undercut.`
