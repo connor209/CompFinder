@@ -48,8 +48,18 @@ function analyse(card, res) {
   const comps = res.comps || [];
   const tokens = buildCompTokens({ name: card.name, number: card.number }, card.q);
 
+  const nameOnly = buildCompTokens({ name: card.name }, card.q);
+
   const uk = CompFinderPricing.recommend(ukOnly(comps), settings, tokens, "sold", card.number, card.set);
-  const ww = CompFinderPricing.recommend(comps, settings, tokens, "sold", card.number, card.set);
+  let ww = CompFinderPricing.recommend(comps, settings, tokens, "sold", card.number, card.set);
+
+  // Mirrors the page's number fallback, so a re-run measures what a visitor
+  // actually gets rather than a stricter path they never see.
+  let numberUnmatched = false;
+  if ((ww.included || []).length === 0 && card.number) {
+    const byName = CompFinderPricing.recommend(comps, settings, nameOnly, "sold", null, card.set);
+    if ((byName.included || []).length >= 3) { ww = byName; numberUnmatched = true; }
+  }
   const used = ww.included || [];
   const totals = used.map((c) => c.totalPence);
   const lo = totals.length ? Math.min(...totals) : null;
@@ -65,10 +75,19 @@ function analyse(card, res) {
   const saturated = res.hasNextPage === true || comps.length >= 39;
   const liq = CompFinderLiquidity.assess({ soldComps: used, activeCount: null, windowDays: 90, saturated });
 
+  // Three outcomes worth telling apart, which the first run lumped together
+  // as "no price": nothing usable at all, a card that only trades graded, and
+  // one recovered by ignoring a number that doesn't exist.
+  const gradedTiers = (ww.graded || []).length;
+  const outcome = ww.finalPence != null
+    ? (numberUnmatched ? "priced-via-name" : "priced")
+    : gradedTiers > 0 ? "graded-only" : "nothing";
+
   const issues = [];
   const bare = card.number ? String(card.number).split("/")[0] : null;
 
   if (comps.length === 0) issues.push("no comps returned at all");
+  if (outcome === "nothing") issues.push("no price and no graded sales");
   if (used.length > 0 && ww.finalPence == null) issues.push("price null despite comps used");
   if (lastSold != null && lo != null && (lastSold < lo || lastSold > hi)) {
     issues.push(`last sold ${gbp(lastSold)} outside used range`);
@@ -80,13 +99,13 @@ function analyse(card, res) {
     if (off.length > used.length / 2) issues.push(`${off.length}/${used.length} used comps don't mention ${bare}`);
   }
   if (lo && hi && lo > 0 && hi / lo > 10) issues.push(`used comps span ${(hi / lo).toFixed(0)}x`);
-  if (comps.length > 0 && used.length === 0) issues.push(`all ${comps.length} comps excluded`);
+  if (comps.length > 0 && used.length === 0 && gradedTiers === 0) issues.push(`all ${comps.length} comps excluded`);
 
   const reasons = {};
   for (const e of ww.excluded || []) reasons[e.exclusionReason] = (reasons[e.exclusionReason] || 0) + 1;
 
   return {
-    card, uk, ww, liq, saturated, issues, reasons,
+    card, uk, ww, liq, saturated, issues, reasons, outcome, numberUnmatched, gradedTiers,
     fetched: comps.length, ukCount: ukOnly(comps).length,
     used: used.length, ukUsed: (uk.included || []).length,
     lastSold, lo, hi
@@ -119,6 +138,7 @@ async function main() {
     writeFileSync(JSON_OUT, JSON.stringify(results.map((r) => ({
       card: r.card, fetched: r.fetched, ukCount: r.ukCount, used: r.used, ukUsed: r.ukUsed,
       price: r.ww?.finalPence ?? null, confidence: r.ww?.confidence ?? null,
+      outcome: r.outcome, numberUnmatched: r.numberUnmatched, gradedTiers: r.gradedTiers,
       liquidity: r.liq?.label ?? null, saturated: r.saturated, issues: r.issues, reasons: r.reasons
     })), null, 2));
     console.log(`\nWrote ${JSON_OUT}`);
@@ -133,6 +153,13 @@ function report(rs) {
   console.log("\n" + "=".repeat(80));
   console.log(`${rs.length} cards · ${ok.length - noPrice.length} priced · ${noPrice.length} no price · ${flagged.length} flagged`);
   console.log("=".repeat(80));
+
+  const outcomes = {};
+  for (const r of ok) outcomes[r.outcome] = (outcomes[r.outcome] || 0) + 1;
+  console.log("\nOutcomes:");
+  for (const [k, v] of Object.entries(outcomes).sort((a, b) => b[1] - a[1])) {
+    console.log(`  ${String(v).padStart(3)}  ${k}`);
+  }
 
   const byBand = {};
   for (const r of ok) {
