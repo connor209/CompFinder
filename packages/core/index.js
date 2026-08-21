@@ -13,6 +13,7 @@
  */
 export { default as CompFinderPricing } from "./pricing.js";
 export { default as SoldCompsApi } from "./soldcomps.js";
+export { default as CompFinderLiquidity } from "./liquidity.js";
 export * from "./cardname.js";
 export * from "./marketplace.js";
 export * from "./epn.js";
