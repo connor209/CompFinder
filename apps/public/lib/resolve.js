@@ -47,6 +47,11 @@ import { detectLanguage } from "@compfinder/core/catalog.js";
  */
 const JP_LEGACY_CODE = /^(PCG|ADV|DP|BW|XY|SM|CP|L)\d/;
 const JP_LEGACY_EXACT = new Set(["LL", "WCP"]);
+// Japanese promos are named "<era>-P": XY-P, S-P, SM-P, SV-P, PCG-P. The
+// English promo codes never take that shape — they are SWSH, SVP, XYPR, SMP,
+// NP, PLAY, BEST — so the trailing "-P" is unambiguous. Caught a Japanese
+// Machamp EX and a Japanese Sordward & Shielbert in an English-only test set.
+const JP_PROMO_CODE = /^[A-Z]{1,4}\d*-P$/;
 const ASIAN_CODE = /^MA\d/;
 
 export function languageOf(row) {
@@ -59,6 +64,7 @@ export function languageOf(row) {
   if (/\d/.test(code) && /C$/.test(code)) return "Chinese";
   if (/[a-z]/.test(code)) return "Japanese";
   if (ASIAN_CODE.test(code)) return "Asian";
+  if (JP_PROMO_CODE.test(code)) return "Japanese";
   if (JP_LEGACY_CODE.test(code) || JP_LEGACY_EXACT.has(code)) return "Japanese";
   return "English";
 }

@@ -36,6 +36,13 @@ const CASES = [
   ["CP6", "20th Anniversary", "Japanese"],
   ["SM1", "Collection Sun", "Japanese"],
 
+  // Japanese promos: "<era>-P". English promos never take that shape.
+  ["XY-P", "XY Promos", "Japanese"],
+  ["S-P", "Sword & Shield Promos", "Japanese"],
+  ["SM-P", "Sun & Moon Promos", "Japanese"],
+  ["SV-P", "Scarlet & Violet Promos", "Japanese"],
+  ["PCG-P", "PCG Promos", "Japanese"],
+
   // Modern Japanese, caught by the lowercase letter.
   ["m5", "Abyss Eye", "Japanese"],
   ["m1L", "Mega Brave", "Japanese"],
@@ -81,7 +88,14 @@ const CASES = [
   ["HS", "HeartGold & SoulSilver", "English"],
   ["UD", "Undaunted", "English"],
   ["TM", "Triumphant", "English"],
-  ["UF", "EX Unseen Forces", "English"]
+  ["UF", "EX Unseen Forces", "English"],
+  ["SWSH", "SWSH Black Star Promos", "English"],
+  ["SVP", "SV Black Star Promos", "English"],
+  ["XYPR", "XY Black Star Promos", "English"],
+  ["NP", "Nintendo Black Star Promos", "English"],
+  ["PLAY", "PLAY Promos", "English"],
+  ["BEST", "Best of Game Cards Promos", "English"],
+  ["PPS3", "Play! Pokémon Prize Pack Series Three", "English"]
 ];
 
 let failed = 0;

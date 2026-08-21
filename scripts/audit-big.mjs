@@ -29,7 +29,9 @@ const gbp = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 
 // Weighted toward the rarities people actually pay for, per the brief to avoid
 // cheap cards, while keeping enough of the commoner chase tiers to notice if
-// something only breaks there.
+// something only breaks there. Every tier-0 and tier-1 card, half the ultras,
+// a third of the rest — roughly 290 of the 455 in the English set, which is
+// the 200-300 the brief asked for without letting the cheap tiers dominate.
 const ALL = JSON.parse(readFileSync(process.env.BIGSET || join(HERE, "bigset.json"), "utf8"));
 const TIER = (r) => /special illustration|secret|hyper|amazing|shiny/i.test(r) ? 0
   : /illustration rare|art rare/i.test(r) ? 1
@@ -37,7 +39,7 @@ const TIER = (r) => /special illustration|secret|hyper|amazing|shiny/i.test(r) ?
 const pick = [];
 for (const tier of [0, 1, 2, 3]) {
   const g = ALL.filter((c) => TIER(c.rarity) === tier);
-  pick.push(...(tier <= 1 ? g : g.filter((_, i) => i % (tier === 2 ? 4 : 6) === 0)));
+  pick.push(...(tier <= 1 ? g : g.filter((_, i) => i % (tier === 2 ? 2 : 3) === 0)));
 }
 const CARDS = pick.slice(0, LIMIT).map((c) => ({ ...c, q: `${c.name} ${c.number} ${c.set}` }));
 
