@@ -25,6 +25,8 @@
  * date and rewritten as "Apr-99". repairExcelDateMangling() below detects
  * and reverses that specific, confirmed pattern.
  */
+import CompFinderPricing from "./pricing.js";
+
 const CardUploaderCsv = (() => {
 
   const GENERIC_SET_VALUES = new Set([
@@ -210,4 +212,4 @@ const CardUploaderCsv = (() => {
   return { parseCsv, rowsToObjects, mapConditionLabel, extractItems, buildQueryFromItem, GENERIC_SET_VALUES };
 })();
 
-if (typeof module !== "undefined") module.exports = CardUploaderCsv;
+export default CardUploaderCsv;

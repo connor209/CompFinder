@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import SoldCompsApi from "@compfinder/core/soldcomps.js";
 
+// How long to wait on SoldComps before giving up on one request.
+const SOLDCOMPS_TIMEOUT_MS = 20_000;
+
 /**
  * Replaces background.js's fetchSoldComps message handler. Same job — call
  * SoldComps with the right key, normalize the response — but the key now
@@ -43,8 +46,13 @@ export async function POST(request) {
     );
   }
 
-  const body = await request.json();
-  const { query, options = {} } = body;
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: "Request body wasn't valid JSON." }, { status: 400 });
+  }
+  const { query, options = {} } = body || {};
   if (!query) {
     return NextResponse.json({ ok: false, error: "Missing search query." }, { status: 400 });
   }
@@ -85,8 +93,26 @@ async function fetchSoldComps(apiKey, query, options) {
 
   let response;
   try {
-    response = await fetch(fullUrl, { headers: { Authorization: `Bearer ${apiKey}` } });
+    response = await fetch(fullUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      // Without this, a SoldComps request that never answers holds this
+      // function open until the platform kills it, and the batch that's
+      // waiting on it sits on one card with no error and no way forward.
+      // A real search answers in a second or two, so 20s is generous.
+      signal: AbortSignal.timeout(SOLDCOMPS_TIMEOUT_MS)
+    });
   } catch (networkErr) {
+    // Deliberately NOT flagged retryable: each attempt costs the full 20s,
+    // so retrying an unresponsive API twice would stall a batch for a
+    // minute per card. Failing the row fast lets the caller's
+    // maxConsecutiveFailures guard stop the run in ~1 minute instead.
+    if (networkErr.name === "TimeoutError" || networkErr.name === "AbortError") {
+      const e = new Error(
+        `SoldComps didn't respond within ${Math.round(SOLDCOMPS_TIMEOUT_MS / 1000)}s — treating it as unavailable rather than waiting indefinitely.`
+      );
+      e.httpStatus = 504;
+      throw e;
+    }
     throw new Error(`Network error calling SoldComps: ${networkErr.message}`);
   }
 
@@ -131,7 +157,15 @@ async function fetchSoldComps(apiKey, query, options) {
   let json;
   try {
     json = await response.json();
-  } catch {
+  } catch (parseErr) {
+    // The timeout signal covers the body stream too, so a response whose
+    // headers arrived but whose body stalls lands here — report that as the
+    // timeout it is, not as a change in the API's shape.
+    if (parseErr.name === "TimeoutError" || parseErr.name === "AbortError") {
+      const e = new Error(`SoldComps started replying but didn't finish within ${Math.round(SOLDCOMPS_TIMEOUT_MS / 1000)}s.`);
+      e.httpStatus = 504;
+      throw e;
+    }
     throw new Error("SoldComps returned a response that wasn't valid JSON — the API may have changed shape.");
   }
 
