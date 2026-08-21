@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import SoldCompsApi from "@compfinder/core/soldcomps.js";
 import { createServiceClient } from "@/lib/supabase";
 
@@ -22,9 +22,40 @@ import { createServiceClient } from "@/lib/supabase";
 const TTL_SECONDS = { sold: 24 * 60 * 60, active: 2 * 60 * 60 };
 
 // Generous enough that no real person hits it, tight enough that a scraper
-// can't run up the bill on distinct queries. Cache hits are counted too:
-// cheap for us, but still a signal of automated traffic.
-const MAX_REQUESTS_PER_HOUR = 120;
+// can't run up the bill on distinct queries. Tunable without a code change,
+// but the default is the number to keep for real visitors — raising it for
+// everyone to let one trusted caller through would be trading the protection
+// for the convenience. That's what AUDIT_TOKEN below is for instead.
+const MAX_REQUESTS_PER_HOUR = Number(process.env.PUBLIC_RATE_LIMIT_PER_HOUR) > 0
+  ? Number(process.env.PUBLIC_RATE_LIMIT_PER_HOUR)
+  : 120;
+
+/**
+ * Shared secret that exempts a caller from the per-IP limit — for our own
+ * audit runs (scripts/audit-public.mjs), which deliberately make a hundred
+ * distinct searches in a few minutes and would otherwise be indistinguishable
+ * from the abuse the limit exists to stop.
+ *
+ * It exempts from the LIMIT only. The cache still runs first, so an audit
+ * re-run costs no upstream calls, and every other guard still applies.
+ * Unset means no bypass exists at all — an absent or empty token can never
+ * match, so leaving it unconfigured is the safe default rather than an
+ * accidental open door.
+ */
+const AUDIT_TOKEN = process.env.AUDIT_TOKEN || "";
+
+function isTrustedCaller(request) {
+  if (!AUDIT_TOKEN) return false;
+  const presented = request.headers.get("x-compfinder-audit") || "";
+  if (presented.length !== AUDIT_TOKEN.length) return false;
+  // Constant-time compare: a length-safe equality check here stops the token
+  // being recovered a character at a time from response timing.
+  try {
+    return timingSafeEqual(Buffer.from(presented), Buffer.from(AUDIT_TOKEN));
+  } catch {
+    return false;
+  }
+}
 
 const QUERY_OPTIONS = { ebaySite: "ebay.co.uk", itemLocation: "worldwide" };
 
@@ -114,17 +145,20 @@ export async function POST(request) {
   }
 
   // --- rate limit, on the path that spends money ---------------------------
+  const trusted = isTrustedCaller(request);
   const windowStart = new Date();
   windowStart.setMinutes(0, 0, 0);
+  // Still counted for a trusted caller — the number is useful for seeing what
+  // an audit actually cost — but not enforced against them.
   const { data: count, error: limitError } = await supabase.rpc("bump_rate_limit", {
-    p_ip: clientIp(request),
+    p_ip: trusted ? "audit" : clientIp(request),
     p_window: windowStart.toISOString()
   });
   // A failure here shouldn't take the page down, but it also shouldn't be a
   // silent way past the limit — log it and continue rather than fail open
   // quietly.
   if (limitError) console.error("rate limit check failed:", limitError.message);
-  if (!limitError && count > MAX_REQUESTS_PER_HOUR) {
+  if (!trusted && !limitError && count > MAX_REQUESTS_PER_HOUR) {
     return NextResponse.json(
       { ok: false, error: "You've made a lot of searches this hour. Try again shortly." },
       { status: 429 }

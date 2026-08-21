@@ -104,7 +104,13 @@ const gbp = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 async function price(query, sold) {
   const res = await fetch(`${BASE}/api/price`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      // Exempts the run from the per-IP limit when AUDIT_TOKEN matches the
+      // deployment's. Without it a hundred distinct searches trip the limit
+      // partway through, which is the limit doing its job.
+      ...(process.env.AUDIT_TOKEN ? { "x-compfinder-audit": process.env.AUDIT_TOKEN } : {})
+    },
     body: JSON.stringify({ query, sold, soldAfterDays: 90 })
   });
   const json = await res.json().catch(() => ({ ok: false, error: `non-JSON (HTTP ${res.status})` }));
