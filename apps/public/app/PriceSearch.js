@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
+import { buildCompTokens } from "@/lib/tokens";
 import TrendChart from "./TrendChart";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -157,13 +158,10 @@ export default function PriceSearch() {
     if (!data) return null;
     const { card, comps } = data;
 
-    // Name tokens come from the typed query; the collector number and set come
-    // from the catalogue card when one was picked. Passing those is what stops
-    // a search for Giratina V 186 pricing itself off Giratina V 130 comps —
-    // the engine can only filter on a number and set if it is given them.
-    const nameTokens = CompFinderPricing.extractNameTokens(
-      CompFinderPricing.simplifyTitle(data.query, settings.stripWords)
-    );
+    // Required words come from the card name plus its collector number — NOT
+    // from the search query, which carries a set code that no eBay title
+    // contains. See lib/tokens.js.
+    const nameTokens = buildCompTokens(card, data.query);
     const cardNumber = card.number || null;
     const cardSet = card.set || null;
 
@@ -173,6 +171,8 @@ export default function PriceSearch() {
     const used = rec.included || [];
     const totals = used.map((c) => c.totalPence);
     const med = totals.length ? median(totals) : null;
+    const lo = totals.length ? Math.min(...totals) : null;
+    const hi = totals.length ? Math.max(...totals) : null;
 
     const chart = used
       .filter((c) => c._source && c._source.endedAt)
@@ -213,12 +213,41 @@ export default function PriceSearch() {
       .sort((a, b) => a.totalPence - b.totalPence)
       .slice(0, 6);
 
+    // --- how much to trust this result -------------------------------------
+    // An audit of 50 searches showed three failure shapes worth telling the
+    // visitor about rather than quietly pricing through.
+
+    // 1. UK-only starves the sample. Searching ebay.co.uk returns mostly
+    //    GBP listings from overseas sellers — across the audit only 29% of
+    //    comps were UK-domestic — so a UK-only price can rest on two sales
+    //    when a worldwide one would rest on twenty.
+    const wideUsed = region === "uk"
+      ? CompFinderPricing.recommend(
+          preFilter(comps, { region: "ww", condition }), settings, nameTokens, "sold", cardNumber, cardSet
+        ).included.length
+      : used.length;
+    const thinUk = region === "uk" && used.length < 3 && wideUsed > used.length;
+
+    // 2. A search that matched very different cards. "Pikachu" priced comps
+    //    from £1.61 to £269.99 — a median across those is arithmetic, not a
+    //    price, and the honest move is to say so and ask for a specific card.
+    const span = lo && hi && lo > 0 ? hi / lo : null;
+    const tooBroad = span != null && span > 10;
+
+    // 3. Asking prices that bear no relation to sold. On broad searches the
+    //    active side fills with cheap listings of other cards, giving
+    //    "£7.49 asking" under a £136 sold price. Better to withhold the
+    //    figure than to print something that reads as a market signal.
+    const askRatio = rec.finalPence && activeRec?.finalPence ? activeRec.finalPence / rec.finalPence : null;
+    const askingUnreliable = askRatio != null && (askRatio > 5 || askRatio < 0.2);
+
     return {
       rec, med, chart, sales, dropped, buy, lastSold,
+      thinUk, wideUsed, tooBroad, span, askingUnreliable,
       activeMedian: activeRec?.finalPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
-      lo: totals.length ? Math.min(...totals) : null,
-      hi: totals.length ? Math.max(...totals) : null,
+      lo,
+      hi,
       used: used.length,
       excludedCount: (rec.excluded || []).length,
       graded: rec.graded || [],
@@ -319,6 +348,25 @@ export default function PriceSearch() {
 
       {view && !loading && (
         <>
+          {(view.thinUk || view.tooBroad) && (
+            <div className="caveats">
+              {view.thinUk && (
+                <div className="caveat">
+                  <strong>Only {view.used} UK sale{view.used === 1 ? "" : "s"} in this window.</strong>{" "}
+                  Most eBay UK listings for cards come from overseas sellers, priced in pounds. Including them
+                  gives {view.wideUsed} comps instead.{" "}
+                  <button className="exlink" onClick={() => setRegion("ww")}>Switch to worldwide</button>
+                </div>
+              )}
+              {view.tooBroad && (
+                <div className="caveat">
+                  <strong>This search matched very different cards</strong> — from {pounds(view.lo)} to{" "}
+                  {pounds(view.hi)}. Pick the exact card from the suggestions to get a price you can rely on.
+                </div>
+              )}
+            </div>
+          )}
+
           <article className="panel">
             <div className="eyebrow">{data.card.set || "Sold comps"}{data.card.rarity ? ` · ${data.card.rarity}` : ""}</div>
             <h2 className="heroname">{data.card.name}</h2>
@@ -330,7 +378,9 @@ export default function PriceSearch() {
               {view.used > 0
                 ? <>Recency-weighted from <b>{view.used}</b> UK sold comps over the last 90 days · median <b>{pounds(view.med)}</b>.</>
                 : "No sold comps found in the last 90 days for that search — try the card name plus its collector number."}
-              {view.activeMedian != null ? <> Currently listed around <b>{pounds(view.activeMedian)}</b> asking.</> : null}
+              {view.activeMedian != null && !view.askingUnreliable ? (
+                <> Currently listed around <b>{pounds(view.activeMedian)}</b> asking.</>
+              ) : null}
             </p>
             {view.used > 0 && (
               <div className="stats">
@@ -355,6 +405,11 @@ export default function PriceSearch() {
               <p className="hint"><span className="spinner" /> &nbsp;Checking current asking prices…</p>
             ) : view.buy.length ? (
               <>
+                {view.askingUnreliable && (
+                  <p className="hint" style={{ marginTop: 0 }}>
+                    Asking prices for this search vary too widely to summarise — these are the closest matches we found.
+                  </p>
+                )}
                 <div className="rows">
                   {view.buy.map((c, i) => {
                     const url = c._source.url;
