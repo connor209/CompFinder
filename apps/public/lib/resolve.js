@@ -17,11 +17,38 @@ import { detectLanguage } from "@compfinder/core/catalog.js";
  * code (CSV3C, CBB2C, 151C) — bare "ASC" for Ascended Heroes has no digit and
  * stays English.
  *
- * Older Japanese sets whose codes are all-caps (XY7, BW7, MA5) are missed.
- * That's a knowing trade: they matter far less to a modern price checker than
- * the current sets this does catch, and a wrong guess there costs a ranking
- * position rather than a wrong price.
+ * That left the pre-2016 Japanese sets, whose codes are all-caps. They were
+ * costing real accuracy, not just ranking: of the 184-card audit set, the
+ * cards that ended up unpriceable or priced off a single comp were dominated
+ * by MA5 Shadow Threat, MA4 Void Blast, XY7 Bandit Ring, XY6 Emerald Break
+ * and BW7 Plasma Gale — sets with no English print at all, so eBay returns
+ * either nothing that matches or one stray import.
+ *
+ * A bare "contains a digit" rule would have caught them and also caught the
+ * English sets it must not: BS2 (Base Set 2), N1-N4 (Neo), G1/G2 (Gym). So
+ * this matches the Japanese code FAMILIES instead, each checked against the
+ * English codes of the same era to be sure they can't collide:
+ *
+ *   PCG1-12   JP e-Card/PCG        English era codes: EX, AQ, SK
+ *   ADV1-5    JP ADV               English: RS, SS, DR, MA, HL, FL...
+ *   DP1-6     JP Diamond & Pearl   English: DP, MT, SW, GE, MD, LA, SF
+ *   L1-L5/LL  JP HGSS "LEGEND"     English: HS, UL, UD, TM, CL
+ *   BW1-9     JP Black & White     English: BLW, EPO, NVI, NXD, DEX, PLS...
+ *   XY1-12    JP XY                English: XY, FLF, FFI, PHF, PRC, AOR...
+ *   SM1-12    JP Sun & Moon        English: SUM, GRI, BUS, CIN, UPR, LOT...
+ *   CP1-6     JP XY concept packs  English: CPA (Champion's Path, no digit)
+ *   WCP       JP World Champions Pack — named, no English equivalent
+ *
+ * MA{digit} is the odd one: MA1 is literally called "Mega Evolution ID/TH",
+ * so the family is the Indonesian/Thai line, not Japanese. It is reported as
+ * "Asian" rather than guessed at — all that matters downstream is that it is
+ * not English. Note the deliberate digit: bare "MA" is English EX Team Magma
+ * vs Team Aqua and must stay English.
  */
+const JP_LEGACY_CODE = /^(PCG|ADV|DP|BW|XY|SM|CP|L)\d/;
+const JP_LEGACY_EXACT = new Set(["LL", "WCP"]);
+const ASIAN_CODE = /^MA\d/;
+
 export function languageOf(row) {
   const named = detectLanguage(row.expansion);
   if (named !== "English") return named;
@@ -31,6 +58,8 @@ export function languageOf(row) {
   // testing for lowercase before this would label them Japanese.
   if (/\d/.test(code) && /C$/.test(code)) return "Chinese";
   if (/[a-z]/.test(code)) return "Japanese";
+  if (ASIAN_CODE.test(code)) return "Asian";
+  if (JP_LEGACY_CODE.test(code) || JP_LEGACY_EXACT.has(code)) return "Japanese";
   return "English";
 }
 
