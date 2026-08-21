@@ -9,6 +9,7 @@ import { MOVERS } from "./movers.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { buildCompTokens } from "../apps/public/lib/tokens.js";
 import { UK, splitByMarket } from "../apps/public/lib/markets.js";
+import { settingsForCard } from "../apps/public/lib/settings.js";
 
 const S = CompFinderPricing.DEFAULT_SETTINGS;
 const args = process.argv.slice(2);
@@ -34,7 +35,8 @@ function score(card, comps) {
   const { chosen, rest } = splitByMarket(comps, UK);
   const all = [...chosen, ...rest];
   if (!all.length) return { rec: null, used: 0, viaName: false };
-  let rec = CompFinderPricing.recommend(all, S, tokens, "sold", card.number, card.set);
+  const cs = settingsForCard(card);
+  let rec = CompFinderPricing.recommend(all, cs, tokens, "sold", card.number, card.set);
   let viaName = false;
   if ((rec.included || []).length === 0) {
     const nameOnly = buildCompTokens({ name: card.name }, card.q);
@@ -55,7 +57,7 @@ for (const card of list) {
   if (!res.ok) { console.log(`${card.name.slice(0,34).padEnd(35)} FETCH FAILED`); continue; }
   const comps = res.comps || [];
   const { rec, used, viaName } = score(card, comps);
-  const ours = rec?.finalPence ?? null;
+  const ours = rec?.rawPence ?? null;
   const ratio = ours && card.pulse ? ours / card.pulse : null;
 
   const notes = [];
