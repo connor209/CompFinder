@@ -7,6 +7,8 @@ import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { buildCompTokens, dropWrongSetTotal } from "@/lib/tokens";
 import { UK, marketsIn, splitByMarket } from "@/lib/markets";
+import { assessAsk } from "@/lib/verdict";
+import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import TrendChart from "./TrendChart";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -56,11 +58,39 @@ export default function PriceSearch() {
   const [condition, setCondition] = useState("any");
   const [soldWindow, setSoldWindow] = useState(90);
   const [showExcluded, setShowExcluded] = useState(false);
+  const [choices, setChoices] = useState(null); // set when several cards match
+  const [recent, setRecent] = useState([]);
+  const [ask, setAsk] = useState("");
   const comboRef = useRef(null);
   // Guards against a slow earlier search landing after a newer one and
   // overwriting it — easy to hit when someone types, waits, then picks a
   // suggestion instead.
   const runId = useRef(0);
+
+  // Recent searches live in localStorage — no account, nothing sent anywhere.
+  // At a show you're comparing several cards at one table, and re-running a
+  // cached search is ~330ms against 1.7-2.7s for a cold one, so this is the
+  // difference between checking four cards and checking one.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("cf-recent");
+      if (raw) setRecent(JSON.parse(raw).slice(0, 30));
+    } catch {
+      /* private browsing, cleared storage — the feature is a convenience */
+    }
+  }, []);
+
+  function remember(card, query, pence) {
+    setRecent((prev) => {
+      const key = (query || "").toLowerCase();
+      const next = [
+        { q: query, name: card.name || query, number: card.number || null, set: card.set || null, pence },
+        ...prev.filter((r) => (r.q || "").toLowerCase() !== key)
+      ].slice(0, 30);
+      try { localStorage.setItem("cf-recent", JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
 
   useEffect(() => {
     function onDocClick(e) {
@@ -86,8 +116,13 @@ export default function PriceSearch() {
     }
   }
 
+  /**
+   * The eBay search text for a resolved card: name, number and the SET NAME —
+   * not the set code. Sellers write "Lost Origin", never "LOR", and the set
+   * name is what makes SoldComps return the right listings in the first place.
+   */
   function queryForCard(card) {
-    return `${card.name} ${card.number || ""} ${card.code || ""}`.replace(/\s+/g, " ").trim();
+    return `${card.name} ${card.number || ""} ${card.set || ""}`.replace(/\s+/g, " ").trim();
   }
 
   /**
@@ -124,11 +159,40 @@ export default function PriceSearch() {
     });
   }
 
+  /**
+   * Resolve the typed text to a catalogue card BEFORE searching.
+   *
+   * The set name isn't decoration: measured across 30 cards, "Mew ex 232/091"
+   * priced at £794 with the set in the query and £546 without, because
+   * SoldComps returns a different result set. Filtering downstream can't
+   * recover a listing that was never fetched, so the query itself has to be
+   * specific — which means knowing which card is meant first.
+   */
+  async function search(text) {
+    const typed = (text || "").trim();
+    if (!typed) return;
+    setChoices(null);
+    try {
+      const res = await fetch(`/api/resolve?q=${encodeURIComponent(typed)}`).then((r) => r.json());
+      const list = (res && res.candidates) || [];
+      if (list.length && res.confident) return run(queryForCard(list[0]), list[0]);
+      // Several genuine possibilities — 223/165 is a 151 Charizard and 223/197
+      // an Obsidian Flames one. Guessing prices the wrong card with total
+      // confidence, so ask instead.
+      if (list.length > 1) return setChoices(list);
+      if (list.length === 1) return run(queryForCard(list[0]), list[0]);
+    } catch {
+      /* resolver is an optimisation, not a gate — fall through to raw text */
+    }
+    return run(typed);
+  }
+
   async function run(searchText, card = null, windowDays = soldWindow) {
     const query = (searchText || "").trim();
     if (!query) return;
     const id = ++runId.current;
 
+    setChoices(null);
     setOpenSug(false);
     setLoading(true);
     setError("");
@@ -146,7 +210,15 @@ export default function PriceSearch() {
       if (id !== runId.current) return;
       // Raw comps are kept as fetched; filtering and scoring happen in the
       // memo below so the controls can re-run them without a new request.
-      setData({ card: card || { name: query }, query, comps });
+      const resolved = card || { name: query };
+      setData({ card: resolved, query, comps });
+      // Recorded from the raw comps rather than the rendered price so the chip
+      // still shows something useful if the visitor then changes market or
+      // condition, which re-scores but doesn't re-search.
+      const quick = CompFinderPricing.recommend(
+        comps, settings, buildCompTokens(resolved, query), "sold", resolved.number || null, resolved.set || null
+      );
+      remember(resolved, query, quick.finalPence ?? null);
     } catch (err) {
       if (id === runId.current) setError(err.message || "Something went wrong pricing that card.");
     } finally {
@@ -299,8 +371,22 @@ export default function PriceSearch() {
     const askRatio = rec.finalPence && activeRec?.finalPence ? activeRec.finalPence / rec.finalPence : null;
     const askingUnreliable = askRatio != null && (askRatio > 5 || askRatio < 0.2);
 
+    const liquidity = CompFinderLiquidity.assess({
+      soldComps: used,
+      activeCount: activeRec ? (activeRec.included || []).length : null,
+      windowDays: soldWindow,
+      // Every result set in the 100-card audit hit the ~40 page cap, so the
+      // rate has to be read from the span the sales cover, not the window.
+      saturated: comps.length >= 39
+    });
+
+    const askPence = ask ? Math.round(parseFloat(String(ask).replace(/[^0-9.]/g, "")) * 100) : null;
+    const verdict = askPence
+      ? assessAsk({ askPence, comps: used, marketPence: rec.finalPence, liquidity })
+      : null;
+
     return {
-      rec, med, chart, sales, dropped, buy, lastSold,
+      rec, med, chart, sales, dropped, buy, lastSold, liquidity, verdict,
       thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers,
       markets, market, restPence, restUsed, premium, conditionCounts,
       activeMedian: activeRec?.finalPence ?? null,
@@ -313,10 +399,25 @@ export default function PriceSearch() {
       matchedCard: !!(cardNumber || cardSet)
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, active, market, condition]);
+  }, [data, active, market, condition, ask, soldWindow]);
 
   return (
     <>
+      {recent.length > 0 && (
+        <div className="recent" aria-label="Recent searches">
+          <span className="recent-label">Recent</span>
+          <div className="recent-row">
+            {recent.map((r, i) => (
+              <button key={i} className="chip" onClick={() => { setQ(r.q); run(r.q, r); }} title={r.q}>
+                <span className="chip-name">{r.name}</span>
+                {r.number ? <span className="chip-no">#{r.number}</span> : null}
+                {r.pence != null ? <span className="chip-price">{pounds(r.pence)}</span> : null}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <section className="searchcard">
         <div className="searchrow">
           <div className="dd-combo" ref={comboRef} style={{ flex: "1 1 auto", minWidth: 0, position: "relative" }}>
@@ -325,7 +426,7 @@ export default function PriceSearch() {
               <input
                 value={q}
                 onChange={(e) => onInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") run(q); if (e.key === "Escape") setOpenSug(false); }}
+                onKeyDown={(e) => { if (e.key === "Enter") search(q); if (e.key === "Escape") setOpenSug(false); }}
                 placeholder="Search a card — e.g. Charizard ex 199/165"
                 aria-label="Search a card"
                 autoComplete="off"
@@ -350,7 +451,7 @@ export default function PriceSearch() {
               </div>
             )}
           </div>
-          <button className="btn btn-primary" onClick={() => run(q)} disabled={loading}>
+          <button className="btn btn-primary" onClick={() => search(q)} disabled={loading}>
             {loading ? "Checking…" : "Check price"}
           </button>
         </div>
@@ -417,11 +518,35 @@ export default function PriceSearch() {
           </div>
         </div>
         <p className="fhint">
-          Region and condition re-filter the results instantly. Pick a card from the suggestions rather than
-          typing free text — it lets us match on the collector number and set, which is what keeps a different
-          print of the same card out of the price.
+          Type a name and number — &ldquo;Charizard ex 223&rdquo; is enough. We look the card up first so the
+          eBay search knows which set it&rsquo;s from, and ask you which one if the number appears in more than
+          one. Market and condition re-filter instantly, without another lookup.
         </p>
       </section>
+
+      {choices && !loading && (
+        <section className="panel">
+          <div className="panel-head">
+            <h3>Which one?</h3>
+            <span className="badge">{choices.length} matches</span>
+          </div>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Same name and number, different sets — they can be worth very different amounts.
+          </p>
+          <div className="picks">
+            {choices.map((c) => (
+              <button key={c.id} className="pick" onClick={() => { setQ(queryForCard(c)); run(queryForCard(c), c); }}>
+                <span className="pick-name">{c.name}</span>
+                <span className="pick-set">{c.set}</span>
+                <span className="pick-meta">
+                  {c.number ? <span className="mono">#{c.number}</span> : null}
+                  {c.rarity ? <span className="pick-rar">{c.rarity}</span> : null}
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {loading && <div className="panel"><span className="spinner" /> &nbsp;Pricing from recent sold listings…</div>}
       {error && !loading && <div className="panel"><p className="hint">{error}</p></div>}
@@ -498,12 +623,43 @@ export default function PriceSearch() {
                 <> Currently listed around <b>{pounds(view.activeMedian)}</b> asking.</>
               ) : null}
             </p>
+            {view.rec.finalPence != null && (
+              <div className={`ask${view.verdict ? " ask-" + view.verdict.tone : ""}`}>
+                <label className="ask-in">
+                  <span>They&rsquo;re asking</span>
+                  <span className="ask-cur">£</span>
+                  <input
+                    value={ask}
+                    onChange={(e) => setAsk(e.target.value)}
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    aria-label="Asking price"
+                  />
+                  {ask ? <button className="ask-clear" onClick={() => setAsk("")} aria-label="Clear">✕</button> : null}
+                </label>
+                {view.verdict && (
+                  <div className="ask-out">
+                    <div className="ask-call">
+                      {view.verdict.call}
+                      <span className="ask-pct">
+                        {view.verdict.vsMarket > 0 ? "+" : ""}{Math.round(view.verdict.vsMarket * 100)}% vs market
+                      </span>
+                    </div>
+                    <ul className="ask-notes">
+                      {view.verdict.notes.map((n, i) => <li key={i}>{n}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            )}
+
             {view.used > 0 && (
               <div className="stats">
                 <div className="stat"><div className="k">Median 90d</div><div className="v">{pounds(view.med)}</div></div>
                 <div className="stat"><div className="k">Range</div><div className="v">{pounds(view.lo)}–{pounds(view.hi)}</div></div>
                 <div className="stat"><div className="k">Last sold</div><div className="v">{pounds(view.lastSold)}</div></div>
                 <div className="stat"><div className="k">Comps used</div><div className="v">{view.used}</div></div>
+                <div className="stat"><div className="k">Sells</div><div className="v vsm">{view.liquidity.label}</div></div>
               </div>
             )}
           </article>
