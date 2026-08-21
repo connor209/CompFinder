@@ -148,7 +148,39 @@ export async function POST(request) {
   return NextResponse.json({ ok: true, comps: parsed.comps, cached: false, fetchedAt: new Date().toISOString() });
 }
 
+// SoldComps' scraper returns 5xx on a query often enough that the business
+// app treats it as routine and retries with backoff (see the isRateLimited
+// path in apps/app). The public page has to do the same or a visitor sees a
+// dead end where the app would have quietly recovered — a single 502 was
+// exactly how this surfaced on the first live search.
+//
+// Only 5xx and 429 are retried: a 4xx won't change on a second attempt and
+// every retry spends quota. Timeouts are deliberately NOT retried — each one
+// costs the full per-attempt budget, and the visitor is watching a spinner.
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const RETRY_DELAYS_MS = [600, 1500];
+// Shorter than the app's 20s: a batch run can afford to wait, a person can't.
+const ATTEMPT_TIMEOUT_MS = 10000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function fetchFromSoldComps(apiKey, query, sold) {
+  let lastError;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    try {
+      return await attemptSoldComps(apiKey, query, sold);
+    } catch (err) {
+      lastError = err;
+      const retryable = err.httpStatus && RETRY_STATUSES.has(err.httpStatus);
+      if (!retryable || attempt === RETRY_DELAYS_MS.length) break;
+      console.warn(`SoldComps ${err.httpStatus} on "${query}" — retry ${attempt + 1}`);
+      await sleep(RETRY_DELAYS_MS[attempt]);
+    }
+  }
+  throw lastError;
+}
+
+async function attemptSoldComps(apiKey, query, sold) {
   const url = SoldCompsApi.buildRequestUrl({
     keyword: query,
     count: 240,
@@ -161,12 +193,23 @@ async function fetchFromSoldComps(apiKey, query, sold) {
   });
   const fullUrl = sold ? url : `${url}&sold=false`;
 
-  const response = await fetch(fullUrl, {
-    headers: { Authorization: `Bearer ${apiKey}` },
-    // Without this a hung upstream holds the function open until the platform
-    // kills it, and the visitor watches a spinner the whole time.
-    signal: AbortSignal.timeout(20000)
-  });
+  let response;
+  try {
+    response = await fetch(fullUrl, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      // Without this a hung upstream holds the function open until the platform
+      // kills it, and the visitor watches a spinner the whole time.
+      signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS)
+    });
+  } catch (networkErr) {
+    // No httpStatus, so the retry loop won't spend another attempt on it.
+    const e = new Error(
+      networkErr.name === "TimeoutError" || networkErr.name === "AbortError"
+        ? `SoldComps didn't respond within ${ATTEMPT_TIMEOUT_MS / 1000}s`
+        : `Network error calling SoldComps: ${networkErr.message}`
+    );
+    throw e;
+  }
 
   if (!response.ok) {
     const e = new Error(`SoldComps returned HTTP ${response.status}`);
