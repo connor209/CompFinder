@@ -17,6 +17,7 @@
  * Only cache misses count against the API rate limit, so re-running after a fix
  * is close to free for cards already seen.
  */
+import { createPacer } from "./lib/pace.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import { buildCompTokens } from "../apps/public/lib/tokens.js";
@@ -98,10 +99,21 @@ const CARDS = [
   { q: "Pidgey 57/102 Base Set shadowless", tag: "obscure" }
 ];
 
+const pacer = createPacer({ onWait: (msg) => console.log(`      ⏳ ${msg}`) });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const gbp = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 
 async function price(query, sold) {
+  // Every call goes through the pacer: it enforces the gap, the hourly
+  // ceiling, and a real backoff if the server rate-limits us anyway.
+  const { status, body } = await pacer.call(async () => {
+    const r = await rawPrice(query, sold);
+    return { status: r.status, body: r.body };
+  });
+  return { status, ...body };
+}
+
+async function rawPrice(query, sold) {
   const res = await fetch(`${BASE}/api/price`, {
     method: "POST",
     headers: {
@@ -114,7 +126,7 @@ async function price(query, sold) {
     body: JSON.stringify({ query, sold, soldAfterDays: 90 })
   });
   const json = await res.json().catch(() => ({ ok: false, error: `non-JSON (HTTP ${res.status})` }));
-  return { status: res.status, ...json };
+  return { status: res.status, body: json };
 }
 
 /** Mirrors the page's UK-only pre-filter, so the audit scores what a visitor sees. */
@@ -200,9 +212,7 @@ async function main() {
   for (const [i, card] of list.entries()) {
     process.stdout.write(`[${String(i + 1).padStart(2)}/${list.length}] ${card.q.padEnd(38)} `);
     const sold = await price(card.q, true);
-    await sleep(DELAY_MS);
     const active = await price(card.q, false);
-    await sleep(DELAY_MS);
 
     if (!sold.ok) {
       console.log(`FETCH FAILED — ${sold.error}`);
@@ -273,6 +283,9 @@ function report(results) {
 
   const allReasons = {};
   for (const r of results) for (const [k, v] of Object.entries(r.excludedReasons || {})) allReasons[k] = (allReasons[k] || 0) + v;
+  const pace = pacer.stats();
+  console.log(`\nPacing: ${pace.served} calls made, ${pace.retried} rate-limit backoffs, ${pace.waitedSeconds}s spent waiting.`);
+
   console.log("\nExclusion reasons across the run:");
   for (const [k, v] of Object.entries(allReasons).sort((a, b) => b[1] - a[1])) console.log(`  ${String(v).padStart(4)}  ${k}`);
 }

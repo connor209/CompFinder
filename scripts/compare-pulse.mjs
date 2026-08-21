@@ -11,6 +11,7 @@
  *
  *   node scripts/compare-pulse.mjs [--url ...] [--limit N]
  */
+import { createPacer } from "./lib/pace.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import { buildCompTokens } from "../apps/public/lib/tokens.js";
@@ -56,10 +57,19 @@ const REFERENCE = [
   { name: "Ampharos",             number: "090/086", set: "Chaos Rising",  rarity: "IR",  pulse: 766,   vol30: 232 }
 ];
 
+const pacer = createPacer({ onWait: (msg) => console.log(`      ⏳ ${msg}`) });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const gbp = (p) => (p == null ? "—" : "£" + (p / 100).toFixed(2));
 
 async function price(query, sold) {
+  const { status, body } = await pacer.call(async () => {
+    const r = await rawPrice(query, sold);
+    return { status: r.status, body: r.body };
+  });
+  return { status, ...body };
+}
+
+async function rawPrice(query, sold) {
   const res = await fetch(`${BASE}/api/price`, {
     method: "POST",
     headers: {
@@ -71,7 +81,8 @@ async function price(query, sold) {
     },
     body: JSON.stringify({ query, sold, soldAfterDays: 90 })
   });
-  return res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  const json = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));
+  return { status: res.status, body: json };
 }
 
 function score(ref, comps, region) {
@@ -91,7 +102,6 @@ async function main() {
   for (const ref of list) {
     const query = `${ref.name} ${ref.number} ${ref.set}`;
     const sold = await price(query, true);
-    await sleep(200);
     if (!sold.ok) {
       console.log(`${(ref.name + " " + ref.number).padEnd(33)} FETCH FAILED ${sold.error}`);
       rows.push({ ref, failed: sold.error });
@@ -159,6 +169,9 @@ function report(rows) {
       console.log(`  ${(r.ref.name + " " + r.ref.number).padEnd(33)} ${r.fetched} fetched · ${JSON.stringify(reasons)}`);
     }
   }
+
+  const pace = pacer.stats();
+  console.log(`\nPacing: ${pace.served} calls made, ${pace.retried} rate-limit backoffs, ${pace.waitedSeconds}s spent waiting.`);
 
   // Volume: ours is a 90-day count, Pulse is 30-day. Compare like for like.
   const volRows = ok.filter((r) => r.ww.used > 0);
