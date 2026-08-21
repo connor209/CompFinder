@@ -5,6 +5,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { buildCompTokens } from "@/lib/tokens";
+import { UK, marketsIn, splitByMarket } from "@/lib/markets";
 import TrendChart from "./TrendChart";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -50,7 +51,7 @@ export default function PriceSearch() {
   // Region and condition re-filter comps we already hold, so changing them is
   // instant and costs no API call. Only the sold window changes the upstream
   // request, so only that one triggers a re-fetch.
-  const [region, setRegion] = useState("uk");
+  const [market, setMarket] = useState(UK);
   const [condition, setCondition] = useState("any");
   const [soldWindow, setSoldWindow] = useState(90);
   const [showExcluded, setShowExcluded] = useState(false);
@@ -93,25 +94,13 @@ export default function PriceSearch() {
    * them out. Runs before recommend() rather than after, so the price itself
    * responds to the controls instead of just the list underneath it.
    */
-  function preFilter(comps, { region, condition }) {
-    return comps
-      .filter((c) => {
-        // itemLocation is null for a UK-domestic seller and set for a
-        // cross-border one (see soldcomps.js), which is what "UK only" means.
-        if (region === "uk" && c.itemLocation) return false;
-        if (condition === "nm" && c.condition !== "NM") return false;
-        if (condition === "nodmg" && (c.condition === "HP" || c.condition === "DMG")) return false;
-        return true;
-      })
-      .map((c) =>
-        // Worldwide is an explicit instruction to price across borders, so the
-        // engine's own non-UK exclusion has to be told to stand down. The real
-        // location is kept for display — only the field the engine reads is
-        // cleared, and only when the visitor asked for it.
-        region === "ww" && c.itemLocation
-          ? { ...c, itemLocation: null, _displayLocation: c.itemLocation }
-          : c
-      );
+  /** Condition only — the market split is handled separately, by splitByMarket. */
+  function preFilter(comps, { condition }) {
+    return comps.filter((c) => {
+      if (condition === "nm" && c.condition !== "NM") return false;
+      if (condition === "nodmg" && (c.condition === "HP" || c.condition === "DMG")) return false;
+      return true;
+    });
   }
 
   async function run(searchText, card = null, windowDays = soldWindow) {
@@ -166,8 +155,14 @@ export default function PriceSearch() {
     const cardNumber = card.number || null;
     const cardSet = card.set || null;
 
-    const filtered = preFilter(comps, { region, condition });
-    let rec = CompFinderPricing.recommend(filtered, settings, nameTokens, "sold", cardNumber, cardSet);
+    const filtered = preFilter(comps, { condition });
+    const markets = marketsIn(filtered);
+    const { chosen, rest } = splitByMarket(filtered, market);
+
+    const priceFor = (pool, tokens = nameTokens, num = cardNumber) =>
+      pool.length ? CompFinderPricing.recommend(pool, settings, tokens, "sold", num, cardSet) : null;
+
+    let rec = priceFor(chosen) || CompFinderPricing.recommend([], settings, nameTokens, "sold", cardNumber, cardSet);
 
     // NUMBER FALLBACK. If requiring the collector number rejects every comp but
     // the name alone matches several, the number is far likelier to be wrong
@@ -178,7 +173,7 @@ export default function PriceSearch() {
     // pretending the number was honoured.
     let numberUnmatched = false;
     if ((rec.included || []).length === 0 && cardNumber) {
-      const byNameOnly = CompFinderPricing.recommend(filtered, settings, nameOnlyTokens, "sold", null, cardSet);
+      const byNameOnly = CompFinderPricing.recommend(chosen, settings, nameOnlyTokens, "sold", null, cardSet);
       if ((byNameOnly.included || []).length >= 3) {
         rec = byNameOnly;
         numberUnmatched = true;
@@ -230,7 +225,7 @@ export default function PriceSearch() {
     // Active listings get the same name/number/set treatment as sold comps.
     // Scoring them with no tokens at all is why "Buy one now" was offering
     // £2.60 copies of a different card.
-    const activeFiltered = preFilter(active.comps, { region, condition });
+    const activeFiltered = splitByMarket(preFilter(active.comps, { condition }), market).chosen;
     const activeRec = activeFiltered.length
       ? CompFinderPricing.recommend(activeFiltered, settings, nameTokens, "active", cardNumber, cardSet)
       : null;
@@ -240,6 +235,16 @@ export default function PriceSearch() {
       .sort((a, b) => a.totalPence - b.totalPence)
       .slice(0, 6);
 
+    // The other side of the split: everything NOT in the chosen market. Shown
+    // beside the headline rather than hidden behind a toggle, because on most
+    // cards it rests on several times more evidence — only a third of eBay UK
+    // sold listings are UK-domestic — and the gap between the two is itself
+    // worth knowing before you list or buy.
+    const restRec = priceFor(rest, numberUnmatched ? nameOnlyTokens : nameTokens, numberUnmatched ? null : cardNumber);
+    const restUsed = restRec ? (restRec.included || []).length : 0;
+    const restPence = restRec ? restRec.finalPence : null;
+    const premium = rec.finalPence && restPence ? rec.finalPence / restPence - 1 : null;
+
     // --- how much to trust this result -------------------------------------
     // An audit of 50 searches showed three failure shapes worth telling the
     // visitor about rather than quietly pricing through.
@@ -248,12 +253,7 @@ export default function PriceSearch() {
     //    GBP listings from overseas sellers — across the audit only 29% of
     //    comps were UK-domestic — so a UK-only price can rest on two sales
     //    when a worldwide one would rest on twenty.
-    const wideUsed = region === "uk"
-      ? CompFinderPricing.recommend(
-          preFilter(comps, { region: "ww", condition }), settings, nameTokens, "sold", cardNumber, cardSet
-        ).included.length
-      : used.length;
-    const thinUk = region === "uk" && used.length < 3 && wideUsed > used.length;
+    const thinHere = used.length < 3 && restUsed > used.length;
 
     // 2. A search that matched very different cards. "Pikachu" priced comps
     //    from £1.61 to £269.99 — a median across those is arithmetic, not a
@@ -270,7 +270,8 @@ export default function PriceSearch() {
 
     return {
       rec, med, chart, sales, dropped, buy, lastSold,
-      thinUk, wideUsed, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers,
+      thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers,
+      markets, market, restPence, restUsed, premium,
       activeMedian: activeRec?.finalPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
       lo,
@@ -281,7 +282,7 @@ export default function PriceSearch() {
       matchedCard: !!(cardNumber || cardSet)
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, active, region, condition]);
+  }, [data, active, market, condition]);
 
   return (
     <>
@@ -325,11 +326,17 @@ export default function PriceSearch() {
 
         <div className="filters">
           <div className="filter">
-            <span className="flabel">Region</span>
-            <div className="seg" role="group" aria-label="Region">
-              {[["uk", "🇬🇧 UK only"], ["ww", "🌍 Worldwide"]].map(([v, l]) => (
-                <button key={v} aria-pressed={region === v} onClick={() => setRegion(v)}>{l}</button>
-              ))}
+            <span className="flabel">Market</span>
+            <div className="seg" role="group" aria-label="Market">
+              {(view ? view.markets : [{ market: UK, count: 0 }])
+                .filter((m) => m.market === UK || m.count >= 2)
+                .slice(0, 4)
+                .map((m) => (
+                  <button key={m.market} aria-pressed={market === m.market} onClick={() => setMarket(m.market)}>
+                    {m.market === UK ? "🇬🇧 UK" : m.market}
+                    {m.count ? <span className="segn">{m.count}</span> : null}
+                  </button>
+                ))}
             </div>
           </div>
 
@@ -375,14 +382,13 @@ export default function PriceSearch() {
 
       {view && !loading && (
         <>
-          {(view.thinUk || view.tooBroad || view.numberUnmatched) && (
+          {(view.thinHere || view.tooBroad || view.numberUnmatched) && (
             <div className="caveats">
-              {view.thinUk && (
+              {view.thinHere && (
                 <div className="caveat">
-                  <strong>Only {view.used} UK sale{view.used === 1 ? "" : "s"} in this window.</strong>{" "}
-                  Most eBay UK listings for cards come from overseas sellers, priced in pounds. Including them
-                  gives {view.wideUsed} comps instead.{" "}
-                  <button className="exlink" onClick={() => setRegion("ww")}>Switch to worldwide</button>
+                  <strong>Only {view.used} sale{view.used === 1 ? "" : "s"} from {view.market === UK ? "UK sellers" : view.market}.</strong>{" "}
+                  Most eBay UK listings for cards come from overseas sellers, priced in pounds — the rest of the
+                  market has {view.restUsed} comps, and that figure sits beside the price above.
                 </div>
               )}
               {view.numberUnmatched && (
@@ -407,10 +413,29 @@ export default function PriceSearch() {
             <div className="eyebrow">{data.card.set || "Sold comps"}{data.card.rarity ? ` · ${data.card.rarity}` : ""}</div>
             <h2 className="heroname">{data.card.name}</h2>
             <div className="priceline">
-              <div className="bigprice"><span className="cur">£</span>{view.rec.finalPence != null ? (view.rec.finalPence / 100).toFixed(2) : "—"}</div>
+              <div className="pricemain">
+                <div className="bigprice"><span className="cur">£</span>{view.rec.finalPence != null ? (view.rec.finalPence / 100).toFixed(2) : "—"}</div>
+                <div className="pricewho">{view.market === UK ? "UK sellers" : view.market} · {view.used} comp{view.used === 1 ? "" : "s"}</div>
+              </div>
               <span className={`conf${view.rec.confidence === "Medium" ? " med" : ""}`}>
                 {view.rec.finalPence == null && view.graded.length > 0 ? "graded only" : `${view.rec.confidence} confidence`}
               </span>
+              {view.restPence != null && (
+                <div className="pricealt">
+                  <div className="altlabel">Rest of the market</div>
+                  <div className="altprice">{pounds(view.restPence)}</div>
+                  <div className="altmeta">
+                    {view.restUsed} comp{view.restUsed === 1 ? "" : "s"}
+                    {view.premium != null && Math.abs(view.premium) >= 0.05 ? (
+                      <> · {view.market === UK ? "UK" : view.market} is{" "}
+                        <b className={view.premium > 0 ? "up" : "down"}>
+                          {Math.abs(Math.round(view.premium * 100))}% {view.premium > 0 ? "higher" : "lower"}
+                        </b>
+                      </>
+                    ) : view.premium != null ? <> · in line</> : null}
+                  </div>
+                </div>
+              )}
             </div>
             <p className="herosub">
               {view.used > 0 ? (
@@ -500,7 +525,7 @@ export default function PriceSearch() {
                 <span className="badge">{view.used} used</span>
                 <span className="spacer" />
                 <span className="hint">
-                  Last {soldWindow} days · {region === "uk" ? "UK only" : "Worldwide"}
+                  Last {soldWindow} days · {view.market === UK ? "UK sellers" : view.market}
                 </span>
               </div>
               <div className="rows">

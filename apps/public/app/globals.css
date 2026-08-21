@@ -342,3 +342,25 @@ footer.site-foot .spacer { flex:1 1 auto; }
 }
 .caveat strong { font-weight:700; }
 .caveat .exlink { color:var(--warn-ink); font-weight:600; }
+
+/* --- paired market prices ------------------------------------------------ */
+.priceline { align-items:flex-start; gap:16px 20px; }
+.pricemain { display:flex; flex-direction:column; gap:3px; }
+.pricewho { font-size:11.5px; color:var(--ink-faint); letter-spacing:.02em; }
+.pricealt {
+  border-left:2px solid var(--line-strong); padding-left:14px;
+  display:flex; flex-direction:column; gap:2px; align-self:center;
+}
+.altlabel { font-size:10px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--ink-faint); }
+.altprice { font-family:var(--font-mono); font-weight:600; font-size:20px; font-variant-numeric:tabular-nums; }
+.altmeta { font-size:11.5px; color:var(--ink-faint); }
+.altmeta b { font-weight:700; }
+.altmeta .up { color:var(--good-ink); }
+.altmeta .down { color:var(--bad-ink); }
+.segn {
+  margin-left:6px; font-size:10.5px; font-variant-numeric:tabular-nums;
+  opacity:.6; font-weight:600;
+}
+@media (max-width:640px) {
+  .pricealt { border-left:0; border-top:1px solid var(--line); padding:10px 0 0; align-self:stretch; width:100%; }
+}
