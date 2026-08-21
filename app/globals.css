@@ -1280,6 +1280,17 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .sale .loc { font-size:11.5px; color:var(--ink-soft); white-space:nowrap; justify-self:end; }
 .dd-empty { color:var(--ink-soft); font-size:13.5px; padding:8px 0; }
 
+/* Buy module — live, buyable listings under the sold comps. Shares .sale's
+   grid so the two lists read as one family; .buy-best gets a quiet accent
+   because the cheapest row is the one a buyer is actually looking for. */
+.buy-list { margin-top:12px; }
+.buy-row .sp { display:flex; align-items:baseline; gap:7px; }
+.buy-best { background:var(--accent-soft); }
+.buy-deal { font-size:10px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--good-ink); background:var(--good-soft); padding:2px 5px; border-radius:5px; }
+.buy-foot { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-top:12px; }
+.buy-disc { font-size:11.5px; color:var(--ink-faint); flex:1 1 220px; min-width:0; }
+
+
 /* trend: click-through day detail */
 .day-sales { margin-top:14px; border:1px solid var(--line); border-radius:var(--radius-sm); overflow:hidden; background:var(--surface-2); }
 .day-sales-head { display:flex; align-items:center; gap:10px; padding:10px 13px; border-bottom:1px solid var(--line); font-size:13px; flex-wrap:wrap; }

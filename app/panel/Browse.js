@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cleanSearchName } from "@/lib/cardname.js";
 import { ebaySearchUrl, cardmarketBestUrl } from "@/lib/marketplace.js";
+import { relFor } from "@/lib/epn.js";
 import { premiumLabel as premiumLabelFor, priceWarning } from "@/lib/priceguide.js";
 import ColumnPicker, { useColumns } from "./ColumnPicker";
 
@@ -340,7 +341,7 @@ export default function Browse({ onDeepDive }) {
                 </thead>
                 <tbody>
                   {filteredCards.map((c) => {
-                    const ebayUrl = ebaySearchUrl(`${cleanSearchName(c.name, game.slug)} ${c.number}`.trim(), { sold: true });
+                    const ebayUrl = ebaySearchUrl(`${cleanSearchName(c.name, game.slug)} ${c.number}`.trim(), { sold: true, customId: "browse" });
                     const cmUrl = cardmarketBestUrl({ cardmarketId: c.cardmarketId, query: `${c.name} ${c.number}`.trim(), gameSlug: game.slug });
                     // Trend can sit an order of magnitude from the cheapest
                     // listing and the 30-day average — usually a graded copy
@@ -396,7 +397,7 @@ export default function Browse({ onDeepDive }) {
                       links: (
                         <td key="links">
                           <div className="brw-card-acts">
-                            <a className="brw-act" href={ebayUrl} target="_blank" rel="noopener noreferrer" title="eBay sold listings ↗" aria-label={`${c.name} — eBay sold listings`}>🔍</a>
+                            <a className="brw-act" href={ebayUrl} target="_blank" rel={relFor(ebayUrl, "noopener noreferrer")} title="eBay sold listings ↗" aria-label={`${c.name} — eBay sold listings`}>🔍</a>
                             {cmUrl ? <a className="brw-act" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Cardmarket page ↗" aria-label={`${c.name} — Cardmarket page`}>🛒</a> : null}
                           </div>
                         </td>

@@ -3,7 +3,7 @@ export const metadata = {
   description: "How CompFinder handles your data"
 };
 
-const UPDATED = "12 August 2026";
+const UPDATED = "21 August 2026";
 
 export default function PrivacyPage() {
   return (
@@ -85,6 +85,19 @@ export default function PrivacyPage() {
           prices, or account. You can disconnect at any time from <strong>Settings → eBay account → Disconnect</strong>,
           which deletes the stored tokens and your cached listings from CompFinder. You can also revoke CompFinder&apos;s
           access directly from your eBay account&apos;s connected-apps settings.
+        </p>
+
+        <h2>Affiliate links</h2>
+        <p>
+          Some links to eBay in CompFinder carry an eBay Partner Network tracking code. If you buy something on eBay
+          after following one, we may receive a small commission from eBay at no extra cost to you. This never affects
+          which listings we show you, the order they appear in, or the prices and recommendations CompFinder
+          calculates — those come only from real sold data. Links to your own eBay listings are never tagged.
+        </p>
+        <p>
+          Following a tagged link sets an eBay cookie on eBay&apos;s own domain, used by eBay to attribute the visit.
+          That cookie is eBay&apos;s, governed by their privacy notice, and CompFinder does not read it or receive any
+          information about what you browse or buy beyond aggregate commission totals.
         </p>
 
         <h2>Retention and deletion</h2>

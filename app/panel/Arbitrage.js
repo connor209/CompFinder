@@ -240,6 +240,10 @@ export default function Arbitrage() {
                   ) : null}
                 </div>
                 <div className="arb-body">
+                  {/* Deliberately NOT EPN-tagged. Arbitrage exists to surface listings the
+                      operator buys and flips, so tagging these would mean earning
+                      affiliate commission on our own purchases — the same rule that
+                      keeps Inventory and ListForm untagged. See lib/epn.js. */}
                   <a className="arb-title" href={r.listing.url || "#"} target="_blank" rel="noopener noreferrer">{r.listing.title}</a>
                   {r.sold.set ? (
                     <div className="arb-set">{r.sold.set}{r.sold.language && r.sold.language !== "English" ? ` · ${r.sold.language}` : ""}</div>

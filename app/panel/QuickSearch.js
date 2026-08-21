@@ -5,6 +5,7 @@ import CompFinderPricing from "@/lib/pricing.js";
 import { detectLanguage } from "@/lib/catalog.js";
 import { cleanSearchName } from "@/lib/cardname.js";
 import { ebaySearchUrl, cardmarketBestUrl } from "@/lib/marketplace.js";
+import { epnLink, relFor } from "@/lib/epn.js";
 import { createClient } from "@/lib/supabase/client";
 import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
@@ -137,7 +138,7 @@ function TrendChart({ sales, medianPence }) {
             {days[selected].items.map((s, i) => (
               <div className="day-item" key={i}>
                 <span className="sp">{pounds(s.v)}</span>
-                <span className="st">{s.url ? <a href={s.url} target="_blank" rel="noopener noreferrer">{s.title}</a> : s.title}</span>
+                <span className="st">{s.url ? <a href={epnLink(s.url, { customId: "trend-day" })} target="_blank" rel={relFor(s.url, "noopener noreferrer")}>{s.title}</a> : s.title}</span>
               </div>
             ))}
           </div>
@@ -560,7 +561,20 @@ export default function QuickSearch({ seed }) {
 
     const confClass = `conf-badge conf-${(rec.confidence || "low").toLowerCase()}`;
     const activePrice = active && active.finalPence != null ? active.finalPence : null;
-    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, activeLoading: activeState.loading, usedCount: used.length, graded: rec.graded || [], gradedTotal, gradedShown };
+    // Live, buyable listings. The sold rows say what the card is worth; these
+    // say where to get one — and unlike a sold comp (an ended listing nobody
+    // can buy) they're the links an affiliate commission can actually come
+    // from. Cheapest first: it's the order a buyer wants and the one that
+    // converts. The data was already fetched and previously thrown away —
+    // only `finalPence` was being rendered from it.
+    const activeListings = (active && active.included ? active.included : [])
+      .filter((c) => c._source && c._source.url)
+      .slice()
+      .sort((a, b) => a.totalPence - b.totalPence)
+      .slice(0, 6);
+    const searchCode = setCodeForSearch(card.series);
+    const ebayQuery = `${card.name} ${card.number || ""} ${searchCode} ${language}`.replace(/\s+/g, " ").trim();
+    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, activeLoading: activeState.loading, usedCount: used.length, graded: rec.graded || [], gradedTotal, gradedShown, activeListings, ebayQuery };
   }
 
   return (
@@ -767,7 +781,7 @@ export default function QuickSearch({ seed }) {
                   const cmUrl = cardmarketBestUrl({ cardmarketId: view.card.cardmarketId, query: baseQ, gameSlug: sourceGame });
                   return (
                     <>
-                      <a className="btn btn-ghost" href={ebaySearchUrl(ebayQ)} target="_blank" rel="noopener noreferrer" title="Open this card's sold listings on eBay">🔍 eBay ↗</a>
+                      <a className="btn btn-ghost" href={ebaySearchUrl(ebayQ, { customId: "quick-search-sold" })} target="_blank" rel={relFor("https://www.ebay.co.uk/", "noopener noreferrer")} title="Open this card's sold listings on eBay">🔍 eBay ↗</a>
                       {cmUrl ? <a className="btn btn-ghost" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Search this card on Cardmarket">🔍 Cardmarket ↗</a> : null}
                     </>
                   );
@@ -877,7 +891,7 @@ export default function QuickSearch({ seed }) {
                     <span className="sd">{fmtDate(s.date)}</span>
                     <span className="st">
                       {s.grade ? <span className={`sale-grade grade-${s.grade.company.toLowerCase()}`} title={`Graded ${s.grade.company} ${s.grade.grade}`}>{s.grade.company} {s.grade.grade}</span> : null}
-                      {s.url ? <a href={s.url} target="_blank" rel="noopener noreferrer">{s.title}</a> : s.title}
+                      {s.url ? <a href={epnLink(s.url, { customId: "sold-comp" })} target="_blank" rel={relFor(s.url, "noopener noreferrer")}>{s.title}</a> : s.title}
                     </span>
                     <span className="loc">{s.loc ? s.loc : "🇬🇧 UK"}</span>
                   </div>
@@ -887,20 +901,59 @@ export default function QuickSearch({ seed }) {
           </div>
 
           <div className="panel">
-            <div className="panel-head"><h3>Active listings</h3><span className="badge2">market read</span></div>
+            <div className="panel-head">
+              <h3>{view.activeListings.length > 0 ? "Buy one now" : "Active listings"}</h3>
+              <span className="badge2">live listings</span>
+            </div>
             {view.activeLoading ? (
               <p className="hint" style={{ marginTop: 0 }}><span className="spinner" /> &nbsp;Checking current asking prices…</p>
             ) : view.active && view.active.included && view.active.included.length > 0 ? (
-              <p className="hint" style={{ marginTop: 0 }}>
-                Currently listed at a median <b>{pounds(view.active.finalPence)}</b> asking ({view.active.included.length} listing(s))
-                {view.rec.finalPence != null && view.active.finalPence != null
-                  ? view.active.finalPence > view.rec.finalPence * 1.1
-                    ? " — sellers asking above recent sold, a sign demand may be firming."
-                    : view.active.finalPence < view.rec.finalPence * 0.95
-                      ? " — asking at or below recent sold, market may be softening."
-                      : " — roughly in line with recent sold."
-                  : "."}
-              </p>
+              <>
+                <p className="hint" style={{ marginTop: 0 }}>
+                  Currently listed at a median <b>{pounds(view.active.finalPence)}</b> asking ({view.active.included.length} listing(s))
+                  {view.rec.finalPence != null && view.active.finalPence != null
+                    ? view.active.finalPence > view.rec.finalPence * 1.1
+                      ? " — sellers asking above recent sold, a sign demand may be firming."
+                      : view.active.finalPence < view.rec.finalPence * 0.95
+                        ? " — asking at or below recent sold, market may be softening."
+                        : " — roughly in line with recent sold."
+                    : "."}
+                </p>
+                {view.activeListings.length > 0 ? (
+                  <div className="sales buy-list">
+                    {view.activeListings.map((c, i) => {
+                      const url = c._source.url;
+                      const under = view.rec.finalPence != null && c.totalPence < view.rec.finalPence * 0.9;
+                      return (
+                        <div className={`sale buy-row${i === 0 ? " buy-best" : ""}`} key={c._source.itemId || i}>
+                          <span className="sp">
+                            {pounds(c.totalPence)}
+                            {under ? <span className="buy-deal" title="Listed under the recent sold price">under</span> : null}
+                          </span>
+                          <span className="sd">{c.condition && c.condition !== "Unknown" ? c.condition : "—"}</span>
+                          <span className="st">
+                            <a href={epnLink(url, { customId: "buy-active" })} target="_blank" rel={relFor(url, "noopener noreferrer")}>{c.title}</a>
+                          </span>
+                          <span className="loc">{c.itemLocation ? c.itemLocation : "🇬🇧 UK"}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+                <div className="buy-foot">
+                  <a
+                    className="btn btn-ghost"
+                    href={ebaySearchUrl(view.ebayQuery, { sold: false, customId: "buy-see-all" })}
+                    target="_blank"
+                    rel={relFor("https://www.ebay.co.uk/", "noopener noreferrer")}
+                  >
+                    See all on eBay ↗
+                  </a>
+                  <span className="buy-disc">
+                    We may earn a commission on eBay purchases made through these links. It never affects the prices shown.
+                  </span>
+                </div>
+              </>
             ) : (
               <p className="dd-empty">No active listings found for this card.</p>
             )}

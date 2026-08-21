@@ -314,15 +314,25 @@ data is already loaded.
 | Arbitrage results | `Arbitrage.js:243` | ✅ |
 | Batch comp rows | `Panel.js:1348` | ✅ |
 | **The user's own listings** | `Inventory.js`, my-listings banner, `ListForm.js:122` | ❌ **never** |
+| **Arbitrage results** | `Arbitrage.js:243` | ❌ **never** |
 
-That last row matters. Putting affiliate tracking on links to the user's own
-eBay listings is self-referential clicking, and it's the fastest way to get an
-EPN account terminated. Keep EPN strictly on comps and third-party listings.
+The two ❌ rows matter more than the ✅ ones. The rule isn't "don't tag your own
+listings", it's **don't tag any link the account holder is the one expected to
+click** — and Arbitrage fails that test as surely as Inventory does, because
+its entire purpose is surfacing listings for you to buy and flip. Tagging it
+would mean earning commission on your own purchases, which is the quickest way
+to lose the account. (An earlier draft of this table had Arbitrage as ✅. It was
+wrong.)
 
-### Implementation sketch
+The same logic says: **leave `NEXT_PUBLIC_EPN_CAMPID` unset until the public
+page ships.** While CompFinder is a single-operator tool, every click in it is
+the account holder's.
 
-One small module, since the rule is "append params to any eBay URL, and only an
-eBay URL":
+### Implementation — built
+
+`lib/epn.js` now exists and the call sites are wired. It is inert until
+`NEXT_PUBLIC_EPN_CAMPID` is set, so it is safe to deploy before approval.
+The shape:
 
 ```js
 // lib/epn.js

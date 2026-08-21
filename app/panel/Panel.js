@@ -7,6 +7,7 @@ import CompFinderPricing from "@/lib/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
+import { epnLink, relFor } from "@/lib/epn.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
 import Arbitrage from "./Arbitrage";
@@ -1345,7 +1346,7 @@ function TitleCell({ c }) {
   const url = c._source && c._source.url;
   if (url) {
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer">
+      <a href={epnLink(url, { customId: "batch-comp" })} target="_blank" rel={relFor(url, "noopener noreferrer")}>
         {c.title}
       </a>
     );
