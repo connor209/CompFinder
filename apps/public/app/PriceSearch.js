@@ -8,6 +8,7 @@ import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { buildCompTokens, dropWrongSetTotal } from "@/lib/tokens";
 import { UK, marketsIn, splitByMarket } from "@/lib/markets";
 import { assessAsk } from "@/lib/verdict";
+import { settingsForCard } from "@/lib/settings";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import TrendChart from "./TrendChart";
 
@@ -262,10 +263,13 @@ export default function PriceSearch() {
     const markets = marketsIn(filtered);
     const { chosen, rest } = splitByMarket(filtered, market);
 
+    // Promo cards need the blanket "promo" exclusion stood down, or every
+    // correctly-matching comp is thrown out for describing the card accurately.
+    const cardSettings = settingsForCard(card);
     const priceFor = (pool, tokens = nameTokens, num = cardNumber) =>
-      pool.length ? CompFinderPricing.recommend(pool, settings, tokens, "sold", num, cardSet) : null;
+      pool.length ? CompFinderPricing.recommend(pool, cardSettings, tokens, "sold", num, cardSet) : null;
 
-    let rec = priceFor(chosen) || CompFinderPricing.recommend([], settings, nameTokens, "sold", cardNumber, cardSet);
+    let rec = priceFor(chosen) || CompFinderPricing.recommend([], cardSettings, nameTokens, "sold", cardNumber, cardSet);
 
     // NUMBER FALLBACK. If requiring the collector number rejects every comp but
     // the name alone matches several, the number is far likelier to be wrong
@@ -276,7 +280,7 @@ export default function PriceSearch() {
     // pretending the number was honoured.
     let numberUnmatched = false;
     if ((rec.included || []).length === 0 && cardNumber) {
-      const byNameOnly = CompFinderPricing.recommend(chosen, settings, nameOnlyTokens, "sold", null, cardSet);
+      const byNameOnly = CompFinderPricing.recommend(chosen, cardSettings, nameOnlyTokens, "sold", null, cardSet);
       if ((byNameOnly.included || []).length >= 3) {
         rec = byNameOnly;
         numberUnmatched = true;
@@ -293,6 +297,15 @@ export default function PriceSearch() {
         )].slice(0, 3)
       : [];
 
+    // WHAT THE HEADLINE NUMBER IS. recommend() returns two figures and they
+    // answer different questions: finalPence is a recommended LISTING price,
+    // floored at £2.49 and rounded up a 50p charm ladder, while rawPence is
+    // the recency-weighted value of the comps themselves. This page asks
+    // "what's that card actually worth", so it wants the second — measured on
+    // the movers list, the floor was reporting £2.49 for a Chesnaught V whose
+    // comps said £1.44. The app keeps finalPence, where a listing floor is
+    // exactly the right answer.
+    const marketPence = rec.rawPence ?? rec.finalPence ?? null;
     const used = rec.included || [];
     const totals = used.map((c) => c.totalPence);
     const med = totals.length ? median(totals) : null;
@@ -330,7 +343,7 @@ export default function PriceSearch() {
     // £2.60 copies of a different card.
     const activeFiltered = splitByMarket(preFilter(active.comps, { condition }), market).chosen;
     const activeRec = activeFiltered.length
-      ? CompFinderPricing.recommend(activeFiltered, settings, nameTokens, "active", cardNumber, cardSet)
+      ? CompFinderPricing.recommend(activeFiltered, cardSettings, nameTokens, "active", cardNumber, cardSet)
       : null;
     const buy = (activeRec?.included || [])
       .filter((c) => c._source && c._source.url)
@@ -345,8 +358,8 @@ export default function PriceSearch() {
     // worth knowing before you list or buy.
     const restRec = priceFor(rest, numberUnmatched ? nameOnlyTokens : nameTokens, numberUnmatched ? null : cardNumber);
     const restUsed = restRec ? (restRec.included || []).length : 0;
-    const restPence = restRec ? restRec.finalPence : null;
-    const premium = rec.finalPence && restPence ? rec.finalPence / restPence - 1 : null;
+    const restPence = restRec ? (restRec.rawPence ?? restRec.finalPence) : null;
+    const premium = marketPence && restPence ? marketPence / restPence - 1 : null;
 
     // --- how much to trust this result -------------------------------------
     // An audit of 50 searches showed three failure shapes worth telling the
@@ -368,7 +381,7 @@ export default function PriceSearch() {
     //    active side fills with cheap listings of other cards, giving
     //    "£7.49 asking" under a £136 sold price. Better to withhold the
     //    figure than to print something that reads as a market signal.
-    const askRatio = rec.finalPence && activeRec?.finalPence ? activeRec.finalPence / rec.finalPence : null;
+    const askRatio = marketPence && activeRec?.rawPence ? activeRec.rawPence / marketPence : null;
     const askingUnreliable = askRatio != null && (askRatio > 5 || askRatio < 0.2);
 
     const liquidity = CompFinderLiquidity.assess({
@@ -382,14 +395,14 @@ export default function PriceSearch() {
 
     const askPence = ask ? Math.round(parseFloat(String(ask).replace(/[^0-9.]/g, "")) * 100) : null;
     const verdict = askPence
-      ? assessAsk({ askPence, comps: used, marketPence: rec.finalPence, liquidity })
+      ? assessAsk({ askPence, comps: used, marketPence, liquidity })
       : null;
 
     return {
-      rec, med, chart, sales, dropped, buy, lastSold, liquidity, verdict,
+      rec, marketPence, med, chart, sales, dropped, buy, lastSold, liquidity, verdict,
       thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers,
       markets, market, restPence, restUsed, premium, conditionCounts,
-      activeMedian: activeRec?.finalPence ?? null,
+      activeMedian: activeRec?.rawPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
       lo,
       hi,
@@ -585,11 +598,11 @@ export default function PriceSearch() {
             <h2 className="heroname">{data.card.name}</h2>
             <div className="priceline">
               <div className="pricemain">
-                <div className="bigprice"><span className="cur">£</span>{view.rec.finalPence != null ? (view.rec.finalPence / 100).toFixed(2) : "—"}</div>
+                <div className="bigprice"><span className="cur">£</span>{view.marketPence != null ? (view.marketPence / 100).toFixed(2) : "—"}</div>
                 <div className="pricewho">{view.market === UK ? "UK sellers" : view.market} · {view.used} comp{view.used === 1 ? "" : "s"}</div>
               </div>
               <span className={`conf${view.rec.confidence === "Medium" ? " med" : ""}`}>
-                {view.rec.finalPence == null && view.graded.length > 0 ? "graded only" : `${view.rec.confidence} confidence`}
+                {view.marketPence == null && view.graded.length > 0 ? "graded only" : `${view.rec.confidence} confidence`}
               </span>
               {view.restPence != null && (
                 <div className="pricealt">
@@ -623,7 +636,7 @@ export default function PriceSearch() {
                 <> Currently listed around <b>{pounds(view.activeMedian)}</b> asking.</>
               ) : null}
             </p>
-            {view.rec.finalPence != null && (
+            {view.marketPence != null && (
               <div className={`ask${view.verdict ? " ask-" + view.verdict.tone : ""}`}>
                 <label className="ask-in">
                   <span>They&rsquo;re asking</span>
@@ -685,7 +698,7 @@ export default function PriceSearch() {
                 <div className="rows">
                   {view.buy.map((c, i) => {
                     const url = c._source.url;
-                    const under = view.rec.finalPence != null && c.totalPence < view.rec.finalPence * 0.95;
+                    const under = view.marketPence != null && c.totalPence < view.marketPence * 0.95;
                     return (
                       <div className={`row${i === 0 ? " best" : ""}`} key={c._source.itemId || i}>
                         <span className="sp">
@@ -772,7 +785,7 @@ export default function PriceSearch() {
 
           {view.graded.length > 0 && (
             <section className="panel">
-              <div className="panel-head"><h3>Graded</h3><span className="badge">raw {pounds(view.rec.finalPence)}</span></div>
+              <div className="panel-head"><h3>Graded</h3><span className="badge">raw {pounds(view.marketPence)}</span></div>
               <div className="rows">
                 {view.graded.map((g) => (
                   <div className="row" key={g.key}>
