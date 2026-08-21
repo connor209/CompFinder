@@ -55,3 +55,40 @@ export function bareNumber(number) {
 }
 
 export default { buildCompTokens, bareNumber };
+
+/**
+ * Excludes comps whose collector number shares our numerator but names a
+ * different set total.
+ *
+ * People type "Charizard ex 223", not "Charizard ex 223/165 151" — measured on
+ * 30 cards, the short form prices 28 of them and agrees with the full query on
+ * 22. Nearly every disagreement is this collision: 223/165 is a 151 Charizard
+ * at ~£259 and 223/197 is an Obsidian Flames one at ~£96, and matching on the
+ * numerator alone pools them into a number that is right for neither.
+ *
+ * MEASURED: across 26 real searches this drops nothing at all (1034/1034 comps
+ * kept), because when we hold a denominator the upstream search already used
+ * it. It earns its place only in the name-fallback path, where a number that
+ * matched nothing is abandoned and a wrong-set print could otherwise be pooled
+ * in. Precautionary, verified harmless — not a measured improvement.
+ *
+ * The denominator is the disambiguator, and it is already in the titles. Only
+ * an explicit, differing one excludes: plenty of sellers write "223" with no
+ * set total at all, and those stay in, since the alternative is discarding the
+ * honest majority to catch the ambiguous few.
+ */
+export function dropWrongSetTotal(comps, number) {
+  const parts = String(number || "").split("/");
+  if (parts.length !== 2) return comps;
+  const want = parts[1].replace(/^0+(?=\d)/, "").trim();
+  const num = parts[0].trim();
+  if (!/^\d{1,4}$/.test(want) || !/^\d{1,4}$/.test(num)) return comps;
+
+  const pattern = new RegExp(`\\b0*${num.replace(/^0+(?=\d)/, "")}\\s*/\\s*(\\d{1,4})\\b|\\b${num}\\s*/\\s*(\\d{1,4})\\b`);
+  return comps.filter((c) => {
+    const m = pattern.exec(c.title || "");
+    if (!m) return true; // no explicit denominator — can't rule it out, so keep it
+    const seen = (m[1] || m[2] || "").replace(/^0+(?=\d)/, "");
+    return seen === want;
+  });
+}

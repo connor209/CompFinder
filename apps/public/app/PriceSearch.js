@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
-import { buildCompTokens } from "@/lib/tokens";
+import { buildCompTokens, dropWrongSetTotal } from "@/lib/tokens";
 import { UK, marketsIn, splitByMarket } from "@/lib/markets";
 import TrendChart from "./TrendChart";
 
@@ -155,7 +155,10 @@ export default function PriceSearch() {
     const cardNumber = card.number || null;
     const cardSet = card.set || null;
 
-    const filtered = preFilter(comps, { condition });
+    // Numerators repeat across sets, so the set total in a title is what tells
+    // 223/165 from 223/197. Applied before the market split so both sides are
+    // scored on the same card.
+    const filtered = dropWrongSetTotal(preFilter(comps, { condition }), cardNumber);
     const markets = marketsIn(filtered);
     const { chosen, rest } = splitByMarket(filtered, market);
 
