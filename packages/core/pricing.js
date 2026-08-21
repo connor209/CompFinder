@@ -138,7 +138,22 @@ const CompFinderPricing = (() => {
       promoVariant: ["promo", "league", "championship", "worlds", "prerelease"],
       bundle: ["bundle", "playset", "lot of", "job lot", "joblot", "x2", "x3", "x4", "x5", "x6",
                 "personal collection", "whole collection", "collection includes"],
-      pickYourOwn: ["choose your card", "pick your own", "you choose", "select your", "pick a card", "you pick", "u pick", "make your selection", "choose your own"]
+      pickYourOwn: ["choose your card", "pick your own", "you choose", "select your", "pick a card", "you pick", "u pick", "make your selection", "choose your own"],
+      // Things that are not the card. A £1000 Umbreon ex was being priced
+      // with a "(Custom Proxy Replica)" at £9.19 and a "Novelty Keychain" at
+      // £10.89 in the same comp set, dragging the floor by two orders of
+      // magnitude — and because both titles name the card and its number
+      // correctly, every other rule let them through.
+      //
+      // Measured against 1,351 real sold titles before adding: proxy 3,
+      // replica 3, novelty 1, keychain 1, binder 1, jumbo 2, oversized 1, and
+      // nothing at all for the rest. Deliberately omits "sticker", "badge" and
+      // "custom" on their own — each is a plausible word in an honest listing,
+      // and the cost of wrongly excluding a real sale is higher than the cost
+      // of occasionally keeping a novelty.
+      notACard: ["proxy", "replica", "orica", "counterfeit", "custom card", "novelty",
+                 "keyring", "keychain", "jumbo", "oversized", "binder insert",
+                 "coaster", "plush", "figurine", "display case"]
     }
   };
 
