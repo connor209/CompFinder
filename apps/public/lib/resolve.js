@@ -200,8 +200,14 @@ export function scoreCard(row, parsed) {
 
   // Name match quality — the signal that was missing entirely.
   const nameScore = nameMatchScore(rowName, wantName);
-  if (nameScore === null) return -1;
-  score += nameScore;
+  if (nameScore === null) {
+    // A fuzzy row cannot match by substring — that is the whole reason it was
+    // fetched — so score it from its similarity instead of discarding it.
+    if (row._similarity == null) return -1;
+    score += Math.max(1, Math.min(NAME_FUZZY_MAX, Math.round(row._similarity * NAME_FUZZY_MAX)));
+  } else {
+    score += nameScore;
+  }
 
   // A stated collector number is the strongest disambiguator there is.
   if (parsed.number) {
@@ -290,6 +296,14 @@ const NAME_ENDS = 25;
 const NAME_INCLUDES = 20;
 const NAME_TOKENS = 12;
 
+/**
+ * Ceiling for a name matched only by trigram similarity — a row the database's
+ * fuzzy fallback returned because nothing matched exactly. Deliberately below
+ * MIN_CONFIDENT_NAME: a guess at what someone meant is a suggestion to be
+ * shown, never a card to be priced silently.
+ */
+const NAME_FUZZY_MAX = 30;
+
 function nameMatchScore(rowName, wantName) {
   if (rowName === wantName) return NAME_EXACT;
   if (rowName.startsWith(wantName + " ")) return NAME_STARTS;
@@ -350,9 +364,12 @@ export function rankCards(rows, parsed, limit = 6) {
   const best = top[0];
   const numberAgrees = !parsed.number || (best && bare(best.row.collector_number) === parsed.number);
   const strongEnough = !!best && (nameMatchScore(norm(best.row.name), norm(parsed.name)) || 0) >= MIN_CONFIDENT_NAME;
+  // Never skip the picker on a guess. The fallback runs only when the exact
+  // search found nothing, so by definition we are unsure what was typed.
+  const isFuzzy = !!best && best.row._similarity != null;
   const clear = top.length === 1 || (top.length > 1 && top[0].score - top[1].score >= 40);
 
-  return { candidates: top, confident: clear && numberAgrees && strongEnough };
+  return { candidates: top, confident: clear && numberAgrees && strongEnough && !isFuzzy, fuzzy: isFuzzy };
 }
 
 export default { parseQuery, scoreCard, rankCards };

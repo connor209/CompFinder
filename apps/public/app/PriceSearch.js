@@ -186,6 +186,10 @@ export default function PriceSearch() {
       const res = await fetch(`/api/resolve?q=${encodeURIComponent(typed)}`).then((r) => r.json());
       const list = (res && res.candidates) || [];
       if (list.length && res.confident) return run(queryForCard(list[0]), list[0]);
+      // A single fuzzy hit is a guess at what was meant, not an answer. Show it
+      // and let them confirm — the alternative is silently pricing a card they
+      // did not ask for because they mistyped one letter.
+      if (list.length && res.fuzzy) return setChoices(list.map((c) => ({ ...c, fuzzy: true })));
       // Several genuine possibilities — 223/165 is a 151 Charizard and 223/197
       // an Obsidian Flames one. Guessing prices the wrong card with total
       // confidence, so ask instead.
@@ -621,7 +625,9 @@ export default function PriceSearch() {
             <span className="badge">{choices.length} matches</span>
           </div>
           <p className="hint" style={{ marginTop: 0 }}>
-            Same name and number, different sets — they can be worth very different amounts.
+            {choices.some((c) => c.fuzzy)
+              ? <>Nothing matched exactly — did you mean one of these?</>
+              : <>Same name and number, different sets — they can be worth very different amounts.</>}
           </p>
           <div className="picks">
             {choices.map((c) => (

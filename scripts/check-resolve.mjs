@@ -189,6 +189,30 @@ const UMBREONS = [
   if (b <= a) fail("the named set should outscore the unnamed one");
 }
 
+{
+  // Fuzzy fallback rows carry a similarity instead of a substring match. They
+  // must be scoreable — the old code discarded them outright, since the typed
+  // name cannot be a substring of the right one, that being the point — and
+  // they must NEVER be confident, however clear the winner looks. A guess at
+  // what someone meant is a suggestion, not a card to price silently.
+  const fuzzyRow = { ...row(1, "Umbreon ex", "161", "Prismatic Evolutions", "PRE", "Special Illustration Rare"), _similarity: 0.86 };
+  const r = rankCards([fuzzyRow], parseQuery("Umbeon ex 161"));
+  if (!r.candidates.length) fail("a fuzzy row must be scoreable, not discarded");
+  if (r.confident) fail("a fuzzy match must never be confident, even alone");
+  if (!r.fuzzy) fail("rankCards should report that the answer came from the fuzzy path");
+
+  // Even a perfect-looking similarity stays below the confidence floor.
+  const r2 = rankCards([{ ...fuzzyRow, _similarity: 1 }], parseQuery("Umbeon ex 161"));
+  if (r2.confident) fail("similarity 1.0 must still not be confident");
+
+  // And an exact match alongside a fuzzy one still wins on the merits.
+  const mixed = rankCards(
+    [fuzzyRow, row(2, "Umbeon ex", "161", "Some Set", "XXX", "Rare")],
+    parseQuery("Umbeon ex 161")
+  );
+  if (mixed.candidates[0].row.cardmarket_id !== 2) fail("an exact name match should outrank a fuzzy one");
+}
+
 if (failed) {
   console.error(`\n${failed} resolver checks failed.`);
   process.exit(1);

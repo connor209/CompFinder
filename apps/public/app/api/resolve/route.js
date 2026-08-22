@@ -3,6 +3,10 @@ import { createPublicClient } from "@/lib/supabase";
 import { cleanSearchName } from "@compfinder/core/cardname.js";
 import { parseQuery, rankCards, languageOf } from "@/lib/resolve";
 
+// One warning per process if the fuzzy RPC isn't there, rather than one per
+// failed search.
+let warnedNoFuzzy = false;
+
 /**
  * Free text -> ranked catalogue cards.
  *
@@ -103,6 +107,27 @@ export async function GET(request) {
     };
     ranked = rankFor(retry, parsedFor);
   }
+  // LAST RESORT: trigram similarity. Only reached when nothing matched by
+  // substring at any token depth, which is exactly the case a substring filter
+  // cannot serve — a typo ("Umbeon"), or a name whose stored form carries
+  // punctuation the visitor didn't type ("N's Zoroark ex"). Measured typo
+  // tolerance before this existed was 0% of 360 queries.
+  //
+  // Degrades silently if migration 020 has not been run: the page keeps its
+  // previous behaviour rather than erroring.
+  if (!ranked.candidates.length) {
+    const { data: fuzzyRows, error: fuzzyError } = await supabase
+      .rpc("search_catalog_fuzzy", { q: parsedFor.name, lim: 60 });
+    if (fuzzyError) {
+      if (!warnedNoFuzzy) {
+        warnedNoFuzzy = true;
+        console.warn("fuzzy catalogue search unavailable (migration 020 not run?):", fuzzyError.message);
+      }
+    } else if (fuzzyRows && fuzzyRows.length) {
+      ranked = rankCards(fuzzyRows.map((r) => ({ ...r, _similarity: r.similarity })), parsedFor);
+    }
+  }
+
   parsed = parsedFor;
 
   const { candidates, confident } = ranked;
@@ -111,6 +136,7 @@ export async function GET(request) {
     ok: true,
     parsed,
     confident,
+    fuzzy: !!ranked.fuzzy,
     candidates: candidates.map(({ row, score }) => ({
       id: row.cardmarket_id,
       name: cleanSearchName(row.name, row.game),
