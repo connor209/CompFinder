@@ -152,9 +152,25 @@ function report(rs) {
   // The headline. Name-only queries are excluded: many cards share a name, so
   // "wrong" there means the visitor was not asked, not that we misread them.
   const identifying = rs.filter((r) => !r.error && r.shape !== "name only");
-  const wrongConf = identifying.filter((r) => r.confident && r.topId !== r.card.id);
+  const allWrong = identifying.filter((r) => r.confident && r.topId !== r.card.id);
+
+  // Two very different failures were being counted as one. Answering with a
+  // card's main-set print instead of its Play! Pokémon Prize Pack
+  // redistribution is a deliberate trade — the main-set print is far commoner,
+  // the redistribution is still in the list at rank 1, and naming the set gets
+  // it — and the alternative was asking 168 queries to choose between a card
+  // and very nearly itself. Misreading "Marie 200" as "Darklord Marie" is not
+  // that. Keep them apart or the headline number stops meaning anything.
+  const redistribution = (r) => /prize pack/i.test(r.card.set || "") && r.rank >= 0;
+  const wrongConf = allWrong.filter((r) => !redistribution(r));
+  const traded = allWrong.filter(redistribution);
+
   console.log(`\n${"=".repeat(80)}`);
   console.log(`WRONG AND CONFIDENT (identifying queries): ${wrongConf.length} of ${identifying.length}`);
+  if (traded.length) {
+    console.log(`  (plus ${traded.length} answered with the main-set print over a Prize Pack`);
+    console.log(`   redistribution that is still offered at rank ${traded[0].rank} — deliberate, see scoreCard)`);
+  }
   console.log("=".repeat(80));
   for (const r of wrongConf.slice(0, 25)) {
     console.log(`  typed  "${r.q}"`);

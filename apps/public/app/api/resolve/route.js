@@ -78,22 +78,34 @@ export async function GET(request) {
   // nothing, then "umbreon ex" finds the card and "prismatic evolutions"
   // becomes the hint that picks the right one out of six. Costs an extra round
   // trip only on a query that was going to fail outright.
+  // Retry while there is nothing to OFFER, not merely nothing fetched. Rows can
+  // come back and then be scored away entirely — "Latios ex EX Dragon" matched
+  // something on latio + ex + dragon, every candidate scored at or below zero,
+  // and because the fetch was non-empty the fallback never ran and the query
+  // returned nothing at all.
+  const rankFor = (rows, p) => rankCards(rows || [], p);
+
+  let usedWords = words;
   let data = await fetchByTokens(tokens);
   if (data === null) return NextResponse.json({ ok: true, parsed, candidates: [], confident: false });
 
-  let usedWords = words;
-  while (!data.length && usedWords.length > 1) {
+  let parsedFor = parsed;
+  let ranked = rankFor(data, parsedFor);
+  while (!ranked.candidates.length && usedWords.length > 1) {
     usedWords = usedWords.slice(0, -1);
     const retry = await fetchByTokens(tokensOf(usedWords));
     if (retry === null) break;
-    data = retry;
-  }
-  if (usedWords.length < words.length) {
     const dropped = words.slice(usedWords.length).join(" ");
-    parsed = { ...parsed, name: usedWords.join(" "), setHint: [parsed.setHint, dropped].filter(Boolean).join(" ") };
+    parsedFor = {
+      ...parsed,
+      name: usedWords.join(" "),
+      setHint: [parsed.setHint, dropped].filter(Boolean).join(" ")
+    };
+    ranked = rankFor(retry, parsedFor);
   }
+  parsed = parsedFor;
 
-  const { candidates, confident } = rankCards(data || [], parsed);
+  const { candidates, confident } = ranked;
 
   return NextResponse.json({
     ok: true,
