@@ -121,17 +121,28 @@ const UMBREONS = [
     row(2, "Umbreon ex", "PRE 060", "Play! Pokémon Prize Pack Series Seven", "PPS7", "Prize Pack Series cards")
   ];
   const r = rankCards(twin, parseQuery("Umbreon ex 60"));
-  if (r.candidates.length !== 1) fail(`a Prize Pack reprint should collapse onto its card, got ${r.candidates.length}`);
-  if (!r.confident) fail("collapsing the reprint should leave a confident answer");
+  if (r.candidates[0].row.cardmarket_id !== 1) fail("the main-set card should rank above its reprint");
+  if (!r.confident) fail("ranking the reprint down should leave a confident answer");
+  // Ranked DOWN, not deleted — it is still a card someone can be holding.
+  if (r.candidates.length !== 2) fail(`the reprint should still be offered, got ${r.candidates.length}`);
 
-  // ...but an entry whose prefix names no set among the candidates stays.
-  const orphan = [
-    row(1, "Umbreon ex", "060", "Prismatic Evolutions", "PRE", "Double Rare"),
-    row(2, "Umbreon ex", "XYZ 060", "Some Other Product", "XYZ", "Promo")
+  // Naming the Prize Pack set must return the Prize Pack card. Deleting the
+  // entry instead of ranking it down made this confidently return the wrong
+  // card, on 27 queries.
+  const named = rankCards(twin, parseQuery("Umbreon ex 60 Play! Pokémon Prize Pack Series Seven"));
+  if (named.candidates[0].row.cardmarket_id !== 2) fail("naming the Prize Pack set should return the Prize Pack card");
+
+  // The Celebrations Classic Collection is numbered the same way ("NR 66") but
+  // is a DIFFERENT card at a very different price, not a redistribution. It
+  // must not be ranked down: these should tie and be offered as a choice.
+  const celebrations = [
+    row(1, "Shining Magikarp", "66", "Neo Revelation", "NR", "Rare Holo"),
+    row(2, "Shining Magikarp", "NR 66", "Celebrations", "CEL", "Rare Holo")
   ];
-  if (rankCards(orphan, parseQuery("Umbreon ex 60")).candidates.length !== 2) {
-    fail("an unrelated set-code prefix must not be collapsed away");
-  }
+  const c = rankCards(celebrations, parseQuery("Shining Magikarp 66"));
+  if (c.confident) fail("a Celebrations reprint is a real choice, not a redistribution");
+  const cNamed = rankCards(celebrations, parseQuery("Shining Magikarp 66 Celebrations"));
+  if (cNamed.candidates[0].row.cardmarket_id !== 2) fail("naming Celebrations should return the Celebrations card");
 }
 
 {

@@ -223,11 +223,35 @@ export function scoreCard(row, parsed) {
   // confidence threshold on its own: someone who types "Umbreon ex 161
   // Prismatic Evolutions" has told us which card they mean, and should not
   // then be asked to choose between six of them.
-  if (parsed.setHint) {
-    const hint = norm(parsed.setHint);
-    const exp = norm(row.expansion);
-    if (hint && exp && (exp.includes(hint) || hint.includes(exp))) score += 40;
-  }
+  const hint = norm(parsed.setHint);
+  const exp = norm(row.expansion);
+  const hinted = !!(hint && exp && (exp.includes(hint) || hint.includes(exp)));
+  if (hinted) score += 40;
+
+  // A Play! Pokémon Prize Pack entry is a reprint of another card, and the
+  // catalogue says so in its number: "Umbreon ex PRE 060" is Prismatic
+  // Evolutions 060, "Gengar VMAX FST 157" is Fusion Strike 157. Left level, it
+  // trails the card it reprints by 8 — the rarity bonus and nothing else —
+  // which is under the confidence threshold, so the page asked the visitor to
+  // choose between a card and very nearly itself. That cost 168 queries their
+  // answer.
+  //
+  // An earlier attempt DELETED these entries, and that was worse: it made a
+  // Prize Pack card unreachable even when its set was typed in full, so
+  // "Mega Charizard Y ex 22 Play! Pokémon Prize Pack Series Nine" confidently
+  // returned the Ascended Heroes card. 27 queries went wrong-and-confident
+  // that way. So it is a penalty, not a removal, and it stands down entirely
+  // when the visitor names the set — ranked down unless you asked for it.
+  //
+  // It also keys on the Prize Pack SET, not merely on a set code in the
+  // number. Keying on the number format alone swept up the Celebrations
+  // Classic Collection, whose entries are numbered the same way ("NR 66") but
+  // are a genuinely different card from the original at a very different
+  // price — not a redistribution of it. Those should tie and be offered as a
+  // choice, which is what they now do.
+  const redistributed = /prize pack/i.test(row.expansion || "") &&
+    /^[A-Za-z]{2,4}\s+\d/.test(String(row.collector_number || ""));
+  if (!hinted && redistributed) score -= REPRINT_PENALTY;
 
   if (/additional/i.test(row.expansion || "")) score -= 12;
 
@@ -283,6 +307,13 @@ function nameMatchScore(rowName, wantName) {
  */
 const MIN_CONFIDENT_NAME = NAME_STARTS;
 
+/**
+ * How far a reprint drops below the card it reprints. Has to clear the
+ * confidence threshold on its own, because the natural gap between them is
+ * only the rarity bonus — 8 points, and sometimes nothing at all.
+ */
+const REPRINT_PENALTY = 45;
+
 export function rankCards(rows, parsed, limit = 6) {
   const scored = rows
     .map((row) => ({ row, score: scoreCard(row, parsed) }))
@@ -302,30 +333,7 @@ export function rankCards(rows, parsed, limit = 6) {
     ].join("|");
     if (!seen.has(key)) seen.set(key, entry);
   }
-  // A Play! Pokémon Prize Pack entry is the SAME card as the one it reprints,
-  // and the catalogue says so in its number: "Umbreon ex PRE 060" is
-  // Prismatic Evolutions 060, "Umbreon VMAX EVS 095" is Evolving Skies 095.
-  // Left in, it sits 8 points behind the main-set card — the rarity bonus and
-  // nothing else — which collapses the confidence gap and asks the visitor to
-  // choose between a card and itself. That cost 168 queries their answer.
-  //
-  // Only collapses when the encoded code actually matches another candidate's
-  // expansion: an entry whose prefix names no set we found stays.
-  const codes = new Set([...seen.values()].map((e) => String(e.row.expansion_code || "").toUpperCase()));
-  const deduped = [...seen.values()].filter((entry) => {
-    const prefix = String(entry.row.collector_number || "").match(/^([A-Za-z]{2,4})\s+\d/);
-    if (!prefix) return true;
-    const reprintOf = prefix[1].toUpperCase();
-    if (!codes.has(reprintOf)) return true;
-    return ![...seen.values()].some((other) =>
-      other !== entry &&
-      String(other.row.expansion_code || "").toUpperCase() === reprintOf &&
-      norm(other.row.name) === norm(entry.row.name) &&
-      bare(other.row.collector_number) === bare(entry.row.collector_number)
-    );
-  });
-
-  const top = deduped.slice(0, limit);
+  const top = [...seen.values()].slice(0, limit);
 
   // Confidence is permission to skip the picker and price straight away, so it
   // needs more than "nothing else came close". Two guards, both from real
