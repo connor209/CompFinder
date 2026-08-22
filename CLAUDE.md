@@ -40,6 +40,39 @@ docs/            research reports; PUBLIC_SEARCH_ADS.md covers the public page p
 Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 `npm run dev:public` / `npm run build:public` (the public page).
 
+## Checks
+
+`npm run check` runs two table tests, no framework, non-zero exit on failure:
+
+- `scripts/check-language.mjs` — which sets `languageOf` calls English.
+- `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
+
+Every case in both is a real expansion code or a real sold-listing title. The
+false-positive cases matter more than the true ones: each is something a draft
+rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
+loudly instead of quietly costing good comps. **Run it before touching
+`packages/core`.**
+
+## Measure before adding a pricing rule
+
+The audit harness exists so a rule is judged on data rather than on the two
+examples that prompted it. Twice now that has reversed a decision that looked
+obvious: "read description" appeared on two £9.99 fakes and turned out to be
+ordinary seller language on genuine full-price sales, and a symmetric price
+outlier at 8x removes real played copies (which is why the low side sits at
+median/12 with a cluster guard).
+
+```
+node scripts/build-bigset.mjs                 # English-only chase cards from the catalogue
+node scripts/audit-big.mjs --json out.json    # price them all, from apps/public
+node scripts/diff-runs.mjs before.json after.json   # per-card, flags LOST prices
+node scripts/inspect-spans.mjs "Card 123 Set"       # read the comps behind one price
+CORPUS_OUT=corpus.json node scripts/probe-rules.mjs # dump every title, test a regex offline
+```
+
+Sold comps cache for 24 hours, so re-running straight after an audit is free
+and touches nothing at SoldComps.
+
 ## Gotchas that have already bitten
 
 - **Relative imports of moved modules.** Anything written against the pre-
