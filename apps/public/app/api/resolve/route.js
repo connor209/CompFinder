@@ -103,7 +103,11 @@ export async function GET(request) {
     parsedFor = {
       ...parsed,
       name: usedWords.join(" "),
-      setHint: [parsed.setHint, dropped].filter(Boolean).join(" ")
+      // A dropped word only becomes a set hint if it could plausibly BE one.
+      // "Umbeon ex" trims to "Umbeon" and offered "ex" as the hint, which then
+      // matched every EX-era set — "EX Sandstorm", "EX Dragon" — for a bogus
+      // +40 and put a 2003 Umbreon above the card actually being searched for.
+      setHint: [parsed.setHint, dropped.length >= 3 ? dropped : ""].filter(Boolean).join(" ")
     };
     ranked = rankFor(retry, parsedFor);
   }
@@ -116,15 +120,22 @@ export async function GET(request) {
   // Degrades silently if migration 020 has not been run: the page keeps its
   // previous behaviour rather than erroring.
   if (!ranked.candidates.length) {
+    // The ORIGINAL name, not the trimmed one. Trimming is a strategy for the
+    // exact path — drop words until something matches — and it is precisely
+    // wrong here: "Umbeon ex" had already been cut down to "Umbeon", so the
+    // fuzzy search looked for the wrong card and ranked a 2003 Umbreon above
+    // the Umbreon ex being searched for. Similarity wants everything typed.
     const { data: fuzzyRows, error: fuzzyError } = await supabase
-      .rpc("search_catalog_fuzzy", { q: parsedFor.name, lim: 60 });
+      .rpc("search_catalog_fuzzy", { q: parsed.name, lim: 60 });
     if (fuzzyError) {
       if (!warnedNoFuzzy) {
         warnedNoFuzzy = true;
         console.warn("fuzzy catalogue search unavailable (migration 020 not run?):", fuzzyError.message);
       }
     } else if (fuzzyRows && fuzzyRows.length) {
-      ranked = rankCards(fuzzyRows.map((r) => ({ ...r, _similarity: r.similarity })), parsedFor);
+      // Scored against the original parse too, for the same reason.
+      ranked = rankCards(fuzzyRows.map((r) => ({ ...r, _similarity: r.similarity })), parsed);
+      if (ranked.candidates.length) parsedFor = parsed;
     }
   }
 
