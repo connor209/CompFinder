@@ -29,7 +29,17 @@ const PARSE = [
   // The 2 in Porygon2 is part of the name, not a collector number.
   ["Porygon2 105", { name: "Porygon2", number: "105", setHint: "" }],
   // A leading number must not be read as the collector number and leave no name.
-  ["151 Charizard ex 183", { name: "151 Charizard ex", number: "183", setHint: "" }]
+  ["151 Charizard ex 183", { name: "151 Charizard ex", number: "183", setHint: "" }],
+
+  // Shiny Vault, Trainer Gallery and Galarian Gallery cards are numbered with
+  // a letter prefix ON THE CARD, so that is what people type. 20 of the 455
+  // audit cards are numbered this way and every one was unreachable.
+  ["Garchomp SV40", { name: "Garchomp", number: "SV40", setHint: "" }],
+  ["Pikachu VMAX TG29", { name: "Pikachu VMAX", number: "TG29", setHint: "" }],
+  ["Deoxys VMAX GG45", { name: "Deoxys VMAX", number: "GG45", setHint: "" }],
+  ["Charizard VMAX SV107 Shining Fates", { name: "Charizard VMAX", number: "SV107", setHint: "Shining Fates" }],
+  // The prefix has to be attached to the digits, or "ex" would be swallowed.
+  ["Umbreon ex 161", { name: "Umbreon ex", number: "161", setHint: "" }]
 ];
 for (const [q, want] of PARSE) {
   const got = parseQuery(q);
@@ -92,6 +102,14 @@ const UMBREONS = [
   if (!rankCards(collide, parseQuery("Charizard ex 223 Obsidian Flames")).confident) {
     fail("naming the set should resolve a collision");
   }
+}
+
+{
+  // A set code parked in the catalogue's number field ("ASC 022", "PRE 006")
+  // must still match the number printed on the card.
+  const prize = [row(1, "Moltres ex", "PRE 006", "Play! Pokémon Prize Pack Series Three", "PPS3", "Promo")];
+  const r = rankCards(prize, parseQuery("Moltres ex 6"));
+  if (!r.candidates.length || r.candidates[0].score < 100) fail("a set-code prefix in the number field should still match on 6");
 }
 
 {

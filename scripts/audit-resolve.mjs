@@ -45,7 +45,10 @@ const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9\s']/g, " ").
  */
 function shapesFor(card) {
   const name = card.name;
-  const num = String(card.number || "").replace(/^0+(?=\d)/, "");
+  // What is PRINTED on the card, which is what a person types. The catalogue
+  // sometimes puts a set code in the number field ("ASC 022", "PRE 006") and
+  // querying that string back is testing my test, not the resolver.
+  const num = String(card.number || "").replace(/^[A-Za-z]{2,4}\s+(?=\d)/, "").replace(/^0+(?=\d)/, "");
   const out = [
     { shape: "name+number", q: `${name} ${num}` },
     { shape: "name+number+set", q: `${name} ${num} ${card.set}` },

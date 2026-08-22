@@ -143,11 +143,21 @@ export function parseQuery(text) {
     if (parsed) return parsed;
   }
 
-  // First standalone number that still leaves a name in front of it. The
-  // "still leaves a name" part matters: "151 Charizard ex 183" would otherwise
-  // read the set name as the collector number. Word boundaries mean the 2 in
-  // "Porygon2" is not a candidate.
-  for (const m of raw.matchAll(/(?:^|\s)(\d{1,4})(?=\s|$)/g)) {
+  // First standalone number that still leaves a name in front of it.
+  //
+  // The letter prefix is not optional decoration: Shiny Vault, Trainer Gallery
+  // and Galarian Gallery cards are NUMBERED that way on the card itself —
+  // SV40, TG29, GG45, SV107 — so that is what people type. Without it,
+  // "Garchomp SV40" parsed no number at all and made "sv40" a required
+  // substring of the card's NAME, returning nothing. 20 of the 455 cards in
+  // the audit set are numbered like this and every one of them was
+  // unreachable.
+  //
+  // "still leaves a name" matters: "151 Charizard ex 183" would otherwise read
+  // the set name as the collector number. Word boundaries mean the 2 in
+  // "Porygon2" is not a candidate, and the prefix must be attached to the
+  // digits, so the "ex" in "Umbreon ex 161" cannot be swallowed into it.
+  for (const m of raw.matchAll(/(?:^|\s)([A-Za-z]{0,3}\d{1,4})(?=\s|$)/g)) {
     const index = m.index + (m[0].length - m[1].length);
     const parsed = cut(index, m[1].length, strip(m[1]), null);
     if (parsed) return parsed;
@@ -156,7 +166,16 @@ export function parseQuery(text) {
 }
 
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9\s']/g, " ").replace(/\s+/g, " ").trim();
-const bare = (s) => String(s || "").split("/")[0].replace(/^0+(?=\d)/, "").trim();
+// Collector number, normalised for comparison. Two catalogue quirks to absorb:
+// a denominator ("161/131"), and a set code sitting in the number field with a
+// space after it — "ASC 022", "PRE 006", "EVS 095" on Prize Pack and promo
+// entries. Nobody types the second form; the number printed on the card is the
+// numeric part, so that is what has to match.
+const bare = (s) => String(s || "")
+  .split("/")[0]
+  .replace(/^[A-Za-z]{2,4}\s+(?=\d)/, "")
+  .replace(/^0+(?=\d)/, "")
+  .trim();
 
 /**
  * Scores one catalogue row against the parsed query. Additive and deliberately
