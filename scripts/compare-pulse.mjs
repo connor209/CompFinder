@@ -15,6 +15,7 @@ import { createPacer } from "./lib/pace.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import { buildCompTokens } from "../apps/public/lib/tokens.js";
+import { priceCard } from "./lib/price-card.mjs";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 const args = process.argv.slice(2);
@@ -85,18 +86,33 @@ async function rawPrice(query, sold) {
   return { status: res.status, body: json };
 }
 
-function score(ref, comps, region) {
+/**
+ * THEN: exactly what this script did when the comparison was first run, kept
+ * so a re-run measures the change rather than asserting it. Default settings
+ * (no promo handling, no language rule), no collector-number guards, and
+ * finalPence — the recommended LISTING price, floored at £2.49 and rounded up
+ * a charm ladder. On a best-sellers list where a third of the cards are worth
+ * under £5, that floor was a large part of what the comparison measured.
+ */
+function scoreThen(ref, comps, region) {
   const pool = region === "uk" ? comps.filter((c) => !c.itemLocation) : comps;
   const tokens = buildCompTokens({ name: ref.name, number: ref.number }, ref.name);
   const rec = CompFinderPricing.recommend(pool, settings, tokens, "sold", ref.number, ref.set);
-  return { rec, used: (rec.included || []).length, poolSize: pool.length };
+  return { rec, pence: rec.finalPence ?? null, used: (rec.included || []).length };
+}
+
+/** NOW: the page's actual pipeline, via the shared module. */
+function scoreNow(ref, comps) {
+  const card = { name: ref.name, number: ref.number, set: ref.set, q: `${ref.name} ${ref.number} ${ref.set}` };
+  const p = priceCard(card, comps);
+  return { rec: p.rec, pence: p.pence, used: p.used, ukPence: p.marketPence, ukUsed: p.marketUsed };
 }
 
 async function main() {
   const list = REFERENCE.slice(0, LIMIT);
   console.log(`Comparing ${list.length} PulseTCG best sellers against ${BASE}\n`);
-  console.log("card                              pulse     ours(UK)  n   ours(WW)  n   ratio  vol90");
-  console.log("-".repeat(92));
+  console.log("card                              pulse       THEN  n      NOW  n   then/pulse  now/pulse");
+  console.log("-".repeat(96));
 
   const rows = [];
   for (const ref of list) {
@@ -108,21 +124,22 @@ async function main() {
       continue;
     }
     const comps = sold.comps || [];
-    const uk = score(ref, comps, "uk");
-    const ww = score(ref, comps, "ww");
-    const best = ww.used >= uk.used ? ww : uk;
-    const ratio = best.rec.finalPence && ref.pulse ? best.rec.finalPence / ref.pulse : null;
+    const then = scoreThen(ref, comps, "ww");
+    const now = scoreNow(ref, comps);
+    const ratioThen = then.pence && ref.pulse ? then.pence / ref.pulse : null;
+    const ratio = now.pence && ref.pulse ? now.pence / ref.pulse : null;
 
     const liq = CompFinderLiquidity.assess({
-      soldComps: ww.rec.included || [], activeCount: null, windowDays: 90
+      soldComps: now.rec ? now.rec.included || [] : [], activeCount: null, windowDays: 90
     });
 
-    rows.push({ ref, uk, ww, ratio, fetched: comps.length, saturated: comps.length >= 39, liq, hasNextPage: sold.hasNextPage });
+    rows.push({ ref, then, now, ratioThen, ratio, ww: now, fetched: comps.length, saturated: comps.length >= 39, liq, hasNextPage: sold.hasNextPage });
     console.log(
       `${(ref.name + " " + ref.number).padEnd(33)} ${gbp(ref.pulse).padStart(8)}  ` +
-      `${gbp(uk.rec.finalPence).padStart(8)} ${String(uk.used).padStart(2)}  ` +
-      `${gbp(ww.rec.finalPence).padStart(8)} ${String(ww.used).padStart(2)}  ` +
-      `${(ratio ? ratio.toFixed(2) + "x" : "  —").padStart(6)}  ${String(ww.used).padStart(3)}` +
+      `${gbp(then.pence).padStart(8)} ${String(then.used).padStart(2)}  ` +
+      `${gbp(now.pence).padStart(8)} ${String(now.used).padStart(2)}  ` +
+      `${(ratioThen ? ratioThen.toFixed(2) + "x" : "  —").padStart(9)}  ` +
+      `${(ratio ? ratio.toFixed(2) + "x" : "  —").padStart(9)}` +
       (comps.length >= 39 ? " CAP" : "")
     );
   }
@@ -139,14 +156,33 @@ function report(rows) {
   console.log(`${ok.length} compared · ${priced.length} produced a price · ${none.length} produced nothing`);
 
   if (priced.length) {
-    const ratios = priced.map((r) => r.ratio).sort((a, b) => a - b);
-    const med = ratios[Math.floor(ratios.length / 2)];
-    const within = (lo, hi) => priced.filter((r) => r.ratio >= lo && r.ratio <= hi).length;
-    console.log(`\nOur price ÷ Pulse market price:`);
-    console.log(`  median ratio      ${med.toFixed(2)}x`);
-    console.log(`  within 0.75–1.5x  ${within(0.75, 1.5)}/${priced.length}`);
-    console.log(`  within 0.5–2x     ${within(0.5, 2)}/${priced.length}`);
-    console.log(`  beyond 3x either way  ${priced.filter((r) => r.ratio > 3 || r.ratio < 0.33).length}/${priced.length}`);
+    const band = (rows, key) => {
+      const rs = rows.map((r) => r[key]).filter((x) => x != null).sort((a, b) => a - b);
+      const med = rs[Math.floor(rs.length / 2)];
+      const within = (lo, hi) => rs.filter((x) => x >= lo && x <= hi).length;
+      return {
+        n: rs.length, med,
+        tight: within(0.75, 1.5),
+        loose: within(0.5, 2),
+        wild: rs.filter((x) => x > 3 || x < 0.33).length
+      };
+    };
+    const t = band(priced, "ratioThen");
+    const n = band(priced, "ratio");
+    console.log(`\nOur price ÷ Pulse market price        THEN        NOW`);
+    console.log(`  median ratio                     ${t.med.toFixed(2)}x       ${n.med.toFixed(2)}x`);
+    console.log(`  within 0.75–1.5x              ${String(t.tight).padStart(4)}/${t.n}   ${String(n.tight).padStart(4)}/${n.n}`);
+    console.log(`  within 0.5–2x                 ${String(t.loose).padStart(4)}/${t.n}   ${String(n.loose).padStart(4)}/${n.n}`);
+    console.log(`  beyond 3x either way          ${String(t.wild).padStart(4)}/${t.n}   ${String(n.wild).padStart(4)}/${n.n}`);
+
+    // Where the two scorings disagree by more than a rounding step.
+    const moved = priced
+      .filter((r) => r.then.pence && r.now.pence && Math.abs(r.now.pence / r.then.pence - 1) > 0.1)
+      .sort((a, b) => Math.abs(Math.log(b.now.pence / b.then.pence)) - Math.abs(Math.log(a.now.pence / a.then.pence)));
+    console.log(`\nPrices that moved more than 10% between the two scorings: ${moved.length}`);
+    for (const r of moved.slice(0, 15)) {
+      console.log(`  ${(r.ref.name + " " + r.ref.number).padEnd(33)} ${gbp(r.then.pence).padStart(8)} -> ${gbp(r.now.pence).padStart(8)}   (${r.then.used} -> ${r.now.used} comps, pulse ${gbp(r.ref.pulse)})`);
+    }
   }
 
   const sat = ok.filter((r) => r.saturated);
@@ -157,7 +193,7 @@ function report(rows) {
   if (worst.length) {
     console.log("\nFurthest from Pulse:");
     for (const r of worst) {
-      console.log(`  ${(r.ref.name + " " + r.ref.number).padEnd(33)} pulse ${gbp(r.ref.pulse).padStart(8)} vs ours ${gbp(r.ww.rec.finalPence).padStart(8)}  ${r.ratio.toFixed(2)}x  (${r.ww.used} comps)`);
+      console.log(`  ${(r.ref.name + " " + r.ref.number).padEnd(33)} pulse ${gbp(r.ref.pulse).padStart(8)} vs ours ${gbp(r.now.pence).padStart(8)}  ${r.ratio.toFixed(2)}x  (${r.now.used} comps)`);
     }
   }
 
@@ -165,7 +201,7 @@ function report(rows) {
     console.log("\nNo price produced:");
     for (const r of none) {
       const reasons = {};
-      for (const e of r.ww.rec.excluded || []) reasons[e.exclusionReason] = (reasons[e.exclusionReason] || 0) + 1;
+      for (const e of (r.now.rec && r.now.rec.excluded) || []) reasons[e.exclusionReason] = (reasons[e.exclusionReason] || 0) + 1;
       console.log(`  ${(r.ref.name + " " + r.ref.number).padEnd(33)} ${r.fetched} fetched · ${JSON.stringify(reasons)}`);
     }
   }

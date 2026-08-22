@@ -10,6 +10,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import { buildCompTokens } from "../apps/public/lib/tokens.js";
 import { UK, splitByMarket } from "../apps/public/lib/markets.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
+import { priceCard } from "./lib/price-card.mjs";
 
 const S = CompFinderPricing.DEFAULT_SETTINGS;
 const args = process.argv.slice(2);
@@ -30,11 +31,18 @@ async function price(query) {
   return body;
 }
 
-function score(card, comps) {
+/**
+ * THEN: this script's scoring as it stood when the movers comparison was first
+ * run. Closer to the page than compare-pulse was — it already used
+ * settingsForCard, the market split and rawPence — but with no collector-number
+ * guards, so a card whose number collides with a set name (Mew ex in the 151
+ * set) or with another print pooled them together.
+ */
+function scoreThen(card, comps) {
   const tokens = buildCompTokens({ name: card.name, number: card.number }, card.q);
   const { chosen, rest } = splitByMarket(comps, UK);
   const all = [...chosen, ...rest];
-  if (!all.length) return { rec: null, used: 0, viaName: false };
+  if (!all.length) return { rec: null, pence: null, used: 0, viaName: false };
   const cs = settingsForCard(card);
   let rec = CompFinderPricing.recommend(all, cs, tokens, "sold", card.number, card.set);
   let viaName = false;
@@ -43,22 +51,30 @@ function score(card, comps) {
     const alt = CompFinderPricing.recommend(all, S, nameOnly, "sold", null, card.set);
     if ((alt.included || []).length >= 3) { rec = alt; viaName = true; }
   }
-  return { rec, used: (rec.included || []).length, viaName };
+  return { rec, pence: rec?.rawPence ?? null, used: (rec.included || []).length, viaName };
+}
+
+/** NOW: the page's actual pipeline, via the shared module. */
+function scoreNow(card, comps) {
+  const p = priceCard(card, comps);
+  return { rec: p.rec, pence: p.pence, used: p.used, viaName: p.viaName };
 }
 
 const rows = [];
 const list = MOVERS.slice(0, LIMIT);
 console.log(`Running ${list.length} movers against ${BASE}\n`);
-console.log("card                                 num         pulse      ours    n  ratio  note");
-console.log("-".repeat(96));
+console.log("card                                 num         pulse      THEN  n      NOW  n  then  now   note");
+console.log("-".repeat(112));
 
 for (const card of list) {
   const res = await price(card.q);
   if (!res.ok) { console.log(`${card.name.slice(0,34).padEnd(35)} FETCH FAILED`); continue; }
   const comps = res.comps || [];
-  const { rec, used, viaName } = score(card, comps);
+  const then = scoreThen(card, comps);
+  const { rec, used, viaName } = scoreNow(card, comps);
   const ours = rec?.rawPence ?? null;
   const ratio = ours && card.pulse ? ours / card.pulse : null;
+  const ratioThen = then.pence && card.pulse ? then.pence / card.pulse : null;
 
   const notes = [];
   if (card.graded) notes.push(`pulse=${card.graded} slab`);
@@ -68,10 +84,11 @@ for (const card of list) {
   else if (used === 0) notes.push("all excluded");
   if ((rec?.graded || []).length) notes.push(`${rec.graded.length} graded tier(s)`);
 
-  rows.push({ card, ours, ratio, used, viaName, comps: comps.length, gradedTiers: (rec?.graded || []).length });
+  rows.push({ card, ours, ratio, ratioThen, then, used, viaName, comps: comps.length, gradedTiers: (rec?.graded || []).length });
   console.log(
-    `${card.name.slice(0,34).padEnd(35)} ${String(card.number).padEnd(11)} ${gbp(card.pulse).padStart(8)} ${gbp(ours).padStart(9)} ${String(used).padStart(4)} ` +
-    `${(ratio ? ratio.toFixed(2) + "x" : "  —").padStart(6)}  ${notes.join(", ")}`
+    `${card.name.slice(0,34).padEnd(35)} ${String(card.number).padEnd(11)} ${gbp(card.pulse).padStart(8)} ` +
+    `${gbp(then.pence).padStart(9)} ${String(then.used).padStart(2)} ${gbp(ours).padStart(9)} ${String(used).padStart(2)} ` +
+    `${(ratioThen ? ratioThen.toFixed(2) : " —").padStart(5)} ${(ratio ? ratio.toFixed(2) : " —").padStart(5)}   ${notes.join(", ")}`
   );
 }
 
@@ -89,7 +106,17 @@ console.log("\n" + "=".repeat(96));
 console.log(`${rows.length} cards · ${priced.length} priced · ${rows.length - priced.length} not`);
 console.log(`\nAccuracy (excluding the ${rows.filter(r=>r.card.graded).length} graded entries, where Pulse quotes a slab and we price raw):`);
 if (med) {
-  console.log(`  median ratio     ${med.toFixed(2)}x   over ${comparable.length} cards`);
+  const rt = comparable.map((r) => r.ratioThen).filter((x) => x != null).sort((a, b) => a - b);
+  const medThen = rt.length ? rt[Math.floor(rt.length / 2)] : null;
+  console.log(`  median ratio     ${medThen ? medThen.toFixed(2) + "x -> " : ""}${med.toFixed(2)}x   over ${comparable.length} cards`);
+  const moved = rows.filter((r) => r.then.pence && r.ours && Math.abs(r.ours / r.then.pence - 1) > 0.1);
+  const gained = rows.filter((r) => !r.then.pence && r.ours);
+  const lostP = rows.filter((r) => r.then.pence && !r.ours);
+  console.log(`  moved >10% between the two scorings: ${moved.length}   gained a price: ${gained.length}   lost one: ${lostP.length}`);
+  for (const r of moved.sort((a, b) => Math.abs(Math.log(b.ours / b.then.pence)) - Math.abs(Math.log(a.ours / a.then.pence))).slice(0, 12)) {
+    console.log(`     ${r.card.name.slice(0, 30).padEnd(31)} ${gbp(r.then.pence).padStart(9)} -> ${gbp(r.ours).padStart(9)}   (${r.then.used} -> ${r.used} comps, pulse ${gbp(r.card.pulse)})`);
+  }
+  for (const r of lostP) console.log(`     LOST  ${r.card.name.slice(0, 30).padEnd(31)} was ${gbp(r.then.pence)}`);
   console.log(`  within 0.75-1.5x ${within(0.75, 1.5)}/${comparable.length}`);
   console.log(`  within 0.5-2x    ${within(0.5, 2)}/${comparable.length}`);
   console.log(`  beyond 3x        ${comparable.filter((r) => r.ratio > 3 || r.ratio < 0.33).length}/${comparable.length}`);
