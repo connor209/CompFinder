@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPublicClient } from "@/lib/supabase";
 import { cleanSearchName } from "@compfinder/core/cardname.js";
+import { parseQuery, rankCards, languageOf } from "@/lib/resolve";
 
 /**
  * Card typeahead for the public search box. Reads card_catalog with the anon
@@ -44,16 +45,41 @@ export async function GET(request) {
     return NextResponse.json({ ok: true, cards: [] });
   }
 
+  // Ranked, not raw. This dropdown is the first thing anyone sees, and it was
+  // returning whatever Postgres handed back: "ns zoroark" suggested an Online
+  // Code Card, and the scoring that keeps those out has existed in resolve all
+  // along. Showing something different from what pressing Enter does is worse
+  // than showing nothing.
+  const parsed = parseQuery(q);
+  let ranked = rankCards(data || [], parsed, 8);
+
+  // Same trigram fallback as /api/resolve. Without it the box stayed empty on
+  // exactly the searches the fuzzy work was meant to rescue — "Umbeon ex" and
+  // "team rockets persian" found nothing here while Enter found them both,
+  // because the fallback only ever reached the submit path.
+  //
+  // Only on a miss, and only once the query is long enough to be worth it: a
+  // two- or three-character prefix matches plenty exactly, and this runs on
+  // every keystroke.
+  if (!ranked.candidates.length && parsed.name.length >= 4) {
+    const { data: fuzzyRows, error: fuzzyError } = await supabase
+      .rpc("search_catalog_fuzzy", { q: parsed.name, lim: 40 });
+    if (!fuzzyError && fuzzyRows && fuzzyRows.length) {
+      ranked = rankCards(fuzzyRows.map((r) => ({ ...r, _similarity: r.similarity })), parsed, 8);
+    }
+  }
+
   return NextResponse.json({
     ok: true,
-    cards: (data || []).map((c) => ({
-      id: c.cardmarket_id,
-      name: cleanSearchName(c.name, c.game),
-      number: c.collector_number,
-      set: c.expansion,
-      code: c.expansion_code,
-      rarity: c.rarity,
-      game: c.game
+    cards: ranked.candidates.map(({ row }) => ({
+      id: row.cardmarket_id,
+      name: cleanSearchName(row.name, row.game),
+      number: row.collector_number,
+      set: row.expansion,
+      code: row.expansion_code,
+      rarity: row.rarity,
+      game: row.game,
+      language: languageOf(row)
     }))
   });
 }

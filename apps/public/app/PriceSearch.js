@@ -109,20 +109,32 @@ export default function PriceSearch() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
+  // Debounced, and last-response-wins. This fires on every keystroke, and now
+  // that a miss can cost a trigram search it is worth not firing four times
+  // while someone types "char". The sequence guard stops a slow early request
+  // overwriting the suggestions for what they have since finished typing.
+  const sugSeq = useRef(0);
+  const sugTimer = useRef(null);
+
   async function onInput(value) {
     setQ(value);
+    if (sugTimer.current) clearTimeout(sugTimer.current);
     if (value.trim().length < 2) {
       setSugs([]);
       setOpenSug(false);
       return;
     }
-    try {
-      const res = await fetch(`/api/suggest?q=${encodeURIComponent(value)}`).then((r) => r.json());
-      setSugs(res.cards || []);
-      setOpenSug((res.cards || []).length > 0);
-    } catch {
-      /* suggestions are a convenience; searching still works without them */
-    }
+    const seq = ++sugSeq.current;
+    sugTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/suggest?q=${encodeURIComponent(value)}`).then((r) => r.json());
+        if (seq !== sugSeq.current) return;
+        setSugs(res.cards || []);
+        setOpenSug((res.cards || []).length > 0);
+      } catch {
+        /* suggestions are a convenience; searching still works without them */
+      }
+    }, 160);
   }
 
   /**
