@@ -9,6 +9,7 @@ import { buildCompTokens, dropWrongSetTotal, dropWrongNumerator } from "@/lib/to
 import { UK, marketsIn, splitByMarket } from "@/lib/markets";
 import { assessAsk } from "@/lib/verdict";
 import { settingsForCard, foreignCount } from "@/lib/settings";
+import { conditionBands } from "@/lib/condition";
 import { VARIANTS, variantQueryTerms, variantTokens, variantsPresent } from "@/lib/variants";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import TrendChart from "./TrendChart";
@@ -326,6 +327,12 @@ export default function PriceSearch() {
     const lo = totals.length ? Math.min(...totals) : null;
     const hi = totals.length ? Math.max(...totals) : null;
 
+    // Two condition figures, but only where the comps can support them. On
+    // vintage cards the gap is the whole story — Meganium ex EX Unseen Forces
+    // is £167 Near Mint against £54 played — and on modern cards there is no
+    // gap at all, so nothing is shown. See lib/condition.js.
+    const bands = conditionBands(used, cardSettings, nameTokens, cardNumber, cardSet);
+
     const chart = used
       .filter((c) => c._source && c._source.endedAt)
       .map((c) => ({ t: new Date(c._source.endedAt).getTime(), v: c.totalPence }))
@@ -421,7 +428,7 @@ export default function PriceSearch() {
     return {
       rec, marketPence, med, chart, sales, dropped, buy, lastSold, liquidity, verdict,
       thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers, singleComp,
-      markets, market, restPence, restUsed, premium, conditionCounts, variantsHere,
+      markets, market, restPence, restUsed, premium, conditionCounts, variantsHere, bands,
       foreignHere: foreignCount(comps),
       activeMedian: activeRec?.rawPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
@@ -696,6 +703,25 @@ export default function PriceSearch() {
                 </div>
               )}
             </div>
+            {view.bands && (
+              <div className="bands">
+                <div className="band">
+                  <span className="bandlabel">Near Mint</span>
+                  <b>{pounds(view.bands.nmPence)}</b>
+                  <span className="bandn">{view.bands.nmCount} sale{view.bands.nmCount === 1 ? "" : "s"}</span>
+                </div>
+                <div className="band">
+                  <span className="bandlabel">Played</span>
+                  <b>{pounds(view.bands.playedPence)}</b>
+                  <span className="bandn">{view.bands.playedCount} sale{view.bands.playedCount === 1 ? "" : "s"}</span>
+                </div>
+                <p className="bandhint">
+                  Sellers who stated a condition. On this card it makes a{" "}
+                  <b>{view.bands.ratio.toFixed(1)}&times;</b> difference — worth checking which one you have.
+                </p>
+              </div>
+            )}
+
             <p className="herosub">
               {view.used > 0 ? (
                 <>Recency-weighted from <b>{view.used}</b> sold comps over the last {soldWindow} days · median <b>{pounds(view.med)}</b>.</>
