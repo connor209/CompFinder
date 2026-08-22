@@ -5,7 +5,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import SoldCompsApi from "@compfinder/core/soldcomps.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
-import { buildCompTokens, dropWrongSetTotal } from "@/lib/tokens";
+import { buildCompTokens, dropWrongSetTotal, dropWrongNumerator } from "@/lib/tokens";
 import { UK, marketsIn, splitByMarket } from "@/lib/markets";
 import { assessAsk } from "@/lib/verdict";
 import { settingsForCard, foreignCount } from "@/lib/settings";
@@ -270,7 +270,7 @@ export default function PriceSearch() {
       if (k !== "HP" && k !== "DMG") conditionCounts.nodmg++;
     }
 
-    const filtered = dropWrongSetTotal(preFilter(comps, { condition }), cardNumber);
+    const filtered = dropWrongNumerator(dropWrongSetTotal(preFilter(comps, { condition }), cardNumber), cardNumber);
     const markets = marketsIn(filtered);
     // Offered only where the comps actually contain them: an empty result
     // behind a tempting button is worse than no button.

@@ -14,7 +14,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 import { createPacer } from "./lib/pace.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
-import { buildCompTokens, dropWrongSetTotal } from "../apps/public/lib/tokens.js";
+import { buildCompTokens, dropWrongSetTotal, dropWrongNumerator } from "../apps/public/lib/tokens.js";
 import { UK, splitByMarket, marketsIn } from "../apps/public/lib/markets.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
 import { variantsPresent } from "../apps/public/lib/variants.js";
@@ -65,7 +65,7 @@ function analyse(card, res) {
   const comps = res.comps || [];
   const cs = settingsForCard(card);
   const tokens = buildCompTokens({ name: card.name, number: card.number }, card.q);
-  const guarded = dropWrongSetTotal(comps, card.number);
+  const guarded = dropWrongNumerator(dropWrongSetTotal(comps, card.number), card.number);
   const { chosen, rest } = splitByMarket(guarded, UK);
   const all = [...chosen, ...rest];
 
@@ -96,7 +96,15 @@ function analyse(card, res) {
   if (used.length && price == null) issues.push("price null with comps used");
   if (lastSold != null && lo != null && (lastSold < lo || lastSold > hi)) issues.push("last sold outside range");
   if (used.some((c) => CompFinderPricing.parseGrade(c.title))) issues.push("graded counted as raw");
-  if (lo && hi && lo > 0 && hi / lo > 15) issues.push(`span ${(hi / lo).toFixed(0)}x`);
+  // Span is only meaningful with a floor under it. Mega Chandelure ex 038
+  // spans 16x — from 48p to £7.45 — which is an ordinary auction spread on a
+  // card worth about £2, not evidence of anything wrong. Rayquaza Gold Star
+  // spans 31x, from £625 to £19,110, and that is a real question. Requiring an
+  // absolute gap as well as a ratio stops the cheap tiers filling the list and
+  // hiding the cards actually worth looking at.
+  if (lo && hi && lo > 0 && hi / lo > 15 && hi - lo > 2000) {
+    issues.push(`span ${(hi / lo).toFixed(0)}x`);
+  }
   if (used.length === 1) issues.push("priced off a single comp");
 
   const reasons = {};

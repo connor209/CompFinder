@@ -10,7 +10,7 @@
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { buildCompTokens, dropWrongSetTotal } from "../apps/public/lib/tokens.js";
+import { buildCompTokens, dropWrongSetTotal, dropWrongNumerator } from "../apps/public/lib/tokens.js";
 import { UK, splitByMarket } from "../apps/public/lib/markets.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
 
@@ -34,7 +34,7 @@ for (const q of process.argv.slice(2)) {
   const comps = res.comps || [];
   const cs = settingsForCard(card);
   const tokens = buildCompTokens({ name: card.name, number: card.number }, q);
-  const { chosen, rest } = splitByMarket(dropWrongSetTotal(comps, card.number), UK);
+  const { chosen, rest } = splitByMarket(dropWrongNumerator(dropWrongSetTotal(comps, card.number), card.number), UK);
   const rec = CompFinderPricing.recommend([...chosen, ...rest], cs, tokens, "sold", card.number, card.set);
   const used = (rec.included || []).slice().sort((a, b) => (a.totalPence || 0) - (b.totalPence || 0));
 

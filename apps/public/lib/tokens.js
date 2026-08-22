@@ -57,6 +57,45 @@ export function bareNumber(number) {
 export default { buildCompTokens, bareNumber };
 
 /**
+ * Excludes comps whose title carries an explicit collector number with a
+ * DIFFERENT numerator from the one being searched for.
+ *
+ * The mirror image of dropWrongSetTotal below, and the one that actually
+ * fires here. That function needs the searched-for number to carry its own
+ * denominator, and the catalogue gives bare numerators — so on this page it
+ * returns early and does nothing.
+ *
+ * The case that needs it: "Mew ex 151 WCD 2025" priced nine comps spanning
+ * £5.13 to £38.73, and they were three different cards. The set is CALLED
+ * 151, so "Pokemon TCG - S&V 151 - 205/165 Mew ex" contains the digits 151
+ * and satisfies the number token — which was matching the set name, not the
+ * collector number. Mew ex 151/165 (~£5-£20), 205/165 (~£20-£38) and 193/165
+ * were all being pooled into one figure that is right for none of them.
+ *
+ * Only an EXPLICIT differing numerator excludes. A title that writes the card
+ * number with no denominator at all stays in, exactly as dropWrongSetTotal
+ * treats a missing set total: the honest majority is not worth discarding to
+ * catch the ambiguous few. And if the guard would leave too little to price
+ * from, it stands down entirely — a catalogue number that is simply wrong
+ * should fall through to the existing name-only fallback, not produce a
+ * confident price off two survivors.
+ */
+export function dropWrongNumerator(comps, number, minKept = 3) {
+  const bare = bareNumber(number);
+  if (!bare) return comps;
+  const want = bare.replace(/^0+(?=\d)/, "");
+
+  const kept = comps.filter((c) => {
+    const found = [...String(c.title || "").matchAll(/\b(\d{1,4})\s*\/\s*(\d{1,4})\b/g)];
+    if (!found.length) return true;            // no explicit number — can't rule it out
+    // Keep it if ANY explicit number in the title is ours. Titles that repeat
+    // the number, or add the set total a second time, must not be punished.
+    return found.some((m) => m[1].replace(/^0+(?=\d)/, "") === want);
+  });
+  return kept.length >= minKept ? kept : comps;
+}
+
+/**
  * Excludes comps whose collector number shares our numerator but names a
  * different set total.
  *
