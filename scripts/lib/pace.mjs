@@ -33,6 +33,7 @@ export function createPacer({
   let served = 0;
   let waitedMs = 0;
   let retried = 0;
+  let recovered = 0;
 
   async function throttle() {
     const now = Date.now();
@@ -62,27 +63,48 @@ export function createPacer({
    * telling us we misjudged the pace, so it's honoured with a real wait rather
    * than retried immediately — retrying hard against a rate limit is how a
    * throttle becomes an outage.
+   *
+   * 5xx is retried too, on a shorter backoff, and that is not a nicety. A
+   * 294-card run lost 69 cards — 23% of it — to bare 502s: the route had
+   * already spent its own two internal retries, this returned the failure
+   * as-is, and the summary then reported "224 priced (100%)" because it
+   * measured against the cards that came back rather than the cards asked
+   * for. A baseline with a quarter of it missing is worse than no baseline,
+   * because the next run's diff reads the recovered cards as improvements.
    */
   async function call(fn) {
+    let lastStatus = null;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       await throttle();
-      const res = await fn();
-      if (res.status !== 429) {
+      let res;
+      try {
+        res = await fn();
+      } catch (err) {
+        // A thrown fetch (socket reset, DNS blip) is the same class of problem
+        // as a 502 and gets the same treatment.
+        res = { status: 0, body: { ok: false, error: err.message } };
+      }
+      lastStatus = res.status;
+      if (res.status !== 429 && !(res.status === 0 || res.status >= 500)) {
         served++;
+        if (attempt > 0) recovered++;
         return res;
       }
       retried++;
-      const backoff = Math.min(60_000, 5000 * 2 ** attempt);
-      onWait(`rate limited — backing off ${Math.round(backoff / 1000)}s (attempt ${attempt + 1})`);
+      const backoff = res.status === 429
+        ? Math.min(60_000, 5000 * 2 ** attempt)   // honour a rate limit properly
+        : Math.min(20_000, 2000 * 2 ** attempt);  // upstream wobble: shorter
+      onWait(`${res.status === 429 ? "rate limited" : `upstream ${res.status || "error"}`} — backing off ${Math.round(backoff / 1000)}s (attempt ${attempt + 1})`);
       waitedMs += backoff;
       await sleep(backoff);
     }
-    throw new Error(`still rate limited after ${maxRetries} backoffs — stopping rather than hammering`);
+    throw new Error(`gave up after ${maxRetries} backoffs (last status ${lastStatus}) — stopping rather than hammering`);
   }
 
   const stats = () => ({
     served,
     retried,
+    recovered,
     waitedSeconds: Math.round(waitedMs / 1000),
     inLastHour: callTimes.length
   });

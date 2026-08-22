@@ -44,14 +44,21 @@ for (const tier of [0, 1, 2, 3]) {
 const CARDS = pick.slice(0, LIMIT).map((c) => ({ ...c, q: `${c.name} ${c.number} ${c.set}` }));
 
 async function price(query) {
-  const { body } = await pacer.call(async () => {
-    const res = await fetch(`${BASE}/api/price`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, sold: true, soldAfterDays: 90 })
+  try {
+    const { status, body } = await pacer.call(async () => {
+      const res = await fetch(`${BASE}/api/price`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, sold: true, soldAfterDays: 90 })
+      });
+      return { status: res.status, body: await res.json().catch(() => ({ ok: false, error: "bad json" })) };
     });
-    return { status: res.status, body: await res.json().catch(() => ({ ok: false, error: "bad json" })) };
-  });
-  return body;
+    // Keep the status alongside the error. "fetch failed" told us nothing when
+    // 69 cards of a 294-card run came back empty; "502 x5" would have.
+    if (!body || !body.ok) return { ok: false, error: `${status} ${(body && body.error) || "no body"}` };
+    return body;
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 function analyse(card, res) {
@@ -124,8 +131,20 @@ function report(rs) {
   const ok = rs.filter((r) => !r.fatal);
   const priced = ok.filter((r) => r.price != null);
   const flagged = ok.filter((r) => r.issues.length);
+  const fatal = rs.filter((r) => r.fatal);
   console.log("=".repeat(78));
-  console.log(`${rs.length} cards · ${priced.length} priced (${Math.round(priced.length / ok.length * 100)}%) · ${flagged.length} flagged`);
+  // Percentage against the cards ASKED FOR, not the cards that came back. The
+  // first 294-card run lost 69 to upstream 502s and reported "224 priced
+  // (100%)", which is true of the survivors and useless as a baseline.
+  console.log(`${rs.length} cards · ${priced.length} priced (${Math.round(priced.length / rs.length * 100)}% of the set) · ${flagged.length} flagged`);
+  if (fatal.length) {
+    console.log(`\n!!  ${fatal.length} of ${rs.length} cards NEVER FETCHED — this run is not a usable baseline`);
+    const why = {};
+    for (const r of fatal) why[r.fatal] = (why[r.fatal] || 0) + 1;
+    for (const [k, v] of Object.entries(why).sort((a, b) => b[1] - a[1]).slice(0, 6)) {
+      console.log(`    ${String(v).padStart(4)}  ${k}`);
+    }
+  }
   console.log("=".repeat(78));
 
   const byRar = {};
@@ -176,5 +195,5 @@ function report(rs) {
     if (none.length > 30) console.log(`  … and ${none.length - 30} more`);
   }
   const p = pacer.stats();
-  console.log(`\nPacing: ${p.served} calls, ${p.retried} backoffs, ${p.waitedSeconds}s waiting.`);
+  console.log(`\nPacing: ${p.served} calls, ${p.retried} backoffs, ${p.recovered} recovered on retry, ${p.waitedSeconds}s waiting.`);
 }
