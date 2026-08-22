@@ -29,18 +29,45 @@ export async function GET(request) {
   // Cast a wide net and rank in JS: the useful signals (exact-name match,
   // language, product type) aren't things this schema can order by, and the
   // candidate set for one card name is small enough that it doesn't matter.
+  const SELECT = "cardmarket_id,name,collector_number,rarity,expansion,expansion_code,game";
+
+  /**
+   * A card name can have far more than 120 rows across every language and
+   * reprint, and the fetch takes an arbitrary 120 of them because there is no
+   * ORDER BY — so which cards are even considered was down to physical row
+   * order. Migration 020 rewrote the table to add a generated column, the
+   * order changed, and Arven 235 Scarlet & Violet stopped being fetched at
+   * all: five queries that had resolved it correctly started answering with a
+   * WCD 2024 Arven instead.
+   *
+   * Two fixes. Ordering makes it deterministic, so a result cannot silently
+   * change under a table rewrite again. And when a collector number was typed,
+   * a second query goes straight after it — the number is by far the strongest
+   * filter available, and it guarantees the card being asked for is in the
+   * candidate set however many namesakes it has.
+   */
   const fetchByTokens = async (tokens) => {
-    let query = supabase
-      .from("card_catalog")
-      .select("cardmarket_id,name,collector_number,rarity,expansion,expansion_code,game")
-      .limit(120);
+    let query = supabase.from("card_catalog").select(SELECT).order("cardmarket_id").limit(120);
     for (const t of tokens) query = query.ilike("name", `%${t}%`);
     const { data, error } = await query;
     if (error) {
       console.error("resolve failed:", error.message);
       return null;
     }
-    return data || [];
+    const rows = data || [];
+
+    // Leading zeros are written both ways in the catalogue ("6" and "006"), so
+    // ask for the forms the typed number could be stored as.
+    if (!parsed.number || !tokens.length) return rows;
+    const n = String(parsed.number);
+    const forms = [...new Set([n, n.padStart(2, "0"), n.padStart(3, "0")])];
+    let byNumber = supabase.from("card_catalog").select(SELECT).order("cardmarket_id").limit(60);
+    byNumber = byNumber.ilike("name", `%${tokens[0]}%`).in("collector_number", forms);
+    const { data: numbered, error: numberError } = await byNumber;
+    if (numberError || !numbered || !numbered.length) return rows;
+
+    const seenIds = new Set(rows.map((r) => r.cardmarket_id));
+    return [...rows, ...numbered.filter((r) => !seenIds.has(r.cardmarket_id))];
   };
 
   // Trim WORDS, derive tokens from them. Deriving the name back out of the
@@ -94,12 +121,14 @@ export async function GET(request) {
   if (data === null) return NextResponse.json({ ok: true, parsed, candidates: [], confident: false });
 
   let parsedFor = parsed;
+  let lastRows = null;
   let ranked = rankFor(data, parsedFor);
   while (!ranked.candidates.length && usedWords.length > 1) {
     usedWords = usedWords.slice(0, -1);
     const retry = await fetchByTokens(tokensOf(usedWords));
     if (retry === null) break;
     const dropped = words.slice(usedWords.length).join(" ");
+    lastRows = retry;
     parsedFor = {
       ...parsed,
       name: usedWords.join(" "),
@@ -110,6 +139,23 @@ export async function GET(request) {
       setHint: [parsed.setHint, dropped.length >= 3 ? dropped : ""].filter(Boolean).join(" ")
     };
     ranked = rankFor(retry, parsedFor);
+  }
+
+  // Trimming assumes the words it drops were a set name. Sometimes they are
+  // part of the card's name: "Charizard LV.X" trims to "Charizard", which then
+  // matches a plain Charizard EXACTLY and outranks the card actually asked
+  // for — LV.X fell to third behind a Skyridge Charizard. So score the same
+  // rows against everything that was typed as well, and prefer that reading
+  // when it does at least as well. Using all of the query is better evidence
+  // than discarding part of it, and it costs no extra round trip.
+  if (usedWords.length < words.length && lastRows) {
+    const full = rankFor(lastRows, parsed);
+    const bestFull = full.candidates[0] ? full.candidates[0].score : -Infinity;
+    const bestTrimmed = ranked.candidates[0] ? ranked.candidates[0].score : -Infinity;
+    if (full.candidates.length && bestFull >= bestTrimmed) {
+      ranked = full;
+      parsedFor = parsed;
+    }
   }
   // LAST RESORT: trigram similarity. Only reached when nothing matched by
   // substring at any token depth, which is exactly the case a substring filter
