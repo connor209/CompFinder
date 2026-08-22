@@ -8,7 +8,7 @@ import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { buildCompTokens, dropWrongSetTotal } from "@/lib/tokens";
 import { UK, marketsIn, splitByMarket } from "@/lib/markets";
 import { assessAsk } from "@/lib/verdict";
-import { settingsForCard } from "@/lib/settings";
+import { settingsForCard, foreignCount } from "@/lib/settings";
 import { VARIANTS, variantQueryTerms, variantTokens, variantsPresent } from "@/lib/variants";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import TrendChart from "./TrendChart";
@@ -64,6 +64,10 @@ export default function PriceSearch() {
   const [recent, setRecent] = useState([]);
   const [ask, setAsk] = useState("");
   const [variant, setVariant] = useState("any");
+  // English-only by default. The page has to assume something — a German
+  // Sylveon VMAX is a different product at a different price — but it should
+  // not assume it silently, so the assumption gets a control.
+  const [includeForeign, setIncludeForeign] = useState(false);
   const comboRef = useRef(null);
   // Guards against a slow earlier search landing after a newer one and
   // overwriting it — easy to hit when someone types, waits, then picks a
@@ -275,7 +279,7 @@ export default function PriceSearch() {
 
     // Promo cards need the blanket "promo" exclusion stood down, or every
     // correctly-matching comp is thrown out for describing the card accurately.
-    const cardSettings = settingsForCard(card);
+    const cardSettings = settingsForCard(card, { includeForeign });
     const priceFor = (pool, tokens = nameTokens, num = cardNumber) =>
       pool.length ? CompFinderPricing.recommend(pool, cardSettings, tokens, "sold", num, cardSet) : null;
 
@@ -418,6 +422,7 @@ export default function PriceSearch() {
       rec, marketPence, med, chart, sales, dropped, buy, lastSold, liquidity, verdict,
       thinHere, tooBroad, span, askingUnreliable, numberUnmatched, seenNumbers, singleComp,
       markets, market, restPence, restUsed, premium, conditionCounts, variantsHere,
+      foreignHere: foreignCount(comps),
       activeMedian: activeRec?.rawPence ?? null,
       activeCount: activeRec?.included?.length ?? 0,
       lo,
@@ -428,7 +433,7 @@ export default function PriceSearch() {
       matchedCard: !!(cardNumber || cardSet)
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, active, market, condition, ask, soldWindow]);
+  }, [data, active, market, condition, ask, soldWindow, includeForeign]);
 
   return (
     <>
@@ -505,7 +510,7 @@ export default function PriceSearch() {
             <div className="filter">
               <span className="flabel">Printing</span>
               <div className="seg" role="group" aria-label="Printing variant">
-                {VARIANTS.filter((v) => v.key === "any" || view.variantsHere[v.key]).slice(0, 4).map((v) => (
+                {VARIANTS.filter((v) => v.key === "any" || view.variantsHere[v.key]).map((v) => (
                   <button
                     key={v.key}
                     aria-pressed={variant === v.key}
@@ -549,6 +554,27 @@ export default function PriceSearch() {
               })}
             </div>
           </div>
+
+          {view && view.foreignHere > 0 && (
+            <div className="filter">
+              <span className="flabel">Language</span>
+              <div className="seg" role="group" aria-label="Language">
+                {[[false, "English"], [true, "Any"]].map(([v, l]) => (
+                  <button
+                    key={String(v)}
+                    aria-pressed={includeForeign === v}
+                    title={v
+                      ? "Include German, Italian, Japanese and other prints"
+                      : "English prints only — a foreign print of the same card is a different product"}
+                    onClick={() => setIncludeForeign(v)}
+                  >
+                    {l}
+                    {v ? <span className="segn">+{view.foreignHere}</span> : null}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="filter">
             <span className="flabel">Sold within</span>

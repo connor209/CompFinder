@@ -61,10 +61,24 @@ function wantsEnglishComps(card) {
   return !lang || lang === "English";
 }
 
-export function settingsForCard(card) {
+const FOREIGN_RE = new RegExp(`\\b(${FOREIGN_LANGUAGE.join("|")})\\b`, "i");
+
+/** How many of these comps name a language other than English. */
+export function foreignCount(comps) {
+  return (comps || []).filter((c) => FOREIGN_RE.test(c.title || "")).length;
+}
+
+/**
+ * `includeForeign` stands the language rule down. The page defaults to
+ * English-only and says so with a control, rather than silently applying an
+ * assumption the visitor cannot see — someone holding a German card should be
+ * able to price it, and someone who wants the whole market should be able to
+ * ask for it.
+ */
+export function settingsForCard(card, { includeForeign = false } = {}) {
   const base = CompFinderPricing.DEFAULT_SETTINGS;
   const promo = isPromoCard(card);
-  const english = wantsEnglishComps(card);
+  const english = wantsEnglishComps(card) && !includeForeign;
   if (!promo && !english) return base;
 
   const excludeKeywords = { ...base.excludeKeywords };
@@ -78,4 +92,4 @@ export function settingsForCard(card) {
   return { ...base, excludeKeywords };
 }
 
-export default { isPromoCard, settingsForCard, FOREIGN_LANGUAGE };
+export default { isPromoCard, settingsForCard, foreignCount, FOREIGN_LANGUAGE };
