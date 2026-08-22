@@ -191,7 +191,13 @@ const CompFinderPricing = (() => {
   // for "ACE Grading 9", "Ace Grade 10" and "PSA Grade 9", all seen live.
   // "tag" needs the digit to follow it directly, which is what keeps TAG TEAM
   // cards ("Reshiram & Charizard GX ... TAG TEAM") out of it.
-  const GRADERS = ["psa", "cgc", "bgs", "sgc", "ace", "tag", "graad", "mgc", "ags"];
+  // "pristine" is a grade rather than a company (CGC's top tier), but it is
+  // written on its own often enough to matter: "PRISTINE 10 GOLD LABEL TOP
+  // POP" and "Certified Pristine 10" name no company at all, and the first of
+  // those was a £303 slab sitting in a five-comp set whose other four ran
+  // £22-£26. All 13 titles carrying "pristine" followed by a digit are slabs;
+  // requiring the digit is what keeps "pristine condition" out.
+  const GRADERS = ["psa", "cgc", "bgs", "sgc", "ace", "tag", "graad", "mgc", "ags", "pristine"];
   const GRADER_ALT = GRADERS.join("|");
   const GRADED_NUMBER_PATTERN = new RegExp(
     `\\b(${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*\\d{1,2}\\b`, "i"

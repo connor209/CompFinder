@@ -34,6 +34,10 @@ const CASES = [
   ["Pokemon Lugia VSTAR 2022 Silver Tempest 211/195 Ace Grade 10 - perfect subgrades", "graded"],
   ["GetGraded 9.5 Dragapult VMAX 197/192 Rebel Clash 2020 Holo Secret Rare EN", "graded"],
   ["PSA 10 Umbreon VMAX (Alternate Art Secret) 215/203 Swsh07: Evolving Skies", "graded"],
+  // A grade with no company named. This one was a £303 comp in a five-comp
+  // set whose other four ran £22-£26.
+  ["Mewtwo VSTAR Secret #086 Pokemon GO~PRISTINE 10 GOLD LABEL TOP POP~SHOOT OFFER", "graded"],
+  ["Radiant Blastoise 018/071 Certified Pristine 10 Pokemon Go Bling", "graded"],
 
   // --- notACard: shapes a keyword cannot express ---------------------------
   ["Charizard 146/144 Skyridge E-Reader Series - Custom-Art Gold Metal Pokemon Card", "notACard"],
@@ -90,7 +94,10 @@ const CASES = [
   // it would take out every one of these.
   ["Pokémon TCG Mew EX 151/165 Scarlet Violet 151 Set Ultra Rare NM", null],
   ["Garchomp SV40/SV94 Hidden Fates: Shiny Vault Shiny Holo Rare Pokemon Card", null],
-  ["Umbreon VMAX 215/203 Evolving Skies Secret Rare Set Holo", null]
+  ["Umbreon VMAX 215/203 Evolving Skies Secret Rare Set Holo", null],
+  // "pristine" needs a digit after it, or an ordinary description of a raw
+  // card would read as a slab.
+  ["Charizard VMAX 074/073 Champion's Path Secret Rare - pristine condition", null]
 ];
 
 // Check (2), the shared-denominator test, needs the searched-for number to
