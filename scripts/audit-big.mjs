@@ -41,7 +41,11 @@ for (const tier of [0, 1, 2, 3]) {
   const g = ALL.filter((c) => TIER(c.rarity) === tier);
   pick.push(...(tier <= 1 ? g : g.filter((_, i) => i % (tier === 2 ? 2 : 3) === 0)));
 }
-const CARDS = pick.slice(0, LIMIT).map((c) => ({ ...c, q: `${c.name} ${c.number} ${c.set}` }));
+// BIGSET_ALL takes every card instead of the rarity-weighted sample. The
+// weighting exists to keep a chase-card run from being dominated by its
+// cheapest tiers; a set built deliberately FROM those tiers wants all of it.
+const chosen = process.env.BIGSET_ALL ? ALL : pick;
+const CARDS = chosen.slice(0, LIMIT).map((c) => ({ ...c, q: `${c.name} ${c.number} ${c.set}` }));
 
 async function price(query) {
   try {
@@ -171,6 +175,27 @@ function report(rs) {
     const k = i.startsWith("span") ? "wide span (>15x)" : i;
     iss[k] = (iss[k] || 0) + 1;
   }
+  // Grouped, when the set says how it was built. A rule tuned on chase cards
+  // can be fine on average and wrong for one whole population.
+  if (ok.some((r) => r.card.group)) {
+    const byGroup = {};
+    for (const r of ok) {
+      const g = r.card.group || "(none)";
+      byGroup[g] = byGroup[g] || { n: 0, p: 0, comps: [], reasons: {} };
+      byGroup[g].n++;
+      if (r.price != null) byGroup[g].p++;
+      byGroup[g].comps.push(r.used);
+      for (const [k, v] of Object.entries(r.reasons || {})) byGroup[g].reasons[k] = (byGroup[g].reasons[k] || 0) + v;
+    }
+    console.log("\nBy group:");
+    for (const [g, v] of Object.entries(byGroup)) {
+      const medComps = v.comps.slice().sort((a, b) => a - b)[Math.floor(v.comps.length / 2)];
+      const top = Object.entries(v.reasons).sort((a, b) => b[1] - a[1]).slice(0, 3)
+        .map(([k, n]) => `${k} ${n}`).join(", ");
+      console.log(`  ${g.padEnd(18)} ${String(v.p).padStart(3)}/${String(v.n).padEnd(3)} priced · median ${String(medComps).padStart(2)} comps · ${top}`);
+    }
+  }
+
   console.log("\nIssues:");
   for (const [k, v] of Object.entries(iss).sort((a, b) => b[1] - a[1])) console.log(`  ${String(v).padStart(4)}  ${k}`);
 
