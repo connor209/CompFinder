@@ -53,9 +53,9 @@ let misses = 0;
 for (const [i, c] of CARDS.entries()) {
   process.stdout.write(`\r  ${i + 1}/${CARDS.length} · ${priced.length} priced · ${misses} misses   `);
   const q = `${c.name} ${c.number} ${c.set}`;
-  let body;
+  let res;
   try {
-    body = await pacer.call(async () => {
+    res = await pacer.call(async () => {
       const r = await fetch(`${BASE}/api/price`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: q, sold: true, soldAfterDays: 90 })
@@ -63,6 +63,9 @@ for (const [i, c] of CARDS.entries()) {
       return { status: r.status, body: await r.json().catch(() => ({ ok: false })) };
     });
   } catch { continue; }
+  // pacer.call resolves to { status, body } - reading .ok off the wrapper is
+  // undefined, which silently skipped every card on the first attempt.
+  const body = res && res.body;
   if (!body || !body.ok) continue;
   if (!body.cached) misses++;
   const comps = body.comps || [];

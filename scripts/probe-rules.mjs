@@ -45,16 +45,19 @@ let misses = 0;
 for (const [i, c] of CARDS.entries()) {
   process.stdout.write(`\r  ${i + 1}/${CARDS.length} · ${corpus.length} comps · ${misses} cache misses   `);
   const q = `${c.name} ${c.number} ${c.set}`;
-  let body;
+  let res;
   try {
-    body = await pacer.call(async () => {
+    res = await pacer.call(async () => {
       const r = await fetch(`${BASE}/api/price`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: q, sold: true, soldAfterDays: 90 })
       });
-      return r.json();
+      return { status: r.status, body: await r.json().catch(() => ({ ok: false })) };
     });
   } catch { continue; }
+  // pacer.call resolves to { status, body }: returning the bare body here meant
+  // the pacer never saw a status and could not retry a 502.
+  const body = res && res.body;
   if (!body || !body.ok) continue;
   if (!body.cached) misses++;
   for (const comp of body.comps || []) {
@@ -67,6 +70,15 @@ for (const [i, c] of CARDS.entries()) {
   }
 }
 console.log(`\n\n${corpus.length} comps across ${CARDS.length} cards (${misses} cache misses)\n`);
+// Written so a candidate regex can be re-tested against the same titles
+// offline, without another pass over the API.
+if (process.env.CORPUS_OUT) {
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(process.env.CORPUS_OUT, JSON.stringify(corpus.map((c) => ({
+    q: c.q, title: c.title, itemPence: c.itemPence, postPence: c.postPence, location: c.location
+  }))));
+  console.log(`corpus written to ${process.env.CORPUS_OUT}\n`);
+}
 
 /** Prints how many titles a pattern hits, with a sample, so it can be judged. */
 function probe(label, re, { sample = 6 } = {}) {
