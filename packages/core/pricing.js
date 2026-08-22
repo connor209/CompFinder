@@ -197,6 +197,22 @@ const CompFinderPricing = (() => {
     `\\b(${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*\\d{1,2}\\b`, "i"
   );
 
+  // Bundles written with a COUNT rather than a bundle word. The keyword list
+  // has "lot of", "job lot" and "x2".."x6", but a leading count is at least as
+  // common and matched none of them: "Pokémon TCG 10 Card Lot Mewtwo VSTAR
+  // 086/078" was sitting in that card's comp set, as was a "3 Card Lot" of
+  // Deoxys promos and a "2 Card Lot" Chesnaught V. Four hits in 11,534 real
+  // titles, all genuine multi-card listings.
+  const COUNTED_LOT_PATTERN = /\b\d{1,3}\s*cards?\s*(?:lot|bundle|set)\b/i;
+
+  // Three or more capitalised names joined by "+", which is how an evolution
+  // line gets sold as one item: "SHINY HOLO RARE Gible + Gabite + Garchomp SET
+  // Pokemon SV40/SV94" was the top comp on Garchomp SV40 at four times its
+  // median. Deliberately three and not two, and deliberately case-sensitive:
+  // a bare "set" token appears in 301 of those titles and is far too common to
+  // key off, while three plus-joined proper nouns appear once.
+  const PLUS_JOINED_NAMES = /\b[A-Z][a-z]+\s*\+\s*[A-Z][a-z]+\s*\+\s*[A-Z][a-z]+/;
+
   // Things shaped like a card listing that are not the card. The keyword list
   // above covers the plain words; this covers the shapes a keyword cannot,
   // because wordBoundaryMatch falls back to a literal substring test for
@@ -649,6 +665,7 @@ const CompFinderPricing = (() => {
     if (!queryWantsReverseHolo && /\breverse\s*holo\b/i.test(t)) return "variantMismatch";
     if (GRADED_NUMBER_PATTERN.test(t)) return "graded";
     if (NOT_A_CARD_PATTERN.test(t)) return "notACard";
+    if (COUNTED_LOT_PATTERN.test(t) || PLUS_JOINED_NAMES.test(t)) return "bundle";
     if (looksLikeNamedMultiCardLot(t, cardNumber)) return "multiCardLot";
     for (const [reason, words] of Object.entries(excludeKeywords)) {
       if (words.some((w) => wordBoundaryMatch(t, w))) return reason;

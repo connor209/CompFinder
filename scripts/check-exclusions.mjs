@@ -59,6 +59,11 @@ const CASES = [
   ["Horsea 030, Seadra 031 and Kingdra 032/182", "multiCardLot"],
   ["Horsea 030 Seadra 031 Kingdra 032/182 - Sv04 Paradox Rift", "multiCardLot"],
 
+  // --- bundles written with a count, or as a plus-joined evolution line -----
+  ["Pokémon TCG 10 Card Lot Mewtwo VSTAR 086/078 Holo Pokémon GO English", "bundle"],
+  ["Chesnaught V 015/195 Silver Tempest - 2 Card Lot", "bundle"],
+  ["SHINY HOLO RARE Gible + Gabite + Garchomp SET Pokemon SV40/SV94 Hidden Fates NM", "bundle"],
+
   // --- FALSE POSITIVES. Each of these was excluded by a draft rule. ---------
   // A date, not a card number: denominator 8 is too small to be a set total.
   ["FRI 21/08 MEGA GENGAR EX 284/217 ASCENDED HEROES", null],
@@ -80,7 +85,12 @@ const CASES = [
   // A set whose NAME is a number. Counting matches rather than distinct
   // numbers made this pair its own set name with the card and read as a lot.
   ["Pokemon 151 Charizard ex 199/165 Special Illustration Rare Holo", null],
-  ["Pokemon Card 151 Mew ex 205/165 SIR English NM", null]
+  ["Pokemon Card 151 Mew ex 205/165 SIR English NM", null],
+  // A bare "set" token appears in 301 of the 11,534 corpus titles. Keying off
+  // it would take out every one of these.
+  ["Pokémon TCG Mew EX 151/165 Scarlet Violet 151 Set Ultra Rare NM", null],
+  ["Garchomp SV40/SV94 Hidden Fates: Shiny Vault Shiny Holo Rare Pokemon Card", null],
+  ["Umbreon VMAX 215/203 Evolving Skies Secret Rare Set Holo", null]
 ];
 
 // Check (2), the shared-denominator test, needs the searched-for number to
