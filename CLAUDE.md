@@ -73,6 +73,19 @@ CORPUS_OUT=corpus.json node scripts/probe-rules.mjs # dump every title, test a r
 Sold comps cache for 24 hours, so re-running straight after an audit is free
 and touches nothing at SoldComps.
 
+## Merging to main deploys — batch it
+
+Both Vercel projects build from this repo, so every push to `main` triggers
+two Production builds and every push to a branch triggers two Previews. On
+2026-08-22 a long audit-and-fix session merged 30 times in a day, hit the
+Hobby plan's 100-deployment cap by early afternoon, and the last two fixes sat
+unbuilt for hours — with the live site quietly serving the commit before them.
+
+Verify locally (`npm run check`, `npm run build:public`), let fixes accumulate
+on the branch, and merge once you have something worth deploying. If the site
+stops reflecting a merge, check the Vercel dashboard before assuming the code
+is wrong: a missed deploy looks exactly like a bug that didn't take.
+
 ## Gotchas that have already bitten
 
 - **Relative imports of moved modules.** Anything written against the pre-
