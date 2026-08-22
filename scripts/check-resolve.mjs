@@ -153,6 +153,21 @@ const UMBREONS = [
   const without = rankCards(rocket, parseQuery("team rockets persian ex 173"));
   if (!withApos.confident) fail("the punctuated form should resolve confidently");
   if (!without.confident) fail("omitting the apostrophe should resolve just as well");
+
+  // Scoring is only half of it: the DB filter runs against the raw name, which
+  // keeps its apostrophe, so "rockets" has to be widened to "rocket" or the
+  // card is never fetched to be scored at all.
+  const forFilter = (w) => {
+    const t = w.toLowerCase();
+    return t.length >= 5 && t.endsWith("s") ? t.slice(0, -1) : t;
+  };
+  const raw = "Team Rocket's Persian ex";
+  for (const w of ["team", "rockets", "persian", "ex"]) {
+    if (!raw.toLowerCase().includes(forFilter(w))) fail(`filter token "${forFilter(w)}" would not fetch ${raw}`);
+  }
+  // ...and it must not shorten something that is already short.
+  if (forFilter("ex") !== "ex") fail("short tokens must be left alone");
+  if (forFilter("eevee") !== "eevee") fail("a token not ending in s must be left alone");
 }
 
 {

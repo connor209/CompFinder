@@ -45,7 +45,25 @@ export async function GET(request) {
   // "hisuian zoroark", which matched the non-V card EXACTLY (100) and the V
   // card only on tokens (12), so it confidently priced the wrong card.
   const words = parsed.name.split(/\s+/).filter(Boolean);
-  const tokensOf = (ws) => ws.map((w) => w.toLowerCase()).filter((t) => t.length >= 2).slice(0, 4);
+
+  // The filter runs against the raw `name` column, which still carries its
+  // apostrophes. Someone typing "team rockets persian ex" produces the token
+  // "rockets", and `name ilike '%rockets%'` does not match "Team Rocket's
+  // Persian ex" — so the card is never fetched and never gets a chance to be
+  // scored, however well the scorer would have handled it. 25 of the 455 cards
+  // in the audit set are trainer-owned cards named this way: Team Rocket's,
+  // Misty's, Brock's, Erika's, N's, Gladion's.
+  //
+  // Dropping a trailing "s" turns "rockets" into "rocket", which matches
+  // "Rocket's" as a substring. It can only ever WIDEN the net — a shorter
+  // needle matches a superset — and ranking still happens in JS, where norm()
+  // deletes the apostrophe so the full name matches exactly. The length floor
+  // keeps it from turning short tokens into noise.
+  const forFilter = (w) => {
+    const t = w.toLowerCase();
+    return t.length >= 5 && t.endsWith("s") ? t.slice(0, -1) : t;
+  };
+  const tokensOf = (ws) => ws.map(forFilter).filter((t) => t.length >= 2).slice(0, 4);
   const tokens = tokensOf(words);
   if (!tokens.length) return NextResponse.json({ ok: true, parsed, candidates: [], confident: false });
 
