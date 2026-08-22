@@ -20,8 +20,21 @@ const settings = CompFinderPricing.DEFAULT_SETTINGS;
  * @param {object} card  { name, number } — number may be "186/196" or "186"
  * @param {string} fallbackQuery  used when no catalogue card was matched
  */
+/**
+ * A printed LEVEL ("Lv.12"), which the catalogue keeps in the name and eBay
+ * sellers almost never type. It was the last unpriceable card in the 294-card
+ * audit: "Flying Pikachu Lv.12" made "Lv.12" a required token, and since every
+ * token must be present, all 40 comps were rejected as a name mismatch even
+ * though they were the right card.
+ *
+ * "Lv.X" is deliberately NOT stripped. That is a rarity, not a level — sellers
+ * do write "Charizard LV.X" — and Charizard LV.X 143 Supreme Victors prices
+ * correctly with it required.
+ */
+const PRINTED_LEVEL = /\s*\bLv\.?\s*\d+\b/gi;
+
 export function buildCompTokens(card, fallbackQuery) {
-  const nameSource = (card && card.name) || fallbackQuery || "";
+  const nameSource = String((card && card.name) || fallbackQuery || "").replace(PRINTED_LEVEL, "");
   const tokens = CompFinderPricing.extractNameTokens(
     CompFinderPricing.simplifyTitle(nameSource, settings.stripWords)
   );
