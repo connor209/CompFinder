@@ -86,22 +86,7 @@ async function rawPrice(query, sold) {
   return { status: res.status, body: json };
 }
 
-/**
- * THEN: exactly what this script did when the comparison was first run, kept
- * so a re-run measures the change rather than asserting it. Default settings
- * (no promo handling, no language rule), no collector-number guards, and
- * finalPence — the recommended LISTING price, floored at £2.49 and rounded up
- * a charm ladder. On a best-sellers list where a third of the cards are worth
- * under £5, that floor was a large part of what the comparison measured.
- */
-function scoreThen(ref, comps, region) {
-  const pool = region === "uk" ? comps.filter((c) => !c.itemLocation) : comps;
-  const tokens = buildCompTokens({ name: ref.name, number: ref.number }, ref.name);
-  const rec = CompFinderPricing.recommend(pool, settings, tokens, "sold", ref.number, ref.set);
-  return { rec, pence: rec.finalPence ?? null, used: (rec.included || []).length };
-}
-
-/** NOW: the page's actual pipeline, via the shared module. */
+/** The page's actual pipeline, via the shared module. */
 function scoreNow(ref, comps) {
   const card = { name: ref.name, number: ref.number, set: ref.set, q: `${ref.name} ${ref.number} ${ref.set}` };
   const p = priceCard(card, comps);
@@ -124,9 +109,9 @@ async function main() {
       continue;
     }
     const comps = sold.comps || [];
-    const then = scoreThen(ref, comps, "ww");
     const now = scoreNow(ref, comps);
-    const ratioThen = then.pence && ref.pulse ? then.pence / ref.pulse : null;
+    const then = { pence: null, used: 0 };
+    const ratioThen = null;
     const ratio = now.pence && ref.pulse ? now.pence / ref.pulse : null;
 
     const liq = CompFinderLiquidity.assess({

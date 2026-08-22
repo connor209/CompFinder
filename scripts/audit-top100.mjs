@@ -1,4 +1,12 @@
 /**
+ * NOTE: reports rawPence — what a card is WORTH. finalPence, the recommended
+ * listing price floored at £2.49 and rounded up a 50p charm ladder, belongs to
+ * the business app and has no place in a "what's it worth" tool. Measured
+ * against the Pulse best sellers, where a third of the cards trade under £5,
+ * the ladder alone put our median at 1.11x their market price against an
+ * honest 1.03x.
+ */
+/**
  * The 100-card audit. Same invariant approach as audit-public.mjs, run against
  * the approved list of current high-volume Pokémon singles.
  *
@@ -79,7 +87,7 @@ function analyse(card, res) {
   // as "no price": nothing usable at all, a card that only trades graded, and
   // one recovered by ignoring a number that doesn't exist.
   const gradedTiers = (ww.graded || []).length;
-  const outcome = ww.finalPence != null
+  const outcome = ww.rawPence != null
     ? (numberUnmatched ? "priced-via-name" : "priced")
     : gradedTiers > 0 ? "graded-only" : "nothing";
 
@@ -88,7 +96,7 @@ function analyse(card, res) {
 
   if (comps.length === 0) issues.push("no comps returned at all");
   if (outcome === "nothing") issues.push("no price and no graded sales");
-  if (used.length > 0 && ww.finalPence == null) issues.push("price null despite comps used");
+  if (used.length > 0 && ww.rawPence == null) issues.push("price null despite comps used");
   if (lastSold != null && lo != null && (lastSold < lo || lastSold > hi)) {
     issues.push(`last sold ${gbp(lastSold)} outside used range`);
   }
@@ -127,7 +135,7 @@ async function main() {
     }
     const r = analyse(card, res);
     console.log(
-      `${String(r.fetched).padStart(3)}→${String(r.used).padStart(3)}  ${gbp(r.ww.finalPence).padStart(10)}  ` +
+      `${String(r.fetched).padStart(3)}→${String(r.used).padStart(3)}  ${gbp(r.ww.rawPence).padStart(10)}  ` +
       `${r.liq.label.padEnd(16)}${r.issues.length ? ` ⚠ ${r.issues.length}` : ""}`
     );
     results.push(r);
@@ -137,7 +145,7 @@ async function main() {
   if (JSON_OUT) {
     writeFileSync(JSON_OUT, JSON.stringify(results.map((r) => ({
       card: r.card, fetched: r.fetched, ukCount: r.ukCount, used: r.used, ukUsed: r.ukUsed,
-      price: r.ww?.finalPence ?? null, confidence: r.ww?.confidence ?? null,
+      price: r.ww?.rawPence ?? null, confidence: r.ww?.confidence ?? null,
       outcome: r.outcome, numberUnmatched: r.numberUnmatched, gradedTiers: r.gradedTiers,
       liquidity: r.liq?.label ?? null, saturated: r.saturated, issues: r.issues, reasons: r.reasons
     })), null, 2));
@@ -148,7 +156,7 @@ async function main() {
 function report(rs) {
   const ok = rs.filter((r) => !r.fatal);
   const flagged = ok.filter((r) => r.issues.length);
-  const noPrice = ok.filter((r) => r.ww?.finalPence == null);
+  const noPrice = ok.filter((r) => r.ww?.rawPence == null);
 
   console.log("\n" + "=".repeat(80));
   console.log(`${rs.length} cards · ${ok.length - noPrice.length} priced · ${noPrice.length} no price · ${flagged.length} flagged`);
@@ -166,7 +174,7 @@ function report(rs) {
     const b = r.card.band;
     byBand[b] = byBand[b] || { n: 0, priced: 0, flagged: 0 };
     byBand[b].n++;
-    if (r.ww?.finalPence != null) byBand[b].priced++;
+    if (r.ww?.rawPence != null) byBand[b].priced++;
     if (r.issues.length) byBand[b].flagged++;
   }
   console.log("\nBy price band:");
@@ -176,7 +184,7 @@ function report(rs) {
 
   const withNum = ok.filter((r) => r.card.number);
   const noNum = ok.filter((r) => !r.card.number);
-  const pricedPct = (arr) => (arr.length ? Math.round((arr.filter((r) => r.ww?.finalPence != null).length / arr.length) * 100) : 0);
+  const pricedPct = (arr) => (arr.length ? Math.round((arr.filter((r) => r.ww?.rawPence != null).length / arr.length) * 100) : 0);
   console.log(`\nWith a collector number: ${pricedPct(withNum)}% priced (${withNum.length} cards)`);
   console.log(`Free text, no number:    ${pricedPct(noNum)}% priced (${noNum.length} cards)`);
 

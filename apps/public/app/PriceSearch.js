@@ -10,6 +10,7 @@ import { UK, marketsIn, splitByMarket } from "@/lib/markets";
 import { assessAsk } from "@/lib/verdict";
 import { settingsForCard, foreignCount } from "@/lib/settings";
 import { conditionBands } from "@/lib/condition";
+import { priceCard } from "@/lib/price";
 import { VARIANTS, variantQueryTerms, variantTokens, variantsPresent } from "@/lib/variants";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import TrendChart from "./TrendChart";
@@ -224,10 +225,12 @@ export default function PriceSearch() {
       // Recorded from the raw comps rather than the rendered price so the chip
       // still shows something useful if the visitor then changes market or
       // condition, which re-scores but doesn't re-search.
-      const quick = CompFinderPricing.recommend(
-        comps, settings, buildCompTokens(resolved, query), "sold", resolved.number || null, resolved.set || null
-      );
-      remember(resolved, query, quick.finalPence ?? null);
+      //
+      // Through the same pipeline as the panel. It used to call recommend()
+      // directly with DEFAULT_SETTINGS and report finalPence, so a chip could
+      // disagree with the price above it three ways at once: the charm ladder,
+      // no promo handling, and neither collector-number guard.
+      remember(resolved, query, priceCard({ ...resolved, q: query }, comps).pence);
     } catch (err) {
       if (id === runId.current) setError(err.message || "Something went wrong pricing that card.");
     } finally {
@@ -320,7 +323,7 @@ export default function PriceSearch() {
     // the movers list, the floor was reporting £2.49 for a Chesnaught V whose
     // comps said £1.44. The app keeps finalPence, where a listing floor is
     // exactly the right answer.
-    const marketPence = rec.rawPence ?? rec.finalPence ?? null;
+    const marketPence = rec.rawPence ?? null;
     const used = rec.included || [];
     const totals = used.map((c) => c.totalPence);
     const med = totals.length ? median(totals) : null;
@@ -379,7 +382,7 @@ export default function PriceSearch() {
     // worth knowing before you list or buy.
     const restRec = priceFor(rest, numberUnmatched ? nameOnlyTokens : nameTokens, numberUnmatched ? null : cardNumber);
     const restUsed = restRec ? (restRec.included || []).length : 0;
-    const restPence = restRec ? (restRec.rawPence ?? restRec.finalPence) : null;
+    const restPence = restRec ? restRec.rawPence : null;
     const premium = marketPence && restPence ? marketPence / restPence - 1 : null;
 
     // --- how much to trust this result -------------------------------------

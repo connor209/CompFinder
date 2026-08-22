@@ -1,4 +1,12 @@
 /**
+ * NOTE: reports rawPence — what a card is WORTH. finalPence, the recommended
+ * listing price floored at £2.49 and rounded up a 50p charm ladder, belongs to
+ * the business app and has no place in a "what's it worth" tool. Measured
+ * against the Pulse best sellers, where a third of the cards trade under £5,
+ * the ladder alone put our median at 1.11x their market price against an
+ * honest 1.03x.
+ */
+/**
  * Consistency audit for the public price page.
  *
  * Runs a deliberately adversarial set of searches against the deployed API and
@@ -164,7 +172,7 @@ function analyse(card, soldComps, activeComps) {
   const issues = [];
   const bare = number ? number.split("/")[0].replace(/^0+/, "") : null;
 
-  if (used.length > 0 && rec.finalPence == null) issues.push("price is null despite comps being used");
+  if (used.length > 0 && rec.rawPence == null) issues.push("price is null despite comps being used");
   if (lastSold != null && lo != null && (lastSold < lo || lastSold > hi)) {
     issues.push(`last sold ${gbp(lastSold)} outside used range ${gbp(lo)}–${gbp(hi)}`);
   }
@@ -176,10 +184,10 @@ function analyse(card, soldComps, activeComps) {
     const off = used.filter((c) => !new RegExp(`\\b0*${bare}\\b`).test(c.title));
     if (off.length) issues.push(`${off.length}/${used.length} used comps don't mention number ${bare}`);
   }
-  if (rec.finalPence && activeRec?.finalPence) {
-    const ratio = activeRec.finalPence / rec.finalPence;
+  if (rec.rawPence && activeRec?.rawPence) {
+    const ratio = activeRec.rawPence / rec.rawPence;
     if (ratio > 5 || ratio < 0.2) {
-      issues.push(`asking ${gbp(activeRec.finalPence)} vs sold ${gbp(rec.finalPence)} (${ratio.toFixed(1)}x)`);
+      issues.push(`asking ${gbp(activeRec.rawPence)} vs sold ${gbp(rec.rawPence)} (${ratio.toFixed(1)}x)`);
     }
   }
   const spreadRatio = lo && hi ? hi / lo : null;
@@ -223,7 +231,7 @@ async function main() {
     r.cachedSold = sold.cached;
     console.log(
       `${String(r.fetched).padStart(3)} fetched → ${String(r.used).padStart(3)} used  ` +
-      `${gbp(r.rec.finalPence).padStart(9)}  ${r.liq.label.padEnd(16)}` +
+      `${gbp(r.rec.rawPence).padStart(9)}  ${r.liq.label.padEnd(16)}` +
       (r.issues.length ? `  ⚠ ${r.issues.length}` : "")
     );
     results.push(r);
