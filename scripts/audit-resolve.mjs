@@ -180,7 +180,14 @@ function report(rs) {
   if (wrongConf.length > 25) console.log(`  … ${wrongConf.length - 25} more`);
 
   // Confident on a query that cannot be disambiguated from the text.
-  const ambigConf = identifying.filter((r) => r.confident && r.collisions > 1);
+  //
+  // "Cannot" is the operative word, and this metric has now been wrong twice
+  // about it. First it counted a foreign print as an alternative, when the
+  // language penalty separates those by 75 points. Then it counted a query
+  // that NAMED THE SET — "Mewtwo 12 Detective Pikachu" against a Wizards Black
+  // Star Promos Mewtwo 12 — where the hint is exactly what settles it. A
+  // collision only matters when the visitor gave us nothing to settle it with.
+  const ambigConf = identifying.filter((r) => r.confident && r.collisions > 1 && !/\+set$/.test(r.shape));
   console.log(`\nConfident despite a real name+number collision: ${ambigConf.length}`);
   for (const r of ambigConf.slice(0, 8)) console.log(`  "${r.q}" -> ${r.topName} · ${r.topSet} (${r.collisions} share it)`);
 

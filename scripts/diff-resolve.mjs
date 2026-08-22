@@ -32,7 +32,13 @@ const shared = [...before.keys()].filter((k) => after.has(k));
 console.log(`${shared.length} queries in both runs`);
 console.log("=".repeat(72));
 
-const wrongConf = (r) => r && !r.error && r.confident && r.topId !== r.card.id && r.shape !== "name only";
+// Same definition the audit prints, so the two tools cannot disagree. A card's
+// main-set print being chosen over its Prize Pack redistribution — which stays
+// in the list and comes back when the set is named — is a deliberate trade,
+// not a misread, and counting it here made a clean run look like a regression.
+const wrongConf = (r) =>
+  r && !r.error && r.confident && r.topId !== r.card.id && r.shape !== "name only" &&
+  !(/prize pack/i.test(r.card.set || "") && r.rank >= 0);
 const found = (r) => r && !r.error && r.rank === 0;
 
 const stat = (pred) => {
