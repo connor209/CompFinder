@@ -229,6 +229,20 @@ const UMBREONS = [
   if (!looksWeak([], parseQuery("anything"))) fail("no candidates at all is weak");
 }
 
+{
+  // The suggestions dropdown ranks with scoreCard now, which asks whether the
+  // card's NAME contains what was typed. Nobody's card is called "223", so a
+  // number-only query has to bypass ranking or the dropdown goes blank on a
+  // perfectly reasonable thing to type. This pins the condition the route uses.
+  const numberOnly = (q) => !/[a-z]/i.test(parseQuery(q).name);
+  for (const q of ["223", "161/165", "090/084"]) {
+    if (!numberOnly(q)) fail(`"${q}" should be treated as a number-only query`);
+  }
+  for (const q of ["umbreon 161", "charizard", "Garchomp SV40", "Mew ex 151 WCD 2025"]) {
+    if (numberOnly(q)) fail(`"${q}" should NOT be treated as a number-only query`);
+  }
+}
+
 if (failed) {
   console.error(`\n${failed} resolver checks failed.`);
   process.exit(1);

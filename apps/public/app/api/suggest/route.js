@@ -51,6 +51,14 @@ export async function GET(request) {
   // along. Showing something different from what pressing Enter does is worse
   // than showing nothing.
   const parsed = parseQuery(q);
+
+  // Someone typing only a collector number — "223", "161/165" — has already
+  // had the work done by the collector_number filter above. Ranking would then
+  // throw those rows away, because scoreCard asks whether the card's NAME
+  // contains what was typed and no card is called "223". Hand them back as
+  // they are; a number is a perfectly good thing to browse by.
+  if (!/[a-z]/i.test(parsed.name)) return NextResponse.json({ ok: true, cards: shape(data || []) });
+
   let ranked = rankCards(data || [], parsed, 8);
 
   // Same trigram fallback as /api/resolve. Without it the box stayed empty on
@@ -69,17 +77,18 @@ export async function GET(request) {
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    cards: ranked.candidates.map(({ row }) => ({
-      id: row.cardmarket_id,
-      name: cleanSearchName(row.name, row.game),
-      number: row.collector_number,
-      set: row.expansion,
-      code: row.expansion_code,
-      rarity: row.rarity,
-      game: row.game,
-      language: languageOf(row)
-    }))
-  });
+  return NextResponse.json({ ok: true, cards: shape(ranked.candidates.map((c) => c.row)) });
+}
+
+function shape(rows) {
+  return rows.map((row) => ({
+    id: row.cardmarket_id,
+    name: cleanSearchName(row.name, row.game),
+    number: row.collector_number,
+    set: row.expansion,
+    code: row.expansion_code,
+    rarity: row.rarity,
+    game: row.game,
+    language: languageOf(row)
+  }));
 }
