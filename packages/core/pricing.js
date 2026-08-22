@@ -639,10 +639,31 @@ const CompFinderPricing = (() => {
       .filter((w) => w.length >= 2);
   }
 
+  /**
+   * A COLLECTOR NUMBER is written both padded and unpadded, and the catalogue
+   * and the seller rarely agree. Measured across 4,778 sold titles from 120
+   * cheap cards: 212 comps on 12 of those cards match the card's name and fail
+   * only because the catalogue says "2" and the listing says "002/073" or
+   * "02/73". \b2\b cannot match inside "002", so every one of them was thrown
+   * out as a name mismatch.
+   *
+   * So a purely numeric token tolerates leading zeros on either side. It
+   * cannot over-match: \b0*2\b finds "2", "02" and "002", and rejects "12"
+   * (no boundary before the 2) and "20" (no boundary after it).
+   *
+   * This also generalises the reason bareNumber keeps its leading zeros — it
+   * was added because \b90\b cannot match inside "090/084", which is the same
+   * problem in the other direction. Both now work whichever way round they are
+   * written.
+   */
   function nameTokensMatch(title, nameTokens) {
     if (!nameTokens || nameTokens.length === 0) return true;
     const t = title || "";
     return nameTokens.every((tok) => {
+      if (/^\d{1,4}$/.test(tok)) {
+        const stripped = tok.replace(/^0+(?=\d)/, "");
+        return new RegExp(`\\b0*${stripped}\\b`, "i").test(t);
+      }
       const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       return new RegExp(`\\b${escaped}\\b`, "i").test(t);
     });

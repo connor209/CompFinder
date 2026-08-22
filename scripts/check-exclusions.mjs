@@ -124,6 +124,30 @@ for (const [title, number, want] of NUMBERED_CASES) {
   }
 }
 
+// --- collector numbers written padded or unpadded ----------------------------
+// The catalogue and the seller rarely agree. Measured across 4,778 sold titles
+// from 120 cheap cards, 212 comps on 12 of them matched the name and failed
+// only because the catalogue said "2" and the listing said "002/073".
+{
+  const check = (title, tokens, want, label) => {
+    const rec = recommend([{ title, itemPricePence: 500, postagePence: 0 }], DEFAULT_SETTINGS, tokens, "sold", null, null);
+    const included = (rec.included || []).length > 0;
+    if (included !== want) {
+      failed++;
+      console.error(`FAIL  ${label}: want ${want ? "kept" : "dropped"}, got ${included ? "kept" : "dropped"}\n      ${title}`);
+    }
+  };
+  check("Weedle 002/073 Common Champions Path NM", ["Weedle", "2"], true, "padded title, unpadded catalogue");
+  check("Weedle 02/73 Champions Path Common Unlimited", ["Weedle", "2"], true, "half-padded title");
+  check("Weedle 2/73 Champions Path NM", ["Weedle", "2"], true, "both unpadded");
+  check("Glaceon ex 090/084 Paldean Fates NM", ["Glaceon", "90"], true, "padded title, unpadded token");
+  check("Glaceon ex 90/84 Paldean Fates NM", ["Glaceon", "090"], true, "unpadded title, padded token");
+  // ...and it must not start matching numbers that merely contain the digits.
+  check("Weedle 12/73 Champions Path NM", ["Weedle", "2"], false, "12 is not 2");
+  check("Weedle 20/73 Champions Path NM", ["Weedle", "2"], false, "20 is not 2");
+  check("Umbreon ex 61/131 Prismatic Evolutions NM", ["Umbreon", "161"], false, "61 is not 161");
+}
+
 // --- postage that dwarfs the card -------------------------------------------
 // A £2 card posted for £20 is not a £22 comp. Built from the real Hydreigon ex
 // 161/086 pull, whose median POSTAGE was £9.85 — so the old median-postage
