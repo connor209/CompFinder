@@ -104,22 +104,55 @@ const NON_CARD = /\b(online code|code card|booster|bundle|display|tin|blister|co
 // Physically different objects that share a name and confuse a price lookup.
 const ODDITY = /\b(oversized|jumbo|giant|xxl)\b/i;
 
-/** Pulls a collector number out of free text: "223/165" or a trailing "223". */
+/**
+ * Splits free text into a card name, a collector number, and a SET HINT.
+ *
+ * The number used to have to be the last thing typed. Anything after it — the
+ * set name — stayed glued to the name, every word of it became a required
+ * substring of the card's name, and the query returned nothing at all:
+ *
+ *   "Umbreon ex 161"                       ->  6 candidates
+ *   "Umbreon ex 161 Prismatic Evolutions"  ->  0 candidates
+ *
+ * That is not a rare way to type. It is also what THIS PAGE puts back in the
+ * search box: queryForCard joins name, number and set, so picking a card from
+ * the picker leaves text in the box that resolves to nothing if the visitor
+ * searches again. Their own successful choice poisoned the next search, and
+ * because search() falls through to the raw text when resolution finds
+ * nothing, the second search silently priced with no card, no number and no
+ * set — with "Prismatic" and "Evolutions" as required words in every comp
+ * title.
+ *
+ * So: everything before the number is the name, everything after it is a hint
+ * about the set. The hint is not thrown away — scoreCard uses it, which is
+ * what makes naming the set help rather than hurt.
+ */
 export function parseQuery(text) {
   const raw = String(text || "").trim();
+  const strip = (n) => String(n).replace(/^0+(?=\d)/, "");
+
+  const cut = (index, length, number, total) => {
+    const name = raw.slice(0, index).replace(/\s+/g, " ").trim();
+    const setHint = raw.slice(index + length).replace(/\s+/g, " ").trim();
+    return name ? { name, number, total, setHint } : null;
+  };
+
   const slash = raw.match(/\b(\d{1,4})\s*\/\s*(\d{1,4})\b/);
   if (slash) {
-    return {
-      name: raw.replace(slash[0], " ").replace(/\s+/g, " ").trim(),
-      number: slash[1].replace(/^0+(?=\d)/, ""),
-      total: slash[2].replace(/^0+(?=\d)/, "")
-    };
+    const parsed = cut(slash.index, slash[0].length, strip(slash[1]), strip(slash[2]));
+    if (parsed) return parsed;
   }
-  const trailing = raw.match(/^(.*?)\s+(\d{1,4})$/);
-  if (trailing && trailing[1].trim()) {
-    return { name: trailing[1].trim(), number: trailing[2].replace(/^0+(?=\d)/, ""), total: null };
+
+  // First standalone number that still leaves a name in front of it. The
+  // "still leaves a name" part matters: "151 Charizard ex 183" would otherwise
+  // read the set name as the collector number. Word boundaries mean the 2 in
+  // "Porygon2" is not a candidate.
+  for (const m of raw.matchAll(/(?:^|\s)(\d{1,4})(?=\s|$)/g)) {
+    const index = m.index + (m[0].length - m[1].length);
+    const parsed = cut(index, m[1].length, strip(m[1]), null);
+    if (parsed) return parsed;
   }
-  return { name: raw, number: null, total: null };
+  return { name: raw, number: null, total: null, setHint: "" };
 }
 
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9\s']/g, " ").replace(/\s+/g, " ").trim();
@@ -138,15 +171,9 @@ export function scoreCard(row, parsed) {
   let score = 0;
 
   // Name match quality — the signal that was missing entirely.
-  if (rowName === wantName) score += 100;
-  else if (rowName.startsWith(wantName + " ")) score += 45;
-  else if (rowName.endsWith(" " + wantName)) score += 25; // "Dark Slowbro" for "slowbro"
-  else if (rowName.includes(wantName)) score += 20;
-  else {
-    const tokens = wantName.split(" ").filter((t) => t.length > 1);
-    if (!tokens.length || !tokens.every((t) => rowName.includes(t))) return -1;
-    score += 12;
-  }
+  const nameScore = nameMatchScore(rowName, wantName);
+  if (nameScore === null) return -1;
+  score += nameScore;
 
   // A stated collector number is the strongest disambiguator there is.
   if (parsed.number) {
@@ -164,6 +191,16 @@ export function scoreCard(row, parsed) {
   else score -= 45;
 
   // "… : Additionals" are duplicate rows of the same set.
+  // The set the visitor named, if they named one. Worth as much as the
+  // confidence threshold on its own: someone who types "Umbreon ex 161
+  // Prismatic Evolutions" has told us which card they mean, and should not
+  // then be asked to choose between six of them.
+  if (parsed.setHint) {
+    const hint = norm(parsed.setHint);
+    const exp = norm(row.expansion);
+    if (hint && exp && (exp.includes(hint) || hint.includes(exp))) score += 40;
+  }
+
   if (/additional/i.test(row.expansion || "")) score -= 12;
 
   if (NON_CARD.test(row.name || "")) score -= 120;
@@ -185,6 +222,39 @@ export function scoreCard(row, parsed) {
  * 70 is an answer. Asking when we know is friction; guessing when we don't is
  * how a Charizard ex 223/165 gets priced off a 223/197.
  */
+/**
+ * How well the row's name matches what was typed, on its own — separate from
+ * the language, rarity and number bonuses that are added on top.
+ *
+ * Confidence keys off THIS rather than the total, because the total can be
+ * bought with bonuses that say nothing about whether we read the visitor
+ * right. "Espon ex" matched "Unexpected Response, Miku Nakano" on a
+ * coincidental substring for 20, and the English bonus alone lifted it to 50 —
+ * over any total-score floor low enough to keep honest weak matches.
+ */
+const NAME_EXACT = 100;
+const NAME_STARTS = 45;
+const NAME_ENDS = 25;
+const NAME_INCLUDES = 20;
+const NAME_TOKENS = 12;
+
+function nameMatchScore(rowName, wantName) {
+  if (rowName === wantName) return NAME_EXACT;
+  if (rowName.startsWith(wantName + " ")) return NAME_STARTS;
+  if (rowName.endsWith(" " + wantName)) return NAME_ENDS;   // "Dark Slowbro" for "slowbro"
+  if (rowName.includes(wantName)) return NAME_INCLUDES;
+  const tokens = wantName.split(" ").filter((t) => t.length > 1);
+  if (!tokens.length || !tokens.every((t) => rowName.includes(t))) return null;
+  return NAME_TOKENS;
+}
+
+/**
+ * Skipping the picker requires the name itself to have matched well — the card
+ * IS what was typed, or begins with it. A merely-contains match can be a
+ * coincidence, and coincidences should be shown, not priced.
+ */
+const MIN_CONFIDENT_NAME = NAME_STARTS;
+
 export function rankCards(rows, parsed, limit = 6) {
   const scored = rows
     .map((row) => ({ row, score: scoreCard(row, parsed) }))
@@ -205,8 +275,25 @@ export function rankCards(rows, parsed, limit = 6) {
     if (!seen.has(key)) seen.set(key, entry);
   }
   const top = [...seen.values()].slice(0, limit);
-  const confident = top.length === 1 || (top.length > 1 && top[0].score - top[1].score >= 40);
-  return { candidates: top, confident };
+
+  // Confidence is permission to skip the picker and price straight away, so it
+  // needs more than "nothing else came close". Two guards, both from real
+  // failures:
+  //
+  //   "Espon ex 34" — a typo for Espeon — returned exactly one candidate,
+  //   "Unexpected Response, Miku Nakano" from The Quintessential Quintuplets,
+  //   because "Unexpected Res-PONSE" contains "espon". One candidate meant
+  //   confident, so it priced a Quintuplets card without asking. Hence both a
+  //   score floor and, separately:
+  //
+  //   if the visitor named a number, the card we are about to price silently
+  //   had better carry that number. Miku Nakano is 122, not 34.
+  const best = top[0];
+  const numberAgrees = !parsed.number || (best && bare(best.row.collector_number) === parsed.number);
+  const strongEnough = !!best && (nameMatchScore(norm(best.row.name), norm(parsed.name)) || 0) >= MIN_CONFIDENT_NAME;
+  const clear = top.length === 1 || (top.length > 1 && top[0].score - top[1].score >= 40);
+
+  return { candidates: top, confident: clear && numberAgrees && strongEnough };
 }
 
 export default { parseQuery, scoreCard, rankCards };
