@@ -73,6 +73,37 @@ CORPUS_OUT=corpus.json node scripts/probe-rules.mjs # dump every title, test a r
 Sold comps cache for 24 hours, so re-running straight after an audit is free
 and touches nothing at SoldComps.
 
+## Where the pricing is trustworthy, measured
+
+`scripts/wideset.json` is 371 cards built to be everything the chase-card set
+is not — cheap Pokémon commons, trainers, energy, Yu-Gi-Oh and Magic. What it
+found, on 2026-08-22:
+
+| population | priced | median comps | wide spans |
+|---|---|---|---|
+| Pokémon chase (the 455-card set) | 100% | 15+ | 6 of 294 |
+| Pokémon trainers | 69/77 | 15 | — |
+| Pokémon commons | 188/201 | 5 | — |
+| Yu-Gi-Oh | 44/60 | 8 | **14** |
+| Magic | 26/33 | 4 | 3 |
+
+**Pokémon is reliable; the other games are not, and it isn't a bug.** The whole
+engine is anchored on the collector number, which is what separates one
+printing from another. Yu-Gi-Oh and Magic sellers mostly don't write it — 33
+of 60 Yu-Gi-Oh cards priced only via the name-only fallback — so the tool
+pools every printing of a card and reports a number with a 15–50x span. Giant
+Growth came back as £5.59 from 30 comps spanning £0.99 to £19.84.
+
+The page does say so (the "matched on the card name alone" and "matched very
+different cards" caveats both fire), but before marketing to anyone, decide
+whether the public page is Pokémon-only or whether the other games get
+set-anchored matching of their own.
+
+**Cheap commons are thin for a different reason: the data isn't there.** Of 40
+comps for a Weedle, almost none are single-card sales — eBay's market for a 1p
+common is "Choose Your Card" pick-lists, correctly excluded. No rule change
+conjures sold data that doesn't exist.
+
 ## Merging to main deploys — batch it
 
 Both Vercel projects build from this repo, so every push to `main` triggers
