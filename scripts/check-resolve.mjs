@@ -113,6 +113,49 @@ const UMBREONS = [
 }
 
 {
+  // A Prize Pack entry is the same card as the one it reprints, and says so in
+  // its number. Left in, it sits 8 points behind and collapses the confidence
+  // gap — asking the visitor to choose between a card and itself.
+  const twin = [
+    row(1, "Umbreon ex", "060", "Prismatic Evolutions", "PRE", "Double Rare"),
+    row(2, "Umbreon ex", "PRE 060", "Play! Pokémon Prize Pack Series Seven", "PPS7", "Prize Pack Series cards")
+  ];
+  const r = rankCards(twin, parseQuery("Umbreon ex 60"));
+  if (r.candidates.length !== 1) fail(`a Prize Pack reprint should collapse onto its card, got ${r.candidates.length}`);
+  if (!r.confident) fail("collapsing the reprint should leave a confident answer");
+
+  // ...but an entry whose prefix names no set among the candidates stays.
+  const orphan = [
+    row(1, "Umbreon ex", "060", "Prismatic Evolutions", "PRE", "Double Rare"),
+    row(2, "Umbreon ex", "XYZ 060", "Some Other Product", "XYZ", "Promo")
+  ];
+  if (rankCards(orphan, parseQuery("Umbreon ex 60")).candidates.length !== 2) {
+    fail("an unrelated set-code prefix must not be collapsed away");
+  }
+}
+
+{
+  // The trimming fallback must not lose a one-character word. "V" is the
+  // difference between a £2 card and a £200 one.
+  const zoroark = [
+    row(1, "Hisuian Zoroark", "076", "Lost Origin", "LOR", "Rare"),
+    row(2, "Hisuian Zoroark V", "146", "Lost Origin", "LOR", "Ultra Rare")
+  ];
+  const parsed = { name: "Hisuian Zoroark V", number: null, total: null, setHint: "Lost Origin" };
+  const r = rankCards(zoroark, parsed);
+  if (r.candidates[0].row.cardmarket_id !== 2) fail("the V card should win when V was typed");
+}
+
+{
+  // Apostrophes: people omit them.
+  const rocket = [row(1, "Team Rocket's Persian ex", "173", "Destined Rivals", "DRI", "Ultra Rare")];
+  const withApos = rankCards(rocket, parseQuery("Team Rocket's Persian ex 173"));
+  const without = rankCards(rocket, parseQuery("team rockets persian ex 173"));
+  if (!withApos.confident) fail("the punctuated form should resolve confidently");
+  if (!without.confident) fail("omitting the apostrophe should resolve just as well");
+}
+
+{
   // The set hint must not fire on an unrelated set.
   const parsed = parseQuery("Umbreon ex 161 Evolving Skies");
   const a = scoreCard(row(1, "Umbreon ex", "161", "Prismatic Evolutions", "PRE", "Special Illustration Rare"), parsed);

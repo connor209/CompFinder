@@ -56,7 +56,9 @@ function shapesFor(card) {
     // No number, set name instead — what you type when you can read the set
     // but the number is too small to make out across a table.
     { shape: "name+set", q: `${name} ${card.set}` },
-    { shape: "lowercase", q: `${name} ${num}`.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim() }
+    // Punctuation DELETED, not spaced: someone skipping the apostrophe types
+    // "team rockets persian ex", never "team rocket s persian ex".
+    { shape: "lowercase", q: `${name} ${num}`.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim() }
   ];
   // Drop one letter from the middle of the first word — the commonest real
   // typo shape, and one a trigram index should still survive.

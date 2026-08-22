@@ -39,7 +39,14 @@ export async function GET(request) {
     return data || [];
   };
 
-  const tokens = parsed.name.toLowerCase().split(/\s+/).filter((t) => t.length >= 2).slice(0, 4);
+  // Trim WORDS, derive tokens from them. Deriving the name back out of the
+  // filtered tokens loses every one-character word — and "V" is not noise on a
+  // Pokémon card. "Hisuian Zoroark V Lost Origin" came back as the name
+  // "hisuian zoroark", which matched the non-V card EXACTLY (100) and the V
+  // card only on tokens (12), so it confidently priced the wrong card.
+  const words = parsed.name.split(/\s+/).filter(Boolean);
+  const tokensOf = (ws) => ws.map((w) => w.toLowerCase()).filter((t) => t.length >= 2).slice(0, 4);
+  const tokens = tokensOf(words);
   if (!tokens.length) return NextResponse.json({ ok: true, parsed, candidates: [], confident: false });
 
   // EVERY token has to appear in the card's name, so one word that isn't part
@@ -56,16 +63,16 @@ export async function GET(request) {
   let data = await fetchByTokens(tokens);
   if (data === null) return NextResponse.json({ ok: true, parsed, candidates: [], confident: false });
 
-  let used = tokens;
-  while (!data.length && used.length > 1) {
-    used = used.slice(0, -1);
-    const retry = await fetchByTokens(used);
+  let usedWords = words;
+  while (!data.length && usedWords.length > 1) {
+    usedWords = usedWords.slice(0, -1);
+    const retry = await fetchByTokens(tokensOf(usedWords));
     if (retry === null) break;
     data = retry;
   }
-  if (used.length < tokens.length) {
-    const dropped = tokens.slice(used.length).join(" ");
-    parsed = { ...parsed, name: used.join(" "), setHint: [parsed.setHint, dropped].filter(Boolean).join(" ") };
+  if (usedWords.length < words.length) {
+    const dropped = words.slice(usedWords.length).join(" ");
+    parsed = { ...parsed, name: usedWords.join(" "), setHint: [parsed.setHint, dropped].filter(Boolean).join(" ") };
   }
 
   const { candidates, confident } = rankCards(data || [], parsed);

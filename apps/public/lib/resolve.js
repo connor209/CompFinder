@@ -165,7 +165,16 @@ export function parseQuery(text) {
   return { name: raw, number: null, total: null, setHint: "" };
 }
 
-const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9\s']/g, " ").replace(/\s+/g, " ").trim();
+// Apostrophes are DELETED, not spaced: people type "team rockets persian ex"
+// and "farfetchd", not "team rocket s". Keeping them cost the match entirely —
+// "team rockets persian ex 173" scored 25 on the weak all-tokens path against
+// 113 for the punctuated form, which was enough to lose confidence.
+const norm = (s) => String(s || "")
+  .toLowerCase()
+  .replace(/'/g, "")
+  .replace(/[^a-z0-9\s]/g, " ")
+  .replace(/\s+/g, " ")
+  .trim();
 // Collector number, normalised for comparison. Two catalogue quirks to absorb:
 // a denominator ("161/131"), and a set code sitting in the number field with a
 // space after it — "ASC 022", "PRE 006", "EVS 095" on Prize Pack and promo
@@ -293,7 +302,30 @@ export function rankCards(rows, parsed, limit = 6) {
     ].join("|");
     if (!seen.has(key)) seen.set(key, entry);
   }
-  const top = [...seen.values()].slice(0, limit);
+  // A Play! Pokémon Prize Pack entry is the SAME card as the one it reprints,
+  // and the catalogue says so in its number: "Umbreon ex PRE 060" is
+  // Prismatic Evolutions 060, "Umbreon VMAX EVS 095" is Evolving Skies 095.
+  // Left in, it sits 8 points behind the main-set card — the rarity bonus and
+  // nothing else — which collapses the confidence gap and asks the visitor to
+  // choose between a card and itself. That cost 168 queries their answer.
+  //
+  // Only collapses when the encoded code actually matches another candidate's
+  // expansion: an entry whose prefix names no set we found stays.
+  const codes = new Set([...seen.values()].map((e) => String(e.row.expansion_code || "").toUpperCase()));
+  const deduped = [...seen.values()].filter((entry) => {
+    const prefix = String(entry.row.collector_number || "").match(/^([A-Za-z]{2,4})\s+\d/);
+    if (!prefix) return true;
+    const reprintOf = prefix[1].toUpperCase();
+    if (!codes.has(reprintOf)) return true;
+    return ![...seen.values()].some((other) =>
+      other !== entry &&
+      String(other.row.expansion_code || "").toUpperCase() === reprintOf &&
+      norm(other.row.name) === norm(entry.row.name) &&
+      bare(other.row.collector_number) === bare(entry.row.collector_number)
+    );
+  });
+
+  const top = deduped.slice(0, limit);
 
   // Confidence is permission to skip the picker and price straight away, so it
   // needs more than "nothing else came close". Two guards, both from real
