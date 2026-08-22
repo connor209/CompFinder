@@ -62,14 +62,42 @@ const CASES = [
   ["", "Journey Together (Japanese)", "Japanese"],
   ["", "Prismatic Evolutions (Korean)", "Korean"],
 
-  // Tripwires. A "contains a digit" rule would break every one of these.
-  ["BS2", "Base Set 2", "English"],
-  ["N1", "Neo Genesis", "English"],
-  ["N4", "Neo Destiny", "English"],
-  ["G1", "Gym Heroes", "English"],
-  ["G2", "Gym Challenge", "English"],
+  // The vintage Japanese families. These were originally asserted the OTHER
+  // WAY ROUND here — as English tripwires — on the reasoning that N1-N4 and
+  // G1/G2 are Neo and Gym. That is CardMarket's convention elsewhere but not
+  // this catalogue's, and the wrong assertion was protecting a real leak.
+  // Every pair below was read back out of the catalogue via /api/resolve.
+  ["N1", "Gold, Silver, to a New World...", "Japanese"],
+  ["N2", "Crossing the Ruins...", "Japanese"],
+  ["N3", "Awakening Legends", "Japanese"],
+  ["G1", "Leaders' Stadium", "Japanese"],
+  ["G2", "Challenge from the Darkness", "Japanese"],
+  ["EC1", "Base Expansion Pack", "Japanese"],
+  ["EC2", "The Town on No Map", "Japanese"],
+  ["EC4", "Split Earth", "Japanese"],
+  ["EXP", "Expansion Pack", "Japanese"],
+  ["EXS", "Expansion Sheet", "Japanese"],
+
+  // The ENGLISH sets of those same eras, which carry no digit at all. These
+  // are the real tripwires: a rule keyed on the letter alone would take them.
+  ["NG", "Neo Genesis", "English"],
+  ["ND", "Neo Discovery", "English"],
+  ["NR", "Neo Revelation", "English"],
+  ["NDE", "Neo Destiny", "English"],
+  ["GH", "Gym Heroes", "English"],
+  ["GC", "Gym Challenge", "English"],
+  ["LC", "Legendary Collection", "English"],
   ["MA", "EX Team Magma vs Team Aqua", "English"],
   ["DP", "Diamond & Pearl", "English"],
+
+  // English sets that DO carry a digit, so the family rule has to be a family
+  // rule and not "contains a digit".
+  ["BA20", "Battle Academy 2020", "English"],
+  ["BA24", "Battle Academy 2024", "English"],
+  ["POP1", "POP Series 1", "English"],
+  ["PPS9", "Play! Pokémon Prize Pack Series Nine", "English"],
+  ["WCD25", "WCD 2025", "English"],
+  ["WCS23", "World Championships 2023 Yokohama Deck -Pikachu-", "English"],
 
   // Ordinary English.
   ["DR", "EX Dragon", "English"],

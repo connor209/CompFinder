@@ -37,7 +37,21 @@ import { detectLanguage } from "@compfinder/core/catalog.js";
  *   XY1-12    JP XY                English: XY, FLF, FFI, PHF, PRC, AOR...
  *   SM1-12    JP Sun & Moon        English: SUM, GRI, BUS, CIN, UPR, LOT...
  *   CP1-6     JP XY concept packs  English: CPA (Champion's Path, no digit)
+ *   N1-N4     JP Neo               English: NG, ND, NR, NDE
+ *   G1-G2     JP Gym               English: GH, GC
+ *   EC1-EC4   JP e-Card            English: EX, AQ, SK
  *   WCP       JP World Champions Pack — named, no English equivalent
+ *   EXP/EXS   JP Expansion Pack / Expansion Sheet — the original 1996 base set
+ *
+ * The N/G/EC families were originally left OUT of this list, on the reasoning
+ * that N1-N4 and G1/G2 are Base Set 2, Neo and Gym in English and must not be
+ * swept up. That reasoning was from memory of CardMarket's conventions and it
+ * was wrong about this catalogue, which uses the opposite convention: N1 is
+ * "Gold, Silver, to a New World...", N2 is "Crossing the Ruins...", G1 is
+ * "Leaders' Stadium" and G2 is "Challenge from the Darkness" — all Japanese —
+ * while the English Neo and Gym sets are NG/ND/NR/NDE and GH/GC, with no digit
+ * at all. There is no BS2 in the catalogue. Every pair in check-language.mjs
+ * is now one read back out of the catalogue rather than one remembered.
  *
  * MA{digit} is the odd one: MA1 is literally called "Mega Evolution ID/TH",
  * so the family is the Indonesian/Thai line, not Japanese. It is reported as
@@ -45,8 +59,8 @@ import { detectLanguage } from "@compfinder/core/catalog.js";
  * not English. Note the deliberate digit: bare "MA" is English EX Team Magma
  * vs Team Aqua and must stay English.
  */
-const JP_LEGACY_CODE = /^(PCG|ADV|DP|BW|XY|SM|CP|L)\d/;
-const JP_LEGACY_EXACT = new Set(["LL", "WCP"]);
+const JP_LEGACY_CODE = /^(PCG|ADV|EC|DP|BW|XY|SM|CP|L|N|G)\d/;
+const JP_LEGACY_EXACT = new Set(["LL", "WCP", "EXP", "EXS"]);
 // Japanese promos are named "<era>-P": XY-P, S-P, SM-P, SV-P, PCG-P. The
 // English promo codes never take that shape — they are SWSH, SVP, XYPR, SMP,
 // NP, PLAY, BEST — so the trailing "-P" is unambiguous. Caught a Japanese
