@@ -11,6 +11,7 @@ import { buildCompTokens } from "../apps/public/lib/tokens.js";
 import { UK, splitByMarket } from "../apps/public/lib/markets.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
 import { priceCard } from "./lib/price-card.mjs";
+import { resolveCard } from "./lib/resolve-card.mjs";
 
 const S = CompFinderPricing.DEFAULT_SETTINGS;
 const args = process.argv.slice(2);
@@ -66,7 +67,10 @@ console.log(`Running ${list.length} movers against ${BASE}\n`);
 console.log("card                                 num         pulse      THEN  n      NOW  n  then  now   note");
 console.log("-".repeat(112));
 
-for (const card of list) {
+for (const ref of list) {
+  // Resolved first, so a Japanese card keeps its Japanese comps — see
+  // lib/resolve-card.mjs.
+  const card = await resolveCard(BASE, ref);
   const res = await price(card.q);
   if (!res.ok) { console.log(`${card.name.slice(0,34).padEnd(35)} FETCH FAILED`); continue; }
   const comps = res.comps || [];

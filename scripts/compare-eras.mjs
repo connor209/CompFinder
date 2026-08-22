@@ -22,6 +22,7 @@
 import { createPacer } from "./lib/pace.mjs";
 import { priceCard } from "../apps/public/lib/price.js";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { resolveCard } from "./lib/resolve-card.mjs";
 import { REFERENCE } from "./pulse-reference.mjs";
 import { MOVERS } from "./movers.mjs";
 
@@ -78,7 +79,10 @@ async function run(label, cards) {
   const rows = [];
   let misses = 0;
   for (const c of cards) {
-    const card = { name: c.name, number: c.number, set: c.set, q: `${c.name} ${c.number} ${c.set}` };
+    // Resolve first, exactly as the page does. Without the card's language the
+    // English-only comp rule fires on Japanese cards and strips the very comps
+    // that should price them.
+    const card = await resolveCard(BASE, { name: c.name, number: c.number, set: c.set, q: `${c.name} ${c.number} ${c.set}` });
     const got = await comps(card.q);
     if (!got) { console.log(`${card.name.slice(0, 36).padEnd(37)} FETCH FAILED`); continue; }
     if (!got.cached) misses++;
