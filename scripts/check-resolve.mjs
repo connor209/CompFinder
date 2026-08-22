@@ -11,7 +11,7 @@
  * rankCards is fed hand-built rows rather than the live catalogue so the check
  * runs offline and deterministically.
  */
-import { parseQuery, rankCards, scoreCard } from "../apps/public/lib/resolve.js";
+import { parseQuery, rankCards, scoreCard, looksWeak } from "../apps/public/lib/resolve.js";
 
 let failed = 0;
 const fail = (msg) => { failed++; console.error(`FAIL  ${msg}`); };
@@ -211,6 +211,22 @@ const UMBREONS = [
     parseQuery("Umbeon ex 161")
   );
   if (mixed.candidates[0].row.cardmarket_id !== 2) fail("an exact name match should outrank a fuzzy one");
+}
+
+{
+  // looksWeak decides whether to escalate to the fuzzy fallback. It must fire
+  // on an incidental substring and stay quiet on a genuine match, or it either
+  // blocks the fallback or runs it on every query.
+  const weak = rankCards([row(1, "Origins: Common Set", "1", "Origins", "ORI", "Common")], parseQuery("ns zoroark ex"));
+  if (!looksWeak(weak.candidates, parseQuery("ns zoroark ex"))) {
+    fail("a two-letter incidental substring should read as weak");
+  }
+  const exact = rankCards([row(1, "Umbreon ex", "161", "Prismatic Evolutions", "PRE", "Special Illustration Rare")], parseQuery("Umbreon ex 161"));
+  if (looksWeak(exact.candidates, parseQuery("Umbreon ex 161"))) fail("an exact name match is not weak");
+  // "Dark Slowbro" for "slowbro" is a real answer, not an accident.
+  const ends = rankCards([row(1, "Dark Slowbro", "42", "Team Rocket", "TR", "Rare")], parseQuery("slowbro 42"));
+  if (looksWeak(ends.candidates, parseQuery("slowbro 42"))) fail("an endsWith match should not trigger the fallback");
+  if (!looksWeak([], parseQuery("anything"))) fail("no candidates at all is weak");
 }
 
 if (failed) {

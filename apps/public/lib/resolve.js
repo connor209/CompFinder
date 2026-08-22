@@ -328,6 +328,25 @@ const MIN_CONFIDENT_NAME = NAME_STARTS;
  */
 const REPRINT_PENALTY = 45;
 
+/**
+ * True when the best candidate matched only by incidental substring — the kind
+ * of hit that means the exact search found SOMETHING but probably not what was
+ * meant, and the fuzzy fallback deserves a try.
+ *
+ * The case that needs it: "ns zoroark ex 98" (N's Zoroark ex, typed without
+ * the apostrophe) trims down to the token "ns", which appears inside
+ * "Origi-NS: Common Set". Rows came back, so the empty-candidates trigger
+ * never fired, and the page answered with a card sharing two letters.
+ *
+ * "endsWith" and better are left alone: "Dark Slowbro" for "slowbro" is a
+ * genuine answer, not an accident.
+ */
+export function looksWeak(candidates, parsed) {
+  const best = candidates && candidates[0];
+  if (!best) return true;
+  return (nameMatchScore(norm(best.row.name), norm(parsed.name)) || 0) <= NAME_INCLUDES;
+}
+
 export function rankCards(rows, parsed, limit = 6) {
   const scored = rows
     .map((row) => ({ row, score: scoreCard(row, parsed) }))

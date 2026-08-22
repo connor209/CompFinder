@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createPublicClient } from "@/lib/supabase";
 import { cleanSearchName } from "@compfinder/core/cardname.js";
-import { parseQuery, rankCards, languageOf } from "@/lib/resolve";
+import { parseQuery, rankCards, languageOf, looksWeak } from "@/lib/resolve";
 
 // One warning per process if the fuzzy RPC isn't there, rather than one per
 // failed search.
@@ -119,7 +119,10 @@ export async function GET(request) {
   //
   // Degrades silently if migration 020 has not been run: the page keeps its
   // previous behaviour rather than erroring.
-  if (!ranked.candidates.length) {
+  // Escalate when the exact path found nothing, and ALSO when what it found is
+  // only an incidental substring — otherwise a query that matches two letters
+  // of an unrelated set blocks the fallback that would have answered it.
+  if (!ranked.candidates.length || looksWeak(ranked.candidates, parsed)) {
     // The ORIGINAL name, not the trimmed one. Trimming is a strategy for the
     // exact path — drop words until something matches — and it is precisely
     // wrong here: "Umbeon ex" had already been cut down to "Umbeon", so the
@@ -134,8 +137,12 @@ export async function GET(request) {
       }
     } else if (fuzzyRows && fuzzyRows.length) {
       // Scored against the original parse too, for the same reason.
-      ranked = rankCards(fuzzyRows.map((r) => ({ ...r, _similarity: r.similarity })), parsed);
-      if (ranked.candidates.length) parsedFor = parsed;
+      const fuzzyRanked = rankCards(fuzzyRows.map((r) => ({ ...r, _similarity: r.similarity })), parsed);
+      // Only displace the exact result if it actually scores better. A weak
+      // exact hit still beats a worse guess.
+      const better = fuzzyRanked.candidates.length &&
+        (!ranked.candidates.length || fuzzyRanked.candidates[0].score > ranked.candidates[0].score);
+      if (better) { ranked = fuzzyRanked; parsedFor = parsed; }
     }
   }
 
