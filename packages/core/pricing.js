@@ -48,11 +48,17 @@ const CompFinderPricing = (() => {
     postageOutlierMultiplier: 8,     // flag a comp if its postage is > this many times the group's median postage...
     postageOutlierFloorPence: 600,   // ...AND exceeds this absolute floor (avoids flagging trivial differences when everything's cheap)
     postageOutlierMinComps: 6,       // only apply with enough comps to make a group median meaningful
+    postageDwarfsItemMultiplier: 2,  // ...or flag it if postage exceeds this many times the group's median ITEM price AND the comp's own item price
     // Price-magnitude sanity check (2026-08-11) — deliberately wide (8x),
     // one-sided (only flags implausibly HIGH prices, never low ones — see
     // splitPriceOutliers comment for why symmetric trimming backfired on
     // real test data).
     priceOutlierMultiplier: 8,
+    // Low side is a separate, wider width — see splitPriceOutliers. At 8x it
+    // removes genuine played copies; at 12x, across 278 cards, it removed
+    // nothing but contamination.
+    priceOutlierLowDivisor: 12,
+    priceOutlierLowMaxShare: 0.2,   // stand down if the cheap group is a cluster, not strays
     // Wide-spread confidence downgrade (2026-08-11) — real evidence: 17
     // genuine comps for the same card/number split cleanly into two tiers
     // (£2.25-£3.99 and £12.26-£24.95) with nothing in between at all. No
@@ -134,11 +140,14 @@ const CompFinderPricing = (() => {
       // false positives in testing. ACE-graded listings ("ACE 10", "ACE 1")
       // are still caught below by GRADED_NUMBER_PATTERN, which requires the
       // grading company name to be directly followed by a 1-2 digit grade.
-      graded: ["psa", "cgc", "bgs", "sgc", "graded", "slab", "slabbed"],
+      graded: ["psa", "cgc", "bgs", "sgc", "graded", "slab", "slabbed", "getgraded"],
       promoVariant: ["promo", "league", "championship", "worlds", "prerelease"],
       bundle: ["bundle", "playset", "lot of", "job lot", "joblot", "x2", "x3", "x4", "x5", "x6",
                 "personal collection", "whole collection", "collection includes"],
-      pickYourOwn: ["choose your card", "pick your own", "you choose", "select your", "pick a card", "you pick", "u pick", "make your selection", "choose your own"],
+      // "choose your" rather than "choose your card": a £1.09 "Choose Your
+      // Pikachu" was sitting under a £15.54 Pikachu VMAX, and sellers put
+      // whatever the search term was in that slot.
+      pickYourOwn: ["choose your", "pick your own", "you choose", "select your", "pick a card", "you pick", "u pick", "make your selection"],
       // Things that are not the card. A £1000 Umbreon ex was being priced
       // with a "(Custom Proxy Replica)" at £9.19 and a "Novelty Keychain" at
       // £10.89 in the same comp set, dragging the floor by two orders of
@@ -161,7 +170,51 @@ const CompFinderPricing = (() => {
   // no other keyword nearby (no literal word "graded" anywhere in the title) —
   // caught live on real search results, e.g. "...ACE 10 🔥" and "...ACE 1 Poor".
   // This regex catches that pattern on top of the plain keyword list above.
-  const GRADED_NUMBER_PATTERN = /\b(psa|cgc|bgs|sgc|ace)\s*-?\s*\d{1,2}\b/i;
+  //
+  // ONE list, three uses: the exclusion pattern here, parseGrade for the graded
+  // panel, and the display ordering in gradedBreakdown. They are derived from
+  // this array because they had already drifted apart once.
+  //
+  // TAG, GRAAD, MGC and AGS were added after running the pattern over 11,063
+  // real sold titles: TAG alone appeared 45 times and 44 of those were caught
+  // by nothing at all — more than every fake-card term put together — and a
+  // graded slab is almost always the top comp on its card. Measured hits not
+  // already excluded: TAG 44, ACE-with-a-word-between 7, AGS 6, GetGraded 2,
+  // GRAAD 2, MGC 2.
+  //
+  // Deliberately NOT included: "GG", which is Galarian Gallery card numbering
+  // (GG12/GG70) and would exclude a whole subset on sight; and "gem mint",
+  // which hits 335 titles but only 31 not already caught, and which sellers
+  // use freely on raw cards.
+  //
+  // "grade"/"graded"/"grading" is allowed between the company and the number
+  // for "ACE Grading 9", "Ace Grade 10" and "PSA Grade 9", all seen live.
+  // "tag" needs the digit to follow it directly, which is what keeps TAG TEAM
+  // cards ("Reshiram & Charizard GX ... TAG TEAM") out of it.
+  const GRADERS = ["psa", "cgc", "bgs", "sgc", "ace", "tag", "graad", "mgc", "ags"];
+  const GRADER_ALT = GRADERS.join("|");
+  const GRADED_NUMBER_PATTERN = new RegExp(
+    `\\b(${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*\\d{1,2}\\b`, "i"
+  );
+
+  // Things shaped like a card listing that are not the card. The keyword list
+  // above covers the plain words; this covers the shapes a keyword cannot,
+  // because wordBoundaryMatch falls back to a literal substring test for
+  // anything containing a space and so cannot match "Custom-Art", "D-I-Y" or
+  // "Fan made art work".
+  //
+  // Every term here was run over the same 11,063 titles first and is correct
+  // on every hit: custom art 1, handmade 2, fan art 3, DIY/D-I-Y 3, inspired
+  // art 2, gold metal / metal card 4. They are rare but they land at the very
+  // bottom of the range — "D-I-Y Mega Charizard Y ex 294/217" at £7.96 against
+  // a £300 median, "Fan made art work Charizard 136/135" at £21 against £591.
+  //
+  // Rejected by the same measurement: "read description", which looked like a
+  // reliable tell on two £9.99 fakes and turned out to be ordinary seller
+  // language on genuine full-price sales (a £1,063 Umbreon ex "Great
+  // Centering! Read Descript"); and "gold plated", "24k", "fake", "sticker"
+  // and "poster", which matched nothing at all.
+  const NOT_A_CARD_PATTERN = /\bcustom[\s-]?art\b|\bhand[\s-]?made\b|\bfan[\s-]?(made|art)\b|\bd[\s.-]?i[\s.-]?y\b|\binspired\s+(art|by)\b|\b(gold|silver)[\s-]?metal\b|\bmetal\s+card\b/i;
 
   /**
    * Detects multi-card lot listings that name several different Pokémon
@@ -187,12 +240,56 @@ const CompFinderPricing = (() => {
    */
   function looksLikeNamedMultiCardLot(title, cardNumber) {
     const t = title || "";
-    const nameNumberMatches = [...t.matchAll(/\b[A-Z][a-zA-Z]+\s+(\d{2,4})\b/g)].filter((m) => {
+
+    // Check (3): two or more distinct "<Name> <N>/<M>" groups. Added after
+    // "Nintendo Pokemon TCG EX Dragon Latias ex 93/97 & Latios ex 94/97 Holo
+    // Lot" priced as a single Latios at £444 against a £143 median, having
+    // survived all of: the bundle words (it says "Lot", not "lot of"), check
+    // (1) below (the "ex" sits between the name and the number, so its
+    // name/number pair never matches), and check (2) (which needs the
+    // searched-for number to carry its denominator — the public page's
+    // catalogue gives bare numbers like "94", so that check is dead there).
+    //
+    // Run over 11,063 real sold titles this matched 28 titles, of which three
+    // were wrong, and each taught its own guard:
+    //   "FRI 21/08 MEGA GENGAR EX 284/217"                    — a date
+    //   "...210/189 Astral Radiance PSA 10. NEW CERT 03/2026" — a year
+    //   "PIKACHU VMAX 044/185 ... VIVID VOLTAGE 44/185"       — one card, twice
+    // So a group is ignored when its denominator is too small to be a set
+    // total or reads as a year, and numerators are compared with leading zeros
+    // stripped. What survives is all genuine: Latias ex 93/97 & Latios ex
+    // 94/97, Flying Pikachu 110/108 & Surfing Pikachu 111/108, Articuno EX
+    // 25/135 Zapdos 48/135 Moltres 14/135.
+    const NUMBER_GROUP = /\b[A-Z][a-zA-Z']+\s+(?:ex|EX|Ex|gx|GX|Gx|v|V|vmax|VMAX|VMax|vstar|VSTAR|VStar)?\s*(\d{1,4})\s*\/\s*(\d{1,4})\b/g;
+    const withDenominator = new Set();
+    for (const m of t.matchAll(NUMBER_GROUP)) {
+      const denom = parseInt(m[2], 10);
+      if (denom < 20) continue;                             // "21/08" is a date
+      if (denom >= 1900 && denom <= 2100) continue;         // "03/2026" is a year
+      withDenominator.add(String(parseInt(m[1], 10)));      // "044" and "44" are one card
+    }
+    if (withDenominator.size >= 2) return true;
+
+    // Check (1): "<Name> <number>" pairs with no denominator at all, which is
+    // how the original three real examples were written ("Horsea 030, Seadra
+    // 031 and Kingdra 032/182").
+    //
+    // Two things this must NOT do, both found by running it over the corpus.
+    // It must skip a number that carries a denominator, because check (3) has
+    // already judged that group properly — without the skip, "PIKACHU VMAX
+    // 044/185 ... VIVID VOLTAGE 44/185" counts as two cards when it is one
+    // card written twice, and "FRI 21/08 ... GENGAR EX 284/217" counts a date
+    // as a card. And it must count distinct numbers rather than matches, or a
+    // set whose name is a number — "Pokemon 151 Charizard ex 199/165" — pairs
+    // its own set name with the card and reads as a lot.
+    const bareNumbers = new Set();
+    for (const m of t.matchAll(/\b[A-Z][a-zA-Z]+\s+(\d{2,4})\b(\s*\/)?/g)) {
+      if (m[2]) continue;                                   // belongs to check (3)
       const n = parseInt(m[1], 10);
-      const isYearLike = m[1].length === 4 && n >= 1990 && n <= 2035;
-      return !isYearLike;
-    });
-    if (nameNumberMatches.length >= 2) return true;
+      if (m[1].length === 4 && n >= 1990 && n <= 2035) continue;   // a year
+      bareNumbers.add(String(n));
+    }
+    if (bareNumbers.size >= 2) return true;
 
     const numMatch = /^\s*[A-Za-z]{0,3}\d{1,4}\s*\/\s*([A-Za-z]{0,3}\d{1,4})\s*$/.exec((cardNumber || "").trim());
     if (numMatch) {
@@ -381,25 +478,53 @@ const CompFinderPricing = (() => {
    * certainly a genuinely different, much rarer parallel that isn't caught
    * by the graded/bundle/promo/variant checks above.
    *
-   * Deliberately ONE-SIDED (only flags implausibly HIGH prices), and
-   * deliberately wide (8x). Tested this both ways against a real 25-comp
-   * data pull (2026-08-11): a symmetric version also flagged unusually
-   * CHEAP comps as outliers whenever the group median itself was already
-   * skewed high by other contamination — which actively excluded the
-   * genuinely correct cheap comps instead of protecting them, making the
-   * final price worse, not better. A cheap comp is never treated as
-   * suspicious here, only a wildly expensive one.
+   * The HIGH side is deliberately wide (8x). Tested both ways against a real
+   * 25-comp data pull (2026-08-11): a symmetric version at that same 8x also
+   * flagged unusually CHEAP comps whenever the group median was already
+   * skewed high by other contamination — which excluded the genuinely correct
+   * cheap comps instead of protecting them, making the final price worse.
+   *
+   * Re-tested on 2026-08-22 across 278 cards, and that result reproduces
+   * exactly: at median/8 the rule removes a £10.80 "Latios Ex Dragon holo
+   * 94/97 LP", a £25.68 Shining Magikarp and a £14.96 Charizard VMAX
+   * Champions Path — all genuine low-condition sales, and the Latios alone
+   * moved that card's median by 25%.
+   *
+   * At median/12 it removes 14 comps across 11 cards and every one of them is
+   * contamination: two "D-I-Y" cards, two "Fan made art work", a "Custom
+   * Handmade Fan Art", a "Custom-Art Gold Metal", two "Premium Gold Metal"
+   * novelties, a "Choose Your Pikachu", and three of the "holo and textured
+   * ... read descrip" template that no keyword can safely catch (£9.99 against
+   * a £1,511 median, £8.99 against £633). All three genuine cheap cards
+   * survive. Wide spans across the run: 21 -> 10.
+   *
+   * The low side therefore exists, but at a different width from the high
+   * side and with a share guard. The August failure is a CLUSTER of cheap
+   * comps being read as outliers; a handful of strays is a different shape,
+   * so the rule stands down entirely once the low group stops looking like
+   * strays. Across those 278 cards nothing came close to the guard — it costs
+   * nothing here and is the thing that stops the old failure recurring.
    */
   function splitPriceOutliers(included, settings) {
     if (included.length < settings.postageOutlierMinComps) return { kept: included, flagged: [] };
     const totals = included.map((c) => c.totalPence).sort((a, b) => a - b);
     const med = median(totals);
     if (!med) return { kept: included, flagged: [] };
+    // Low side stands down when the cheap comps are a cluster rather than a
+    // few strays — that shape is a bimodal comp set (or a median skewed by
+    // contamination further up), not a handful of fakes, and trimming it is
+    // what went wrong last time.
+    const lowFloor = med / settings.priceOutlierLowDivisor;
+    const lowCount = included.filter((c) => c.totalPence < lowFloor).length;
+    const trimLow = lowCount > 0 && lowCount <= included.length * settings.priceOutlierLowMaxShare;
+
     const kept = [];
     const flagged = [];
     for (const c of included) {
       if (c.totalPence > med * settings.priceOutlierMultiplier) {
         flagged.push({ ...c, exclusionReason: "priceOutlier" });
+      } else if (trimLow && c.totalPence < lowFloor) {
+        flagged.push({ ...c, exclusionReason: "priceOutlierLow" });
       } else {
         kept.push(c);
       }
@@ -523,6 +648,7 @@ const CompFinderPricing = (() => {
     const queryWantsReverseHolo = (nameTokens || []).some((tok) => /^reverse$/i.test(tok));
     if (!queryWantsReverseHolo && /\breverse\s*holo\b/i.test(t)) return "variantMismatch";
     if (GRADED_NUMBER_PATTERN.test(t)) return "graded";
+    if (NOT_A_CARD_PATTERN.test(t)) return "notACard";
     if (looksLikeNamedMultiCardLot(t, cardNumber)) return "multiCardLot";
     for (const [reason, words] of Object.entries(excludeKeywords)) {
       if (words.some((w) => wordBoundaryMatch(t, w))) return reason;
@@ -615,12 +741,35 @@ const CompFinderPricing = (() => {
     const postages = included.map((c) => c.postagePence || 0).sort((a, b) => a - b);
     const medPostage = median(postages);
     const threshold = Math.max(medPostage * settings.postageOutlierMultiplier, settings.postageOutlierFloorPence);
+
+    // Second test, against the CARD rather than against the other postages.
+    // The multiplier above compares each comp's postage to the group median
+    // postage, which silently stops working when high postage is the norm for
+    // the card: Hydreigon ex 161/086 came back with a median postage of £9.85,
+    // so the threshold was £78 and nothing was flagged — and the card priced
+    // £0.74 to £22.96, a 31x span in which every expensive comp was the same
+    // £2 card with £10-£21 of postage bolted on.
+    //
+    // A £2 card posted for £20 is not a £22 comp in the UK market, and on a
+    // £1,100 Umbreon the same £20 is noise. So the second threshold scales
+    // with the median ITEM price, and only fires when the postage also exceeds
+    // the item's own price — which is what stops it touching an expensive card.
+    const items = included.map((c) => c.itemPricePence || 0).sort((a, b) => a - b);
+    const medItem = median(items);
+    const dwarfThreshold = Math.max(medItem * settings.postageDwarfsItemMultiplier, settings.postageOutlierFloorPence);
+
     const kept = [];
     const flagged = [];
     for (const c of included) {
-      if ((c.postagePence || 0) > threshold) flagged.push({ ...c, exclusionReason: "highPostage" });
+      const post = c.postagePence || 0;
+      const dwarfs = post > dwarfThreshold && post > (c.itemPricePence || 0);
+      if (post > threshold || dwarfs) flagged.push({ ...c, exclusionReason: "highPostage" });
       else kept.push(c);
     }
+    // Never let this empty the comp set. Where high postage is genuinely how
+    // the whole market for a card behaves, excluding all of it leaves nothing
+    // to price from, which is worse than a wide span.
+    if (kept.length < settings.postageOutlierMinComps / 2) return { kept: included, flagged: [] };
     return { kept, flagged };
   }
 
@@ -789,7 +938,9 @@ const CompFinderPricing = (() => {
    * title has no company+number grade (e.g. a bare "graded" with no number).
    */
   function parseGrade(title) {
-    const m = (title || "").match(/\b(psa|cgc|bgs|sgc|ace)\s*-?\s*(10|\d(?:\.5)?)\b/i);
+    const m = (title || "").match(
+      new RegExp(`\\b(${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*(10|\\d(?:\\.5)?)\\b`, "i")
+    );
     if (!m) return null;
     const company = m[1].toUpperCase();
     const grade = parseFloat(m[2]);
@@ -807,7 +958,7 @@ const CompFinderPricing = (() => {
    * strongest grade first within each company (PSA before CGC before BGS).
    */
   function gradedBreakdown(comps, settings = DEFAULT_SETTINGS, nameTokens = null, minPerTier = 1) {
-    const COMPANY_ORDER = { PSA: 0, CGC: 1, BGS: 2, SGC: 3, ACE: 4 };
+    const COMPANY_ORDER = Object.fromEntries(GRADERS.map((g, i) => [g.toUpperCase(), i]));
     const tiers = new Map(); // key -> { company, grade, prices: [] }
     for (const comp of comps) {
       const title = comp.title || "";

@@ -11,6 +11,6 @@
     "start": "npm run start --workspace apps/app",
     "dev:public": "npm run dev --workspace apps/public",
     "build:public": "npm run build --workspace apps/public",
-    "check": "node scripts/check-language.mjs"
+    "check": "node scripts/check-language.mjs && node scripts/check-exclusions.mjs"
   }
 }
