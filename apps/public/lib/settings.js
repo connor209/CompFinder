@@ -23,19 +23,59 @@ export function isPromoCard(card) {
   return PROMO_NUMBER.test(String(card.number || "").trim());
 }
 
-export function settingsForCard(card) {
-  if (!isPromoCard(card)) return CompFinderPricing.DEFAULT_SETTINGS;
-  const base = CompFinderPricing.DEFAULT_SETTINGS;
-  return {
-    ...base,
-    excludeKeywords: {
-      ...base.excludeKeywords,
-      // "league", "championship", "worlds" and "prerelease" stay: those are
-      // genuinely different promos from an ordinary Black Star one, so they'd
-      // still contaminate. Only the blanket "promo" is stood down.
-      promoVariant: base.excludeKeywords.promoVariant.filter((w) => w !== "promo")
-    }
-  };
+/**
+ * Foreign-language prints of an English card.
+ *
+ * A German Sylveon VMAX, an Italian Vaporeon ex and a Spanish Garchomp are
+ * different products at different prices, and they were being pooled into
+ * English comp sets: across 11,063 audited sold titles, 119 named a language
+ * other than English — German 26, Italian 13, Spanish 11, Chinese 9, French 7
+ * — and a Russian Machamp EX was the single top comp on its card at six times
+ * the median.
+ *
+ * This lives here and NOT in packages/core on purpose. Core is shared with the
+ * app, which has its own manual language toggle and is used to price stock
+ * that may deliberately be a foreign print; silently excluding those from a
+ * batch run would be a surprise. The public page has no toggle, so it has to
+ * make an assumption, and English is the right one for a UK marketplace.
+ *
+ * "carte" is deliberately absent even though it is the strongest French
+ * marker: it matched "Lotto Carte Pokemon Raichu ex 98/100 EX Sandstorm
+ * inglese" — an Italian-language listing for an ENGLISH card, which is a sale
+ * we want. Bare "japan" is out for the same reason, where "japanese" is safe.
+ */
+const FOREIGN_LANGUAGE = [
+  "russian", "italian", "italiano", "french", "française", "francaise",
+  "german", "deutsch", "spanish", "español", "espanol",
+  "portuguese", "português", "portugues",
+  "japanese", "korean", "chinese", "thai", "indonesian"
+];
+
+/**
+ * True when we have no positive reason to think the card is foreign. A card
+ * resolved from the catalogue carries its language; a free-text search with no
+ * resolved card does not, and English is the right default there.
+ */
+function wantsEnglishComps(card) {
+  const lang = card && card.language;
+  return !lang || lang === "English";
 }
 
-export default { isPromoCard, settingsForCard };
+export function settingsForCard(card) {
+  const base = CompFinderPricing.DEFAULT_SETTINGS;
+  const promo = isPromoCard(card);
+  const english = wantsEnglishComps(card);
+  if (!promo && !english) return base;
+
+  const excludeKeywords = { ...base.excludeKeywords };
+  if (promo) {
+    // "league", "championship", "worlds" and "prerelease" stay: those are
+    // genuinely different promos from an ordinary Black Star one, so they'd
+    // still contaminate. Only the blanket "promo" is stood down.
+    excludeKeywords.promoVariant = base.excludeKeywords.promoVariant.filter((w) => w !== "promo");
+  }
+  if (english) excludeKeywords.foreignPrint = FOREIGN_LANGUAGE;
+  return { ...base, excludeKeywords };
+}
+
+export default { isPromoCard, settingsForCard, FOREIGN_LANGUAGE };

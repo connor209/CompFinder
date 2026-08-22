@@ -11,6 +11,7 @@
  * good comps.
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { settingsForCard } from "../apps/public/lib/settings.js";
 
 const { DEFAULT_SETTINGS, recommend } = CompFinderPricing;
 
@@ -158,8 +159,41 @@ for (const [title, number, want] of NUMBERED_CASES) {
   if (low3 !== 0) { failed++; console.error(`FAIL  bimodal cluster: expected 0 excluded, got ${low3}`); }
 }
 
+// --- foreign-language prints: PUBLIC PAGE ONLY -------------------------------
+// Deliberately not in core (see apps/public/lib/settings.js): the app has a
+// manual language toggle and prices stock that may be a foreign print on
+// purpose. These run through settingsForCard rather than DEFAULT_SETTINGS.
+{
+  const check = (title, card, want) => {
+    const rec = recommend(
+      [{ title, itemPricePence: 5000, postagePence: 0 }],
+      settingsForCard(card), null, "sold", null, null
+    );
+    const got = (rec.excluded || [])[0]?.exclusionReason ?? null;
+    if (got !== want) {
+      failed++;
+      console.error(`FAIL  foreign: want ${String(want)}, got ${String(got)}\n      ${title}`);
+    }
+  };
+  const english = { name: "Vaporeon ex", language: "English" };
+  const japanese = { name: "Hydreigon", language: "Japanese" };
+
+  check("Vaporeon ex 149/131 SIR Prismatic Evolutions Italian Pokemon Card NM", english, "foreignPrint");
+  check("SYLVEON VMAX POKEMON 212/203 EVOLVING SKIES 2021 GERMAN", english, "foreignPrint");
+  check("Pecharunt ex 163/131 (Korean) Prismatic Evolutions Pokemon Holo NM", english, "foreignPrint");
+  check("Hydreigon 057/052 Next Destinies 1st Ed BW3 Japanese Pokemon Card MP", english, "foreignPrint");
+  // An ITALIAN-LANGUAGE listing for an ENGLISH card ("inglese"). This is the
+  // sale we want, and it is why "carte" is not in the list.
+  check("Lotto Carte Pokemon Raichu ex 98/100 EX Sandstorm inglese", english, null);
+  check("Vaporeon ex 149/131 SIR Prismatic Evolutions Pokemon Card NM", english, null);
+  // A card the catalogue says IS Japanese must keep its Japanese comps.
+  check("Hydreigon 057/052 Next Destinies 1st Ed BW3 Japanese Pokemon Card MP", japanese, null);
+  // No resolved card at all: English is the right default on a UK marketplace.
+  check("Vaporeon ex 149/131 SIR Prismatic Evolutions Italian Pokemon Card NM", null, "foreignPrint");
+}
+
 if (failed) {
   console.error(`\n${failed} exclusion checks failed.`);
   process.exit(1);
 }
-console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage and low-outlier cases pass.`);
+console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier and foreign-print cases pass.`);
