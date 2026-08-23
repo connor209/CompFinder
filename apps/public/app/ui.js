@@ -6,10 +6,10 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 export const gbp = (pence) => (pence == null ? "—" : CompFinderPricing.toPoundsStr(pence));
 
 /** The whole mark is the two-tone split across two lines. No symbol beside it. */
-export function Wordmark({ href = "/", size = 13 }) {
+export function Wordmark({ href = "/", size = 13, id }) {
   const El = href ? "a" : "span";
   return (
-    <El className="wordmark" href={href || undefined} style={{ fontSize: size }}>
+    <El className="wordmark" id={id} href={href || undefined} style={{ fontSize: size }}>
       Last<b>Comp</b>
     </El>
   );

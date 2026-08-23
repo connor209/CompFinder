@@ -224,6 +224,26 @@ tokens; there is no light palette to fall back to, so nothing is behind a
 
 Fonts are self-hosted through `next/font`, not linked to Google.
 
+**The splash and the iOS launch image are one picture.** iOS draws a static PNG
+before any of our code runs, and the splash animation continues from exactly
+that state — so `lib/splash-frame.js` holds the geometry as numbers and both
+`app/Splash.js` and `app/launch-image/route.js` are generated from it. Hand-
+matching them is how the handoff becomes a visible jump. Frame one is
+deliberately complete-looking on its own (wordmark all white, flat grey rule,
+no holo, no tagline), because a slow network leaves the visitor sitting on it.
+
+Two things learned building it. The launch image needs a real Archivo file —
+`apps/public/assets/Archivo-Expanded-800.ttf`, read off disk and force-traced
+via `outputFileTracingIncludes`, because `fetch(new URL(…, import.meta.url))`
+resolves to a static asset path the bundler can't fetch at build time. And the
+mock's teal bloom is absent from BOTH sides: Satori renders no radial gradient
+at any syntax tried, and a bloom in the DOM against a flat PNG is exactly the
+jump this file exists to prevent.
+
+Startup images go through `metadata.appleWebApp.startupImage`, not a
+hand-written `<head>` — the App Router hoists metadata and a `<head>` in the
+root layout renders nothing.
+
 ```
 /                        search
 /card/[q]                which one? when ambiguous, otherwise the answer

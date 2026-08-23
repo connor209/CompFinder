@@ -396,3 +396,61 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
   text-transform:uppercase; color:var(--ink-faint); margin-bottom:2px;
 }
 .bandn { display:block; font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
+
+/* ---------------------------------------------------------------------------
+   Splash
+   Frame one is what iOS has already painted as a static PNG before any of this
+   runs, so nothing enters or moves: the mark is already in place and only
+   colour and the rule change. See lib/splash-frame.js for the geometry both
+   this and the launch image are generated from.
+--------------------------------------------------------------------------- */
+.splash {
+  position:fixed; inset:0; z-index:100; background:var(--ground);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  overflow:hidden; opacity:1; transition:opacity 220ms ease-in-out;
+}
+.splash[data-stage="out"] { opacity:0; }
+
+.sp-holo {
+  position:absolute; inset:0; background:var(--holo);
+  opacity:0; transition:opacity 900ms ease-out;
+}
+.splash[data-stage="warm"] .sp-holo,
+.splash[data-stage="rule"] .sp-holo,
+.splash[data-stage="tag"] .sp-holo,
+.splash[data-stage="out"] .sp-holo { opacity:.10; }
+
+.sp-mark {
+  position:relative; display:flex; flex-direction:column; align-items:flex-start;
+  font-family:var(--font-display); font-variation-settings:"wdth" 125;
+  font-weight:800; text-transform:uppercase; line-height:.96;
+  font-size:clamp(44px, 16vw, 76px); letter-spacing:-.005em; color:var(--ink);
+  transition:transform 220ms ease-in-out;
+}
+.sp-comp { color:var(--ink); transition:color 320ms ease-out; }
+.splash[data-stage="warm"] .sp-comp,
+.splash[data-stage="rule"] .sp-comp,
+.splash[data-stage="tag"] .sp-comp,
+.splash[data-stage="out"] .sp-comp { color:var(--accent); }
+
+/* Flat grey in frame one; teal fills the last third, left to right. */
+.sp-rule {
+  position:relative; display:block; width:100%; height:3px; border-radius:2px;
+  background:var(--line); margin-top:.34em;
+}
+.sp-rule i {
+  position:absolute; left:0; top:0; bottom:0; width:0; border-radius:2px;
+  background:var(--accent); transition:width 420ms ease-out;
+}
+.splash[data-stage="rule"] .sp-rule i,
+.splash[data-stage="tag"] .sp-rule i,
+.splash[data-stage="out"] .sp-rule i { width:33%; }
+
+.sp-tag {
+  position:absolute; bottom:13%; font-size:12px; color:var(--ink-faint);
+  opacity:0; transition:opacity 400ms ease-out;
+}
+.splash[data-stage="tag"] .sp-tag,
+.splash[data-stage="out"] .sp-tag { opacity:1; }
+
+@media (prefers-reduced-motion: reduce) { .splash { display:none; } }

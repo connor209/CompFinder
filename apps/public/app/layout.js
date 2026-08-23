@@ -44,6 +44,12 @@ const sans = IBM_Plex_Sans({
   display: "swap"
 });
 
+const STARTUP = [
+  [1179, 2556], [1284, 2778], [1170, 2532], [1125, 2436],
+  [1242, 2688], [1242, 2208], [828, 1792], [750, 1334],
+  [1206, 2622], [1320, 2868]
+];
+
 export const metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://lastcomp.co.uk"),
   title: {
@@ -60,7 +66,23 @@ export const metadata = {
     siteName: "Last Comp",
     type: "website"
   },
-  twitter: { card: "summary_large_image" }
+  twitter: { card: "summary_large_image" },
+  // iOS draws one of these before any code runs, and the splash continues from
+  // exactly that state — every entry points at the same generator as the DOM
+  // frame (lib/splash-frame.js), so the two cannot drift. A device size not
+  // listed simply gets no launch image rather than a mismatched one.
+  //
+  // Written through the Metadata API rather than a <head> in this file: the
+  // App Router hoists metadata, and a hand-authored <head> here rendered
+  // nothing at all.
+  appleWebApp: {
+    title: "Last Comp",
+    statusBarStyle: "black-translucent",
+    startupImage: STARTUP.map(([w, h]) => ({
+      url: `/launch-image?w=${w}&h=${h}`,
+      media: `(device-width: ${w / 3}px) and (device-height: ${h / 3}px) and (-webkit-device-pixel-ratio: 3)`
+    }))
+  }
 };
 
 export const viewport = {

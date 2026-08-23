@@ -1,4 +1,5 @@
 import SearchField from "./SearchField";
+import Splash from "./Splash";
 import { Wordmark } from "./ui";
 
 /**
@@ -30,11 +31,14 @@ const POINTS = [
 export default function Home() {
   return (
     <main>
+      <Splash />
       <div className="headblock search">
         <span className="wash" aria-hidden="true" />
         <span className="sheen" aria-hidden="true" />
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Wordmark href={null} />
+          {/* The splash measures this and travels the mark here rather than
+              fading it out, so the brand lands where it lives. */}
+          <Wordmark href={null} id="lc-header-mark" />
           <span style={{ flex: 1 }} />
           <a
             href={process.env.NEXT_PUBLIC_APP_URL || "#pro"}
