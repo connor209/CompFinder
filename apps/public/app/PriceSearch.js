@@ -36,6 +36,39 @@ const EXCLUSION_LABELS = {
 };
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 
+/**
+ * Card art, when we have it.
+ *
+ * Three states, and the design has to survive all of them: a URL, no URL, and
+ * a URL that fails to load. Coverage is 84% of English cards and nothing at
+ * all for Japanese sets, so "no picture" is ordinary rather than exceptional —
+ * the placeholder keeps the same footprint so the layout doesn't jump between
+ * one card and the next.
+ *
+ * The image is never the thing being asserted. It confirms which card is being
+ * priced; the price stands on the comps regardless.
+ */
+function CardArt({ src, alt, className = "heroart" }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return <div className={className} aria-hidden="true"><span className="artnone">🂠</span></div>;
+  }
+  return (
+    <div className={className}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={src}
+        alt={alt ? `${alt} card` : ""}
+        loading="lazy"
+        decoding="async"
+        // Their CDN is a third party: a 404 or an outage must degrade to the
+        // placeholder, never to a broken-image icon in the middle of a price.
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
 function fmtDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -664,12 +697,18 @@ export default function PriceSearch() {
           <div className="picks">
             {choices.map((c) => (
               <button key={c.id} className="pick" onClick={() => { setQ(queryForCard(c)); run(queryForCard(c), c); }}>
-                <span className="pick-name">{c.name}</span>
-                <span className="pick-set">{c.set}</span>
-                <span className="pick-meta">
-                  {c.number ? <span className="mono">#{c.number}</span> : null}
-                  {c.rarity ? <span className="pick-rar">{c.rarity}</span> : null}
-                  {c.language && c.language !== "English" ? <span className="pick-lang">{c.language}</span> : null}
+                {/* The picker is where art earns its place: "Charizard ex
+                    223/165" and "Charizard ex 223/197" are two lines of nearly
+                    identical text, and two obviously different pictures. */}
+                <CardArt src={c.image} alt={c.name} className="pickart" />
+                <span className="pick-text">
+                  <span className="pick-name">{c.name}</span>
+                  <span className="pick-set">{c.set}</span>
+                  <span className="pick-meta">
+                    {c.number ? <span className="mono">#{c.number}</span> : null}
+                    {c.rarity ? <span className="pick-rar">{c.rarity}</span> : null}
+                    {c.language && c.language !== "English" ? <span className="pick-lang">{c.language}</span> : null}
+                  </span>
                 </span>
               </button>
             ))}
@@ -717,32 +756,37 @@ export default function PriceSearch() {
           )}
 
           <article className="panel">
-            <div className="eyebrow">{data.card.set || "Sold comps"}{data.card.rarity ? ` · ${data.card.rarity}` : ""}</div>
-            <h2 className="heroname">{data.card.name}</h2>
-            <div className="priceline">
-              <div className="pricemain">
-                <div className="bigprice"><span className="cur">£</span>{view.marketPence != null ? (view.marketPence / 100).toFixed(2) : "—"}</div>
-                <div className="pricewho">{view.market === UK ? "UK sellers" : view.market} · {view.used} comp{view.used === 1 ? "" : "s"}</div>
-              </div>
-              <span className={`conf${view.rec.confidence === "Medium" ? " med" : ""}`}>
-                {view.marketPence == null && view.graded.length > 0 ? "graded only" : `${view.rec.confidence} confidence`}
-              </span>
-              {view.restPence != null && (
-                <div className="pricealt">
-                  <div className="altlabel">Rest of the market</div>
-                  <div className="altprice">{pounds(view.restPence)}</div>
-                  <div className="altmeta">
-                    {view.restUsed} comp{view.restUsed === 1 ? "" : "s"}
-                    {view.premium != null && Math.abs(view.premium) >= 0.05 ? (
-                      <> · {view.market === UK ? "UK" : view.market} is{" "}
-                        <b className={view.premium > 0 ? "up" : "down"}>
-                          {Math.abs(Math.round(view.premium * 100))}% {view.premium > 0 ? "higher" : "lower"}
-                        </b>
-                      </>
-                    ) : view.premium != null ? <> · in line</> : null}
+            <div className="hero">
+              <CardArt src={data.card.image} alt={data.card.name} />
+              <div>
+                <div className="eyebrow">{data.card.set || "Sold comps"}{data.card.rarity ? ` · ${data.card.rarity}` : ""}</div>
+                <h2 className="heroname">{data.card.name}</h2>
+                <div className="priceline">
+                  <div className="pricemain">
+                    <div className="bigprice"><span className="cur">£</span>{view.marketPence != null ? (view.marketPence / 100).toFixed(2) : "—"}</div>
+                    <div className="pricewho">{view.market === UK ? "UK sellers" : view.market} · {view.used} comp{view.used === 1 ? "" : "s"}</div>
                   </div>
+                  <span className={`conf${view.rec.confidence === "Medium" ? " med" : ""}`}>
+                    {view.marketPence == null && view.graded.length > 0 ? "graded only" : `${view.rec.confidence} confidence`}
+                  </span>
+                  {view.restPence != null && (
+                    <div className="pricealt">
+                      <div className="altlabel">Rest of the market</div>
+                      <div className="altprice">{pounds(view.restPence)}</div>
+                      <div className="altmeta">
+                        {view.restUsed} comp{view.restUsed === 1 ? "" : "s"}
+                        {view.premium != null && Math.abs(view.premium) >= 0.05 ? (
+                          <> · {view.market === UK ? "UK" : view.market} is{" "}
+                            <b className={view.premium > 0 ? "up" : "down"}>
+                              {Math.abs(Math.round(view.premium * 100))}% {view.premium > 0 ? "higher" : "lower"}
+                            </b>
+                          </>
+                        ) : view.premium != null ? <> · in line</> : null}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
             {view.bands && (
               <div className="bands">

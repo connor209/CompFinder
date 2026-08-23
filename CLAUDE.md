@@ -42,7 +42,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs six table tests, no framework, non-zero exit on failure:
+`npm run check` runs seven table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -51,6 +51,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-turnstile.mjs` — pass forgery, client binding, expiry, off-switch.
 - `scripts/check-liquidity.mjs` — how a capped result set is read, and a grep
   against anyone guessing it from a comp count again.
+- `scripts/check-images.mjs` — which picture goes with which card.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -143,6 +144,42 @@ side against live data, and re-running it inside 24 hours is free.
 comps for a Weedle, almost none are single-card sales — eBay's market for a 1p
 common is "Choose Your Card" pick-lists, correctly excluded. No rule change
 conjures sold data that doesn't exist.
+
+## Card images
+
+The catalogue is Cardmarket-derived and has no art of its own, so image URLs
+are matched in and stored on `card_catalog` (migration 022), never fetched
+inside a visitor's request. Two reasons: a public page shouldn't depend on a
+third party being up — the alternative source, pokemontcg.io, spent an hour
+returning 500 to every call on 2026-08-23 — and we store links, not copies, so
+the artwork stays The Pokémon Company's problem to license rather than ours to
+redistribute.
+
+```
+node scripts/probe-images.mjs                       # measure coverage, writes nothing
+NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node scripts/backfill-images.mjs --dry-run        # then without, to write
+```
+
+Measured over the 400 English cards in the audit sets: **84% end up with art,
+90% of the chase set.** The gaps are World Championship Decks and a few EX-era
+and promo sets tcgdex doesn't index (13%), plus the Shining Fates Shiny Vault,
+which it lists without art (12 cards). Non-English rows are skipped — tcgdex
+has them, but under Japanese set names, which needs a name map we don't have.
+
+**The match is set + collector number; the card NAME is a guard on the result,
+never part of the key.** A missing picture is a gap; a picture of the wrong
+card is a lie about what's being priced, and it's the most confident-looking
+thing on the page. Two rules earn their place, both in `scripts/lib/card-images.mjs`:
+
+- **Sub-sets are a whitelist**, not "any set name that extends another".
+  Cardmarket keeps the Trainer Gallery, Galarian Gallery and Shiny Vault inside
+  their parent with a TG/GG/SV number prefix; tcgdex splits them out. The naive
+  rule also merges Base Set 2 into Base Set, Dragon Frontiers into Dragon, Team
+  Rocket Returns into Team Rocket and eight XY Trainer Kits into XY. The tests
+  caught it.
+- **Zero-padding comes off after the letter prefix.** SV001, SV01 and SV1 are
+  one card; SV1 and SV10 are not.
 
 ## Merging to main deploys — batch it
 

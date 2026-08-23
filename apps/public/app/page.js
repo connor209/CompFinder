@@ -42,7 +42,11 @@ export default function Home() {
         <a href="/privacy">Privacy</a>
         <a href="/privacy#affiliate">Affiliate disclosure</a>
         <span className="spacer" />
-        <span>Prices from real eBay UK sold listings. Not affiliated with eBay.</span>
+        <span>
+          Prices from real eBay UK sold listings. Card images from{" "}
+          <a href="https://tcgdex.dev" rel="noopener noreferrer nofollow" target="_blank">TCGdex</a>.
+          Not affiliated with eBay, Nintendo or The Pok&eacute;mon Company.
+        </span>
       </footer>
     </div>
   );

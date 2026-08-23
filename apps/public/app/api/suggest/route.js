@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createPublicClient } from "@/lib/supabase";
 import { cleanSearchName } from "@compfinder/core/cardname.js";
 import { parseQuery, rankCards, languageOf } from "@/lib/resolve";
+import { selectCatalog } from "@/lib/catalog-select";
 
 /**
  * Card typeahead for the public search box. Reads card_catalog with the anon
@@ -26,29 +27,34 @@ export async function GET(request) {
   const words = q.toLowerCase().split(/\s+/).filter((w) => w.length >= 2).slice(0, 4);
   const digits = q.match(/\d{1,4}/);
 
-  let query = supabase
-    .from("card_catalog")
-    .select("cardmarket_id,name,collector_number,rarity,expansion,expansion_code,game")
-    // Pokémon only — see the note in ../resolve/route.js for what the audit
-    // measured about the other games.
-    .eq("game", "pokemon")
-    // Fetch a POOL and rank it, rather than ranking an arbitrary eight. With
-    // limit(8) the database handed back eight rows in physical order and
-    // scoring then discarded most of them: "charizard" dropped from eight
-    // suggestions to two, both of them Radiant Charizard, with no Base Set,
-    // no ex and no VMAX anywhere. Ranking only helps if it has something to
-    // rank.
-    .limit(60);
+  // Columns come from the helper so a deployment that lands before migration
+  // 022 loses the art rather than the whole dropdown.
+  const build = (columns) => {
+    let query = supabase
+      .from("card_catalog")
+      .select(columns)
+      // Pokémon only — see the note in ../resolve/route.js for what the audit
+      // measured about the other games.
+      .eq("game", "pokemon")
+      // Fetch a POOL and rank it, rather than ranking an arbitrary eight. With
+      // limit(8) the database handed back eight rows in physical order and
+      // scoring then discarded most of them: "charizard" dropped from eight
+      // suggestions to two, both of them Radiant Charizard, with no Base Set,
+      // no ex and no VMAX anywhere. Ranking only helps if it has something to
+      // rank.
+      .limit(60);
 
-  for (const w of words) {
-    // A number in the query is far more likely to be a collector number than
-    // part of the name, so don't force it to match the name field too.
-    if (/^\d+$/.test(w)) continue;
-    query = query.ilike("name", `%${w}%`);
-  }
-  if (digits) query = query.ilike("collector_number", `${digits[0]}%`);
+    for (const w of words) {
+      // A number in the query is far more likely to be a collector number than
+      // part of the name, so don't force it to match the name field too.
+      if (/^\d+$/.test(w)) continue;
+      query = query.ilike("name", `%${w}%`);
+    }
+    if (digits) query = query.ilike("collector_number", `${digits[0]}%`);
+    return query;
+  };
 
-  const { data, error } = await query;
+  const { data, error } = await selectCatalog(build);
   if (error) {
     console.error("suggest failed:", error.message);
     return NextResponse.json({ ok: true, cards: [] });
@@ -99,6 +105,7 @@ function shape(rows) {
     code: row.expansion_code,
     rarity: row.rarity,
     game: row.game,
-    language: languageOf(row)
+    language: languageOf(row),
+    image: row.image_small || null
   }));
 }

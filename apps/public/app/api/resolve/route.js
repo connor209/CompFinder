@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createPublicClient } from "@/lib/supabase";
 import { cleanSearchName } from "@compfinder/core/cardname.js";
 import { parseQuery, rankCards, languageOf, looksWeak } from "@/lib/resolve";
+import { selectCatalog } from "@/lib/catalog-select";
 
 // One warning per process if the fuzzy RPC isn't there, rather than one per
 // failed search.
@@ -29,7 +30,9 @@ export async function GET(request) {
   // Cast a wide net and rank in JS: the useful signals (exact-name match,
   // language, product type) aren't things this schema can order by, and the
   // candidate set for one card name is small enough that it doesn't matter.
-  const SELECT = "cardmarket_id,name,collector_number,rarity,expansion,expansion_code,game";
+  // Column list comes from the helper: it drops image_small and says so once
+  // if migration 022 hasn't been run, rather than failing the whole query and
+  // taking the resolver down with it.
 
   /**
    * POKÉMON ONLY, deliberately.
@@ -67,9 +70,11 @@ export async function GET(request) {
    * candidate set however many namesakes it has.
    */
   const fetchByTokens = async (tokens) => {
-    let query = supabase.from("card_catalog").select(SELECT).eq("game", GAME).order("cardmarket_id").limit(120);
-    for (const t of tokens) query = query.ilike("name", `%${t}%`);
-    const { data, error } = await query;
+    const { data, error } = await selectCatalog((columns) => {
+      let query = supabase.from("card_catalog").select(columns).eq("game", GAME).order("cardmarket_id").limit(120);
+      for (const t of tokens) query = query.ilike("name", `%${t}%`);
+      return query;
+    });
     if (error) {
       console.error("resolve failed:", error.message);
       return null;
@@ -81,9 +86,9 @@ export async function GET(request) {
     if (!parsed.number || !tokens.length) return rows;
     const n = String(parsed.number);
     const forms = [...new Set([n, n.padStart(2, "0"), n.padStart(3, "0")])];
-    let byNumber = supabase.from("card_catalog").select(SELECT).eq("game", GAME).order("cardmarket_id").limit(60);
-    byNumber = byNumber.ilike("name", `%${tokens[0]}%`).in("collector_number", forms);
-    const { data: numbered, error: numberError } = await byNumber;
+    const { data: numbered, error: numberError } = await selectCatalog((columns) =>
+      supabase.from("card_catalog").select(columns).eq("game", GAME).order("cardmarket_id").limit(60)
+        .ilike("name", `%${tokens[0]}%`).in("collector_number", forms));
     if (numberError || !numbered || !numbered.length) return rows;
 
     const seenIds = new Set(rows.map((r) => r.cardmarket_id));
@@ -236,6 +241,10 @@ export async function GET(request) {
       // Shown on the picker: a Japanese print of the same card is a different
       // product at a different price, and the set name alone doesn't say so.
       language: languageOf(row),
+      // Null until the backfill has run, and null for the sets tcgdex doesn't
+      // index — the picker has to read fine either way, so this is a bonus
+      // rather than a layout the design depends on.
+      image: row.image_small || null,
       score
     }))
   });
