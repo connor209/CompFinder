@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Last Comp">
+  <!-- The LC tile: used anywhere the two-line lockup won't fit. Border drops to
+       1px under 40px in the spec, which at 32px is 1 unit here. -->
+  <rect x="0.5" y="0.5" width="31" height="31" rx="8" fill="#141B1D" stroke="#2BBAA6"/>
+  <text x="16" y="21.5" text-anchor="middle"
+        font-family="Archivo, 'Helvetica Neue', Arial, sans-serif"
+        font-size="13" font-weight="800" font-stretch="expanded"
+        letter-spacing="0.4" fill="#2BBAA6">LC</text>
+</svg>

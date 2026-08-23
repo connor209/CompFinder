@@ -38,7 +38,7 @@ export function priceCard(card, comps = [], { market = UK } = {}) {
 
   // NUMBER FALLBACK. If requiring the collector number rejects every comp but
   // the name alone matches several, the number is likelier wrong than the
-  // market empty. Mirrors PriceSearch.
+  // market empty. Mirrors the card screen.
   let viaName = false;
   if (rec && (rec.included || []).length === 0) {
     const alt = CompFinderPricing.recommend(

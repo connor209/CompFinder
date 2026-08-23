@@ -8,8 +8,12 @@ editing anything** — the words below are the agreed shorthand.
 | Say this | Means | Vercel project | Who uses it |
 |---|---|---|---|
 | **the app**, **Pro** | `apps/app` | `comp-finder` | us, daily, for the business |
-| **the public page**, **the free page** | `apps/public` | `compfinder-public` | anonymous visitors |
+| **Last Comp**, **the public page** | `apps/public` | `compfinder-public` | anonymous visitors |
 | **core** | `packages/core` | — | both of the above |
+
+The public page is called **Last Comp** as of 2026-08-23 — the Vercel project
+and the repo keep the old name, so "CompFinder" in a path is the codebase and
+"Last Comp" in copy is the product.
 
 If a request could mean either ("fix the price display", "change the buy
 module"), **ask which before editing** rather than guessing. They now contain
@@ -202,6 +206,46 @@ thing on the page. Two rules earn their place, both in `scripts/lib/card-images.
   caught it.
 - **Zero-padding comes off after the letter prefix.** SV001, SV01 and SV1 are
   one card; SV1 and SV10 are not.
+
+## Last Comp: the public page's design system
+
+Dark only, three fonts, four screens. `apps/public/app/globals.css` holds the
+tokens; there is no light palette to fall back to, so nothing is behind a
+`prefers-color-scheme` query.
+
+- **Archivo at width 125%** for anything that shouts — headings, brand, labels,
+  buttons, verdicts — always uppercase. The width axis is the identity, which
+  is why `layout.js` asks next/font for `weight: "variable"` and `axes:
+  ["wdth"]`: request fixed weights instead and next/font refuses the axis, the
+  build still passes, and every heading quietly renders at normal width.
+- **Martian Mono** for exactly two figures a screen (the buy-it-today price and
+  the sells-for figure) and nothing else.
+- **IBM Plex Mono** for rows, dates and inputs; **IBM Plex Sans** for prose.
+
+Fonts are self-hosted through `next/font`, not linked to Google.
+
+```
+/                        search
+/card/[q]                which one? when ambiguous, otherwise the answer
+/card/[q]/workings       every sale counted, every sale excluded, net after fees
+```
+
+Both card screens run off `lib/use-card.js`. That is deliberate: the workings
+exist to show the arithmetic behind the answer, and a second fetching path
+would eventually have them explaining a different number than the one on the
+previous screen.
+
+**Anything quoting a constant must be generated from it.** The workings screen
+prints "Based on £200.01 at 13.25% fees, 30p fixed, plus £1.35 postage" under a
+net figure, and both come from `FEE_RATE`/`FEE_FIXED_PENCE` in `lib/verdict.js`.
+The design prototype shipped a hardcoded version of that caption once and it
+disagreed with the figure above it.
+
+**The sale notes on the workings screen are derived, never invented.**
+`lib/sale-note.js` reads condition wording, holo, postage and the seller's own
+condition field out of the listing. The mock also shows "sold at auction",
+"14 bids" and "private seller"; SoldComps returns none of those, so they are
+absent rather than guessed.
 
 ## Merging to main deploys — batch it
 
