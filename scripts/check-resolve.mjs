@@ -255,6 +255,30 @@ const UMBREONS = [
   }
 }
 
+{
+  // A sealed product carries the card's name. The top suggestion for
+  // "charizard" — the commonest search this page will ever take — was a
+  // "Pokémon Card Display Set Gift Box", with "Battle Party Set" behind it.
+  const mixed = [
+    row(1, "Charizard", "001", "Pokémon Card Display Set Gift Box Charizard", "CSMC", "Promo"),
+    row(2, "Charizard", "4", "Base Set", "BS", "Rare Holo")
+  ];
+  const r = rankCards(mixed, parseQuery("charizard"));
+  if (r.candidates[0].row.cardmarket_id !== 2) fail("a gift box should not outrank an actual card");
+
+  // ...but cards from tins and from Classic Collection ARE real singles and
+  // must not be penalised for the set they came in.
+  const keep = [
+    row(1, "Shining Magikarp", "NR 66", "Celebrations: Classic Collection", "CEL", "Rare Holo"),
+    row(2, "Charizard", "SWSH050", "Champion's Path Tin", "CPA", "Promo")
+  ];
+  for (const k of keep) {
+    if (!rankCards([k], parseQuery(k.name)).candidates.length) {
+      fail(`${k.expansion} is a real card and must still rank`);
+    }
+  }
+}
+
 if (failed) {
   console.error(`\n${failed} resolver checks failed.`);
   process.exit(1);

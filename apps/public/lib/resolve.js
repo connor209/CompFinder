@@ -101,6 +101,17 @@ export function languageOf(row) {
 // the card's name — "Online Code Card (Umbreon Blister)" matches "umbreon".
 const NON_CARD = /\b(online code|code card|booster|bundle|display|tin|blister|collection box|elite trainer|deck box|sleeves|binder|portfolio|playmat)\b/i;
 
+// The same test, for the EXPANSION. A sealed product carries the card's name —
+// the top suggestion for "charizard", the commonest search this page will ever
+// take, was "Charizard" from "Pokémon Card Display Set Gift Box Charizard",
+// with "Battle Party Set" close behind. Neither is a card you can hold.
+//
+// Deliberately narrower than NON_CARD: "tin" and "collection" are excluded
+// because cards from tins and from Celebrations: Classic Collection are real
+// singles that trade normally, and penalising their whole set would hide them.
+// Only markers that can ONLY mean sealed product are here.
+const NON_CARD_SET = /\b(display set|gift box|booster|blister|elite trainer|deck box|party set|premium collection box)\b/i;
+
 // Physically different objects that share a name and confuse a price lookup.
 const ODDITY = /\b(oversized|jumbo|giant|xxl)\b/i;
 
@@ -262,6 +273,7 @@ export function scoreCard(row, parsed) {
   if (/additional/i.test(row.expansion || "")) score -= 12;
 
   if (NON_CARD.test(row.name || "")) score -= 120;
+  if (NON_CARD_SET.test(row.expansion || "")) score -= 120;
   if (ODDITY.test(row.name || "") || ODDITY.test(row.rarity || "")) score -= 60;
 
   // Chase rarities are what people look up; commons are rarely the intent
