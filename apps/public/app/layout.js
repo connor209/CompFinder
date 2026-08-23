@@ -3,14 +3,14 @@ import "./globals.css";
 export const metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || "https://compfinder.co.uk"),
   title: {
-    default: "CompFinder — what's that card worth?",
+    default: "CompFinder — what's that Pokémon card worth?",
     template: "%s · CompFinder"
   },
   description:
-    "Free UK card price checker. Real eBay sold prices from the last 90 days, filtered for junk comps and graded slabs, then recency-weighted.",
+    "Free UK Pokémon card price checker. Real eBay sold prices from the last 90 days, filtered for junk comps and graded slabs, then recency-weighted.",
   openGraph: {
-    title: "CompFinder — what's that card worth?",
-    description: "Free UK card price checker built on real eBay sold data.",
+    title: "CompFinder — what's that Pokémon card worth?",
+    description: "Free UK Pokémon card price checker built on real eBay sold data.",
     url: "/",
     siteName: "CompFinder",
     type: "website"

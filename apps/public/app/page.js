@@ -12,14 +12,14 @@ export default function Home() {
         <div className="brandmark">CF</div>
         <div>
           <div className="brandname">CompFinder</div>
-          <div className="brandsub">Free UK card price checker</div>
+          <div className="brandsub">Free UK Pokémon card price checker</div>
         </div>
         <span className="spacer" />
         <a className="btn btn-sm" href={process.env.NEXT_PUBLIC_APP_URL || "#pro"}>Sign in</a>
       </header>
 
       <section className="lede">
-        <h1>What&rsquo;s that card actually worth?</h1>
+        <h1>What&rsquo;s that Pok&eacute;mon card actually worth?</h1>
         <p>
           Real eBay UK sold prices from the last 90 days &mdash; filtered for junk comps, graded slabs and
           international sellers, then recency-weighted. Free, no account needed.

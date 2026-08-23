@@ -29,6 +29,9 @@ export async function GET(request) {
   let query = supabase
     .from("card_catalog")
     .select("cardmarket_id,name,collector_number,rarity,expansion,expansion_code,game")
+    // Pokémon only — see the note in ../resolve/route.js for what the audit
+    // measured about the other games.
+    .eq("game", "pokemon")
     // Fetch a POOL and rank it, rather than ranking an arbitrary eight. With
     // limit(8) the database handed back eight rows in physical order and
     // scoring then discarded most of them: "charizard" dropped from eight
@@ -77,9 +80,10 @@ export async function GET(request) {
   // every keystroke.
   if (!ranked.candidates.length && parsed.name.length >= 4) {
     const { data: fuzzyRows, error: fuzzyError } = await supabase
-      .rpc("search_catalog_fuzzy", { q: parsed.name, lim: 40 });
+      .rpc("search_catalog_fuzzy", { q: parsed.name, lim: 150 });
     if (!fuzzyError && fuzzyRows && fuzzyRows.length) {
-      ranked = rankCards(fuzzyRows.map((r) => ({ ...r, _similarity: r.similarity })), parsed, 8);
+      const pokemonOnly = fuzzyRows.filter((r) => (r.game || "pokemon") === "pokemon");
+      ranked = rankCards(pokemonOnly.map((r) => ({ ...r, _similarity: r.similarity })), parsed, 8);
     }
   }
 

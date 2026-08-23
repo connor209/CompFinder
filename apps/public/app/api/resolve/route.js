@@ -32,6 +32,26 @@ export async function GET(request) {
   const SELECT = "cardmarket_id,name,collector_number,rarity,expansion,expansion_code,game";
 
   /**
+   * POKÉMON ONLY, deliberately.
+   *
+   * The catalogue is multi-game and this page used to answer for all of it.
+   * A 371-card audit measured what that was worth: Pokémon prices reliably
+   * (188/201 commons, 69/77 trainers, 4 wide spans in 278 cards), and
+   * Yu-Gi-Oh and Magic do not. The whole engine is anchored on the collector
+   * number, because that is what separates one printing from another, and
+   * sellers in those games mostly don't write it — 33 of 60 Yu-Gi-Oh cards
+   * priced only via the name-only fallback, pooling every printing into one
+   * figure, and 14 of 60 spanned more than 15x. Giant Growth came back as
+   * £5.59 from comps running £0.99 to £19.84.
+   *
+   * A confident-looking number built on pooled printings is worse than no
+   * answer, so until those games get set-anchored matching of their own the
+   * page does not offer them. It also stops "Bea" returning three Cardfight!!
+   * Vanguard cards, which is how this surfaced in the first place.
+   */
+  const GAME = "pokemon";
+
+  /**
    * A card name can have far more than 120 rows across every language and
    * reprint, and the fetch takes an arbitrary 120 of them because there is no
    * ORDER BY — so which cards are even considered was down to physical row
@@ -47,7 +67,7 @@ export async function GET(request) {
    * candidate set however many namesakes it has.
    */
   const fetchByTokens = async (tokens) => {
-    let query = supabase.from("card_catalog").select(SELECT).order("cardmarket_id").limit(120);
+    let query = supabase.from("card_catalog").select(SELECT).eq("game", GAME).order("cardmarket_id").limit(120);
     for (const t of tokens) query = query.ilike("name", `%${t}%`);
     const { data, error } = await query;
     if (error) {
@@ -61,7 +81,7 @@ export async function GET(request) {
     if (!parsed.number || !tokens.length) return rows;
     const n = String(parsed.number);
     const forms = [...new Set([n, n.padStart(2, "0"), n.padStart(3, "0")])];
-    let byNumber = supabase.from("card_catalog").select(SELECT).order("cardmarket_id").limit(60);
+    let byNumber = supabase.from("card_catalog").select(SELECT).eq("game", GAME).order("cardmarket_id").limit(60);
     byNumber = byNumber.ilike("name", `%${tokens[0]}%`).in("collector_number", forms);
     const { data: numbered, error: numberError } = await byNumber;
     if (numberError || !numbered || !numbered.length) return rows;
@@ -174,14 +194,18 @@ export async function GET(request) {
     // wrong here: "Umbeon ex" had already been cut down to "Umbeon", so the
     // fuzzy search looked for the wrong card and ranked a 2003 Umbreon above
     // the Umbreon ex being searched for. Similarity wants everything typed.
-    const { data: fuzzyRows, error: fuzzyError } = await supabase
-      .rpc("search_catalog_fuzzy", { q: parsed.name, lim: 60 });
+    // A bigger pool than we need, because it is filtered to Pokémon in JS —
+    // the RPC has no game parameter, and adding one would mean another
+    // migration for a page that only wants the one game.
+    let { data: fuzzyRows, error: fuzzyError } = await supabase
+      .rpc("search_catalog_fuzzy", { q: parsed.name, lim: 200 });
     if (fuzzyError) {
       if (!warnedNoFuzzy) {
         warnedNoFuzzy = true;
         console.warn("fuzzy catalogue search unavailable (migration 020 not run?):", fuzzyError.message);
       }
     } else if (fuzzyRows && fuzzyRows.length) {
+      fuzzyRows = fuzzyRows.filter((r) => (r.game || GAME) === GAME);
       // Scored against the original parse too, for the same reason.
       const fuzzyRanked = rankCards(fuzzyRows.map((r) => ({ ...r, _similarity: r.similarity })), parsed);
       // Only displace the exact result if it actually scores better. A weak

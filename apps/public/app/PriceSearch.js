@@ -487,7 +487,7 @@ export default function PriceSearch() {
                 value={q}
                 onChange={(e) => onInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") search(q); if (e.key === "Escape") setOpenSug(false); }}
-                placeholder="Search a card — e.g. Charizard ex 199/165"
+                placeholder="Search a Pokémon card — e.g. Charizard ex 199/165"
                 aria-label="Search a card"
                 autoComplete="off"
               />

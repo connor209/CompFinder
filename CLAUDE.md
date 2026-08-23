@@ -87,6 +87,11 @@ found, on 2026-08-22:
 | Yu-Gi-Oh | 44/60 | 8 | **14** |
 | Magic | 26/33 | 4 | 3 |
 
+**Decided 2026-08-22: the public page is Pokémon-only.** `/api/resolve` and
+`/api/suggest` filter on `game = 'pokemon'`, and the copy says so. The engine
+is unchanged — `packages/core` still prices any game, and the app still uses
+it for all of them.
+
 **Pokémon is reliable; the other games are not, and it isn't a bug.** The whole
 engine is anchored on the collector number, which is what separates one
 printing from another. Yu-Gi-Oh and Magic sellers mostly don't write it — 33
@@ -94,10 +99,11 @@ of 60 Yu-Gi-Oh cards priced only via the name-only fallback — so the tool
 pools every printing of a card and reports a number with a 15–50x span. Giant
 Growth came back as £5.59 from 30 comps spanning £0.99 to £19.84.
 
-The page does say so (the "matched on the card name alone" and "matched very
-different cards" caveats both fire), but before marketing to anyone, decide
-whether the public page is Pokémon-only or whether the other games get
-set-anchored matching of their own.
+Both caveats fire on those cards ("matched on the card name alone", "matched
+very different cards"), but a confident-looking number built on pooled
+printings is worse than no answer — hence the scoping above. Lifting it means
+giving those games set-anchored matching of their own, not just removing the
+filter.
 
 **Cheap commons are thin for a different reason: the data isn't there.** Of 40
 comps for a Weedle, almost none are single-card sales — eBay's market for a 1p
