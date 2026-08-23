@@ -57,10 +57,27 @@ const SUBSET_SUFFIXES = ["trainer gallery", "galarian gallery", "shiny vault"];
  * The parent comes first, and callers let it win a number collision: a plain
  * number belongs to the main set.
  */
+/**
+ * Set names we and tcgdex spell differently, where no rule covers it.
+ * Deliberately tiny and explicit: a fuzzy set match puts a whole set's art on
+ * the wrong cards at once, which is the worst failure available here.
+ */
+const SET_ALIASES = new Map([
+  ["sv black star promos", "svp black star promos"]
+]);
+
 export function setFamily(ourSetName, theirSets) {
   const key = norm(ourSetName);
   if (!key) return [];
-  const parent = theirSets.find((s) => norm(s.name) === key);
+  const find = (name) => theirSets.find((s) => norm(s.name) === name);
+
+  // Cardmarket prefixes the whole 2003-2007 era with "EX " — "EX Unseen
+  // Forces", "EX Deoxys", "EX Holon Phantoms" — where tcgdex just names the
+  // set. That one prefix accounts for around a thousand cards. Tried only
+  // after the exact name fails, and only accepted on an exact match of what's
+  // left, so it can't reach a set that merely looks similar.
+  let parent = find(key) || find(SET_ALIASES.get(key) || "");
+  if (!parent && key.startsWith("ex ")) parent = find(key.slice(3));
   if (!parent) return [];
   const subsets = theirSets.filter((s) => {
     if (s.id === parent.id) return false;
@@ -79,7 +96,11 @@ export function setFamily(ourSetName, theirSets) {
  * refuses art for cards we have matched correctly.
  */
 const PARENTHETICAL = /\s*\([^)]*\)\s*$/;
-const GRADE_WORDS = /\b(ex|gx|v|vmax|vstar|lv x)\b/g;
+// No suffix stripping. It was here to fold "Umbreon ex" into "Umbreon EX",
+// which lowercasing already does — and it was quietly merging Charizard with
+// Charizard ex, Charizard V and Charizard LV.X, which are four different cards
+// at four different prices. Nothing that separates two real cards may be
+// normalised away.
 
 /**
  * The same card, written two ways.
@@ -105,9 +126,16 @@ export function nameKey(n) {
   // precisely the confusion that would put one's picture on the other.
   t = t.replace(/♂/g, " male ").replace(/♀/g, " female ");
   t = t.replace(/\[\s*m\s*\]/g, " male ").replace(/\[\s*f\s*\]/g, " female ");
-  // The δ says "Delta Species" already; Cardmarket writes both.
-  t = t.replace(/\bdelta species\b/g, " ");
-  return norm(t).replace(GRADE_WORDS, "").replace(/\s+/g, "");
+  // The δ says "Delta Species" already; Cardmarket writes both, and puts it at
+  // the opposite end: "Rainbow Energy Delta" against "δ Rainbow Energy".
+  t = t.replace(/\u03b4/g, " ").replace(/\bdelta species\b/g, " ").replace(/\bdelta\b/g, " ");
+  // Gold Star cards: Cardmarket spells it, tcgdex uses the symbol.
+  t = t.replace(/\u2606|\u2605/g, " gold star ").replace(/\bgold star\b/g, " gold star ");
+  // The printed level is decoration on a DP-era card and Cardmarket keeps it:
+  // "Dialga Lv.68" is tcgdex's "Dialga". Not to be confused with LV.X, which
+  // is a different card and has no digits after it.
+  t = t.replace(/\blv\.?\s*\d+\b/g, " ");
+  return norm(t).replace(/\s+/g, "");
 }
 
 /** Levenshtein, bounded — we only ever care whether it exceeds 1. */
@@ -134,7 +162,13 @@ export function nameAgrees(ours, theirs) {
   const b = nameKey(theirs);
   if (!a || !b) return false;
   if (a === b) return true;
-  return a.length >= 5 && b.length >= 5 && withinOneEdit(a, b);
+  if (a.length < 5 || b.length < 5) return false;
+  // One name extending the other is never a typo — it's a suffix, and a suffix
+  // is what tells Charizard from Charizard V. Only a substitution in the
+  // middle gets the benefit of the doubt.
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  if (long.startsWith(short) || long.endsWith(short)) return false;
+  return withinOneEdit(a, b);
 }
 
 /**
@@ -153,15 +187,33 @@ export function imageUrls(base) {
  */
 export function indexByNumber(family, cardsBySetId) {
   const byNumber = new Map();
+  // Second index, on the digits alone. The Black Star Promos sets number their
+  // cards SWSH001, SM01, XY01 where our catalogue holds the bare number —
+  // about 1,200 cards across the six of them. Only consulted when the exact
+  // key misses, and only where the digits pick out exactly ONE card in the
+  // set: in a set holding both 1 and SV1, "1" is ambiguous and guessing would
+  // put the Shiny Vault card's picture on the main-set one.
+  const digitCounts = new Map();
+  const byDigits = new Map();
   const parentId = family.length ? family[0].id : null;
+
   for (const part of family) {
     for (const card of cardsBySetId.get(part.id) || []) {
       const key = numKey(card.localId);
       if (!byNumber.has(key) || part.id === parentId) byNumber.set(key, card);
+      const digits = key.replace(/^[a-z]+/, "");
+      if (!digits) continue;
+      digitCounts.set(digits, (digitCounts.get(digits) || 0) + 1);
+      if (!byDigits.has(digits) || part.id === parentId) byDigits.set(digits, card);
     }
   }
+  for (const [digits, n] of digitCounts) if (n > 1) byDigits.delete(digits);
+  byNumber.set(DIGIT_INDEX, byDigits);
   return byNumber;
 }
+
+/** Where indexByNumber stashes the digits-only index on the returned map. */
+export const DIGIT_INDEX = Symbol("digits");
 
 /**
  * The whole decision for one catalogue row.
@@ -170,7 +222,9 @@ export function indexByNumber(family, cardsBySetId) {
  * breakdown instead of stopping at the first oddity.
  */
 export function matchCard(ours, byNumber) {
-  const hit = byNumber.get(numKey(ours.number ?? ours.collector_number));
+  const key = numKey(ours.number ?? ours.collector_number);
+  const digits = byNumber.get(DIGIT_INDEX);
+  const hit = byNumber.get(key) || (digits && !/^[a-z]/.test(key) ? digits.get(key) : undefined);
   if (!hit) return { outcome: "no-number" };
   if (!nameAgrees(ours.name, hit.name)) {
     return { outcome: "name-clash", theirName: hit.name, theirId: hit.id };

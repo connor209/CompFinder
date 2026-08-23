@@ -54,7 +54,8 @@ const THEIR_SETS = [
   { id: "xyp", name: "XY Black Star Promos" },
   { id: "tk-xy-b", name: "XY trainer Kit (Bisharp)" },
   { id: "cel25", name: "Celebrations" },
-  { id: "cel25cc", name: "Celebrations Classic Collection" }
+  { id: "cel25cc", name: "Celebrations Classic Collection" },
+  { id: "ex10", name: "Unseen Forces" }
 ];
 const family = (name) => setFamily(name, THEIR_SETS).map((s) => s.id);
 
@@ -65,6 +66,12 @@ eq("family: Lost Origin", family("Lost Origin").join(","), "swsh11,swsh11.5tg");
 eq("family: Crown Zenith", family("Crown Zenith").join(","), "swsh12.5,swsh12.5gg");
 eq("family: a set with no sub-set", family("Prismatic Evolutions").join(","), "sv08.5");
 eq("family: an unknown set", family("WCD 2024").join(","), "");
+// Cardmarket prefixes the 2003-2007 era with "EX "; tcgdex names the set.
+// Around a thousand cards turn on this one prefix.
+eq("family: EX-era prefix", family("EX Unseen Forces").join(","), "ex10");
+eq("family: EX Dragon is Dragon, not Dragon Frontiers", family("EX Dragon").join(","), "ex2");
+// Only on an exact match of what's left — it must not reach for a lookalike.
+eq("family: EX + nonsense stays unmatched", family("EX Nothing Like This").join(","), "");
 // Sets whose names extend another set's name but are separate products. Each
 // of these was merged by the first version of the rule, and merging any of
 // them puts one card's art on another card's number.
@@ -104,6 +111,32 @@ for (const [ours, theirs] of SAME_CARD) {
 // card for its counterpart. Nidoran♂ and Nidoran♀ are one symbol apart, are
 // different cards with different numbers, and are exactly the pair a loose
 // rule puts the wrong picture on.
+// Suffixes are the whole difference between four cards at four prices. This
+// used to strip them, which quietly folded Charizard, Charizard ex, Charizard
+// V and Charizard LV.X into one.
+const SUFFIX_CARDS = [
+  ["Charizard", "Charizard V"],
+  ["Charizard", "Charizard ex"],
+  ["Charizard V", "Charizard VMAX"],
+  ["Charizard LV.X", "Charizard"],
+  ["Zacian V", "Zacian"]
+];
+for (const [ours, theirs] of SUFFIX_CARDS) {
+  if (nameAgrees(ours, theirs)) fail(`nameAgrees: ${ours} must NOT match ${theirs} — a suffix is a different card`);
+}
+
+// Written differently by us and tcgdex, same card. Each of these was a whole
+// era's worth of refusals on the 32,365-row run.
+const REWRITTEN = [
+  ["Dialga Lv.68", "Dialga"],                    // printed level, all of DP
+  ["Torterra Lv.45", "Torterra"],
+  ["Espeon Gold Star", "Espeon \u2606"],           // spelled vs the symbol
+  ["Rainbow Energy Delta", "\u03b4 Rainbow Energy"] // and at the other end
+];
+for (const [ours, theirs] of REWRITTEN) {
+  if (!nameAgrees(ours, theirs)) fail(`nameAgrees: ${ours} should match ${theirs}`);
+}
+
 const DIFFERENT_CARDS = [
   ["Nidoran [M]", "Nidoran [F]"],
   ["Nidoran\u2642", "Nidoran\u2640"],
@@ -167,8 +200,35 @@ eq("parent wins a collision", matchCard({ name: "Zacian V", number: "72" }, idx)
 // rows and the probe reads audit fixtures.
 eq("collector_number works too", matchCard({ name: "Bulbasaur", collector_number: "1" }, idx).outcome, "matched");
 
+// Promo sets number their cards SWSH001 where our catalogue holds the bare
+// number — about 1,200 cards across the six Black Star Promos sets.
+const PROMOS = [{ id: "swshp", name: "SWSH Black Star Promos" }];
+const promoIdx = indexByNumber(setFamily("SWSH Black Star Promos", PROMOS), new Map([["swshp", [
+  { id: "swshp-SWSH001", localId: "SWSH001", name: "Zacian V", image: "https://a/1" },
+  { id: "swshp-SWSH002", localId: "SWSH002", name: "Zamazenta V", image: "https://a/2" }
+]]]));
+for (const num of ["1", "001", "SWSH001", "SWSH1"]) {
+  eq(`promo number ${num}`, matchCard({ name: "Zacian V", number: num }, promoIdx).outcome, "matched");
+}
+
+// The digits-only fallback must stand down where it would be guessing. Here
+// both halves of the family carry a 500 under different prefixes and neither
+// is a bare "500", so the digits alone cannot say which — and picking either
+// would put one card's picture on the other.
+const AMBIG_SETS = [{ id: "p", name: "Ambiguous" }, { id: "p2", name: "Ambiguous Shiny Vault" }];
+const ambiguous = indexByNumber(setFamily("Ambiguous", AMBIG_SETS), new Map([
+  ["p", [{ id: "p-A500", localId: "A500", name: "Alpha", image: "https://a/a" }]],
+  ["p2", [{ id: "p2-SV500", localId: "SV500", name: "Beta", image: "https://a/b" }]]
+]));
+eq("ambiguous digits are refused", matchCard({ name: "Alpha", number: "500" }, ambiguous).outcome, "no-number");
+// Unambiguous digits still resolve.
+eq("unambiguous digits resolve", matchCard({ name: "Zacian V", number: "1" }, promoIdx).outcome, "matched");
+// And a number that already carries a prefix never falls back to digits: if
+// SV7 isn't there, the answer is no, not "here is number 7".
+eq("a prefixed number doesn't fall back", matchCard({ name: "Zacian V", number: "TG1" }, promoIdx).outcome, "no-number");
+
 if (failures) {
   console.error(`\nimages: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log(`images: ${NUMBERS.length} number, ${SAME_CARD.length + DIFFERENT_CARDS.length} name, plus set-family and match cases hold.`);
+console.log(`images: ${NUMBERS.length} number, ${SAME_CARD.length + DIFFERENT_CARDS.length + SUFFIX_CARDS.length + REWRITTEN.length} name, plus set-family and match cases hold.`);
