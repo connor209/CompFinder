@@ -80,6 +80,42 @@ for (const [parent, parentId, why] of NOT_SUBSETS) {
 }
 
 // --- names ------------------------------------------------------------------
+// The catalogue and tcgdex write the same card differently in three ways that
+// between them refused 1,477 real pairings on the first full run.
+const SAME_CARD = [
+  // Spacing of the Mega prefix.
+  ["MAggron EX", "M Aggron EX"],
+  ["MGardevoir EX", "M Gardevoir EX"],
+  // Symbols spelled out on our side.
+  ["Nidoran [M]", "Nidoran\u2642"],
+  ["Nidoran [F]", "Nidoran\u2640"],
+  ["Giovanni's Nidoran [F]", "Giovanni's Nidoran\u2640"],
+  // The δ already says Delta Species; Cardmarket writes both.
+  ["Pikachu \u03b4 Delta Species", "Pikachu \u03b4"],
+  ["Deoxys \u03b4 Delta Species", "Deoxys \u03b4"],
+  // One letter apart, and the same card since 1999.
+  ["Imposter Professor Oak", "Impostor Professor Oak"]
+];
+for (const [ours, theirs] of SAME_CARD) {
+  if (!nameAgrees(ours, theirs)) fail(`nameAgrees: ${ours} should match ${theirs}`);
+}
+
+// The tolerance that makes those work must not reach far enough to swap a
+// card for its counterpart. Nidoran♂ and Nidoran♀ are one symbol apart, are
+// different cards with different numbers, and are exactly the pair a loose
+// rule puts the wrong picture on.
+const DIFFERENT_CARDS = [
+  ["Nidoran [M]", "Nidoran [F]"],
+  ["Nidoran\u2642", "Nidoran\u2640"],
+  ["Nidoran [M]", "Nidoran\u2640"],
+  ["Nidoking", "Nidoqueen"],
+  ["Zacian V", "Zamazenta V"],
+  ["Mew", "Mewtwo"]
+];
+for (const [ours, theirs] of DIFFERENT_CARDS) {
+  if (nameAgrees(ours, theirs)) fail(`nameAgrees: ${ours} must NOT match ${theirs}`);
+}
+
 // Their name often carries a disambiguator ours doesn't. At one number in one
 // set there is only one card, so a parenthetical can't be what tells two
 // apart — refusing these would throw away art for cards matched correctly.
@@ -135,4 +171,4 @@ if (failures) {
   console.error(`\nimages: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log(`images: ${NUMBERS.length} number + set-family, name-guard and match cases hold.`);
+console.log(`images: ${NUMBERS.length} number, ${SAME_CARD.length + DIFFERENT_CARDS.length} name, plus set-family and match cases hold.`);

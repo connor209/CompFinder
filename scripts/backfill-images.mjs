@@ -108,6 +108,11 @@ console.log(`tcgdex knows ${theirSets.length} English sets; we have ${bySet.size
 // --- match, and write as we go ----------------------------------------------
 const tally = { matched: 0, "no-art": 0, "no-number": 0, "name-clash": 0, "no-set": 0, unknown: 0 };
 const clashes = [];
+// Which sets the misses are concentrated in. A total on its own can't tell a
+// genuine gap in their index from our set being spelled differently, and the
+// difference decides whether there is anything to fix.
+const missingSets = new Map();
+const numberMisses = new Map();
 let written = 0;
 
 async function flush(updates) {
@@ -127,6 +132,7 @@ for (const [setName, cards] of bySet) {
   const family = setFamily(setName, theirSets);
   if (!family.length) {
     tally["no-set"] += cards.length;
+    missingSets.set(setName, cards.length);
     await flush(cards.map((c) => ({ cardmarket_id: c.cardmarket_id, name: c.name, image_checked_at: now() })));
     console.log(`    —/${String(cards.length).padEnd(4)} ${setName}   (tcgdex has no such set)`);
     continue;
@@ -155,6 +161,7 @@ for (const [setName, cards] of bySet) {
     tally[m.outcome] = (tally[m.outcome] || 0) + 1;
     if (m.outcome === "matched") ok++;
     if (m.outcome === "name-clash") clashes.push({ ...c, theirName: m.theirName });
+    if (m.outcome === "no-number") numberMisses.set(setName, (numberMisses.get(setName) || 0) + 1);
     updates.push({
       cardmarket_id: c.cardmarket_id,
       name: c.name,
@@ -181,6 +188,23 @@ console.log(`  names disagreed, refused  ${tally["name-clash"]}`);
 if (tally.unknown) console.log(`  left for the next run     ${tally.unknown}  (their API didn't answer)`);
 console.log(`\ntcgdex calls ${calls}${failed ? `, gave up on ${failed}` : ""}`);
 console.log(DRY ? "\nDRY RUN — nothing was written." : `\nwrote ${written} rows.`);
+
+const top = (map, n = 25) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
+
+if (missingSets.size) {
+  console.log(`\nSets tcgdex has no counterpart for (${missingSets.size} sets, ${tally["no-set"]} cards).`);
+  console.log(`Some are genuinely not indexed — World Championship decks, old promos — but a`);
+  console.log(`set here with a familiar name is us and them spelling it differently, which is`);
+  console.log(`fixable. Biggest first:`);
+  for (const [name, n] of top(missingSets)) console.log(`  ${String(n).padStart(5)}  ${name}`);
+  if (missingSets.size > 25) console.log(`  … and ${missingSets.size - 25} more`);
+}
+
+if (numberMisses.size) {
+  console.log(`\nSets matched, but numbers inside them didn't (${tally["no-number"]} cards):`);
+  for (const [name, n] of top(numberMisses, 15)) console.log(`  ${String(n).padStart(5)}  ${name}`);
+  if (numberMisses.size > 15) console.log(`  … and ${numberMisses.size - 15} more`);
+}
 
 if (clashes.length) {
   console.log(`\nRefused because the names disagree (${clashes.length}) — worth an eye, since each is`);

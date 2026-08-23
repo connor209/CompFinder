@@ -81,12 +81,60 @@ export function setFamily(ourSetName, theirSets) {
 const PARENTHETICAL = /\s*\([^)]*\)\s*$/;
 const GRADE_WORDS = /\b(ex|gx|v|vmax|vstar|lv x)\b/g;
 
+/**
+ * The same card, written two ways.
+ *
+ * The first version of this compared names almost literally and refused 1,477
+ * pairings across the catalogue, every sampled one of which was the same card:
+ *
+ *   MAggron EX          vs  M Aggron EX          spacing of the Mega prefix
+ *   Nidoran [M]         vs  Nidoran♂             symbols spelled out
+ *   Pikachu δ Delta Species vs Pikachu δ         the suffix written twice
+ *
+ * Spaces carry no information once both sides are down to letters and digits,
+ * so they come out entirely — which folds the Mega case away — and the gender
+ * symbols are mapped before the punctuation is stripped, or ♂ and ♀ both
+ * vanish and every Nidoran becomes the same card.
+ */
 export function nameKey(n) {
-  return norm(String(n || "").replace(PARENTHETICAL, "")).replace(GRADE_WORDS, "").replace(/\s+/g, " ").trim();
+  let t = String(n || "").toLowerCase().replace(PARENTHETICAL, "");
+  // Before norm() removes them: ♂ and ♀ are the whole difference between two
+  // real, differently-numbered cards, so they must survive as letters. Spelled
+  // out rather than kept as "m" and "f", because the one-edit tolerance below
+  // would otherwise treat Nidoran♂ and Nidoran♀ as the same card — which is
+  // precisely the confusion that would put one's picture on the other.
+  t = t.replace(/♂/g, " male ").replace(/♀/g, " female ");
+  t = t.replace(/\[\s*m\s*\]/g, " male ").replace(/\[\s*f\s*\]/g, " female ");
+  // The δ says "Delta Species" already; Cardmarket writes both.
+  t = t.replace(/\bdelta species\b/g, " ");
+  return norm(t).replace(GRADE_WORDS, "").replace(/\s+/g, "");
 }
 
+/** Levenshtein, bounded — we only ever care whether it exceeds 1. */
+function withinOneEdit(a, b) {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  let i = 0;
+  while (i < short.length && short[i] === long[i]) i++;
+  let j = 0;
+  while (j < short.length - i && short[short.length - 1 - j] === long[long.length - 1 - j]) j++;
+  // What's left unmatched in the middle: one character on each side at most.
+  return long.length - i - j <= 1;
+}
+
+/**
+ * A guard, not a key. Set and number already identify the card, so what this
+ * has to catch is a whole SET matched to the wrong set — where the name isn't
+ * a character out, it's a different Pokémon entirely. One edit of tolerance
+ * catches "Imposter Professor Oak" against "Impostor Professor Oak" without
+ * letting Charizard through as Blastoise.
+ */
 export function nameAgrees(ours, theirs) {
-  return nameKey(ours) === nameKey(theirs) && nameKey(ours) !== "";
+  const a = nameKey(ours);
+  const b = nameKey(theirs);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.length >= 5 && b.length >= 5 && withinOneEdit(a, b);
 }
 
 /**
