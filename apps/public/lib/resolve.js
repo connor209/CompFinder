@@ -298,11 +298,17 @@ const NAME_TOKENS = 12;
 
 /**
  * Ceiling for a name matched only by trigram similarity — a row the database's
- * fuzzy fallback returned because nothing matched exactly. Deliberately below
- * MIN_CONFIDENT_NAME: a guess at what someone meant is a suggestion to be
- * shown, never a card to be priced silently.
+ * fuzzy fallback returned because nothing matched exactly. One BELOW
+ * MIN_CONFIDENT_NAME, so a guess at what someone meant is always a suggestion
+ * to be shown and never a card to be priced silently.
+ *
+ * It sits just under the threshold rather than well under it because the gap
+ * has to leave room to rank. At 30, similarity was compressed so hard that a
+ * PERFECT match scored 30 while a partial one scored 18 — and the partial
+ * card's chase-rarity bonus then overtook it: "Charizard LV.X" ranked fourth,
+ * behind three plain Charizards it shares only a word with.
  */
-const NAME_FUZZY_MAX = 30;
+const NAME_FUZZY_MAX = NAME_STARTS - 1;
 
 function nameMatchScore(rowName, wantName) {
   if (rowName === wantName) return NAME_EXACT;

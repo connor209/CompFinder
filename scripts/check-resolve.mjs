@@ -201,6 +201,18 @@ const UMBREONS = [
   if (r.confident) fail("a fuzzy match must never be confident, even alone");
   if (!r.fuzzy) fail("rankCards should report that the answer came from the fuzzy path");
 
+  // Similarity has to leave room to RANK, not just to stay below the
+  // confidence floor. Compressed into 30 points, a perfect match scored 30 and
+  // a partial one 18 — and the partial card's chase-rarity bonus overtook it,
+  // putting "Charizard LV.X" fourth behind three plain Charizards.
+  const fuzzyPair = [
+    { ...row(1, "Charizard", "146", "Skyridge", "SK", "Rare Holo"), _similarity: 0.62 },
+    { ...row(2, "Charizard LV.X", "143", "Supreme Victors", "SV", "Ultra Rare"), _similarity: 1 }
+  ];
+  const ordered = rankCards(fuzzyPair, parseQuery("Charizard LV.X"));
+  if (ordered.candidates[0].row.cardmarket_id !== 2) fail("the closer fuzzy match should rank first");
+  if (ordered.confident) fail("a fuzzy result must not be confident however it ranks");
+
   // Even a perfect-looking similarity stays below the confidence floor.
   const r2 = rankCards([{ ...fuzzyRow, _similarity: 1 }], parseQuery("Umbeon ex 161"));
   if (r2.confident) fail("similarity 1.0 must still not be confident");

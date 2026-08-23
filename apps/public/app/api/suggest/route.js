@@ -29,7 +29,13 @@ export async function GET(request) {
   let query = supabase
     .from("card_catalog")
     .select("cardmarket_id,name,collector_number,rarity,expansion,expansion_code,game")
-    .limit(8);
+    // Fetch a POOL and rank it, rather than ranking an arbitrary eight. With
+    // limit(8) the database handed back eight rows in physical order and
+    // scoring then discarded most of them: "charizard" dropped from eight
+    // suggestions to two, both of them Radiant Charizard, with no Base Set,
+    // no ex and no VMAX anywhere. Ranking only helps if it has something to
+    // rank.
+    .limit(60);
 
   for (const w of words) {
     // A number in the query is far more likely to be a collector number than
