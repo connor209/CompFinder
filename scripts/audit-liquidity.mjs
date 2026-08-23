@@ -31,6 +31,7 @@ import { createPacer } from "./lib/pace.mjs";
 import { auditHeaders } from "./lib/audit-headers.mjs";
 import { priceCard } from "./lib/price-card.mjs";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
+import { assessLiquidity } from "../apps/public/lib/liquidity.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -130,27 +131,13 @@ for (const card of CARDS) {
   bands.rawSpan = byRawSpan.band;
   rates.rawSpan = byRawSpan.recentPerWeek;
 
-  // A fifth, and the one that survives both objections.
-  //
-  // The span BETWEEN the oldest and newest raw comp is the wrong window for
-  // the same reason the survivors' span was: it ends whenever the newest
-  // listing ended, so a card that sold 13 times in four days and nothing since
-  // reads as illiquid, because the "recent half" of a four-day window is empty.
-  //
-  // The window that is actually justified: page one reaches back to T, so for
-  // the period [T, now] every matching listing for this card is in the data.
-  // Sales = the filtered comps, window = now - T. It ends at now by
-  // construction, so it stays honest about a card that has stopped selling,
-  // and the recency split has nothing left to add — the whole window is
-  // recent, which is why core already collapses the split on capped sets.
-  const oldestRaw = rawTimes.length ? rawTimes[rawTimes.length - 1] : null;
-  const visibleDays = capped && oldestRaw ? Math.max((NOW - oldestRaw) / 86400000, 0.5) : null;
-  const visiblePerWeek = visibleDays ? Math.round((used.length / visibleDays) * 7 * 100) / 100 : null;
-  const bandOf = (perWeek) => perWeek >= 3 ? "very-liquid" : perWeek >= 1 ? "liquid" : perWeek >= 0.25 ? "slow" : "illiquid";
-  bands.visible = visibleDays
-    ? (used.length ? bandOf(visiblePerWeek) : "unknown")
-    : bands.trustPage;
-  rates.visible = visibleDays ? visiblePerWeek : rates.trustPage;
+  // A fifth: what the page now ships. Scored through the shared helper rather
+  // than re-derived here — a harness with its own copy of the model is how the
+  // count guess survived unnoticed in the first place.
+  const shipped = assessLiquidity({ used, response: res, comps, windowDays: 90, now: NOW });
+  bands.visible = shipped.band;
+  rates.visible = shipped.recentPerWeek;
+  const visibleDays = shipped.capped ? shipped.effectiveDays : null;
 
   rows.push({
     q: card.q,
@@ -172,6 +159,9 @@ for (const card of CARDS) {
     })(),
     concentratedShown: liq(POLICY.trustPage).concentrated,
     concentratedRawSpan: byRawSpan.concentrated,
+    concentratedShipped: shipped.concentrated,
+    momentumShipped: shipped.momentum,
+    reasonShipped: shipped.reasons[0] || null,
     // The count guess, against the API's own answer.
     missedCap: known && res.hasNextPage === true && !POLICY.count,
     falseCap: known && res.hasNextPage === false && POLICY.count
@@ -243,7 +233,7 @@ for (const r of movedByVisible) {
     `   today ${r.bands.count} (${r.rates.count}/wk) → ${r.bands.visible} (${r.rates.visible}/wk)`);
 }
 
-const regains = cappedRows.filter((r) => !r.concentratedShown && r.concentratedRawSpan);
+const regains = cappedRows.filter((r) => !r.concentratedShown && r.concentratedShipped);
 console.log(`bunching warnings the capped flag was suppressing: ${regains.length}`);
 
 const withRaw = rows.filter((r) => r.droppedByCurrency != null);

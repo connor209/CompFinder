@@ -35,6 +35,24 @@ export function saturatedFrom(response, comps = []) {
 }
 
 /**
+ * How far back the first page of results reaches, in days ending now.
+ *
+ * Measured on the RAW comps — everything the search returned — because that is
+ * what the page cap applied to. The filtered comps are this card's sales
+ * *within* that reach, and dividing them by their own span is what read a
+ * Xerneas selling once every three weeks as "Sells fast".
+ */
+function visibleDaysFrom(comps, now = Date.now()) {
+  let oldest = null;
+  for (const c of comps || []) {
+    const at = c && c._source && c._source.endedAt ? new Date(c._source.endedAt).getTime() : NaN;
+    if (Number.isNaN(at)) continue;
+    if (oldest === null || at < oldest) oldest = at;
+  }
+  return oldest === null ? null : Math.max((now - oldest) / 86400000, 0.5);
+}
+
+/**
  * The page's liquidity read, in one place.
  *
  * Same reasoning as priceCard() in lib/price.js: a harness that computes this
@@ -50,13 +68,18 @@ export function saturatedFrom(response, comps = []) {
  * @param {number} [input.windowDays]
  */
 export function assessLiquidity({ used = [], response = null, comps = [], activeCount = null, windowDays = 90, now }) {
+  const raw = comps.length ? comps : used;
+  const saturated = saturatedFrom(response, raw);
   return CompFinderLiquidity.assess({
     soldComps: used,
     activeCount,
     windowDays,
-    saturated: saturatedFrom(response, comps.length ? comps : used),
+    saturated,
+    // Only meaningful on a capped set, and only from the raw comps.
+    visibleDays: saturated ? visibleDaysFrom(raw, now || Date.now()) : null,
     ...(now ? { now } : {})
   });
 }
 
-export default { assessLiquidity, saturatedFrom };
+export default { assessLiquidity, saturatedFrom, visibleDaysFrom };
+export { visibleDaysFrom };

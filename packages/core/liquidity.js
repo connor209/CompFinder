@@ -37,6 +37,10 @@ const CompFinderLiquidity = (() => {
 
   const DAY_MS = 24 * 60 * 60 * 1000;
 
+  // Shortest window worth cutting in half. Under a fortnight, "the recent
+  // half" is a handful of days and the comparison is noise.
+  const MIN_SPLIT_DAYS = 14;
+
   function median(nums) {
     if (!nums.length) return null;
     const s = [...nums].sort((a, b) => a - b);
@@ -67,9 +71,12 @@ const CompFinderLiquidity = (() => {
    * @param {Array}    input.soldComps   comps the price was built from (post-filter)
    * @param {number}   [input.activeCount] live listings for the same card, if known
    * @param {number}   [input.windowDays]  how far back the sold search reached
+   * @param {number}   [input.visibleDays] on a capped set, how far back page one
+   *                                       reaches — measured on the RAW result
+   *                                       set, before filtering. See below.
    * @param {number}   [input.now]         injectable clock, for tests
    */
-  function assess({ soldComps = [], activeCount = null, windowDays = 90, saturated = false, now = Date.now() } = {}) {
+  function assess({ soldComps = [], activeCount = null, windowDays = 90, saturated = false, visibleDays = null, now = Date.now() } = {}) {
     const times = saleTimes(soldComps);
     const sales = times.length;
 
@@ -83,9 +90,26 @@ const CompFinderLiquidity = (() => {
     // When the caller says the set was capped, the period becomes the span the
     // returned sales actually cover. That turns the cap from a distortion into
     // a density measurement — the tighter the span, the faster the card moves.
+    //
+    // WHICH SPAN, THOUGH. The cap applies to the SEARCH, not to this card: a
+    // page of forty listings might contain three sales of the card asked for.
+    // Reading the rate off the span between those three says the card sold
+    // three times in three days when what happened is that three of the last
+    // forty listings for that query were it. Measured over 40 cards on
+    // 2026-08-23, that overstated a Xerneas at 7 sales a week where the honest
+    // figure is 0.36, and it overstates by more the harder the filtering works.
+    //
+    // What page one actually supports: it reaches back to some moment T, so
+    // between T and now every matching listing is in the data, and the sales
+    // that survived filtering are all of this card's sales in that period. So
+    // the window is `visibleDays` — measured on the raw result set by the
+    // caller, who is the only one holding it — and it ends at now, which keeps
+    // it honest about a card that has stopped selling. Callers that don't pass
+    // it get the older behaviour rather than a silent change of meaning.
     const observedSpanDays = sales >= 2 ? Math.max((times[0] - times[times.length - 1]) / DAY_MS, 0.5) : null;
-    const effectiveDays = saturated && observedSpanDays ? observedSpanDays : windowDays;
-    const capped = !!(saturated && observedSpanDays && observedSpanDays < windowDays);
+    const visible = saturated && visibleDays > 0 ? Math.max(visibleDays, 0.5) : null;
+    const effectiveDays = visible || (saturated && observedSpanDays ? observedSpanDays : windowDays);
+    const capped = !!(saturated && effectiveDays < windowDays);
 
     if (sales === 0) {
       return {
@@ -117,9 +141,17 @@ const CompFinderLiquidity = (() => {
     const halfWindow = effectiveDays / 2;
     const recentCutoff = now - halfWindow * DAY_MS;
     const recentSales = times.filter((t) => t >= recentCutoff).length;
-    // A capped set is entirely recent by construction, so splitting it in half
-    // would just halve a number that already describes current demand.
-    const recentPerWeek = capped ? salesPerWeek : round2((recentSales / halfWindow) * 7);
+    // The split needs a window that ENDS AT NOW, or "the recent half" is the
+    // recent half of a period that finished days ago. A visible window does end
+    // at now, so it splits like any other — and that is the whole point, since
+    // it is what separates a card selling steadily from one that sold twenty
+    // times last month and nothing since. A window derived from the comps'
+    // own span does not, so it keeps the old behaviour of not splitting.
+    //
+    // Below a fortnight the halves stop meaning anything: three days of sales
+    // against three days of nothing is noise, not a trend.
+    const splittable = !capped || (visible && effectiveDays >= MIN_SPLIT_DAYS);
+    const recentPerWeek = splittable ? round2((recentSales / halfWindow) * 7) : salesPerWeek;
 
     // Gaps between consecutive sales. More honest than a raw count for thin
     // cards: four sales spread evenly across 90 days is a working market,
@@ -130,10 +162,12 @@ const CompFinderLiquidity = (() => {
 
     // Distinct selling days vs sales. Well under 1 means bunching.
     const distinctDays = new Set(times.map((t) => Math.floor(t / DAY_MS))).size;
-    // Not meaningful on a capped set: seeing only the most recent page
-    // guarantees the sales look bunched, whether or not one seller is behind
-    // them. Flagging it there would warn on every fast-moving card.
-    const concentrated = !capped && sales >= 4 && distinctDays / sales < 0.5;
+    // Bunching is only meaningless when the window is the sales' own span —
+    // then they look bunched by construction, whoever sold them. Across a
+    // window that ends at now, four sales on one afternoon and nothing either
+    // side is exactly the clearout this flag exists to name.
+    const bunchingReadable = !capped || (visible && effectiveDays >= MIN_SPLIT_DAYS);
+    const concentrated = bunchingReadable && sales >= 4 && distinctDays / sales < 0.5;
 
     // Supply pressure. Sell-through is the share of "card exists on eBay"
     // events that ended in a sale; days-of-supply turns the same two numbers
@@ -160,8 +194,8 @@ const CompFinderLiquidity = (() => {
     // Is it warming or cooling? Compare the recent half of the window with the
     // older half. Needs enough sales for the split to mean anything.
     let momentum = null;
-    if (sales >= 6 && !capped) {
-      const midpoint = now - (windowDays / 2) * DAY_MS;
+    if (sales >= 6 && splittable) {
+      const midpoint = now - (effectiveDays / 2) * DAY_MS;
       const recent = times.filter((t) => t >= midpoint).length;
       const older = sales - recent;
       momentum = older === 0 ? "heating" : recent / older >= 1.5 ? "heating" : recent / older <= 0.5 ? "cooling" : "steady";
@@ -184,15 +218,32 @@ const CompFinderLiquidity = (() => {
       activeCount,
       windowDays,
       capped,
+      // The window the rate was actually computed over — 90 days normally, and
+      // how far back page one reached when the set was capped.
+      effectiveDays: round1(effectiveDays),
       observedSpanDays: observedSpanDays != null ? round1(observedSpanDays) : null,
-      reasons: explain({ salesPerWeek, recentPerWeek, sellThrough, daysOfSupply, medianGapDays, spread, momentum, concentrated, sales, halfWindow, recentSales, capped, observedSpanDays })
+      reasons: explain({ salesPerWeek, recentPerWeek, sellThrough, daysOfSupply, medianGapDays, spread, momentum, concentrated, sales, halfWindow, recentSales, capped, observedSpanDays, visible, effectiveDays, splittable })
     };
   }
 
   /** Plain sentences, so the number never has to be interpreted by the reader. */
-  function explain({ salesPerWeek, recentPerWeek, sellThrough, daysOfSupply, medianGapDays, spread, momentum, concentrated, sales, halfWindow, recentSales, capped, observedSpanDays }) {
+  function explain({ salesPerWeek, recentPerWeek, sellThrough, daysOfSupply, medianGapDays, spread, momentum, concentrated, sales, halfWindow, recentSales, capped, observedSpanDays, visible, effectiveDays, splittable }) {
     const out = [];
-    if (capped) {
+    if (visible) {
+      // The honest sentence for a capped set. Not "at least N sales" — within
+      // the window page one reaches, N is exactly how many there were. What's
+      // missing is everything OLDER, which is a different caveat and the one
+      // worth printing.
+      const days = Math.round(effectiveDays);
+      out.push(
+        `${sales} sale${sales === 1 ? "" : "s"} in the ${days === 1 ? "last day" : `last ${days} days`}` +
+        ` — about ${salesPerWeek >= 1 ? `${round1(salesPerWeek)} a week` : `one every ${Math.round(7 / Math.max(salesPerWeek, 0.01))} days`}.`
+      );
+      out.push("That's as far back as one page of results reaches, so older sales aren't counted here.");
+      if (splittable && recentSales === 0) {
+        out.push(`None of them in the last ${Math.round(halfWindow)} days, though.`);
+      }
+    } else if (capped) {
       const perDay = observedSpanDays ? sales / observedSpanDays : null;
       out.push(
         `At least ${sales} sales in the last ${observedSpanDays < 1.5 ? "day" : Math.round(observedSpanDays) + " days"}` +

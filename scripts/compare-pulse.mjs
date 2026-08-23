@@ -84,14 +84,14 @@ async function main() {
       windowDays: 90
     });
 
-    rows.push({ ref, then, now, ratioThen, ratio, ww: now, fetched: comps.length, saturated: comps.length >= 39, liq, hasNextPage: sold.hasNextPage });
+    rows.push({ ref, then, now, ratioThen, ratio, ww: now, fetched: comps.length, saturated: liq.capped, liq, hasNextPage: sold.hasNextPage });
     console.log(
       `${(ref.name + " " + ref.number).padEnd(33)} ${gbp(ref.pulse).padStart(8)}  ` +
       `${gbp(then.pence).padStart(8)} ${String(then.used).padStart(2)}  ` +
       `${gbp(now.pence).padStart(8)} ${String(now.used).padStart(2)}  ` +
       `${(ratioThen ? ratioThen.toFixed(2) + "x" : "  —").padStart(9)}  ` +
       `${(ratio ? ratio.toFixed(2) + "x" : "  —").padStart(9)}` +
-      (comps.length >= 39 ? " CAP" : "")
+      (liq.capped ? " CAP" : "")
     );
   }
 

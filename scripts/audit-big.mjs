@@ -117,7 +117,7 @@ function analyse(card, res) {
     fetched: comps.length, confidence: rec?.confidence ?? null, liquidity: liq.label,
     gradedTiers: (rec?.graded || []).length, viaName, issues, reasons,
     variants: variantsPresent(comps), markets: marketsIn(guarded).length,
-    lo, hi, saturated: res.hasNextPage === true || comps.length >= 39
+    lo, hi, saturated: liq.capped
   };
 }
 

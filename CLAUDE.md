@@ -42,13 +42,15 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs five table tests, no framework, non-zero exit on failure:
+`npm run check` runs six table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
 - `scripts/check-resolve.mjs` — what the resolver parses and how it ranks.
 - `scripts/check-public-price.mjs` — a grep: no charm ladder on the public side.
 - `scripts/check-turnstile.mjs` — pass forgery, client binding, expiry, off-switch.
+- `scripts/check-liquidity.mjs` — how a capped result set is read, and a grep
+  against anyone guessing it from a comp count again.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -107,6 +109,35 @@ very different cards"), but a confident-looking number built on pooled
 printings is worse than no answer — hence the scoping above. Lifting it means
 giving those games set-anchored matching of their own, not just removing the
 filter.
+
+## Liquidity is read off one boolean — get it from the API
+
+The band on the page ("Sells fast", "Slow mover") hangs almost entirely on
+whether the result set was CAPPED. SoldComps returns one page of sales,
+newest first, so for a fast card the window isn't 90 days — it's however long
+those sales took.
+
+Two things were wrong about that until 2026-08-23, and both were invisible
+because the harness and the page each had their own copy of the logic:
+
+- **The page guessed the cap from the comp count** (`comps.length >= 39`),
+  because `price()` threw `hasNextPage` away. Measured over 40 cards, the guess
+  is wrong on 21: when SoldComps says there is more it has returned between 35
+  and 40 items, so 39 misses real caps, and nine sets of 39–55 items weren't
+  capped at all. Two other harnesses passed no flag and read every fast card
+  as slow. `assessLiquidity()` in `apps/public/lib/liquidity.js` is now the
+  only definition, used by the page and all four audits.
+- **The rate was measured over the span of the SURVIVING comps.** The cap
+  truncates the *search*, not the card: a Xerneas keeps 3 sales out of 40
+  listings, and those three sit 3 days apart inside a page reaching back 58
+  days. That read as "Sells fast, 7 a week" for a card selling once every
+  three weeks. The window page one actually supports is **[oldest listing on
+  the page, now]** — complete data for that card over that period — which is
+  what `visibleDays` passes to `assess()`. It moved 10 of 25 capped cards,
+  in both directions.
+
+`node scripts/audit-liquidity.mjs --n 40` scores all five policies side by
+side against live data, and re-running it inside 24 hours is free.
 
 **Cheap commons are thin for a different reason: the data isn't there.** Of 40
 comps for a Weedle, almost none are single-card sales — eBay's market for a 1p
