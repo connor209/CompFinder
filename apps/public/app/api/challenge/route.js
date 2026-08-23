@@ -74,7 +74,10 @@ export async function POST(request) {
     // Not readable from JavaScript: the client never needs to look inside it,
     // and a pass that scripts can read is a pass that a scraped page can lift.
     httpOnly: true,
-    secure: true,
+    // Secure everywhere but local development: a Secure cookie is silently
+    // dropped over plain http, so `npm run dev:public` with Turnstile keys set
+    // would challenge, succeed, store nothing, and challenge again.
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: PASS_TTL_SECONDS
