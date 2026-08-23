@@ -13,7 +13,6 @@
  */
 import { createPacer } from "./lib/pace.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import { buildCompTokens } from "../apps/public/lib/tokens.js";
 import { priceCard } from "./lib/price-card.mjs";
 
@@ -25,6 +24,7 @@ const LIMIT = Number(argOf("--limit", "999"));
 
 import { REFERENCE } from "./pulse-reference.mjs";
 import { auditHeaders } from "./lib/audit-headers.mjs";
+import { assessLiquidity } from "../apps/public/lib/liquidity.js";
 
 
 const pacer = createPacer({ onWait: (msg) => console.log(`      ⏳ ${msg}`) });
@@ -77,8 +77,11 @@ async function main() {
     const ratioThen = null;
     const ratio = now.pence && ref.pulse ? now.pence / ref.pulse : null;
 
-    const liq = CompFinderLiquidity.assess({
-      soldComps: now.rec ? now.rec.included || [] : [], activeCount: null, windowDays: 90
+    const liq = assessLiquidity({
+      used: now.rec ? now.rec.included || [] : [],
+      response: sold,
+      comps,
+      windowDays: 90
     });
 
     rows.push({ ref, then, now, ratioThen, ratio, ww: now, fetched: comps.length, saturated: comps.length >= 39, liq, hasNextPage: sold.hasNextPage });

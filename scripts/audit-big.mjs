@@ -13,12 +13,12 @@ import { dirname, join } from "node:path";
 const HERE = dirname(fileURLToPath(import.meta.url));
 import { createPacer } from "./lib/pace.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import { buildCompTokens, dropWrongSetTotal, dropWrongNumerator } from "../apps/public/lib/tokens.js";
 import { UK, splitByMarket, marketsIn } from "../apps/public/lib/markets.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
 import { variantsPresent } from "../apps/public/lib/variants.js";
 import { auditHeaders } from "./lib/audit-headers.mjs";
+import { assessLiquidity } from "../apps/public/lib/liquidity.js";
 
 const args = process.argv.slice(2);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -90,10 +90,7 @@ function analyse(card, res) {
   const lastSold = dated.length ? dated[0].totalPence : null;
   const price = rec?.rawPence ?? null;
 
-  const liq = CompFinderLiquidity.assess({
-    soldComps: used, activeCount: null, windowDays: 90,
-    saturated: res.hasNextPage === true || comps.length >= 39
-  });
+  const liq = assessLiquidity({ used, response: res, comps, windowDays: 90 });
 
   const issues = [];
   if (!comps.length) issues.push("no comps fetched");

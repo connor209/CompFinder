@@ -27,9 +27,9 @@
  */
 import { createPacer } from "./lib/pace.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import { buildCompTokens } from "../apps/public/lib/tokens.js";
 import { auditHeaders } from "./lib/audit-headers.mjs";
+import { assessLiquidity } from "../apps/public/lib/liquidity.js";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 const args = process.argv.slice(2);
@@ -137,7 +137,7 @@ function preFilterUk(comps) {
   return comps.filter((c) => !c.itemLocation);
 }
 
-function analyse(card, soldComps, activeComps) {
+function analyse(card, soldComps, activeComps, soldResponse = null) {
   // Exactly what the page does, so the audit scores the shipped behaviour.
   const tokens = buildCompTokens({ name: card.name || card.q, number: card.number }, card.q);
   const number = card.number || null;
@@ -157,8 +157,12 @@ function analyse(card, soldComps, activeComps) {
     .sort((a, b) => new Date(b._source.endedAt) - new Date(a._source.endedAt));
   const lastSold = byDate.length ? byDate[0].totalPence : null;
 
-  const liq = CompFinderLiquidity.assess({
-    soldComps: used,
+  // response is the /api/price body for the sold search; without it this
+  // defaulted `saturated` to false and read every fast card as slow.
+  const liq = assessLiquidity({
+    used,
+    response: soldResponse,
+    comps: soldComps,
     activeCount: activeRec ? (activeRec.included || []).length : null,
     windowDays: 90
   });
@@ -222,7 +226,7 @@ async function main() {
       results.push({ card, fatal: sold.error, issues: [`fetch failed: ${sold.error}`], used: 0 });
       continue;
     }
-    const r = analyse(card, sold.comps || [], active.ok ? active.comps || [] : []);
+    const r = analyse(card, sold.comps || [], active.ok ? active.comps || [] : [], sold);
     r.cachedSold = sold.cached;
     console.log(
       `${String(r.fetched).padStart(3)} fetched → ${String(r.used).padStart(3)} used  ` +

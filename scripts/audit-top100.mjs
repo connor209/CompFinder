@@ -20,10 +20,10 @@
 import { createPacer } from "./lib/pace.mjs";
 import { TOP_100 } from "./top100.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import { buildCompTokens } from "../apps/public/lib/tokens.js";
 import { writeFileSync } from "node:fs";
 import { auditHeaders } from "./lib/audit-headers.mjs";
+import { assessLiquidity } from "../apps/public/lib/liquidity.js";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
 const args = process.argv.slice(2);
@@ -76,10 +76,8 @@ function analyse(card, res) {
     .sort((a, b) => new Date(b._source.endedAt) - new Date(a._source.endedAt));
   const lastSold = byDate.length ? byDate[0].totalPence : null;
 
-  // Unknown hasNextPage (a cache entry predating the field) falls back to the
-  // count: a full page is the observable symptom of a capped result set.
-  const saturated = res.hasNextPage === true || comps.length >= 39;
-  const liq = CompFinderLiquidity.assess({ soldComps: used, activeCount: null, windowDays: 90, saturated });
+  const liq = assessLiquidity({ used, response: res, comps, windowDays: 90 });
+  const saturated = liq.capped;
 
   // Three outcomes worth telling apart, which the first run lumped together
   // as "no price": nothing usable at all, a card that only trades graded, and

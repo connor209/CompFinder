@@ -13,7 +13,7 @@ import { conditionBands } from "@/lib/condition";
 import { priceCard } from "@/lib/price";
 import { challengeAvailable, ensurePass } from "@/lib/turnstile-client";
 import { VARIANTS, variantQueryTerms, variantTokens, variantsPresent } from "@/lib/variants";
-import CompFinderLiquidity from "@compfinder/core/liquidity.js";
+import { assessLiquidity } from "@/lib/liquidity";
 import TrendChart from "./TrendChart";
 
 const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -229,16 +229,17 @@ export default function PriceSearch() {
     // Active listings fetch alongside but never block the price — they fill in
     // the "Buy one now" module once they land.
     price(query, false, windowDays)
-      .then((comps) => { if (id === runId.current) setActive({ loading: false, comps }); })
+      .then((res) => { if (id === runId.current) setActive({ loading: false, comps: res.comps || [] }); })
       .catch(() => { if (id === runId.current) setActive({ loading: false, comps: [] }); });
 
     try {
-      const comps = await price(query, true, windowDays);
+      const res = await price(query, true, windowDays);
       if (id !== runId.current) return;
+      const comps = res.comps || [];
       // Raw comps are kept as fetched; filtering and scoring happen in the
       // memo below so the controls can re-run them without a new request.
       const resolved = card || { name: query };
-      setData({ card: resolved, query, comps, variant: variantForRun });
+      setData({ card: resolved, query, comps, variant: variantForRun, response: res });
       // Recorded from the raw comps rather than the rendered price so the chip
       // still shows something useful if the visitor then changes market or
       // condition, which re-scores but doesn't re-search.
@@ -275,7 +276,10 @@ export default function PriceSearch() {
       }
       throw new Error(res.error || "Pricing request failed.");
     }
-    return res.comps || [];
+    // The whole response, not just the comps. hasNextPage is how we know the
+    // result set was capped, and liquidity is mostly that one boolean — this
+    // used to return `res.comps` and the flag never reached the page at all.
+    return res;
   }
 
   const view = useMemo(() => {
@@ -444,13 +448,15 @@ export default function PriceSearch() {
     const askRatio = marketPence && activeRec?.rawPence ? activeRec.rawPence / marketPence : null;
     const askingUnreliable = askRatio != null && (askRatio > 5 || askRatio < 0.2);
 
-    const liquidity = CompFinderLiquidity.assess({
-      soldComps: used,
+    const liquidity = assessLiquidity({
+      used,
+      // Carries hasNextPage: whether the result set was capped is most of what
+      // separates "Slow mover" from "Sells fast", and the page used to guess it
+      // from the comp count. See lib/liquidity.js for what that cost.
+      response: data.response,
+      comps,
       activeCount: activeRec ? (activeRec.included || []).length : null,
-      windowDays: soldWindow,
-      // Every result set in the 100-card audit hit the ~40 page cap, so the
-      // rate has to be read from the span the sales cover, not the window.
-      saturated: comps.length >= 39
+      windowDays: soldWindow
     });
 
     const askPence = ask ? Math.round(parseFloat(String(ask).replace(/[^0-9.]/g, "")) * 100) : null;
