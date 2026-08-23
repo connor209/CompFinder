@@ -115,6 +115,35 @@ const missingSets = new Map();
 const numberMisses = new Map();
 let written = 0;
 
+/**
+ * Stops the run rather than logging past it.
+ *
+ * The first version counted write failures and carried on, so a run whose
+ * every write was rejected still walked all 176 sets, still made 167 calls to
+ * tcgdex, still printed a coverage summary, and still exited 0 — "wrote 0
+ * rows" was the only sign, sitting under a green tick. A backfill that cannot
+ * write has nothing to say about coverage.
+ */
+function diagnose(error) {
+  const text = `${error.message || ""} ${error.details || ""} ${error.hint || ""}`.toLowerCase();
+  if (text.includes("row-level security")) {
+    return [
+      "The database refused the write under row-level security.",
+      "",
+      "That means the key being used is NOT the service_role key — anon and",
+      "authenticated can read card_catalog but never write it, which is exactly",
+      "what happened here: 32,365 rows read, none written.",
+      "",
+      "Supabase → Project Settings → API → Project API keys → service_role.",
+      "It is the one marked secret, not the one marked public."
+    ].join("\n");
+  }
+  if (text.includes("image_small") || text.includes("column")) {
+    return "The image columns aren't there. Run supabase/migrations/022_catalog_images.sql first.";
+  }
+  return null;
+}
+
 async function flush(updates) {
   if (!updates.length || DRY) return;
   // `name` rides along because upsert INSERTs first, and the table's name
@@ -122,7 +151,13 @@ async function flush(updates) {
   // moment ago, so the insert never actually fires — but without a name in
   // the payload the statement wouldn't be valid to attempt.
   const { error } = await supabase.from("card_catalog").upsert(updates, { onConflict: "cardmarket_id" });
-  if (error) { console.error("  write failed:", error.message); return; }
+  if (error) {
+    console.error(`\nWrite failed: ${error.message}`);
+    const why = diagnose(error);
+    if (why) console.error(`\n${why}`);
+    console.error(`\nStopping — ${written} rows written before this.`);
+    process.exit(1);
+  }
   written += updates.length;
 }
 
