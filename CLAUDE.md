@@ -167,11 +167,27 @@ holds the service-role key, so it never runs off a push. Needs the repository
 secrets `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and
 migration 022 applied first.
 
-Measured over the 400 English cards in the audit sets: **84% end up with art,
-90% of the chase set.** The gaps are World Championship Decks and a few EX-era
-and promo sets tcgdex doesn't index (13%), plus the Shining Fates Shiny Vault,
-which it lists without art (12 cards). Non-English rows are skipped — tcgdex
-has them, but under Japanese set names, which needs a name map we don't have.
+Backfilled 2026-08-23: **21,162 of 32,365 English rows have art (65%)**. That
+whole-catalogue figure is dominated by things nobody prices here — sealed
+products, World Championship decks, Play! Prize Packs and Japanese-named sets
+tcgdex doesn't index. On the cards people actually search it is **84%, and 90%
+of the chase set**. Non-English rows are skipped: tcgdex has them, but under
+Japanese set names, which needs a name map we don't have.
+
+Getting there took four rounds, and 52% of it was matching bugs rather than
+missing data:
+
+| fixed | worth |
+|---|---|
+| Cardmarket prefixes the 2003-07 era "EX Unseen Forces"; tcgdex doesn't | ~2,000 |
+| Promos are numbered `SWSH001` there, bare numbers here | ~1,100 |
+| `Dialga Lv.68`/`Dialga`, `Espeon Gold Star`/`Espeon ☆`, `Nidoran [M]`/`Nidoran♂` | ~1,300 |
+
+**Two hazards the tests caught before they shipped**, both in the name guard:
+it was folding Charizard, Charizard ex, Charizard V and Charizard LV.X into one
+card, and the first fix for that merged Nidoran♂ with Nidoran♀. A suffix is
+only ever accepted in one direction — ours carrying `LV.X` where tcgdex writes
+the base name is the same card; theirs carrying `V` where ours doesn't is not.
 
 **The match is set + collector number; the card NAME is a guard on the result,
 never part of the key.** A missing picture is a gap; a picture of the wrong
