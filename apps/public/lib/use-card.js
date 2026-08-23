@@ -144,10 +144,21 @@ export function derive(card, searchText, soldRes, liveRes) {
   const rec = priced.rec;
   const used = rec ? rec.included || [] : [];
 
+  // activeCount is what turns a rate into a wait: without it there is no
+  // days-of-supply and no sell-through, which is how the old page said "the
+  // listings up now would clear in about 12 days" and this one said nothing.
+  // Counted from the guarded, UK-filtered live set below rather than the raw
+  // response, so it's the same population the price used.
+  const liveGuarded = dropWrongNumerator(
+    dropWrongSetTotal(liveRes.comps || [], card.number), card.number
+  );
+  const liveUkCount = splitByMarket(liveGuarded, UK).chosen.length;
+
   const liquidity = assessLiquidity({
     used,
     response: soldRes,
     comps,
+    activeCount: (liveRes.comps || []).length ? liveUkCount : null,
     windowDays: SOLD_WINDOW_DAYS
   });
   const confidence = assessConfidence({
@@ -162,10 +173,7 @@ export function derive(card, searchText, soldRes, liveRes) {
   // £2.60 copies of a different card.
   const settings = settingsForCard(withQ);
   const tokens = buildCompTokens({ name: card.name, number: card.number }, searchText);
-  const guardedLive = dropWrongNumerator(
-    dropWrongSetTotal(liveRes.comps || [], card.number), card.number
-  );
-  const liveUk = splitByMarket(guardedLive, UK).chosen;
+  const liveUk = splitByMarket(liveGuarded, UK).chosen;
   const liveRec = liveUk.length
     ? CompFinderPricing.recommend(liveUk, settings, tokens, "active", card.number, card.set)
     : null;
