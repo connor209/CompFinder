@@ -97,7 +97,23 @@ const CASES = [
   ["Umbreon VMAX 215/203 Evolving Skies Secret Rare Set Holo", null],
   // "pristine" needs a digit after it, or an ordinary description of a raw
   // card would read as a slab.
-  ["Charizard VMAX 074/073 Champion's Path Secret Rare - pristine condition", null]
+  ["Charizard VMAX 074/073 Champion's Path Secret Rare - pristine condition", null],
+
+  // --- not a card: binder inserts and display furniture ---------------------
+  // Found as the CHEAPEST LIVE LISTING for a Charizard ex 223/197 whose real
+  // floor is £72.54, which on the redesigned page made it the headline "buy it
+  // today for" figure. The keyword list held "binder insert" and "display
+  // case"; neither substring appears in these titles.
+  ["Charizard ex 223/197 Obsidian Flames Extended Binder Art Inserts", "notACard"],
+  ["Pokémon Umbreon VMAX 215/203 Extended Art Binder Insert", "notACard"],
+  ["Magikarp Illustration Rare 203/193 Paldea Evolved Extended Art Binder Inserts", "notACard"],
+  ["Pokemon TCG Charizard EX Scarlet Violet Obsidian Flames 223/197 Display Stand", "notACard"],
+  // The false positive that kept bare "binder" out of the pattern: a real sale
+  // of a real card, described by its seller as worth putting in a binder.
+  ["Charizard EX 4/100 - Crystal Guardians 2006 Delta Species (HP - Binder Worthy)", null],
+  // And the reason bare "display" stayed out: this one is already caught twice
+  // over by the fan-art and gold-metal patterns, so it earns nothing.
+  ["Pokemon Charizard ex 223/197 Obsidian Flames Holo Gold Metal Fan Art Display Card", "notACard"]
 ];
 
 // Check (2), the shared-denominator test, needs the searched-for number to

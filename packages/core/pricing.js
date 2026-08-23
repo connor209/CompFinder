@@ -236,7 +236,25 @@ const CompFinderPricing = (() => {
   // language on genuine full-price sales (a £1,063 Umbreon ex "Great
   // Centering! Read Descript"); and "gold plated", "24k", "fake", "sticker"
   // and "poster", which matched nothing at all.
-  const NOT_A_CARD_PATTERN = /\bcustom[\s-]?art\b|\bhand[\s-]?made\b|\bfan[\s-]?(made|art)\b|\bd[\s.-]?i[\s.-]?y\b|\binspired\s+(art|by)\b|\b(gold|silver)[\s-]?metal\b|\bmetal\s+card\b/i;
+  // Added 2026-08-23, after "Charizard ex 223/197 Obsidian Flames Extended
+  // Binder Art Inserts" at £14.89 turned up as the cheapest live listing for a
+  // card whose real floor is £72.54 — and, on the redesigned public page, as
+  // the headline "buy it today for" figure.
+  //
+  // The keyword list already held "binder insert", which the literal
+  // substring test cannot see inside "Binder Art Inserts", and "display case",
+  // which cannot see "Display Stand". Both are shapes rather than phrases, so
+  // they belong here.
+  //
+  // Measured before widening, over 11,534 sold titles and 400 live listings:
+  // binder-with-insert 4 hits, all of them art inserts rather than cards;
+  // art-insert 2, same; display box/case/stand/frame/folder 1, a stand.
+  // Bare "binder" was REJECTED on the same evidence — it matches "Charizard EX
+  // 4/100 Crystal Guardians (HP - Binder Worthy)", a real sale of a real card.
+  // Bare "display" was rejected too: its only other hit is a "Gold Metal Fan
+  // Art Display Card" that two existing patterns already catch. Booster-box
+  // and ETB terms matched nothing at all and are not here.
+  const NOT_A_CARD_PATTERN = /\bcustom[\s-]?art\b|\bhand[\s-]?made\b|\bfan[\s-]?(made|art)\b|\bd[\s.-]?i[\s.-]?y\b|\binspired\s+(art|by)\b|\b(gold|silver)[\s-]?metal\b|\bmetal\s+card\b|\bbinder\b[^|]*\binserts?\b|\binserts?\b[^|]*\bbinder\b|\bart\s+inserts?\b|\bdisplay\s+(box|case|stand|frame|folder)\b/i;
 
   /**
    * Detects multi-card lot listings that name several different Pokémon

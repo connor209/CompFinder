@@ -59,12 +59,17 @@ export function assessConfidence({ rec, comps = [], windowDays = 90, market = "U
   if (outlier && n > 1) sentences[sentences.length - 1] += ` and ${outlier}`;
   if (n > 1) sentences[sentences.length - 1] += ".";
 
+  // Only claim agreement when the ENGINE agrees. It caps confidence at Low
+  // when eBay's own catalogue data says the comps are more than one product,
+  // and a page that answers that with "they agree closely, so £84.84 is a fair
+  // read" is contradicting itself in the same panel — which is exactly what
+  // the first cut of this did on a Charizard ex.
   const price = rec && rec.rawPence;
   if (price != null) {
     sentences.push(
-      spread >= 3 || n < 6
-        ? `Treat ${gbp(price)} as a ballpark, not a fixed price.`
-        : `They agree closely, so ${gbp(price)} is a fair read.`
+      tier === "High" && spread < 3
+        ? `They agree closely, so ${gbp(price)} is a fair read.`
+        : `Treat ${gbp(price)} as a ballpark, not a fixed price.`
     );
   }
 

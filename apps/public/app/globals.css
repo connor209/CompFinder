@@ -367,3 +367,32 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
 }
 @keyframes spin { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation:none; } }
+
+/* ---------------------------------------------------------------------------
+   Caveats — the things that must be said before the number is believed.
+   Amber rather than red: these qualify a price, they don't retract it.
+--------------------------------------------------------------------------- */
+.caveats { display:grid; gap:8px; margin-bottom:10px; }
+.caveat {
+  margin:0; padding:10px 12px; border-radius:var(--r-md);
+  font-size:12.5px; line-height:1.5;
+  background:var(--caution-bg); border:1px solid #3A2E14; color:var(--caution);
+}
+.caveat[data-tone="info"] {
+  background:var(--panel); border-color:var(--line); color:var(--ink-soft);
+}
+
+.variants { margin-bottom:10px; }
+.variants .pill { text-decoration:none; }
+.variants .pill[data-on="true"] { border-color:var(--accent); background:var(--selected); }
+
+.split { display:block; font-size:11.5px; color:var(--ink-faint); margin-top:4px; }
+.split b.up { color:var(--good); }
+.split b.down { color:var(--warn); }
+
+.bands { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px; }
+.bandlabel {
+  display:block; font:700 9.5px var(--font-sans); letter-spacing:.1em;
+  text-transform:uppercase; color:var(--ink-faint); margin-bottom:2px;
+}
+.bandn { display:block; font-size:11.5px; color:var(--ink-soft); margin-top:2px; }

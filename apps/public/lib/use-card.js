@@ -9,6 +9,10 @@ import { priceCard } from "./price.js";
 import { assessLiquidity } from "./liquidity.js";
 import { assessConfidence } from "./confidence.js";
 import { groupExclusions } from "./exclusions.js";
+import { conditionBands } from "./condition.js";
+import { variantsPresent } from "./variants.js";
+import { caveatsFor } from "./caveats.js";
+import { foreignCount } from "./settings.js";
 import { challengeAvailable, ensurePass } from "./turnstile-client.js";
 
 /**
@@ -156,6 +160,25 @@ export function derive(card, searchText, soldRes, liveRes) {
     }))
     .sort((a, b) => a.totalPence - b.totalPence);
 
+  // The rest of the market, beside the UK figure. Both are real answers to
+  // "what's it worth" and they routinely differ by a third — showing only one
+  // hides the fact that there IS a difference.
+  const { chosen: ukComps, rest: restComps } = splitByMarket(
+    dropWrongNumerator(dropWrongSetTotal(comps, card.number), card.number), UK
+  );
+  const ukRec = ukComps.length
+    ? CompFinderPricing.recommend(ukComps, settings, tokens, "sold", card.number, card.set)
+    : null;
+  const restRec = restComps.length
+    ? CompFinderPricing.recommend(restComps, settings, tokens, "sold", card.number, card.set)
+    : null;
+
+  // Two condition figures, but only where the comps can support them. On a
+  // vintage card the gap is the whole story — Meganium ex EX Unseen Forces is
+  // £167 Near Mint against £54 played — and on a modern card there is no gap
+  // at all, so nothing is shown. See lib/condition.js.
+  const bands = conditionBands(used, settings, tokens, card.number, card.set);
+
   const sales = used
     .map((c) => ({
       pence: c.totalPence ?? c.itemPricePence,
@@ -167,8 +190,17 @@ export function derive(card, searchText, soldRes, liveRes) {
     }))
     .sort((a, b) => b.t - a.t);
 
-  return {
+  const base = {
     marketPence: priced.pence,
+    ukPence: ukRec ? ukRec.rawPence : null,
+    marketUsed: ukRec ? (ukRec.included || []).length : 0,
+    restPence: restRec ? restRec.rawPence : null,
+    restUsed: restRec ? (restRec.included || []).length : 0,
+    bands,
+    gradedTiers: rec ? (rec.graded || []).length : 0,
+    foreign: foreignCount(comps),
+    variantsHere: variantsPresent(comps),
+    rec,
     used: used.length,
     usedComps: used,
     sales,
@@ -182,6 +214,10 @@ export function derive(card, searchText, soldRes, liveRes) {
     lo: priced.lo,
     hi: priced.hi
   };
+
+  // Caveats need the finished picture, so they come last rather than being
+  // threaded through every branch above.
+  return { ...base, caveats: caveatsFor({ rec, derived: base, card }) };
 }
 
 export default { useCard, derive, queryForCard, SOLD_WINDOW_DAYS };

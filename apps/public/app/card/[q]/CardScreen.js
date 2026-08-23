@@ -7,6 +7,7 @@ import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { assessAsk } from "@/lib/verdict";
 import { useCard, queryForCard, SOLD_WINDOW_DAYS } from "@/lib/use-card";
+import { VARIANTS, variantQueryTerms } from "@/lib/variants";
 import { CardArt, Crumb, gbp } from "../../ui";
 
 function median(nums) {
@@ -184,6 +185,38 @@ function Answer({ query, card, d }) {
       </div>
 
       <div className="screen tight">
+        {d.caveats.length > 0 && (
+          <div className="caveats">
+            {d.caveats.map((c, i) => (
+              <p className="caveat" data-tone={c.tone} key={i}>{c.text}</p>
+            ))}
+          </div>
+        )}
+
+        {/* variantsPresent returns a COUNT MAP, not a list — reading .length off
+            it silently hid this control entirely on the first attempt. */}
+        {Object.keys(d.variantsHere).length > 0 && (
+          <div className="variants">
+            <span className="eyebrow">Which printing</span>
+            <div className="pills" style={{ marginTop: 7 }}>
+              {VARIANTS.filter((v) => v.key === "any" || d.variantsHere[v.key]).map((v) => {
+                // A variant is just a different search, so it gets its own URL
+                // rather than being a control that mutates this one.
+                const target = [card.name, card.number, card.set, ...variantQueryTerms(v.key)]
+                  .filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+                const on = (card.q || "") === target;
+                return (
+                  <a key={v.key} className="pill" data-on={on}
+                     href={`/card/${encodeURIComponent(target)}`}>
+                    <b>{v.label}</b>
+                    {d.variantsHere[v.key] ? <span>{d.variantsHere[v.key]}</span> : null}
+                  </a>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="pair">
           <div className="panel">
             <span className="eyebrow">Sells for</span>
@@ -191,6 +224,12 @@ function Answer({ query, card, d }) {
             <span style={{ display: "block", fontSize: 11.5, color: "var(--ink-soft)", marginTop: 2 }}>
               {d.used} sale{d.used === 1 ? "" : "s"}{med != null ? <> · median {gbp(med)}</> : null}
             </span>
+            {d.restPence != null && d.marketUsed > 0 && (
+              <span className="split">
+                UK {gbp(d.ukPence)} · rest of the market {gbp(d.restPence)}
+                {premiumLine(d.ukPence, d.restPence)}
+              </span>
+            )}
           </div>
           <div className="panel">
             <span className="eyebrow">Shifts</span>
@@ -216,6 +255,29 @@ function Answer({ query, card, d }) {
             See the workings →
           </a>
         </div>
+
+        {d.bands && (
+          <div className="panel pad13" style={{ marginTop: 10 }}>
+            <span className="eyebrow">Condition is doing the work here</span>
+            <div className="bands">
+              <div>
+                <span className="bandlabel">Near mint</span>
+                <span className="figure sm">{gbp(d.bands.nmPence)}</span>
+                <span className="bandn">{d.bands.nmCount} sale{d.bands.nmCount === 1 ? "" : "s"}</span>
+              </div>
+              <div>
+                <span className="bandlabel">Played</span>
+                <span className="figure sm">{gbp(d.bands.playedPence)}</span>
+                <span className="bandn">{d.bands.playedCount} sale{d.bands.playedCount === 1 ? "" : "s"}</span>
+              </div>
+            </div>
+            <p className="micro" style={{ marginTop: 9 }}>
+              Only sellers who stated a condition. On this card that is a{" "}
+              {Math.round((d.bands.nmPence / d.bands.playedPence - 1) * 100)}% difference,
+              so which one you are holding matters more than the headline.
+            </p>
+          </div>
+        )}
 
         <div className="panel pad13" style={{ marginTop: 10 }}>
           <span className="eyebrow">Someone&rsquo;s offering it to you at</span>
@@ -265,6 +327,16 @@ function Answer({ query, card, d }) {
       </div>
     </main>
   );
+}
+
+/** UK against the rest, when the gap is big enough to be worth a sentence. */
+function premiumLine(ukPence, restPence) {
+  if (!ukPence || !restPence) return null;
+  const diff = ukPence / restPence - 1;
+  if (Math.abs(diff) < 0.05) return <> · in line</>;
+  return <> · UK is <b className={diff > 0 ? "up" : "down"}>
+    {Math.abs(Math.round(diff * 100))}% {diff > 0 ? "higher" : "lower"}
+  </b></>;
 }
 
 function liquidityColour(band) {
