@@ -95,7 +95,9 @@ export function setFamily(ourSetName, theirSets) {
  * the thing telling two cards apart, and treating it as significant just
  * refuses art for cards we have matched correctly.
  */
-const PARENTHETICAL = /\s*\([^)]*\)\s*$/;
+// Repeated, because a card can carry two: "Team Magma's Baltoy (Fighting)
+// (Peck)" is tcgdex's "Team Magma's Baltoy".
+const PARENTHETICAL = /(\s*\([^)]*\))+\s*$/;
 // No suffix stripping. It was here to fold "Umbreon ex" into "Umbreon EX",
 // which lowercasing already does — and it was quietly merging Charizard with
 // Charizard ex, Charizard V and Charizard LV.X, which are four different cards
@@ -126,6 +128,9 @@ export function nameKey(n) {
   // precisely the confusion that would put one's picture on the other.
   t = t.replace(/♂/g, " male ").replace(/♀/g, " female ");
   t = t.replace(/\[\s*m\s*\]/g, " male ").replace(/\[\s*f\s*\]/g, " female ");
+  // Other bracketed letters are the SP-era owner marks — "Charizard [G]" is
+  // tcgdex's "Charizard G" — so the brackets go and the letter stays.
+  t = t.replace(/\[\s*([a-z])\s*\]/g, " $1 ");
   // The δ says "Delta Species" already; Cardmarket writes both, and puts it at
   // the opposite end: "Rainbow Energy Delta" against "δ Rainbow Energy".
   t = t.replace(/\u03b4/g, " ").replace(/\bdelta species\b/g, " ").replace(/\bdelta\b/g, " ");
@@ -137,6 +142,14 @@ export function nameKey(n) {
   t = t.replace(/\blv\.?\s*\d+\b/g, " ");
   return norm(t).replace(/\s+/g, "");
 }
+
+/**
+ * What may appear on our side of a name and not theirs. A closed list: these
+ * are card variants, and anything not on it is a different card.
+ */
+// "star" is deliberately absent: Gold Star normalises to "goldstar" and needs
+// no help, while a bare "star" would let VSTAR pass as V — two cards.
+const VARIANT_SUFFIX = /^(lvx|ex|gx|v|vmax|vstar|goldstar)$/;
 
 /** Levenshtein, bounded — we only ever care whether it exceeds 1. */
 function withinOneEdit(a, b) {
@@ -163,9 +176,19 @@ export function nameAgrees(ours, theirs) {
   if (!a || !b) return false;
   if (a === b) return true;
   if (a.length < 5 || b.length < 5) return false;
-  // One name extending the other is never a typo — it's a suffix, and a suffix
-  // is what tells Charizard from Charizard V. Only a substitution in the
-  // middle gets the benefit of the doubt.
+  // OUR name carrying a variant suffix theirs omits is the common case and a
+  // safe one: tcgdex writes DP promo 37 as "Dialga" where Cardmarket writes
+  // "Dialga LV.X", and within one set one number is one card, so a shared base
+  // name means the set matched. 148 cards, nearly all of them LV.X.
+  //
+  // Only in that direction. Accepting THEIR name as the longer one would
+  // quietly upgrade our plain Charizard to their Charizard V, which is a
+  // different card at a different price — and nothing in the data suggests
+  // tcgdex is the more verbose of the two.
+  if (a.startsWith(b) && VARIANT_SUFFIX.test(a.slice(b.length))) return true;
+
+  // Otherwise one name extending the other is never a typo, and only a
+  // substitution in the middle gets the benefit of the doubt.
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   if (long.startsWith(short) || long.endsWith(short)) return false;
   return withinOneEdit(a, b);

@@ -114,12 +114,14 @@ for (const [ours, theirs] of SAME_CARD) {
 // Suffixes are the whole difference between four cards at four prices. This
 // used to strip them, which quietly folded Charizard, Charizard ex, Charizard
 // V and Charizard LV.X into one.
+// Direction matters, and only THEIRS being longer is refused. The reverse —
+// ours carrying LV.X or V where tcgdex writes the base name — is the DP promo
+// case below, and is the same card written short.
 const SUFFIX_CARDS = [
   ["Charizard", "Charizard V"],
   ["Charizard", "Charizard ex"],
   ["Charizard V", "Charizard VMAX"],
-  ["Charizard LV.X", "Charizard"],
-  ["Zacian V", "Zacian"]
+  ["Charizard", "Charizard LV.X"]
 ];
 for (const [ours, theirs] of SUFFIX_CARDS) {
   if (nameAgrees(ours, theirs)) fail(`nameAgrees: ${ours} must NOT match ${theirs} — a suffix is a different card`);
@@ -136,6 +138,29 @@ const REWRITTEN = [
 for (const [ours, theirs] of REWRITTEN) {
   if (!nameAgrees(ours, theirs)) fail(`nameAgrees: ${ours} should match ${theirs}`);
 }
+
+// Our side carrying a variant suffix theirs omits — the whole LV.X promo run,
+// and the direction Cardmarket is consistently more verbose in.
+const OURS_LONGER = [
+  ["Dialga LV.X", "Dialga"],
+  ["Charizard [G] LV.X", "Charizard G"],      // SP-era owner mark, bracketed
+  ["Garchomp [C] LV.X", "Garchomp C"],
+  ["Team Magma's Baltoy (Fighting) (Peck)", "Team Magma's Baltoy"],  // two of them
+  ["Charizard LV.X", "Charizard"],
+  ["Zacian V", "Zacian"]
+];
+for (const [ours, theirs] of OURS_LONGER) {
+  if (!nameAgrees(ours, theirs)) fail(`nameAgrees: ${ours} should match ${theirs}`);
+}
+// Never the other way. Accepting THEIR longer name would silently upgrade our
+// plain card to a V, which is a different card at a different price.
+if (nameAgrees("Dialga", "Dialga LV.X")) fail("nameAgrees: theirs must not be the longer one");
+if (nameAgrees("Charizard", "Charizard V")) fail("nameAgrees: theirs must not be the longer one");
+// And the extra text has to be a variant, not anything at all: V and VMAX are
+// two cards, and "ours is longer" alone would merge them.
+if (nameAgrees("Pikachu VMAX", "Pikachu V")) fail("nameAgrees: VMAX is not V");
+if (nameAgrees("Charizard VSTAR", "Charizard V")) fail("nameAgrees: VSTAR is not V");
+if (nameAgrees("Rattata Alolan", "Rattata")) fail("nameAgrees: a regional form is a different card");
 
 const DIFFERENT_CARDS = [
   ["Nidoran [M]", "Nidoran [F]"],
@@ -231,4 +256,4 @@ if (failures) {
   console.error(`\nimages: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log(`images: ${NUMBERS.length} number, ${SAME_CARD.length + DIFFERENT_CARDS.length + SUFFIX_CARDS.length + REWRITTEN.length} name, plus set-family and match cases hold.`);
+console.log(`images: ${NUMBERS.length} number, ${SAME_CARD.length + DIFFERENT_CARDS.length + SUFFIX_CARDS.length + REWRITTEN.length + OURS_LONGER.length} name, plus set-family and match cases hold.`);
