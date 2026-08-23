@@ -1,4 +1,5 @@
 import CardScreen from "./CardScreen";
+import { windowFromParam } from "@/lib/windows";
 
 /**
  * The answer lives at its own URL so it can be shared, linked and cached —
@@ -15,7 +16,10 @@ export async function generateMetadata({ params }) {
   };
 }
 
-export default async function CardPage({ params }) {
+export default async function CardPage({ params, searchParams }) {
   const { q } = await params;
-  return <CardScreen query={decodeURIComponent(q || "")} />;
+  // The sold window lives in the URL rather than in component state, so the
+  // workings link carries it and a shared link reproduces what the sender saw.
+  const { days } = (await searchParams) || {};
+  return <CardScreen query={decodeURIComponent(q || "")} days={windowFromParam(days)} />;
 }

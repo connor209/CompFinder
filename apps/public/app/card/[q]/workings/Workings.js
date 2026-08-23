@@ -2,7 +2,8 @@
 
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { FEE_RATE, FEE_FIXED_PENCE, DEFAULT_POSTAGE_PENCE } from "@/lib/verdict";
-import { useCard, SOLD_WINDOW_DAYS } from "@/lib/use-card";
+import { useCard } from "@/lib/use-card";
+import { cardHref } from "@/lib/windows";
 import { noteFor } from "@/lib/sale-note";
 import { Crumb, gbp } from "../../../ui";
 
@@ -28,9 +29,10 @@ function when(iso) {
  * how many sales there were — a workings screen that doesn't reconcile with
  * the number it explains is worse than no workings screen.
  */
-export default function Workings({ query }) {
-  const state = useCard(query);
-  const backToCard = `/card/${encodeURIComponent(query)}`;
+export default function Workings({ query, days }) {
+  // Same hook, same window as the answer screen — see lib/windows.js.
+  const state = useCard(query, days);
+  const backToCard = cardHref(query, days);
 
   if (state.status !== "ready") {
     return (
@@ -68,7 +70,7 @@ export default function Workings({ query }) {
       <div className="screen">
         <h2 className="scr-h sm">Every sale we counted</h2>
         <p className="body" style={{ margin: "9px 0 0" }}>
-          {spell(counted.length)} UK sale{counted.length === 1 ? "" : "s"} in the last {SOLD_WINDOW_DAYS} days,
+          {spell(counted.length)} UK sale{counted.length === 1 ? "" : "s"} in the last {days} days,
           newest first. The last comp is the one at the top.
         </p>
 

@@ -397,6 +397,36 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
 }
 .bandn { display:block; font-size:11.5px; color:var(--ink-soft); margin-top:2px; }
 
+/* The last comp sits inside .split, so it is deliberately quieter than the
+   headline — it is one sale, not the answer. */
+.split b.lastcomp { color:var(--ink); font-weight:600; }
+
+/* Graded tiers. A slab is a different market from a raw card and none of these
+   feed the price above, so the rows read as a reference table rather than as
+   another set of figures competing with the headline. */
+.graded { margin-top:8px; }
+.gradedrow {
+  display:grid; grid-template-columns:auto 1fr auto; align-items:baseline; gap:10px;
+  padding:6px 0; border-top:1px solid var(--line);
+}
+.gradedrow:first-child { border-top:0; padding-top:2px; }
+.gtier {
+  font:700 11px var(--font-display); font-variation-settings:"wdth" 125;
+  text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft);
+}
+.gprice { font:600 13.5px var(--font-mono); color:var(--ink); }
+.gn { font-size:11.5px; color:var(--ink-faint); text-align:right; }
+
+/* Sold window. Changing it is a new fetch, so it lives outside the panels it
+   changes rather than inside any one of them. */
+.windowrow { margin-top:12px; }
+.windowrow .pill[data-on="true"] { border-color:var(--accent); background:var(--selected); }
+
+/* Trend. The SVG inherits currentColor for its gridlines and axis labels, so
+   the muted colour here is what makes them recede behind the line. */
+.trend { display:block; width:100%; height:auto; margin-top:8px; color:var(--ink-soft); }
+.dd-empty { margin:8px 0 0; font-size:12.5px; color:var(--ink-faint); }
+
 /* ---------------------------------------------------------------------------
    Splash
    Frame one is what iOS has already painted as a static PNG before any of this

@@ -14,6 +14,7 @@ import { variantsPresent } from "./variants.js";
 import { caveatsFor } from "./caveats.js";
 import { foreignCount } from "./settings.js";
 import { challengeAvailable, ensurePass } from "./turnstile-client.js";
+import { DEFAULT_SOLD_WINDOW } from "./windows.js";
 
 /**
  * Everything a card page needs, from a query string.
@@ -22,11 +23,12 @@ import { challengeAvailable, ensurePass } from "./turnstile-client.js";
  * disagree about how many sales there were or which ones counted — the
  * workings exist to show the arithmetic behind the answer, and a second
  * fetching path would eventually make them arithmetic about different things.
+ * The window is a caller's argument for the same reason: it is in the URL, and
+ * both screens read it from there rather than each holding their own default.
  *
  * The sold window is cached server-side for 24 hours, so the second screen's
  * fetch costs nothing upstream.
  */
-export const SOLD_WINDOW_DAYS = 90;
 
 /** One card → the search text that finds it. Set name included deliberately:
  *  measured over 30 cards, "Mew ex 232/091" priced at £794 with the set in the
@@ -35,25 +37,25 @@ export function queryForCard(card) {
   return [card.name, card.number || "", card.set || ""].join(" ").replace(/\s+/g, " ").trim();
 }
 
-async function price(query, sold, retried = false) {
+async function price(query, sold, windowDays, retried = false) {
   const res = await fetch("/api/price", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, sold, soldAfterDays: SOLD_WINDOW_DAYS })
+    body: JSON.stringify({ query, sold, soldAfterDays: windowDays })
   }).then((r) => r.json());
 
   if (!res.ok) {
     // The bot check asks once and only on a cache miss; solving it and coming
     // back is a normal path, not an error.
     if (res.needsChallenge && !retried && challengeAvailable()) {
-      if (await ensurePass()) return price(query, sold, true);
+      if (await ensurePass()) return price(query, sold, windowDays, true);
     }
     throw new Error(res.error || "Pricing request failed.");
   }
   return res;
 }
 
-export function useCard(query) {
+export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW) {
   const [state, setState] = useState({ status: "loading", query });
 
   useEffect(() => {
@@ -89,8 +91,8 @@ export function useCard(query) {
       // price calls have nothing to do with each other and the sold set is the
       // only one the page can't draw without. Fired together and rendered on
       // the first, the same card is readable in about six.
-      const soldPromise = price(searchText, true);
-      const livePromise = price(searchText, false).catch(() => ({ comps: [] }));
+      const soldPromise = price(searchText, true, windowDays);
+      const livePromise = price(searchText, false, windowDays).catch(() => ({ comps: [] }));
 
       let sold;
       try {
@@ -112,7 +114,7 @@ export function useCard(query) {
         status: "ready",
         query,
         card: { ...card, q: searchText },
-        derived: derive(card, searchText, sold, { comps: [] }),
+        derived: derive(card, searchText, sold, { comps: [] }, windowDays),
         listingsPending: true
       });
 
@@ -122,13 +124,13 @@ export function useCard(query) {
         status: "ready",
         query,
         card: { ...card, q: searchText },
-        derived: derive(card, searchText, sold, listings),
+        derived: derive(card, searchText, sold, listings, windowDays),
         listingsPending: false
       });
     })();
 
     return () => { alive = false; };
-  }, [query]);
+  }, [query, windowDays]);
 
   return state;
 }
@@ -137,7 +139,7 @@ export function useCard(query) {
  * The whole read of one card, in one pure function so it can be reasoned about
  * (and, later, tested) without a browser.
  */
-export function derive(card, searchText, soldRes, liveRes) {
+export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_SOLD_WINDOW) {
   const withQ = { ...card, q: searchText };
   const comps = soldRes.comps || [];
   const priced = priceCard(withQ, comps);
@@ -159,14 +161,9 @@ export function derive(card, searchText, soldRes, liveRes) {
     response: soldRes,
     comps,
     activeCount: (liveRes.comps || []).length ? liveUkCount : null,
-    windowDays: SOLD_WINDOW_DAYS
+    windowDays
   });
-  const confidence = assessConfidence({
-    rec,
-    comps,
-    windowDays: SOLD_WINDOW_DAYS,
-    market: UK
-  });
+  const confidence = assessConfidence({ rec, comps, windowDays, market: UK });
 
   // Active listings get the same name/number/set treatment as sold comps.
   // Scoring them with no tokens is why an early "buy one now" was offering
@@ -241,7 +238,13 @@ export function derive(card, searchText, soldRes, liveRes) {
     excludedCount: rec ? (rec.excluded || []).length : 0,
     viaName: priced.viaName,
     lo: priced.lo,
-    hi: priced.hi
+    hi: priced.hi,
+    windowDays,
+    graded: rec ? rec.graded || [] : [],
+    // The most recent sale that actually counted. The product is named after
+    // it, and until now it only appeared on the workings screen. sales is
+    // already newest-first, so this is the head of it and never a second sort.
+    lastComp: sales[0] || null
   };
 
   // Caveats need the finished picture, so they come last rather than being
@@ -249,4 +252,4 @@ export function derive(card, searchText, soldRes, liveRes) {
   return { ...base, caveats: caveatsFor({ rec, derived: base, card }) };
 }
 
-export default { useCard, derive, queryForCard, SOLD_WINDOW_DAYS };
+export default { useCard, derive, queryForCard };

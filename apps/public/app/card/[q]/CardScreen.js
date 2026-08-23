@@ -6,9 +6,18 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { assessAsk } from "@/lib/verdict";
-import { useCard, queryForCard, SOLD_WINDOW_DAYS } from "@/lib/use-card";
+import { useCard, queryForCard } from "@/lib/use-card";
+import { SOLD_WINDOWS, cardHref } from "@/lib/windows";
 import { VARIANTS, variantQueryTerms } from "@/lib/variants";
+import TrendChart from "../../TrendChart";
 import { CardArt, Crumb, gbp } from "../../ui";
+
+function when(iso) {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
 
 function median(nums) {
   if (!nums.length) return null;
@@ -17,15 +26,20 @@ function median(nums) {
   return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 }
 
-export default function CardScreen({ query }) {
-  const state = useCard(query);
+export default function CardScreen({ query, days }) {
+  const router = useRouter();
+  // The window comes from the URL, the same way a variant does: changing it is
+  // a different search, not a filter over what we already hold, and the
+  // workings link has to carry it or it would explain a different number.
+  const setDays = (w) => router.replace(cardHref(query, w), { scroll: false });
+  const state = useCard(query, days);
 
   if (state.status === "loading") {
     return (
       <main>
         <Crumb label={query} />
         <div className="screen">
-          <p className="body"><span className="spinner" /> &nbsp;Reading the last 90 days of sold listings…</p>
+          <p className="body"><span className="spinner" /> &nbsp;Reading the last {days} days of sold listings…</p>
         </div>
       </main>
     );
@@ -45,7 +59,10 @@ export default function CardScreen({ query }) {
     );
   }
 
-  return <Answer query={query} card={state.card} d={state.derived} pending={state.listingsPending} />;
+  return (
+    <Answer query={query} card={state.card} d={state.derived} pending={state.listingsPending}
+            days={days} setDays={setDays} />
+  );
 }
 
 /* -------------------------------------------------------------------------
@@ -115,7 +132,7 @@ function WhichOne({ query, candidates, fuzzy }) {
 /* -------------------------------------------------------------------------
    Screen 3 — the answer
 ------------------------------------------------------------------------- */
-function Answer({ query, card, d, pending }) {
+function Answer({ query, card, d, pending, days, setDays }) {
   const [ask, setAsk] = useState("");
 
   const askPence = useMemo(() => {
@@ -133,14 +150,14 @@ function Answer({ query, card, d, pending }) {
   const cheapest = d.cheapest;
   const heroPence = cheapest ? cheapest.totalPence : d.marketPence;
   const med = median(d.usedComps.map((c) => c.totalPence ?? c.itemPricePence).filter(Boolean));
-  const workings = `/card/${encodeURIComponent(query)}/workings`;
+  const workings = cardHref(query, days, "/workings");
   const searchUrl = ebaySearchUrl(card.q || query, { sold: false, customId: "buy-see-all" });
 
   return (
     <main>
       <Crumb
         label={[card.name, card.number].filter(Boolean).join(" ")}
-        scope={`🇬🇧 ${SOLD_WINDOW_DAYS}d`}
+        scope={`🇬🇧 ${days}d`}
       />
 
       <div className="headblock answer">
@@ -231,6 +248,12 @@ function Answer({ query, card, d, pending }) {
             <span style={{ display: "block", fontSize: 11.5, color: "var(--ink-soft)", marginTop: 2 }}>
               {d.used} sale{d.used === 1 ? "" : "s"}{med != null ? <> · median {gbp(med)}</> : null}
             </span>
+            {d.lastComp && (
+              <span className="split">
+                Last one sold <b className="lastcomp">{gbp(d.lastComp.pence)}</b>
+                {d.lastComp.endedAt ? <> · {when(d.lastComp.endedAt)}</> : null}
+              </span>
+            )}
             {d.restPence != null && d.marketUsed > 0 && (
               <span className="split">
                 UK {gbp(d.ukPence)} · rest of the market {gbp(d.restPence)}
@@ -286,6 +309,40 @@ function Answer({ query, card, d, pending }) {
           </div>
         )}
 
+        {d.graded.length > 0 && (
+          <div className="panel pad13" style={{ marginTop: 10 }}>
+            <span className="eyebrow">Graded, if yours were slabbed</span>
+            <div className="graded">
+              {d.graded.slice(0, 6).map((g) => (
+                <div className="gradedrow" key={g.key}>
+                  <span className="gtier">{g.label}</span>
+                  <span className="gprice">{gbp(g.medianPence)}</span>
+                  <span className="gn">{g.count} sale{g.count === 1 ? "" : "s"}</span>
+                </div>
+              ))}
+            </div>
+            <p className="micro" style={{ marginTop: 8 }}>
+              A different market from a raw card, and none of these are in the price above.
+            </p>
+          </div>
+        )}
+
+        {d.sales.length >= 2 && (
+          <div className="panel pad13" style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span className="section-title">What it&rsquo;s been doing</span>
+              <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>
+                daily median · dashed line is the {days}-day figure
+              </span>
+            </div>
+            <TrendChart
+              sales={d.sales.filter((s) => s.t).map((s) => ({ t: s.t, v: s.pence }))}
+              medianPence={d.marketPence}
+              windowDays={days}
+            />
+          </div>
+        )}
+
         <div className="panel pad13" style={{ marginTop: 10 }}>
           <span className="eyebrow">Someone&rsquo;s offering it to you at</span>
           <div className="askrow">
@@ -305,6 +362,21 @@ function Answer({ query, card, d, pending }) {
             {askPence
               ? <>{onlineLine(askPence, cheapest)} {verdict ? verdict.notes[0] : null}</>
               : <>Type what they&rsquo;re asking and we&rsquo;ll tell you how it compares to what this card actually sells for.</>}
+          </p>
+        </div>
+
+        <div className="windowrow">
+          <span className="eyebrow">Sold window</span>
+          <div className="pills" style={{ marginTop: 7 }}>
+            {SOLD_WINDOWS.map((w) => (
+              <button key={w} type="button" className="pill" data-on={w === days}
+                      onClick={() => setDays(w)}>
+                <b>Last {w} days</b>
+              </button>
+            ))}
+          </div>
+          <p className="micro" style={{ marginTop: 7 }}>
+            Ninety days finds more sales; thirty is more current on a card that&rsquo;s moving.
           </p>
         </div>
 

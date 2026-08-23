@@ -46,7 +46,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs seven table tests, no framework, non-zero exit on failure:
+`npm run check` runs eight table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -56,6 +56,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-liquidity.mjs` — how a capped result set is read, and a grep
   against anyone guessing it from a comp count again.
 - `scripts/check-images.mjs` — which picture goes with which card.
+- `scripts/check-windows.mjs` — the sold window: one list, read off the URL.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -247,6 +248,7 @@ root layout renders nothing.
 ```
 /                        search
 /card/[q]                which one? when ambiguous, otherwise the answer
+/card/[q]?days=30        the same answer over a shorter sold window
 /card/[q]/workings       every sale counted, every sale excluded, net after fees
 ```
 
@@ -254,6 +256,30 @@ Both card screens run off `lib/use-card.js`. That is deliberate: the workings
 exist to show the arithmetic behind the answer, and a second fetching path
 would eventually have them explaining a different number than the one on the
 previous screen.
+
+**The sold window is in the URL, not in component state**, for the same
+reason. `lib/windows.js` owns the list (30 and 90), and `/api/price` validates
+against that same list rather than its own copy — an arbitrary number would
+fragment the cache into near-duplicate entries that each cost a fresh API call.
+Ninety is the default and is left out of the URL, so the ordinary link stays
+the shareable one it has always been. A `days` state on the answer screen
+renders identically and quietly leaves the workings explaining the 90-day
+figure; `check-windows.mjs` fails on it.
+
+**The answer screen waits on the sold comps, never on the live listings.**
+Cold, a card was resolve 1.0s → sold 5.2s → active 7.7s, one after the other:
+about fourteen seconds before anything appeared. The two price calls are now
+started together and the screen renders as soon as the sold set lands, with the
+buy-it-today figure filling in behind a "checking what's listed right now…"
+line. Sold data is the answer; what is listed this minute is the upsell, and it
+is the slower of the two. Roughly six seconds cold, and nothing on a cache hit.
+
+**What the answer screen shows beyond the price.** All of it was already
+computed and thrown away: the last comp (`sales[0]` — the product is named
+after it), the graded tiers from `gradedBreakdown()`, and the daily-median
+trend chart. Graded rows are a reference table, deliberately quieter than the
+headline, because a slab is a different market and none of those sales feed the
+price above.
 
 **Anything quoting a constant must be generated from it.** The workings screen
 prints "Based on £200.01 at 13.25% fees, 30p fixed, plus £1.35 postage" under a

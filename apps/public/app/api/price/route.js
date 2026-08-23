@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase";
 import { claimSoldCompsSlot } from "@/lib/soldcomps-pacer";
 import { clientIp } from "@/lib/client-ip";
 import { turnstileEnabled, passIsValid, PASS_COOKIE } from "@/lib/turnstile";
+import { SOLD_WINDOWS, DEFAULT_SOLD_WINDOW } from "@/lib/windows";
 
 /**
  * Public pricing endpoint. Same job as the app's /api/soldcomps, but with the
@@ -72,13 +73,6 @@ function isTrustedCaller(request) {
 
 const QUERY_OPTIONS = { ebaySite: "ebay.co.uk", itemLocation: "worldwide" };
 
-// How far back to look for sold comps. A longer window finds more comps for a
-// scarce card; a shorter one is more current for a card that's moving. Only
-// these two are accepted — an arbitrary number from the client would fragment
-// the cache into near-duplicate entries that each cost a fresh API call.
-const ALLOWED_SOLD_WINDOWS = [30, 90];
-const DEFAULT_SOLD_WINDOW = 90;
-
 /**
  * Cache key. Normalises the query the same way for everyone — lowercased,
  * collapsed whitespace — so "Charizard  ex 199/165" and "charizard ex 199/165"
@@ -101,9 +95,11 @@ export async function POST(request) {
 
   const query = typeof body.query === "string" ? body.query.trim() : "";
   const sold = body.sold !== false;
-  // Anything not on the allow-list falls back to the default rather than
-  // erroring — a bad value is a caller bug, not something a visitor can fix.
-  const soldAfterDays = ALLOWED_SOLD_WINDOWS.includes(body.soldAfterDays)
+  // How far back to look for sold comps. The allow-list lives in lib/windows.js
+  // so the toggle on the page and the values honoured here can't drift apart.
+  // Anything not on it falls back to the default rather than erroring — a bad
+  // value is a caller bug, not something a visitor can fix.
+  const soldAfterDays = SOLD_WINDOWS.includes(body.soldAfterDays)
     ? body.soldAfterDays
     : DEFAULT_SOLD_WINDOW;
   if (!query) {
