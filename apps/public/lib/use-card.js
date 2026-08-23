@@ -58,7 +58,7 @@ export function useCard(query) {
 
   useEffect(() => {
     if (!query) return undefined;
-    let live = true;
+    let alive = true;
     setState({ status: "loading", query });
 
     (async () => {
@@ -72,7 +72,7 @@ export function useCard(query) {
         if (candidates.length && (res.confident || candidates.length === 1)) {
           resolved = candidates[0];
         } else if (candidates.length) {
-          if (live) setState({ status: "choose", query, candidates, fuzzy: !!res.fuzzy });
+          if (alive) setState({ status: "choose", query, candidates, fuzzy: !!res.fuzzy });
           return;
         }
       } catch {
@@ -82,31 +82,52 @@ export function useCard(query) {
       const card = resolved || { name: query, q: query };
       const searchText = resolved ? queryForCard(resolved) : query;
 
+      // BOTH REQUESTS GO OUT AT ONCE, and the price renders on the sold one.
+      //
+      // Awaiting them in turn cost a cold card fourteen seconds of spinner —
+      // resolve 1.0s, then sold 5.2s, then live 7.7s, summed — where the two
+      // price calls have nothing to do with each other and the sold set is the
+      // only one the page can't draw without. Fired together and rendered on
+      // the first, the same card is readable in about six.
+      const soldPromise = price(searchText, true);
+      const livePromise = price(searchText, false).catch(() => ({ comps: [] }));
+
       let sold;
       try {
-        sold = await price(searchText, true);
+        sold = await soldPromise;
       } catch (err) {
-        if (live) setState({ status: "error", query, error: err.message });
+        // Swallow the live one too, or an unhandled rejection follows the
+        // failure out.
+        livePromise.catch(() => {});
+        if (alive) setState({ status: "error", query, error: err.message });
         return;
       }
-      if (!live) return;
+      if (!alive) return;
 
-      // Live listings never block the price. They fill in the hero's buy-it-
-      // today figure when they land, and their absence is a state the design
-      // has an answer for.
-      let live_ = { comps: [] };
-      try { live_ = await price(searchText, false); } catch { /* optional */ }
-      if (!live) return;
-
+      // Everything except what's listed right now. The hero says "sells for"
+      // until the listings land, then becomes "buy it today for" — a true
+      // statement at each moment rather than a number that changes under a
+      // fixed label.
       setState({
         status: "ready",
         query,
         card: { ...card, q: searchText },
-        derived: derive(card, searchText, sold, live_)
+        derived: derive(card, searchText, sold, { comps: [] }),
+        listingsPending: true
+      });
+
+      const listings = await livePromise;
+      if (!alive) return;
+      setState({
+        status: "ready",
+        query,
+        card: { ...card, q: searchText },
+        derived: derive(card, searchText, sold, listings),
+        listingsPending: false
       });
     })();
 
-    return () => { live = false; };
+    return () => { alive = false; };
   }, [query]);
 
   return state;

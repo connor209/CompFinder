@@ -45,7 +45,7 @@ export default function CardScreen({ query }) {
     );
   }
 
-  return <Answer query={query} card={state.card} d={state.derived} />;
+  return <Answer query={query} card={state.card} d={state.derived} pending={state.listingsPending} />;
 }
 
 /* -------------------------------------------------------------------------
@@ -115,7 +115,7 @@ function WhichOne({ query, candidates, fuzzy }) {
 /* -------------------------------------------------------------------------
    Screen 3 — the answer
 ------------------------------------------------------------------------- */
-function Answer({ query, card, d }) {
+function Answer({ query, card, d, pending }) {
   const [ask, setAsk] = useState("");
 
   const askPence = useMemo(() => {
@@ -161,7 +161,12 @@ function Answer({ query, card, d }) {
               {cheapest
                 ? <>cheapest of {d.listings.length} UK listing{d.listings.length === 1 ? "" : "s"}
                     {cheapest.postagePence ? <> · +{gbp(cheapest.postagePence)} post</> : <> · free post</>}</>
-                : <>nothing listed in the UK right now · {d.used} recent sale{d.used === 1 ? "" : "s"}</>}
+                : pending
+                  // The sold figure is on screen within a second; what's listed
+                  // right now takes longer, and saying so beats a spinner where
+                  // the answer should be.
+                  ? <><span className="spinner" /> &nbsp;checking what&rsquo;s listed right now…</>
+                  : <>nothing listed in the UK right now · {d.used} recent sale{d.used === 1 ? "" : "s"}</>}
             </span>
           </span>
         </div>
@@ -171,6 +176,8 @@ function Answer({ query, card, d }) {
              target="_blank" rel={relFor(cheapest.url, "noopener noreferrer")}>
             See it on eBay UK →
           </a>
+        ) : pending ? (
+          <span className="cta" data-pending="true">Finding the cheapest one…</span>
         ) : (
           // Nothing to buy is a real state, not an empty one: the useful next
           // move is a standing eBay search rather than a dead button.

@@ -454,3 +454,10 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
 .splash[data-stage="out"] .sp-tag { opacity:1; }
 
 @media (prefers-reduced-motion: reduce) { .splash { display:none; } }
+
+/* The CTA while live listings are still coming back: present, so the layout
+   doesn't jump when it becomes a real button, but plainly not yet clickable. */
+.cta[data-pending="true"] {
+  background:var(--input); color:var(--ink-faint); cursor:default;
+  border:1px solid var(--line-strong);
+}
