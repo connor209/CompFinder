@@ -25,6 +25,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import { resolveCard } from "./lib/resolve-card.mjs";
 import { REFERENCE } from "./pulse-reference.mjs";
 import { MOVERS } from "./movers.mjs";
+import { auditHeaders } from "./lib/audit-headers.mjs";
 
 const args = process.argv.slice(2);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -64,7 +65,7 @@ const med = (a) => { const s = a.slice().sort((x, y) => x - y); return s.length 
 async function comps(query) {
   const { body } = await pacer.call(async () => {
     const r = await fetch(`${BASE}/api/price`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: auditHeaders(),
       body: JSON.stringify({ query, sold: true, soldAfterDays: 90 })
     });
     return { status: r.status, body: await r.json().catch(() => ({ ok: false })) };

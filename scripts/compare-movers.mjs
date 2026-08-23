@@ -12,6 +12,7 @@ import { UK, splitByMarket } from "../apps/public/lib/markets.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
 import { priceCard } from "./lib/price-card.mjs";
 import { resolveCard } from "./lib/resolve-card.mjs";
+import { auditHeaders } from "./lib/audit-headers.mjs";
 
 const S = CompFinderPricing.DEFAULT_SETTINGS;
 const args = process.argv.slice(2);
@@ -24,7 +25,7 @@ const gbp = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 async function price(query) {
   const { body } = await pacer.call(async () => {
     const res = await fetch(`${BASE}/api/price`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: auditHeaders(),
       body: JSON.stringify({ query, sold: true, soldAfterDays: 90 })
     });
     return { status: res.status, body: await res.json().catch(() => ({ ok: false, error: "bad json" })) };

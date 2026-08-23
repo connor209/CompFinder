@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createPacer } from "./lib/pace.mjs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { auditHeaders } from "./lib/audit-headers.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -49,7 +50,7 @@ for (const [i, c] of CARDS.entries()) {
   try {
     res = await pacer.call(async () => {
       const r = await fetch(`${BASE}/api/price`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: auditHeaders(),
         body: JSON.stringify({ query: q, sold: true, soldAfterDays: 90 })
       });
       return { status: r.status, body: await r.json().catch(() => ({ ok: false })) };

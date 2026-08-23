@@ -18,6 +18,7 @@ import { buildCompTokens, dropWrongSetTotal, dropWrongNumerator } from "../apps/
 import { UK, splitByMarket, marketsIn } from "../apps/public/lib/markets.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
 import { variantsPresent } from "../apps/public/lib/variants.js";
+import { auditHeaders } from "./lib/audit-headers.mjs";
 
 const args = process.argv.slice(2);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -51,7 +52,7 @@ async function price(query) {
   try {
     const { status, body } = await pacer.call(async () => {
       const res = await fetch(`${BASE}/api/price`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST", headers: auditHeaders(),
         body: JSON.stringify({ query, sold: true, soldAfterDays: 90 })
       });
       return { status: res.status, body: await res.json().catch(() => ({ ok: false, error: "bad json" })) };

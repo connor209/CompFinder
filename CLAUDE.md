@@ -42,12 +42,15 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs two table tests, no framework, non-zero exit on failure:
+`npm run check` runs five table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
+- `scripts/check-resolve.mjs` — what the resolver parses and how it ranks.
+- `scripts/check-public-price.mjs` — a grep: no charm ladder on the public side.
+- `scripts/check-turnstile.mjs` — pass forgery, client binding, expiry, off-switch.
 
-Every case in both is a real expansion code or a real sold-listing title. The
+Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
 loudly instead of quietly costing good comps. **Run it before touching
@@ -151,26 +154,39 @@ is wrong: a missed deploy looks exactly like a bug that didn't take.
 Things deliberately set for a page with no visitors. Each one is wrong the
 moment strangers can reach it.
 
-- [ ] **Rate limit back to 120/hour.** `apps/public/app/api/price/route.js`
-      currently runs at `TESTING_LIMIT` (2000) so audit runs don't trip it.
-      That endpoint spends real money per cache miss — at 2000 one scraper
-      burns a month of SoldComps quota in an afternoon. Set it to
-      `PUBLIC_LIMIT` and use `AUDIT_TOKEN` for our own runs.
+- [x] **Rate limit back to 120/hour.** Done 2026-08-23. `PUBLIC_LIMIT` is the
+      default in `apps/public/app/api/price/route.js`; `PUBLIC_RATE_LIMIT_PER_HOUR`
+      still overrides it. Our own runs use `AUDIT_TOKEN` instead — every audit
+      script sends it via `scripts/lib/audit-headers.mjs`, which warns loudly
+      when it isn't set rather than letting a long run die of 429s an hour in.
+- [x] **Throttle our own calls to SoldComps.** Done 2026-08-23, migration
+      `021_soldcomps_global_pacer.sql`. A leaky bucket in Postgres hands out
+      slots 1100ms apart (~54/min, short of their 60 on purpose); a request
+      that would wait more than 4s is shed with a "try again in a few seconds"
+      rather than queued. In Postgres because each Vercel invocation is its own
+      process — an in-process bucket paces one lambda and leaves the rest
+      unbounded. Every attempt claims a slot, retries included. Fails OPEN if
+      the pacer is unreachable, so the deploy doesn't depend on the migration
+      having been run.
+- [x] **Bot protection** on `/api/price`. Done 2026-08-23. Turnstile, but as a
+      pass rather than a per-request token: `/api/challenge` trades one solved
+      token for a signed 30-minute cookie bound to the visitor, and `/api/price`
+      checks the cookie on cache misses only. One challenge per half hour, and
+      nobody re-reading a cached price is ever asked. **Inert until both
+      `TURNSTILE_SECRET_KEY` and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` are set** —
+      set both or neither, since the secret alone asks for a check the page
+      can't solve.
 - [ ] **Set `NEXT_PUBLIC_EPN_CAMPID`** (5339194433). Left unset while we are
       the only ones clicking, since commission on your own purchases ends the
       EPN account.
-- [ ] **Throttle our own calls to SoldComps.** Their documented limit is 60
-      requests/minute across the whole key, and the public page has no global
-      limiter — only a per-IP one. A modest burst of visitors, or one cache
-      cold-start, will exceed it. Measured: a 282-card audit at ~170/min
-      failed 155 of 282 with upstream errors. Needs a queue or a concurrency
-      cap before real traffic, or busy periods return errors that look like
-      the tool being broken.
-- [ ] **Bot protection** on `/api/price` — Turnstile or equivalent. The rate
-      limit alone only bounds one IP.
 - [ ] **Consent management** (a Google-certified CMP) before any ad code, and
       `ads.txt`, for UK/EEA traffic.
 - [ ] **The SoldComps answer below.** Not optional.
+
+The three that are done are configuration as much as code: `AUDIT_TOKEN` and
+the two Turnstile keys still have to exist in Vercel, and migration 021 has to
+be run against Supabase, or the pacer logs that it is unreachable and lets
+everything through.
 
 ## Open question blocking the public page
 

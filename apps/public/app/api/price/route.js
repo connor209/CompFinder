@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "node:crypto";
 import SoldCompsApi from "@compfinder/core/soldcomps.js";
 import { createServiceClient } from "@/lib/supabase";
+import { claimSoldCompsSlot } from "@/lib/soldcomps-pacer";
+import { clientIp } from "@/lib/client-ip";
+import { turnstileEnabled, passIsValid, PASS_COOKIE } from "@/lib/turnstile";
 
 /**
  * Public pricing endpoint. Same job as the app's /api/soldcomps, but with the
@@ -12,6 +15,10 @@ import { createServiceClient } from "@/lib/supabase";
  *   - Cache first, always. A repeat query costs nothing, which is both the
  *     margin and the main defence against someone walking the catalogue.
  *   - Rate limited per IP, because the endpoint spends real money per miss.
+ *   - Paced globally, because SoldComps' own limit is 60/minute across the
+ *     whole key and a per-IP limit cannot see aggregate load.
+ *   - Gated on a Turnstile pass once one is configured, because none of the
+ *     above distinguishes a visitor from a script.
  *
  * POST { query, sold? }  ->  { ok, comps, cached, fetchedAt }
  */
@@ -21,22 +28,20 @@ import { createServiceClient } from "@/lib/supabase";
 // has already sold is a worse experience than a slightly slower page.
 const TTL_SECONDS = { sold: 24 * 60 * 60, active: 2 * 60 * 60 };
 
-// ⚠️ RAISED FOR TESTING — REDUCE BEFORE THIS PAGE IS PUBLIC ⚠️
+// Per-IP hourly cap on cache misses. 120 is generous enough that no real
+// person searching cards hits it, and tight enough to bound the damage when
+// someone decides to walk the catalogue: this endpoint spends real money per
+// miss.
 //
-// 2000/hour is a testing figure, deliberately high enough that hundred-card
-// audit runs don't trip it while the page has no visitors but us. It is NOT a
-// safe public number: this endpoint spends real money per cache miss, so at
-// 2000 a single scraper could burn a month of SoldComps quota in an afternoon.
-//
-// Before going public, set this back to PUBLIC_LIMIT (120) — generous enough
-// that no real person hits it, tight enough to bound the damage — and use
-// AUDIT_TOKEN below for our own runs instead. Tracked in CLAUDE.md's go-live
-// checklist so it can't be forgotten.
+// It sat at 2000 through the audit phase so hundred-card runs wouldn't trip it
+// while the page had no visitors but us. That is not a safe public number — at
+// 2000 one scraper burns a month of SoldComps quota in an afternoon — so our
+// own runs now go through AUDIT_TOKEN below instead, which is exempt from the
+// limit without weakening it for anyone else.
 const PUBLIC_LIMIT = 120;
-const TESTING_LIMIT = 2000;
 const MAX_REQUESTS_PER_HOUR = Number(process.env.PUBLIC_RATE_LIMIT_PER_HOUR) > 0
   ? Number(process.env.PUBLIC_RATE_LIMIT_PER_HOUR)
-  : TESTING_LIMIT;
+  : PUBLIC_LIMIT;
 
 /**
  * Shared secret that exempts a caller from the per-IP limit — for our own
@@ -84,17 +89,6 @@ function cacheKey(query, sold, soldAfterDays) {
   return createHash("sha256")
     .update(`${normal}|${QUERY_OPTIONS.ebaySite}|${sold ? "sold" : "active"}|${soldAfterDays}`)
     .digest("hex");
-}
-
-/**
- * Client IP. Vercel sets x-forwarded-for; the left-most entry is the client,
- * the rest are proxies. Falls back to a constant so a missing header buckets
- * everyone together rather than handing out an unlimited allowance.
- */
-function clientIp(request) {
-  const fwd = request.headers.get("x-forwarded-for") || "";
-  const first = fwd.split(",")[0].trim();
-  return first || request.headers.get("x-real-ip") || "unknown";
 }
 
 export async function POST(request) {
@@ -156,14 +150,29 @@ export async function POST(request) {
     });
   }
 
-  // --- rate limit, on the path that spends money ---------------------------
+  // --- everything below here is on the path that spends money --------------
   const trusted = isTrustedCaller(request);
+  const ip = clientIp(request);
+
+  // Is there a browser here? The rate limit bounds one IP, which is no answer
+  // at all to a few hundred proxies each behaving impeccably. Checked before
+  // the limit because it costs a hash rather than a database write, and only
+  // on a miss, so a visitor re-reading a cached price is never challenged.
+  if (turnstileEnabled() && !trusted && !passIsValid(request.cookies.get(PASS_COOKIE)?.value, ip)) {
+    return NextResponse.json(
+      // The flag, not the prose, is what the client keys off: it solves a
+      // challenge and retries once. Anything without a browser sees a 403.
+      { ok: false, needsChallenge: true, error: "Just checking you're human — one moment." },
+      { status: 403 }
+    );
+  }
+
   const windowStart = new Date();
   windowStart.setMinutes(0, 0, 0);
   // Still counted for a trusted caller — the number is useful for seeing what
   // an audit actually cost — but not enforced against them.
   const { data: count, error: limitError } = await supabase.rpc("bump_rate_limit", {
-    p_ip: trusted ? "audit" : clientIp(request),
+    p_ip: trusted ? "audit" : ip,
     p_window: windowStart.toISOString()
   });
   // A failure here shouldn't take the page down, but it also shouldn't be a
@@ -184,8 +193,17 @@ export async function POST(request) {
 
   let parsed;
   try {
-    parsed = await fetchFromSoldComps(apiKey, query, sold, soldAfterDays);
+    parsed = await fetchFromSoldComps(supabase, apiKey, query, sold, soldAfterDays);
   } catch (err) {
+    // Shed by the global pacer: we are inside our own limit on purpose, not
+    // broken. Saying so with a Retry-After beats a 502 that invites an
+    // immediate retry and makes the queue worse.
+    if (err.pacerBusy) {
+      return NextResponse.json(
+        { ok: false, error: "Lots of searches going through right now. Try again in a few seconds." },
+        { status: 503, headers: { "Retry-After": "5" } }
+      );
+    }
     // Upstream detail (quota, key problems) is ours, not the visitor's — it
     // would leak how the service is provisioned and they can't act on it.
     console.error("SoldComps request failed:", err.message);
@@ -236,9 +254,22 @@ const ATTEMPT_TIMEOUT_MS = 10000;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchFromSoldComps(apiKey, query, sold, soldAfterDays) {
+async function fetchFromSoldComps(supabase, apiKey, query, sold, soldAfterDays) {
   let lastError;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    // Every attempt claims a slot, not just the first. A retry is a request to
+    // SoldComps like any other and counts against their 60/minute — pacing only
+    // the first attempt would let a wobbly upstream triple our outgoing rate at
+    // exactly the moment it is least able to take it.
+    const slot = await claimSoldCompsSlot(supabase);
+    if (!slot.ok) {
+      // On a retry, the original failure is the more useful thing to report:
+      // the visitor's request already went out once and came back broken.
+      if (attempt > 0) break;
+      const busy = new Error("Global SoldComps pacer shed the request");
+      busy.pacerBusy = true;
+      throw busy;
+    }
     try {
       return await attemptSoldComps(apiKey, query, sold, soldAfterDays);
     } catch (err) {

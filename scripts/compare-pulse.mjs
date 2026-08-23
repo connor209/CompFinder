@@ -24,6 +24,7 @@ const BASE = argOf("--url", "https://comp-finder-public.vercel.app").replace(/\/
 const LIMIT = Number(argOf("--limit", "999"));
 
 import { REFERENCE } from "./pulse-reference.mjs";
+import { auditHeaders } from "./lib/audit-headers.mjs";
 
 
 const pacer = createPacer({ onWait: (msg) => console.log(`      ⏳ ${msg}`) });
@@ -41,13 +42,7 @@ async function price(query, sold) {
 async function rawPrice(query, sold) {
   const res = await fetch(`${BASE}/api/price`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      // Exempts the run from the per-IP limit when AUDIT_TOKEN matches the
-      // deployment's. Without it a hundred distinct searches trip the limit
-      // partway through, which is the limit doing its job.
-      ...(process.env.AUDIT_TOKEN ? { "x-compfinder-audit": process.env.AUDIT_TOKEN } : {})
-    },
+    headers: auditHeaders(),
     body: JSON.stringify({ query, sold, soldAfterDays: 90 })
   });
   const json = await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }));

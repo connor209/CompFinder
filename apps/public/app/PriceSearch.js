@@ -11,6 +11,7 @@ import { assessAsk } from "@/lib/verdict";
 import { settingsForCard, foreignCount } from "@/lib/settings";
 import { conditionBands } from "@/lib/condition";
 import { priceCard } from "@/lib/price";
+import { challengeAvailable, ensurePass } from "@/lib/turnstile-client";
 import { VARIANTS, variantQueryTerms, variantTokens, variantsPresent } from "@/lib/variants";
 import CompFinderLiquidity from "@compfinder/core/liquidity.js";
 import TrendChart from "./TrendChart";
@@ -254,13 +255,26 @@ export default function PriceSearch() {
     }
   }
 
-  async function price(query, sold, soldAfterDays) {
+  /**
+   * `retried` guards the one place this calls itself: the server asks for a
+   * human check on a cache miss, we solve one and come back. Once. A challenge
+   * that succeeds but still gets a 403 means something is misconfigured
+   * server-side, and looping on it would spin forever behind a spinner.
+   */
+  async function price(query, sold, soldAfterDays, retried = false) {
     const res = await fetch("/api/price", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, sold, soldAfterDays })
     }).then((r) => r.json());
-    if (!res.ok) throw new Error(res.error || "Pricing request failed.");
+    if (!res.ok) {
+      if (res.needsChallenge && !retried && challengeAvailable()) {
+        // Single-flight inside ensurePass: this search made two requests and
+        // both may land here, but only one challenge is solved between them.
+        if (await ensurePass()) return price(query, sold, soldAfterDays, true);
+      }
+      throw new Error(res.error || "Pricing request failed.");
+    }
     return res.comps || [];
   }
 

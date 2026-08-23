@@ -13,6 +13,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import { buildCompTokens, dropWrongSetTotal, dropWrongNumerator } from "../apps/public/lib/tokens.js";
 import { UK, splitByMarket } from "../apps/public/lib/markets.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
+import { auditHeaders } from "./lib/audit-headers.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASE = (process.env.AUDIT_URL || "https://comp-finder-public.vercel.app").replace(/\/$/, "");
@@ -27,7 +28,7 @@ function parse(q) {
 for (const q of process.argv.slice(2)) {
   const card = parse(q);
   const res = await fetch(`${BASE}/api/price`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST", headers: auditHeaders(),
     body: JSON.stringify({ query: q, sold: true, soldAfterDays: 90 })
   }).then((r) => r.json());
 
