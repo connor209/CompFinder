@@ -161,6 +161,12 @@ NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
   node scripts/backfill-images.mjs --dry-run        # then without, to write
 ```
 
+Or from the browser, with no checkout: **Actions → Backfill card images → Run
+workflow** (`.github/workflows/backfill-images.yml`). Manual trigger only — it
+holds the service-role key, so it never runs off a push. Needs the repository
+secrets `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and
+migration 022 applied first.
+
 Measured over the 400 English cards in the audit sets: **84% end up with art,
 90% of the chase set.** The gaps are World Championship Decks and a few EX-era
 and promo sets tcgdex doesn't index (13%), plus the Shining Fates Shiny Vault,
