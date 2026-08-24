@@ -55,12 +55,59 @@ async function price(query, sold, windowDays, retried = false) {
   return res;
 }
 
-export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW) {
-  const [state, setState] = useState({ status: "loading", query });
+/**
+ * The ready state the server can hand us, built from a cache entry it read
+ * before this component existed. Seeding useState with it — rather than
+ * setting it in an effect — is the whole point: the effect runs in the
+ * browser, so anything it produces is invisible to a crawler, and the price
+ * has to be in the HTML that leaves the server.
+ */
+export function seeded(initial, query, windowDays) {
+  if (!initial || !initial.card || !initial.sold) return { status: "loading", query };
+  const card = initial.card;
+  return {
+    status: "ready",
+    query,
+    card,
+    // Listings are deliberately absent: they are two hours fresh at best, and
+    // a server-rendered "buy it today for" would be quoting something that may
+    // have sold days ago — with an affiliate tag on it.
+    derived: derive(card, card.q || query, initial.sold, { comps: [] }, windowDays),
+    listingsPending: true,
+    fromCache: initial.sold.fetchedAt || null
+  };
+}
+
+export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null) {
+  const [state, setState] = useState(() => seeded(initial, query, windowDays));
 
   useEffect(() => {
     if (!query) return undefined;
     let alive = true;
+
+    // Served from cache by the server: the sold half is already on screen and
+    // correct, so the only thing still missing is what's listed right now.
+    // Skipping the resolve and the sold fetch is what keeps a crawler — and a
+    // reader — from costing an upstream request for an answer we already had.
+    if (initial && initial.card && initial.sold) {
+      const card = initial.card;
+      const searchText = card.q || query;
+      price(searchText, false, windowDays)
+        .catch(() => ({ comps: [] }))
+        .then((listings) => {
+          if (!alive) return;
+          setState({
+            status: "ready",
+            query,
+            card,
+            derived: derive(card, searchText, initial.sold, listings, windowDays),
+            listingsPending: false,
+            fromCache: initial.sold.fetchedAt || null
+          });
+        });
+      return () => { alive = false; };
+    }
+
     setState({ status: "loading", query });
 
     (async () => {
@@ -130,7 +177,7 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW) {
     })();
 
     return () => { alive = false; };
-  }, [query, windowDays]);
+  }, [query, windowDays, initial]);
 
   return state;
 }
@@ -267,4 +314,4 @@ export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_
   return { ...base, caveats: caveatsFor({ rec, derived: base, card }) };
 }
 
-export default { useCard, derive, queryForCard };
+export default { useCard, derive, queryForCard, seeded };

@@ -1,0 +1,120 @@
+# Keep the card pages priced.
+#
+# A card page renders from soldcomps_cache and never calls SoldComps itself —
+# that is what makes it affordable for a crawler to walk 455 of them. This is
+# the job that puts the prices there.
+#
+# THE SCHEDULE IS A BUDGET. On the Starter plan there are 2,000 SoldComps
+# requests a month, shared with everyone actually using the site. Warming all
+# 455 cards costs 455 of them, so this runs WEEKLY at 120 cards — one full
+# cycle a month, about 455 requests, leaving ~1,500 for live visitors. Making
+# it nightly would spend the month's quota on ourselves in a week and leave
+# visitors seeing "try again shortly".
+#
+# Raise the limit when the plan changes, not before. The script always warms
+# the stalest first, so a partial run is a useful run.
+#
+# Set up once, in Settings → Secrets and variables → Actions:
+#   NEXT_PUBLIC_SUPABASE_URL        the project URL
+#   SUPABASE_SERVICE_ROLE_KEY       service_role, NOT anon — needed to read
+#                                   cache ages, since soldcomps_cache has RLS
+#                                   on with no policies
+#   AUDIT_TOKEN                     the deployment's token, so the run isn't
+#                                   throttled like a visitor at 120/hour
+#   PUBLIC_SITE_URL  (variable)     the deployed public page, if not the default
+name: Warm card pages
+
+on:
+  schedule:
+    # 04:10 UTC on Mondays — off-peak for UK visitors, and a fixed day makes
+    # "did it run" answerable at a glance.
+    - cron: '10 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'How many cards to warm (each costs one SoldComps request)'
+        type: string
+        default: '120'
+      max_age:
+        description: 'Skip cards warmed within this many days'
+        type: string
+        default: '21'
+      dry_run:
+        description: "Show what would be warmed, spend nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Two runs at once would both decide the same cards are stale and warm them
+# twice — paying for each one, which is the one thing this job must not do.
+concurrency:
+  group: warm-card-pages
+  cancel-in-progress: false
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Check the secrets are set
+        env:
+          URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TOKEN: ${{ secrets.AUDIT_TOKEN }}
+        run: |
+          missing=""
+          [ -n "$URL" ] || missing="$missing NEXT_PUBLIC_SUPABASE_URL"
+          [ -n "$KEY" ] || missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          # Not fatal: without it the run is rate limited like a visitor and
+          # gets 429s after 120 misses, which looks like the site falling over
+          # an hour in. Worth saying loudly rather than failing the job.
+          [ -n "$TOKEN" ] || echo "::warning::AUDIT_TOKEN is not set — this run will be throttled at 120 cache misses/hour."
+
+      # Inputs go through the environment into an argv array, never into the
+      # text of a command: a free-text box that reaches a shell is a free-text
+      # box that can write shell.
+      - name: Warm
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          AUDIT_TOKEN: ${{ secrets.AUDIT_TOKEN }}
+          SITE_URL: ${{ vars.PUBLIC_SITE_URL }}
+          # A scheduled run has no inputs, so the defaults live here too.
+          CARD_LIMIT: ${{ inputs.limit || '120' }}
+          MAX_AGE: ${{ inputs.max_age || '21' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -o pipefail
+          args=(--limit "$CARD_LIMIT" --max-age "$MAX_AGE")
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          [ -n "$SITE_URL" ] && args+=(--url "$SITE_URL")
+          echo "Running with: ${args[*]}"
+          node scripts/warm-cardpages.mjs "${args[@]}" | tee run.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Card page warming"
+            echo
+            echo '```'
+            head -1 run.log 2>/dev/null || true
+            tail -4 run.log 2>/dev/null || echo "(no output — see the step log above)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -26,13 +26,15 @@ function median(nums) {
   return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 }
 
-export default function CardScreen({ query, days }) {
+export default function CardScreen({ query, days, initial = null }) {
   const router = useRouter();
   // The window comes from the URL, the same way a variant does: changing it is
   // a different search, not a filter over what we already hold, and the
   // workings link has to carry it or it would explain a different number.
   const setDays = (w) => router.replace(cardHref(query, w), { scroll: false });
-  const state = useCard(query, days);
+  // `initial` is a cached price the server already read, so the first paint
+  // (and the HTML a crawler gets) carries the answer rather than a spinner.
+  const state = useCard(query, days, initial);
 
   if (state.status === "loading") {
     return (
