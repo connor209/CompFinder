@@ -1,4 +1,5 @@
 import { pricedCards } from "@/lib/card-page";
+import { siteUrl } from "@/lib/indexing";
 
 /**
  * Only pages with something on them.
@@ -15,7 +16,7 @@ import { pricedCards } from "@/lib/card-page";
 export const revalidate = 21600; // six hours; the set moves in batches, not continuously
 
 export default async function sitemap() {
-  const base = process.env.NEXT_PUBLIC_SITE_URL || "https://lastcomp.co.uk";
+  const base = siteUrl();
   const now = new Date();
 
   const staticPages = [

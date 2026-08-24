@@ -46,7 +46,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs eleven table tests, no framework, non-zero exit on failure:
+`npm run check` runs twelve table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -63,6 +63,8 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   key it hashes to, keys pinned, with a grep against a second derivation.
 - `scripts/check-cardpage.mjs` — that a cached card server-renders a price, and
   that everything else falls through to the client.
+- `scripts/check-indexing.mjs` — that the door to search engines defaults shut,
+  and that robots.txt and the page metadata give the same answer.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -137,6 +139,15 @@ price, just no price, while the warmer keeps writing entries nobody reads.
 page submitted in bulk demotes the good ones with it. Card pages carry a
 **canonical** to the published spelling: the same card is reachable under every
 typo, and without one those compete with each other.
+
+**None of it is switched on yet.** `PUBLIC_ALLOW_INDEXING` gates robots.txt and
+the pages' `noindex` from `lib/indexing.js`, and defaults to CLOSED. Two
+conditions, both required: the domain has to be live, or the content is indexed
+against a preview hostname and you owe yourself a migration for pages that had
+just started to rank; and SoldComps have to have answered, because inviting
+Googlebot to crawl every card page is an emphatic way of doing the thing they
+have not yet said we may do. `NEXT_PUBLIC_SITE_URL` must name a host that
+actually resolves — a canonical pointing at a dead host is worse than none.
 
 ```
 node scripts/build-cardpages.mjs            # rebuild the published set

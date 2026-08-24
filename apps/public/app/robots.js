@@ -1,17 +1,22 @@
+import { indexingAllowed, siteUrl } from "@/lib/indexing";
+
 /**
- * Crawling is the acquisition plan, so this opens the door — with one
- * exception that costs money.
+ * Crawling is the acquisition plan — but only once we are ready to be found.
+ * Until PUBLIC_ALLOW_INDEXING is set this closes the door entirely, and
+ * doesn't advertise a sitemap there is no permission to read. See
+ * lib/indexing.js for why the default is shut.
  *
- * /api/ is disallowed because those routes spend a real SoldComps request per
- * cache miss. Nothing there is useful to a crawler, and a bot walking
- * /api/price is exactly the traffic the rate limit and Turnstile exist to
- * stop; saying so up front means the well-behaved crawlers never get counted
- * against it in the first place.
+ * When it opens, /api/ stays disallowed regardless: those routes spend a real
+ * SoldComps request per cache miss, nothing there is useful to a crawler, and
+ * a bot walking /api/price is exactly the traffic the rate limit and Turnstile
+ * exist to stop.
  */
 export default function robots() {
-  const base = process.env.NEXT_PUBLIC_SITE_URL || "https://lastcomp.co.uk";
+  if (!indexingAllowed()) {
+    return { rules: [{ userAgent: "*", disallow: "/" }] };
+  }
   return {
     rules: [{ userAgent: "*", allow: "/", disallow: ["/api/"] }],
-    sitemap: `${base}/sitemap.xml`
+    sitemap: `${siteUrl()}/sitemap.xml`
   };
 }

@@ -1,5 +1,6 @@
 import "./globals.css";
 import { Archivo, Martian_Mono, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
+import { indexingAllowed } from "@/lib/indexing";
 
 /**
  * Fonts are self-hosted, not linked. next/font downloads the files at build
@@ -67,6 +68,11 @@ export const metadata = {
     type: "website"
   },
   twitter: { card: "summary_large_image" },
+  // noindex until the flag is set. robots.txt stops a crawler ASKING; this
+  // stops a URL that reached Google some other way from being INDEXED, and
+  // both have to say the same thing or the wrong one wins. One source for the
+  // answer — see lib/indexing.js.
+  robots: indexingAllowed() ? undefined : { index: false, follow: false },
   // iOS draws one of these before any code runs, and the splash continues from
   // exactly that state — every entry points at the same generator as the DOM
   // frame (lib/splash-frame.js), so the two cannot drift. A device size not
