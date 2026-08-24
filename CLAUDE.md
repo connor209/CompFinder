@@ -46,7 +46,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs eight table tests, no framework, non-zero exit on failure:
+`npm run check` runs eleven table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -57,12 +57,98 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   against anyone guessing it from a comp count again.
 - `scripts/check-images.mjs` — which picture goes with which card.
 - `scripts/check-windows.mjs` — the sold window: one list, read off the URL.
+- `scripts/check-listings.mjs` — which live listings may be shown, and which may
+  be the hero. Built around the £44.75 Umbreon that shipped.
+- `scripts/check-cardquery.mjs` — the query a card is searched by and the cache
+  key it hashes to, keys pinned, with a grep against a second derivation.
+- `scripts/check-cardpage.mjs` — that a cached card server-renders a price, and
+  that everything else falls through to the client.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
 loudly instead of quietly costing good comps. **Run it before touching
 `packages/core`.**
+
+## The hero is a minimum, and a minimum has no robustness
+
+Everywhere else on a card page a bad comp is absorbed: the price is a weighted
+median and one stray moves it by pennies. **"Buy it today for" is the cheapest
+live listing**, so the worst match in the set *is* the answer — in the largest
+type on the page, with an affiliate link under it.
+
+That shipped. Umbreon VMAX 215 Evolving Skies, 24 Aug 2026: eight sold comps,
+median £837.48, last one £949.95, and a hero reading **£44.75** pointing at a
+listing that was not the card.
+
+Two leaks put it there, and both had to close:
+
+- **`dropWrongNumerator` keeps a title with no collector number** — right for
+  sold comps, where dropping them loses real evidence and the median absorbs
+  the rest; wrong for a minimum, where the unnumbered stray wins by
+  construction.
+- **Cheap listings that *did* carry 215/203 still weren't the card** (£57.72,
+  £85.56 against a £837 median). No amount of name and number matching catches
+  those: a title is not evidence about the object.
+
+`apps/public/lib/listings.js` owns both rules — a positive number match for
+live listings, then a price floor at **a third** of what the card sells for.
+The floor is nothing like the sold-side rule, which drops a low outlier at
+median/12: a completed sale is evidence that somebody paid it, an asking price
+is evidence of nothing, and the cheap tail of a chase card's listings is where
+fakes and wrong printings collect. It only stands where it can — nothing under
+£5, nothing on fewer than three comps, and if *every* listing is below it then
+the floor is likelier wrong than every seller, so they show.
+
+**The third is not yet measured against a corpus.** `probe-rules.mjs` and the
+audit harness are how that gets done, and the number should move if the data
+disagrees.
+
+Nothing is dropped quietly: the count is handed back and the page says so.
+
+## Card pages, crawlers, and the budget
+
+`/card/<query>` is a client component that fetches on mount, so what left the
+server used to be a spinner — no answer for a crawler on the one surface built
+to be crawled, and a SoldComps request per uncached view against a URL space
+where any string is a valid page.
+
+The **published set** (`apps/public/lib/published-cards.js`, the 455 chase
+cards) is the set we stand behind: server-rendered with a price, listed in the
+sitemap, kept warm. `lib/card-page.js` reads the cached price on the server and
+seeds the hook with it — **seeding `useState` rather than setting it in an
+effect is the point**, since an effect runs in the browser, which was never the
+problem. Anything else falls through to the client path unchanged.
+
+**A crawler must never cost a SoldComps request.** `card-page.js` only READS
+the cache. Filling it is the warmer's job.
+
+**The buy module stays client-side.** Asking prices are two hours fresh at best
+and a cache entry can be a month old, so a server-rendered "buy it today for"
+would tag a listing that may have sold days ago.
+
+**Three callers must build the same query string**, or every server-rendered
+page misses the cache forever: `queryForCard()` in `lib/card-query.js` (not
+`use-card.js` — that file is `"use client"` and the server can't import it) and
+`cacheKeyFor()` in `lib/cache-key.js`. The failure is invisible — no wrong
+price, just no price, while the warmer keeps writing entries nobody reads.
+
+**The sitemap lists only cards that currently have a price**, because a thin
+page submitted in bulk demotes the good ones with it. Card pages carry a
+**canonical** to the published spelling: the same card is reachable under every
+typo, and without one those compete with each other.
+
+```
+node scripts/build-cardpages.mjs            # rebuild the published set
+node scripts/warm-cardpages.mjs --dry-run   # what needs warming, spends nothing
+node scripts/warm-cardpages.mjs --limit 120 # warm the 120 stalest
+```
+
+Or **Actions → Warm card pages**. It also runs weekly, and that cadence is a
+budget: Starter is 2,000 requests a month shared with live visitors, 455 cards
+cost 455, so weekly-at-120 is one full cycle a month and leaves ~1,500 for
+people actually using the site. **Raise the limit when the plan changes, not
+before.**
 
 ## Measure before adding a pricing rule
 
@@ -328,6 +414,18 @@ is wrong: a missed deploy looks exactly like a bug that didn't take.
   listings (Inventory, the my-listings banner, ListForm) and the whole
   Arbitrage tab. Commission on your own purchases gets the account terminated.
 - **Leave the campaign ID unset until the public page has real visitors.**
+- **Set it on `compfinder-public` only, never on `comp-finder`.** The variable
+  is read once in `packages/core/epn.js`, which both apps share, and
+  `apps/app/.env.local.example` carries the same name. Set on the app it tags
+  QuickSearch's own "Buy one now" rows and the batch comp rows — links the
+  account holder clicks. Separate Vercel projects are what keep this safe; it
+  is one dropdown away from not being.
+
+What it is likely to earn, with the sums, is in `docs/EPN_EXPECTED_RETURN.md`:
+~3p per outbound click, ~£0.0045 per search, so **~740 searches a day for £100
+a month**. One £10 Pro subscriber is worth about 2,200 free searches — the
+number that should settle any trade-off between "more clicks to eBay" and "more
+visitors who find the batch tool".
 
 ## Before the public page goes live
 
@@ -356,14 +454,24 @@ moment strangers can reach it.
       `TURNSTILE_SECRET_KEY` and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` are set** —
       set both or neither, since the secret alone asks for a check the page
       can't solve.
-- [ ] **Set `NEXT_PUBLIC_EPN_CAMPID`** (5339194433). Left unset while we are
-      the only ones clicking, since commission on your own purchases ends the
-      EPN account.
+- [x] **Privacy policy and affiliate disclosure.** Done 2026-08-24,
+      `apps/public/app/privacy/page.js` with an `#affiliate` section, plus the
+      disclosure inline in the home footer rather than only behind a link. The
+      site had none of its own — only the business app's, a different Vercel
+      project — so any link to `/privacy` 404'd. EPN review the live site, so
+      this was blocking the application. **The contact address on it
+      (`privacy@lastcomp.co.uk`) has to actually exist.**
+- [ ] **Set `NEXT_PUBLIC_EPN_CAMPID`** (5339194433), on `compfinder-public`
+      only — see above. Left unset while we are the only ones clicking, since
+      commission on your own purchases ends the EPN account.
+- [ ] **Apply to EPN.** They review a live site with a working disclosure, so
+      this can't happen before the domain does — which means the SoldComps
+      answer below gates the affiliate revenue too, not just the legal question.
 - [ ] **Consent management** (a Google-certified CMP) before any ad code, and
       `ads.txt`, for UK/EEA traffic.
 - [ ] **The SoldComps answer below.** Not optional.
 
-The three that are done are configuration as much as code: `AUDIT_TOKEN` and
+Most of what is done is configuration as much as code: `AUDIT_TOKEN` and
 the two Turnstile keys still have to exist in Vercel, and migration 021 has to
 be run against Supabase, or the pacer logs that it is unreachable and lets
 everything through.
