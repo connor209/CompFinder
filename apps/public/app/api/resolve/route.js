@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createPublicClient } from "@/lib/supabase";
-import { cleanSearchName } from "@compfinder/core/cardname.js";
-import { parseQuery, rankCards, languageOf, looksWeak } from "@/lib/resolve";
+import { parseQuery, rankCards, looksWeak } from "@/lib/resolve";
 import { selectCatalog } from "@/lib/catalog-select";
+import { cardFromRow } from "@/lib/card-query";
 
 // One warning per process if the fuzzy RPC isn't there, rather than one per
 // failed search.
@@ -230,22 +230,14 @@ export async function GET(request) {
     parsed,
     confident,
     fuzzy: !!ranked.fuzzy,
-    candidates: candidates.map(({ row, score }) => ({
-      id: row.cardmarket_id,
-      name: cleanSearchName(row.name, row.game),
-      number: row.collector_number,
-      set: row.expansion,
-      code: row.expansion_code,
-      rarity: row.rarity,
-      game: row.game,
-      // Shown on the picker: a Japanese print of the same card is a different
-      // product at a different price, and the set name alone doesn't say so.
-      language: languageOf(row),
-      // Null until the backfill has run, and null for the sets tcgdex doesn't
-      // index — the picker has to read fine either way, so this is a bonus
-      // rather than a layout the design depends on.
-      image: row.image_small || null,
-      score
-    }))
+    // cardFromRow is shared with /api/suggest, the sitemap and the warmer. The
+    // shape it returns is what the card screen is written against, and `name`
+    // is CLEANED rather than raw — the query, and so the cache key, is built
+    // from it, so a second copy of this mapping would cache-miss forever.
+    // (`language` is for the picker: a Japanese print of the same card is a
+    // different product at a different price and the set name doesn't say so.
+    // `image` is null until the backfill has run and for sets tcgdex doesn't
+    // index, so the picker reads fine without it.)
+    candidates: candidates.map(({ row, score }) => ({ ...cardFromRow(row), score }))
   });
 }

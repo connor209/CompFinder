@@ -16,6 +16,12 @@ import { safeListings } from "./listings.js";
 import { foreignCount } from "./settings.js";
 import { challengeAvailable, ensurePass } from "./turnstile-client.js";
 import { DEFAULT_SOLD_WINDOW } from "./windows.js";
+// Defined in card-query.js, not here: the sitemap, the card page and the
+// warmer all build this same string on the server, and this file is "use
+// client". Re-exported so existing callers are unchanged.
+import { queryForCard } from "./card-query.js";
+
+export { queryForCard };
 
 /**
  * Everything a card page needs, from a query string.
@@ -30,13 +36,6 @@ import { DEFAULT_SOLD_WINDOW } from "./windows.js";
  * The sold window is cached server-side for 24 hours, so the second screen's
  * fetch costs nothing upstream.
  */
-
-/** One card → the search text that finds it. Set name included deliberately:
- *  measured over 30 cards, "Mew ex 232/091" priced at £794 with the set in the
- *  query and £546 without, because eBay returns a different result set. */
-export function queryForCard(card) {
-  return [card.name, card.number || "", card.set || ""].join(" ").replace(/\s+/g, " ").trim();
-}
 
 async function price(query, sold, windowDays, retried = false) {
   const res = await fetch("/api/price", {

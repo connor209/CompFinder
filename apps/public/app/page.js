@@ -67,6 +67,10 @@ export default function Home() {
           Prices from real eBay UK sold listings. Card images from{" "}
           <a className="link" href="https://tcgdex.dev" rel="noopener noreferrer nofollow" target="_blank">TCGdex</a>.
           Not affiliated with eBay, Nintendo, Creatures or The Pok&eacute;mon Company.
+          {" "}Some eBay links are affiliate links &mdash; we may earn a commission at no extra cost to you, and it
+          never changes the prices shown.{" "}
+          <a className="link" href="/privacy">Privacy</a> &middot;{" "}
+          <a className="link" href="/privacy#affiliate">Affiliate disclosure</a>.
         </p>
       </div>
     </main>

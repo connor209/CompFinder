@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import SoldCompsApi from "@compfinder/core/soldcomps.js";
 import { createServiceClient } from "@/lib/supabase";
 import { claimSoldCompsSlot } from "@/lib/soldcomps-pacer";
 import { clientIp } from "@/lib/client-ip";
 import { turnstileEnabled, passIsValid, PASS_COOKIE } from "@/lib/turnstile";
+// The key derivation is shared: a server-rendered card page and the warmer
+// read these same entries without coming through this route, so a second copy
+// here would be a silent, permanent cache miss the moment either was edited.
+import { cacheKeyFor } from "@/lib/cache-key";
+import { normaliseQuery } from "@/lib/card-query";
 import { SOLD_WINDOWS, DEFAULT_SOLD_WINDOW } from "@/lib/windows";
 
 /**
@@ -73,17 +78,6 @@ function isTrustedCaller(request) {
 
 const QUERY_OPTIONS = { ebaySite: "ebay.co.uk", itemLocation: "worldwide" };
 
-/**
- * Cache key. Normalises the query the same way for everyone — lowercased,
- * collapsed whitespace — so "Charizard  ex 199/165" and "charizard ex 199/165"
- * are one cache entry rather than two API calls.
- */
-function cacheKey(query, sold, soldAfterDays) {
-  const normal = String(query).toLowerCase().replace(/\s+/g, " ").trim();
-  return createHash("sha256")
-    .update(`${normal}|${QUERY_OPTIONS.ebaySite}|${sold ? "sold" : "active"}|${soldAfterDays}`)
-    .digest("hex");
-}
 
 export async function POST(request) {
   let body;
@@ -117,7 +111,7 @@ export async function POST(request) {
     return NextResponse.json({ ok: false, error: "Pricing is temporarily unavailable." }, { status: 503 });
   }
 
-  const key = cacheKey(query, sold, soldAfterDays);
+  const key = cacheKeyFor(query, sold, soldAfterDays);
   const ttl = sold ? TTL_SECONDS.sold : TTL_SECONDS.active;
   const freshAfter = new Date(Date.now() - ttl * 1000).toISOString();
 
@@ -213,7 +207,7 @@ export async function POST(request) {
   const { error: writeError } = await supabase.from("soldcomps_cache").upsert(
     {
       cache_key: key,
-      query: query.toLowerCase().replace(/\s+/g, " ").trim(),
+      query: normaliseQuery(query),
       ebay_site: QUERY_OPTIONS.ebaySite,
       sold,
       payload: { comps: parsed.comps, hasNextPage: parsed.hasNextPage, rawItemCount: parsed.rawItemCount },

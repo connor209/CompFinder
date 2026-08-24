@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createPublicClient } from "@/lib/supabase";
-import { cleanSearchName } from "@compfinder/core/cardname.js";
-import { parseQuery, rankCards, languageOf } from "@/lib/resolve";
+import { parseQuery, rankCards } from "@/lib/resolve";
 import { selectCatalog } from "@/lib/catalog-select";
+import { cardFromRow } from "@/lib/card-query";
 
 /**
  * Card typeahead for the public search box. Reads card_catalog with the anon
@@ -96,16 +96,12 @@ export async function GET(request) {
   return NextResponse.json({ ok: true, cards: shape(ranked.candidates.map((c) => c.row)) });
 }
 
+/**
+ * Same shape as /api/resolve, from the same function on purpose: a suggestion
+ * the visitor clicks becomes the query, so a mapping that differed even in
+ * `name` would price a different string from the one the resolver would have
+ * produced for the same card — and hash to a different cache key.
+ */
 function shape(rows) {
-  return rows.map((row) => ({
-    id: row.cardmarket_id,
-    name: cleanSearchName(row.name, row.game),
-    number: row.collector_number,
-    set: row.expansion,
-    code: row.expansion_code,
-    rarity: row.rarity,
-    game: row.game,
-    language: languageOf(row),
-    image: row.image_small || null
-  }));
+  return rows.map(cardFromRow);
 }
