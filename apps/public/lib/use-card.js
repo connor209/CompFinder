@@ -12,6 +12,7 @@ import { groupExclusions } from "./exclusions.js";
 import { conditionBands } from "./condition.js";
 import { variantsPresent } from "./variants.js";
 import { caveatsFor } from "./caveats.js";
+import { safeListings } from "./listings.js";
 import { foreignCount } from "./settings.js";
 import { challengeAvailable, ensurePass } from "./turnstile-client.js";
 import { DEFAULT_SOLD_WINDOW } from "./windows.js";
@@ -175,16 +176,26 @@ export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_
     ? CompFinderPricing.recommend(liveUk, settings, tokens, "active", card.number, card.set)
     : null;
 
-  const listings = ((liveRec && liveRec.included) || [])
-    .map((c) => ({
-      itemPence: c.itemPricePence,
-      postagePence: c.postagePence || 0,
-      totalPence: c.totalPence ?? c.itemPricePence,
-      title: c.title,
-      url: c._source && c._source.url,
-      condition: c.condition && c.condition !== "Unknown" ? c.condition : null
-    }))
-    .sort((a, b) => a.totalPence - b.totalPence);
+  // What survives matching is not yet what we may show. The hero is the
+  // CHEAPEST of these, so a single wrong listing is the headline rather than a
+  // rounding error — see lib/listings.js for the £44.75 Umbreon this fixes.
+  // The floor is measured against the price the page itself is showing, so it
+  // has to be computed before the listings are trimmed to it.
+  const safe = safeListings({
+    candidates: (liveRec && liveRec.included) || [],
+    number: card.number,
+    soldPence: priced.pence,
+    soldUsed: used.length
+  });
+
+  const listings = safe.listings.map((c) => ({
+    itemPence: c.itemPricePence,
+    postagePence: c.postagePence || 0,
+    totalPence: c.totalPence ?? c.itemPricePence,
+    title: c.title,
+    url: c._source && c._source.url,
+    condition: c.condition && c.condition !== "Unknown" ? c.condition : null
+  }));
 
   // The rest of the market, beside the UK figure. Both are real answers to
   // "what's it worth" and they routinely differ by a third — showing only one
@@ -232,6 +243,11 @@ export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_
     sales,
     listings,
     cheapest: listings[0] || null,
+    // Counted, not hidden. "16 listings" turning into "12" with no explanation
+    // reads as the page having found less than it did, and the reason is worth
+    // saying: these were too cheap to be this card.
+    suppressedListings: safe.suppressed,
+    listingFloorPence: safe.floorPence,
     liquidity,
     confidence,
     exclusions: groupExclusions((rec && rec.excluded) || []),

@@ -11,6 +11,6 @@
     "start": "npm run start --workspace apps/app",
     "dev:public": "npm run dev --workspace apps/public",
     "build:public": "npm run build --workspace apps/public",
-    "check": "node scripts/check-language.mjs && node scripts/check-exclusions.mjs && node scripts/check-resolve.mjs && node scripts/check-public-price.mjs && node scripts/check-turnstile.mjs && node scripts/check-liquidity.mjs && node scripts/check-images.mjs && node scripts/check-windows.mjs"
+    "check": "node scripts/check-language.mjs && node scripts/check-exclusions.mjs && node scripts/check-resolve.mjs && node scripts/check-public-price.mjs && node scripts/check-turnstile.mjs && node scripts/check-liquidity.mjs && node scripts/check-images.mjs && node scripts/check-windows.mjs && node scripts/check-listings.mjs"
   }
 }

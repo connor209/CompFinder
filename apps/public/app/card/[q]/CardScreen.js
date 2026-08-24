@@ -388,6 +388,17 @@ function Answer({ query, card, d, pending, days, setDays }) {
                 {d.listings.length} on eBay UK
               </span>
             </div>
+            {/* Said out loud rather than quietly dropped: a count that shrinks
+                with no explanation reads as having found less than we did, and
+                "too cheap to be this card" is the useful half of the answer —
+                it tells someone what they'll see if they go and look. */}
+            {d.suppressedListings > 0 && (
+              <p className="body soft" style={{ margin: "0 0 8px", fontSize: 12 }}>
+                {d.suppressedListings} cheaper {d.suppressedListings === 1 ? "listing is" : "listings are"} hidden
+                {d.listingFloorPence ? <> — under {gbp(d.listingFloorPence)}</> : null}, which is too far below what
+                this card sells for to be the same card. Fakes and wrong printings collect at the bottom of the list.
+              </p>
+            )}
             {d.listings.slice(0, 4).map((l, i) => (
               <a key={l.url || i} className="listing" href={epnLink(l.url, { customId: "buy-row" })}
                  target="_blank" rel={relFor(l.url, "noopener noreferrer")}>
