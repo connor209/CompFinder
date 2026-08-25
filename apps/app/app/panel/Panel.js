@@ -16,6 +16,7 @@ import {
   FILTER_KEYS,
   RETENTION_DAYS
 } from "@/lib/batch-store.js";
+import { buildPool, poolLabel, stickerRows, stickerSummary } from "@/lib/showstock.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
@@ -154,7 +155,7 @@ function buildQueryForItem(item, settings, includeCondition, useFullTitle) {
   return { query, nameTokens, set: null, csvItem: null, cardNumber: numMatch ? numMatch[1].replace(/\s+/g, "") : null };
 }
 
-export default function Panel({ initialSection = "dashboard", initialBatchId = null }) {
+export default function Panel({ initialSection = "dashboard", initialBatchId = null, initialPool = null }) {
   const [pastedText, setPastedText] = useState("");
   const [csvItems, setCsvItems] = useState(null);
   const [csvSummary, setCsvSummary] = useState("");
@@ -258,6 +259,21 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // the same file back with only the prices changed.
   const [csvRaw, setCsvRaw] = useState(null); // { text, name }
 
+  // The show pool named by ?pool=show — the cards currently checked out to a
+  // show, offered for pricing. Loaded, then WAITED ON: a pool of 200 cards is
+  // 200 SoldComps requests, and a screen that spent them on mount would spend
+  // them again on every refresh.
+  const [pool, setPool] = useState(null); // { items, skipped, label } | null
+  const [poolLoading, setPoolLoading] = useState(false);
+  const [poolError, setPoolError] = useState("");
+  // The pool the results on screen were priced from, so the sticker panel and
+  // the saved run's label both know which trip this was. A ref as well as
+  // state: runBatchInner reads it in the same tick it is set.
+  const [poolRun, setPoolRun] = useState(null);
+  const poolRunRef = useRef(null);
+  const [stickerNotice, setStickerNotice] = useState("");
+  const [applyingStickers, setApplyingStickers] = useState(false);
+
   // The saved run the results on screen came from — set both when one is
   // re-opened and when a fresh run has just been saved, so the screen can say
   // which it is and a later active-listing check updates the right record.
@@ -319,6 +335,11 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       setCsvSummary("");
       applyFilters(loaded.batch.filters);
       setOpenBatch(loaded.batch);
+      // A saved pool run brings its sticker panel back with it. That is the
+      // whole reason the show it was priced for is stored: re-opening the run
+      // at the table days later is how a lost label gets reprinted.
+      setPoolRun(loaded.batch.pool_name || null);
+      poolRunRef.current = loaded.batch.pool_name || null;
       setStatus(
         `Re-opened ${loaded.batch.label} — priced ${new Date(loaded.batch.created_at).toLocaleString()}, and showing exactly what it was priced from.`
       );
@@ -346,7 +367,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const liveRef = useRef(null);
   const skipLiveWrite = useRef(false);
   useEffect(() => {
-    liveRef.current = { results, activeByIndex, csvRaw, csvSummary, status, statusIsError, openBatch };
+    liveRef.current = { results, activeByIndex, csvRaw, csvSummary, status, statusIsError, openBatch, poolRun };
   });
   const writeLive = useCallback(() => {
     const live = liveRef.current;
@@ -360,7 +381,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           csvSummary: live.csvSummary,
           status: live.status,
           statusIsError: live.statusIsError,
-          openBatch: live.openBatch
+          openBatch: live.openBatch,
+          poolRun: live.poolRun
         })
       );
     } catch {
@@ -386,6 +408,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       openSavedBatch(initialBatchId);
       return;
     }
+    // A pool in the URL is a deliberate "price this set", same as an id is a
+    // deliberate "re-open that run" — restoring the last thing this tab looked
+    // at over the top of it would bury what was just asked for.
+    if (initialPool) return;
     let payload = null;
     try {
       payload = JSON.parse(sessionStorage.getItem(LIVE_BATCH_KEY) || "null");
@@ -403,7 +429,51 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       setStatusIsError(!!payload.statusIsError);
     }
     if (payload.openBatch) setOpenBatch(payload.openBatch);
-  }, [stream, initialBatchId, openSavedBatch]);
+    if (payload.poolRun) {
+      setPoolRun(payload.poolRun);
+      poolRunRef.current = payload.poolRun;
+    }
+  }, [stream, initialBatchId, initialPool, openSavedBatch]);
+
+  // Load the show pool: every card still checked out. The Show Desk owns this
+  // set — nothing here decides what is in it, which is why re-running the pool
+  // after packing another box picks the new cards up for free.
+  const poolRequested = useRef(false);
+  useEffect(() => {
+    if (stream !== "batch" || initialPool !== "show" || poolRequested.current) return;
+    // Latched before the first await, not after: without it a failed load
+    // leaves `pool` null and `poolLoading` back to false, which is the exact
+    // state this effect fires on — it would retry forever.
+    poolRequested.current = true;
+    let cancelled = false;
+    (async () => {
+      setPoolLoading(true);
+      setPoolError("");
+      try {
+        const supabase = createClient();
+        const { data, error } = await supabase
+          .from("stock_checkouts")
+          .select("id,sku,title,event,stack_name,sticker_pence")
+          .is("resolved_at", null)
+          .order("checked_out_at", { ascending: true });
+        if (error) throw error;
+        if (cancelled) return;
+        const { items, skipped } = buildPool(data || []);
+        setPool({ items, skipped, label: poolLabel(data || []) });
+      } catch (err) {
+        if (!cancelled) {
+          setPoolError(
+            /stock_checkouts|does not exist|schema cache/i.test(err.message || "")
+              ? "The show desk isn't set up in Supabase yet — migration 016 hasn't been applied."
+              : `Couldn't load the show pool: ${err.message}`
+          );
+        }
+      } finally {
+        if (!cancelled) setPoolLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [stream, initialPool]);
 
   /** Clear the screen for a fresh run, and stop the one being cleared from
    *  being written back out on the way to the empty page. */
@@ -419,6 +489,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     setBatchNotice("");
     setStatus("");
     setStatusIsError(false);
+    setPoolRun(null);
+    poolRunRef.current = null;
+    setStickerNotice("");
     router.push("/panel/batch", { scroll: false });
   }, [router]);
 
@@ -614,7 +687,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     }
   }
 
-  async function runBatch(items) {
+  async function runBatch(items, { poolName = null } = {}) {
     if (!items || items.length === 0) {
       setStatus("Paste at least one title, or upload a CSV, first.");
       setStatusIsError(true);
@@ -625,6 +698,11 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     skipLiveWrite.current = false;
     setOpenBatch(null);
     setBatchNotice("");
+    setStickerNotice("");
+    // Set the ref as well as the state: runBatchInner saves the run at the end
+    // of this same call, and would otherwise read the previous render's value.
+    poolRunRef.current = poolName;
+    setPoolRun(poolName);
     try {
       await runBatchInner(items);
     } finally {
@@ -897,6 +975,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         activeByIndex: activeLocal,
         filters: currentFilters(),
         csvRaw,
+        poolName: poolRunRef.current,
         status
       });
       if (!batch) return;
@@ -947,6 +1026,104 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     URL.revokeObjectURL(url);
   }
 
+  /**
+   * Write the run's sticker prices back onto the open checkouts they came
+   * from, so the Show Desk can price a card at the table and the label export
+   * has one number to print.
+   *
+   * Rows are matched on SKU, never on order: the results list gets filtered
+   * and re-sorted on screen, and a sticker landing on the wrong card is a card
+   * sold for the wrong money. Held rows are skipped entirely rather than
+   * written as null — a card that had a sticker from an earlier run keeps it,
+   * instead of losing it to a run that happened to price it badly.
+   *
+   * This one is not fire-and-forget. The whole point is that the number is
+   * still there at the show, and a silent failure would only surface with a
+   * customer standing in front of you.
+   */
+  async function applyStickers() {
+    const rows = stickerRows(results).filter((r) => !r.held && r.sku);
+    if (rows.length === 0) return;
+    setApplyingStickers(true);
+    setStickerNotice("Saving sticker prices to the show desk…");
+    try {
+      const supabase = createClient();
+      const { data: open, error } = await supabase
+        .from("stock_checkouts")
+        .select("id,sku")
+        .is("resolved_at", null);
+      if (error) throw error;
+
+      const bySku = new Map();
+      for (const c of open || []) {
+        if (c.sku) bySku.set(String(c.sku).toLowerCase(), c.id);
+      }
+      const now = new Date().toISOString();
+      let saved = 0;
+      const missing = [];
+      for (const r of rows) {
+        const id = bySku.get(r.sku.toLowerCase());
+        if (!id) { missing.push(r.sku); continue; }
+        const { error: upErr } = await supabase
+          .from("stock_checkouts")
+          .update({
+            sticker_pence: r.stickerPence,
+            sticker_set_at: now,
+            sticker_batch_id: openBatch?.id || null
+          })
+          .eq("id", id);
+        if (upErr) throw upErr;
+        saved += 1;
+      }
+      setStickerNotice(
+        `Saved ${saved} sticker price${saved === 1 ? "" : "s"} to the show desk.` +
+          (missing.length
+            ? ` ${missing.length} card${missing.length === 1 ? " was" : "s were"} no longer checked out (${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}) — checked back in since this run.`
+            : "")
+      );
+    } catch (err) {
+      setStickerNotice(
+        /sticker_pence|does not exist|schema cache/i.test(err.message || "")
+          ? "Sticker prices could NOT be saved — migration 024 hasn't been applied in Supabase yet. They're still on screen, and the CSV below still works."
+          : `Sticker prices could NOT be saved: ${err.message}`
+      );
+    } finally {
+      setApplyingStickers(false);
+    }
+  }
+
+  /**
+   * The sticker rows as a CSV. Interim, until the Nimbot label template lands
+   * — the columns below are ours, not the printer's, so this is something you
+   * can map by hand in the label app rather than the drop-in import that
+   * replaces it.
+   *
+   * Two things it already gets right, because both are unrecoverable once a
+   * label is printed: a BOM, so £ survives being opened in Excel, and a card
+   * number that Excel cannot mistake for a date — see repairExcelDateMangling
+   * in lib/carduploader.js for the bare "4/99" -> "Apr-99" case this avoids by
+   * never shipping a number in a cell of its own.
+   */
+  function downloadStickerCsv() {
+    const rows = stickerRows(results).filter((r) => !r.held);
+    if (rows.length === 0) return;
+    const esc = (v) => {
+      const t = v == null ? "" : String(v);
+      return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    const lines = [["SKU", "Card", "Price"].join(",")];
+    for (const r of rows) {
+      lines.push([esc(r.sku), esc(r.title), `£${(r.stickerPence / 100).toFixed(2)}`].join(","));
+    }
+    const blob = new Blob(["\ufeff" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `stickers-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -973,6 +1150,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       return matchesSearch && matchesConfidence && matchesReason && matchesStock;
     });
   const inStockCount = known ? results.filter((r) => knownFor(r)?.stock).length : 0;
+
+  // Sticker rows for a pool run. Derived at render from the same results the
+  // table shows, through the one function that owns the rounding — the number
+  // on screen, the number written to the show desk and the number in the CSV
+  // are the same number by construction, not by three callers agreeing.
+  const stickers = poolRun ? stickerRows(results) : [];
+  const stickerCounts = stickerSummary(stickers);
 
   /** Hand back the uploaded CardUploader CSV with our prices in it. */
   function exportEbayCsv() {
@@ -1114,6 +1298,50 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
 
       <SavedBatches onOpen={goToBatch} refreshNonce={batchesNonce} openId={openBatch?.id || null} />
 
+      {initialPool === "show" ? (
+        <section className="panel">
+          <div className="panel-head">
+            <span className="eyebrow">Show pool</span>
+            {pool ? <span className="badge2">{pool.items.length} away</span> : null}
+          </div>
+          {poolLoading ? <p className="hint hint-small">Reading what&apos;s checked out…</p> : null}
+          {poolError ? <p className="hint hint-small" style={{ color: "var(--bad-ink)" }}>{poolError}</p> : null}
+          {pool && !poolLoading ? (
+            pool.items.length === 0 ? (
+              <p className="dd-empty">
+                Nothing is checked out. Pack for the show on the Show desk first — this prices whatever is away.
+              </p>
+            ) : (
+              <>
+                <p className="hint">
+                  Every card checked out to <b>{pool.label}</b>. Pricing them costs{" "}
+                  <b>{pool.items.length}</b> SoldComps request{pool.items.length === 1 ? "" : "s"} and takes
+                  roughly {Math.max(1, Math.round((pool.items.length * 3) / 60))} minute
+                  {Math.max(1, Math.round((pool.items.length * 3) / 60)) === 1 ? "" : "s"}. The run saves
+                  itself, and re-opening it later spends nothing.
+                </p>
+                {pool.skipped.length > 0 ? (
+                  <p className="hint hint-small">
+                    {pool.skipped.length} checked-out card{pool.skipped.length === 1 ? " has" : "s have"} no
+                    title to search on and {pool.skipped.length === 1 ? "is" : "are"} left out
+                    {pool.skipped.some((k) => k.sku) ? ` (${pool.skipped.map((k) => k.sku).filter(Boolean).join(", ")})` : ""}.
+                  </p>
+                ) : null}
+                <div className="row">
+                  <button
+                    className="btn btn-primary"
+                    disabled={running}
+                    onClick={() => runBatch(pool.items, { poolName: pool.label })}
+                  >
+                    {running ? "Running…" : `Price all ${pool.items.length}`}
+                  </button>
+                </div>
+              </>
+            )
+          ) : null}
+        </section>
+      ) : null}
+
       <section className="panel">
         <div className="panel-head"><span className="eyebrow">Search</span></div>
         <p className="hint">Paste titles OR upload a CardUploader CSV export below.</p>
@@ -1225,6 +1453,55 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       </section>
 
       {status && <div className={statusIsError ? "compfinder-error" : ""} id="compfinder-status">{status}</div>}
+
+      {poolRun && stickers.length > 0 ? (
+        <section className="panel">
+          <div className="panel-head">
+            <span className="eyebrow">Sticker prices — {poolRun}</span>
+            <span className="badge2">
+              {stickerCounts.priced} priced{stickerCounts.held ? ` · ${stickerCounts.held} held` : ""}
+            </span>
+          </div>
+          <p className="hint">
+            Cash-rounded from the recommended price — £1 steps to £20, £5 to £100, £10 above — because
+            nobody hands 50p pieces across a table. A thin price is held back rather than printed: a
+            sticker has no room for the caveat the screen would show next to it.
+          </p>
+          <div className="stack-list">
+            {stickers.map((r, i) => (
+              <div className="ps-row" key={i}>
+                <span className="stack-sku">{r.sku || "—"}</span>
+                <span className="stack-title">{r.title}</span>
+                {r.held ? (
+                  <span className="hint-small" style={{ color: "var(--warn-ink)", flex: "none" }}>
+                    held — {r.reason}
+                  </span>
+                ) : (
+                  <>
+                    <span className="hint-small" style={{ color: "var(--ink-faint)", flex: "none" }}>
+                      eBay £{(r.recommendedPence / 100).toFixed(2)}
+                    </span>
+                    <span className="sd-price">£{(r.stickerPence / 100).toFixed(2)}</span>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="row" style={{ marginTop: 10 }}>
+            <button
+              className="btn btn-primary"
+              disabled={applyingStickers || stickerCounts.priced === 0}
+              onClick={applyStickers}
+            >
+              {applyingStickers ? "Saving…" : `Save ${stickerCounts.priced} sticker price${stickerCounts.priced === 1 ? "" : "s"} to the show desk`}
+            </button>
+            <button className="btn btn-ghost" disabled={stickerCounts.priced === 0} onClick={downloadStickerCsv}>
+              ⬇ Sticker CSV (interim)
+            </button>
+          </div>
+          {stickerNotice ? <p className="hint hint-small sb-notice">{stickerNotice}</p> : null}
+        </section>
+      ) : null}
 
       <section className="panel results-panel">
         <div className="panel-head">

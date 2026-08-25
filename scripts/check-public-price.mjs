@@ -27,14 +27,20 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCANNED = ["apps/public/app", "apps/public/lib", "scripts"];
 const SKIP_DIRS = new Set([".next", "node_modules"]);
 
-// Two files are exempt wholesale. This one has to name the field in code to
-// look for it. check-batchsave.mjs asserts the round trip of a saved run from
-// the BUSINESS app's batch screen, where a recommended listing price is the
-// right answer and the whole point of the screen — it never reads anything
-// under apps/public. Everywhere else may DISCUSS finalPence in a comment —
-// the explanation of why we don't use it is worth keeping — but must not read
-// it.
-const EXEMPT = new Set(["scripts/check-public-price.mjs", "scripts/check-batchsave.mjs"]);
+// Three files are exempt wholesale. This one has to name the field in code to
+// look for it. The other two assert BUSINESS-app behaviour, where a
+// recommended listing price is the right answer and the whole point of the
+// screen, and neither reads anything under apps/public: check-batchsave.mjs
+// covers the round trip of a saved batch run, and check-showstock.mjs covers
+// the show-table sticker, which is derived from finalPence precisely because
+// it is a price to SELL at rather than a valuation. Everywhere else may
+// DISCUSS finalPence in a comment — the explanation of why we don't use it is
+// worth keeping — but must not read it.
+const EXEMPT = new Set([
+  "scripts/check-public-price.mjs",
+  "scripts/check-batchsave.mjs",
+  "scripts/check-showstock.mjs"
+]);
 
 /** Strips line comments and whole-line block-comment bodies. */
 function codeOnly(line) {
