@@ -524,3 +524,31 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
 .changelist { margin:0; padding-left:18px; }
 .changelist li { margin:0 0 9px; }
 .changelist li:last-child { margin-bottom:0; }
+
+/* ---------------------------------------------------------------------------
+   Cold-card loading. The bar is INDETERMINATE on purpose: nothing streams out
+   of the price call, so there is no percentage to draw that wouldn't be made
+   up. It says "working", the line above it says what on.
+--------------------------------------------------------------------------- */
+.progress { display:grid; gap:11px; }
+.progress .pbar {
+  display:block; position:relative; overflow:hidden;
+  height:3px; border-radius:2px; background:var(--line);
+}
+.progress .pfill {
+  position:absolute; top:0; bottom:0; left:0; width:40%; border-radius:2px;
+  background:linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation:pslide 1.3s ease-in-out infinite;
+}
+@keyframes pslide {
+  0%   { transform:translateX(-110%); }
+  100% { transform:translateX(360%); }
+}
+/* No travelling bar, but still visibly not-finished: the track fills flat and
+   the words carry the whole story. */
+@media (prefers-reduced-motion: reduce) {
+  .progress .pfill {
+    animation:none; width:100%; opacity:.4;
+    background:var(--accent);
+  }
+}

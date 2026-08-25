@@ -11,7 +11,7 @@ import { useCard, queryForCard } from "@/lib/use-card";
 import { SOLD_WINDOWS, cardHref } from "@/lib/windows";
 import { VARIANTS, variantQueryTerms } from "@/lib/variants";
 import TrendChart from "../../TrendChart";
-import { CardArt, Crumb, gbp } from "../../ui";
+import { CardArt, Crumb, SearchProgress, gbp } from "../../ui";
 
 function when(iso) {
   const d = new Date(iso);
@@ -42,7 +42,7 @@ export default function CardScreen({ query, days, initial = null, set = null, si
       <main>
         <Crumb label={query} />
         <div className="screen">
-          <p className="body"><span className="spinner" /> &nbsp;Reading the last {days} days of sold listings…</p>
+          <SearchProgress stage={state.stage} days={days} />
         </div>
       </main>
     );

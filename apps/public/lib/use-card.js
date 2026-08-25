@@ -64,7 +64,7 @@ async function price(query, sold, windowDays, retried = false) {
  * has to be in the HTML that leaves the server.
  */
 export function seeded(initial, query, windowDays) {
-  if (!initial || !initial.card || !initial.sold) return { status: "loading", query };
+  if (!initial || !initial.card || !initial.sold) return { status: "loading", query, stage: "resolving" };
   const card = initial.card;
   return {
     status: "ready",
@@ -111,7 +111,7 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
       return () => { alive = false; };
     }
 
-    setState({ status: "loading", query });
+    setState({ status: "loading", query, stage: "resolving" });
 
     (async () => {
       // A card the visitor clicked in the dropdown was already resolved once,
@@ -144,6 +144,13 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
 
       const card = resolved || { name: query, q: query };
       const searchText = resolved ? queryForCard(resolved) : query;
+
+      // The loading copy advances here rather than on a timer, because this is
+      // a real event: the card is settled and the only thing left is the
+      // fetch. A card handed over by the dropdown reaches it immediately,
+      // which is correct — nothing was resolved, so nothing should claim to
+      // have been.
+      if (alive) setState({ status: "loading", query, stage: "pricing" });
 
       // BOTH REQUESTS GO OUT AT ONCE, and the price renders on the sold one.
       //

@@ -26,6 +26,7 @@ import {
   SOLD_WINDOWS, DEFAULT_SOLD_WINDOW, windowFromParam, cardHref,
   deriveWindow
 } from "../apps/public/lib/windows.js";
+import { STEP_MS, RESOLVING, pricingSteps, stepFor } from "../apps/public/lib/progress-steps.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
@@ -34,6 +35,12 @@ let failed = 0;
 function eq(label, got, want) {
   if (got !== want) {
     console.error(`  ${label}\n    got  ${JSON.stringify(got)}\n    want ${JSON.stringify(want)}`);
+    failed += 1;
+  }
+}
+function ok(label, cond) {
+  if (!cond) {
+    console.error(`  ${label}`);
     failed += 1;
   }
 }
@@ -113,7 +120,9 @@ for (const rel of ["apps/public/app/card/[q]/CardScreen.js",
 // The copy on both screens has to be generated from the window on screen, not
 // from a number typed into a sentence.
 for (const rel of ["apps/public/app/card/[q]/CardScreen.js",
-                   "apps/public/app/card/[q]/workings/Workings.js"]) {
+                   "apps/public/app/card/[q]/workings/Workings.js",
+                   "apps/public/lib/progress-steps.js",
+                   "apps/public/app/ui.js"]) {
   for (const [i, line] of read(rel).split("\n").entries()) {
     const code = line.trim();
     if (code.startsWith("//") || code.startsWith("*")) continue;
@@ -123,6 +132,32 @@ for (const rel of ["apps/public/app/card/[q]/CardScreen.js",
     }
   }
 }
+
+// The loading copy names the window, so it has to be BUILT from it. Every
+// other line is fixed text; that one is the only place a stale 90 could hide.
+for (const w of SOLD_WINDOWS) {
+  const [first] = pricingSteps(w);
+  ok(`the first pricing line names ${w} days`, first.includes(String(w)));
+  for (const other of SOLD_WINDOWS) {
+    if (other !== w) {
+      ok(`the ${w}-day line does not also say ${other}`, !first.includes(String(other)));
+    }
+  }
+}
+
+// Before the resolver answers there is nothing to say about sales, and after
+// the last line there is nothing further to say at all — a long fetch should
+// look like it is still working, not like it has looped back to the start.
+eq("stage 'resolving' shows the resolving line", stepFor("resolving", 90, 0), RESOLVING);
+eq("stage 'resolving' ignores the clock", stepFor("resolving", 90, 99 * STEP_MS), RESOLVING);
+const STEPS = pricingSteps(90);
+for (const [i, want] of STEPS.entries()) {
+  eq(`pricing line ${i + 1} at ${i * STEP_MS}ms`, stepFor("pricing", 90, i * STEP_MS + 1), want);
+}
+eq("the last line holds rather than cycling",
+   stepFor("pricing", 90, 500 * STEP_MS), STEPS[STEPS.length - 1]);
+eq("a negative clock still starts at the first line",
+   stepFor("pricing", 90, -5000), STEPS[0]);
 
 // --- the shorter window is taken out of the longer one ----------------------
 // Thirty days of sales sit inside ninety days of sales, and the warmer only
@@ -175,4 +210,4 @@ if (failed) {
   console.error(`\n${failed} sold-window case(s) failed.`);
   process.exit(1);
 }
-console.log(`windows: ${PARAM_CASES.length} param cases + URL round trip, one list, no local window state, and 30d derived from 90d unless capped.`);
+console.log(`windows: ${PARAM_CASES.length} param cases + URL round trip, one list, no local window state, 30d derived from 90d unless capped, and the loading copy built from the window.`);

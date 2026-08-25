@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { STEP_MS, stepFor } from "@/lib/progress-steps";
+import { DEFAULT_SOLD_WINDOW } from "@/lib/windows";
 
 export const gbp = (pence) => (pence == null ? "—" : CompFinderPricing.toPoundsStr(pence));
 
@@ -62,6 +64,33 @@ export function Crumb({ back = "/", label, scope = null }) {
       <a className="back" href={back} aria-label="Back">←</a>
       <span className="q">{label}</span>
       {scope ? <span className="scope">{scope}</span> : null}
+    </div>
+  );
+}
+
+/**
+ * The cold-card loading state: an indeterminate bar and a line that advances.
+ *
+ * `stage` comes from useCard and flips on a REAL event (the resolver
+ * returning), which is why the first line can promise to be finding the card
+ * and be telling the truth. Within a stage the lines are timed, because
+ * there is nothing finer to hang them on — see lib/progress-steps.js.
+ */
+export function SearchProgress({ stage = "resolving", days = DEFAULT_SOLD_WINDOW }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  // Restart the clock when the stage changes, so "pricing" begins at its own
+  // first line rather than wherever the resolver happened to leave it.
+  useEffect(() => {
+    setElapsed(0);
+    const id = setInterval(() => setElapsed((ms) => ms + STEP_MS), STEP_MS);
+    return () => clearInterval(id);
+  }, [stage]);
+
+  return (
+    <div className="progress" role="status" aria-live="polite">
+      <p className="body">{stepFor(stage, days, elapsed)}</p>
+      <span className="pbar" aria-hidden="true"><span className="pfill" /></span>
     </div>
   );
 }
