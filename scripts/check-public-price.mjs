@@ -27,10 +27,14 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCANNED = ["apps/public/app", "apps/public/lib", "scripts"];
 const SKIP_DIRS = new Set([".next", "node_modules"]);
 
-// Only this file is exempt wholesale: it has to name the field in code to
-// look for it. Everywhere else may DISCUSS finalPence in a comment — the
-// explanation of why we don't use it is worth keeping — but must not read it.
-const SELF = "scripts/check-public-price.mjs";
+// Two files are exempt wholesale. This one has to name the field in code to
+// look for it. check-batchsave.mjs asserts the round trip of a saved run from
+// the BUSINESS app's batch screen, where a recommended listing price is the
+// right answer and the whole point of the screen — it never reads anything
+// under apps/public. Everywhere else may DISCUSS finalPence in a comment —
+// the explanation of why we don't use it is worth keeping — but must not read
+// it.
+const EXEMPT = new Set(["scripts/check-public-price.mjs", "scripts/check-batchsave.mjs"]);
 
 /** Strips line comments and whole-line block-comment bodies. */
 function codeOnly(line) {
@@ -47,7 +51,7 @@ function walk(dir) {
     if (statSync(full).isDirectory()) { walk(full); continue; }
     if (!/\.(js|mjs)$/.test(entry)) continue;
     const rel = relative(ROOT, full);
-    if (rel === SELF) continue;
+    if (EXEMPT.has(rel)) continue;
     readFileSync(full, "utf8").split("\n").forEach((line, i) => {
       if (/finalPence/.test(codeOnly(line))) {
         offenders.push(`${rel}:${i + 1}  ${line.trim().slice(0, 88)}`);

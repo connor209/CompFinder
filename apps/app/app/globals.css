@@ -1188,6 +1188,26 @@ html, body { overflow-x: clip; max-width: 100%; }
 .inv-upd.err { color:var(--bad-ink); }
 .inv-upd.busy { color:var(--ink-soft); }
 
+/* Saved batch runs — the list, and the banner over a re-opened one */
+.sb-list { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.sb-row { display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); }
+.sb-row-on { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.sb-main { display:flex; flex-direction:column; gap:2px; min-width:0; flex:1; }
+.sb-label { font-weight:600; font-size:14px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sb-meta { font-family:var(--font-mono); font-size:11.5px; color:var(--ink-faint); }
+.sb-left { font-size:11.5px; color:var(--ink-faint); white-space:nowrap; }
+.sb-acts { display:flex; gap:6px; flex-shrink:0; }
+.sb-acts .btn { padding:6px 12px; font-size:13px; }
+.sb-open { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:10px 14px; margin-bottom:12px; border:1px solid color-mix(in srgb,var(--accent) 45%,var(--line)); border-radius:12px; background:var(--accent-soft); }
+.sb-open-t { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.sb-open-t .hint-small { margin-top:0; }
+.sb-notice { margin-bottom:12px; }
+
+@media (max-width: 640px) {
+  .sb-row { flex-wrap:wrap; }
+  .sb-left { order:3; }
+}
+
 /* Batch results — card view */
 .view-toggle { display:inline-flex; background:var(--surface-sink); border:1px solid var(--line); border-radius:var(--radius-pill); padding:3px; gap:2px; }
 .view-toggle button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:650; font-size:12.5px; padding:6px 12px; border-radius:var(--radius-pill); cursor:pointer; }

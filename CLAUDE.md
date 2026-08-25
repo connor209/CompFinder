@@ -46,7 +46,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs fourteen table tests, no framework, non-zero exit on failure:
+`npm run check` runs fifteen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -72,6 +72,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   the sub-IDs, that the slot prefix still selects what it always did, that
   `epn.js` passes them through unrewritten, and a grep against hand-writing
   one at a call site.
+- `scripts/check-batchsave.mjs` — what survives saving and re-opening a batch
+  run: every comp, every exclusion reason, the asking prices on the right card,
+  and a grep against a second definition of the saved shape.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -491,6 +494,55 @@ disagreed with the figure above it.
 condition field out of the listing. The mock also shows "sold at auction",
 "14 bids" and "private seller"; SoldComps returns none of those, so they are
 absent rather than guessed.
+
+## A batch run is saved, and a saved run is frozen
+
+A run of the app's Batch screen costs one SoldComps request per card and
+several minutes. It used to live only in React state, and **a slug change
+remounts the panel** — so opening a deep dive from a result (`/panel/search`)
+threw the whole run away. Fifty-nine cards, priced, gone on one click, with no
+way back except paying for all fifty-nine again.
+
+`price_checks` was never the answer to that. It keeps one flat row per priced
+card — title, query, price, confidence, two counts — deliberately without the
+comps, because the History page is a plain SELECT. It says what we priced a
+card at. It cannot say why.
+
+Migration 023 adds `price_batches` + `price_batch_items`: the run, with the
+**full recommendation including `included[]` and `excluded[]`**, the filters it
+ran under, and the CardUploader CSV verbatim so the eBay upload export still
+works days later. Both tables are named in exactly one file,
+`apps/app/lib/batch-store.js`, and `check-batchsave.mjs` greps to keep it that
+way.
+
+- **Re-opening a run spends nothing upstream.** The comps are the ones it was
+  priced from, not a fresh lookup — that is what makes it a record of a price
+  decision rather than a live quote, and it is why re-opening is free.
+- **A saved run is re-opened by URL** — `/panel/batch/<id>`. In the URL rather
+  than in state precisely because state is the thing that gets lost: a run
+  identified by its URL survives the next deep dive and comes back on the Back
+  button.
+- **There are two copies and one serialiser.** Supabase is the saved run;
+  `sessionStorage` under `cf-batch-live` covers the gap between finishing a run
+  and it being saved, and the case where migration 023 hasn't been applied.
+  Both go through `batchRows()`/`restoreResults()`, because two serialisers
+  would disagree eventually and the disagreement is invisible — a run that
+  re-opens with its prices but not the comps behind them still looks fine.
+- **A comp is stored cut down to what the results screen renders** (price,
+  postage, sold date, listing link, location, exclusion reason). A run is
+  around a megabyte of comps as it is.
+- **Retention is 30 days**, set by `RETENTION_DAYS` in `batch-store.js` and by
+  the column default in migration 023 — the check asserts they agree. The rows
+  are fat and their value decays fast: a run is a working document you list off
+  over a few days, not an archive. Expired runs are swept when the saved-runs
+  list loads, rather than by a cron that can quietly stop working.
+- **A save that fails says so.** Everything else on this screen is
+  fire-and-forget; this isn't, because the promise is that the run can be got
+  back and the failure would otherwise only surface at the moment it was needed.
+
+Migration 023 has to be applied in Supabase. Until it is, the panel says so on
+the run it couldn't save, and the sessionStorage copy still carries the run
+across the panel — but not across a reload.
 
 ## Merging to main deploys — batch it
 

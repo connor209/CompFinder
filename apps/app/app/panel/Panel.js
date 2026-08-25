@@ -7,6 +7,15 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
+import {
+  saveBatch,
+  loadBatch,
+  batchRows,
+  restoreResults,
+  updateItemActive,
+  FILTER_KEYS,
+  RETENTION_DAYS
+} from "@/lib/batch-store.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
@@ -22,12 +31,17 @@ import Accounts from "./Accounts";
 import Browse from "./Browse";
 import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
+import SavedBatches from "./SavedBatches";
 import MarketLinks from "./MarketLinks";
 import { Icon } from "./icons";
 import ThemeSeg from "./ThemeSeg";
 import SkinPicker from "./SkinPicker";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
+// The run currently on screen, kept for this browser tab. Saved runs live in
+// Supabase (migration 023); this is only what covers the gap between finishing
+// a run and it being saved, and the case where saving isn't available at all.
+const LIVE_BATCH_KEY = "cf-batch-live";
 
 // Section <-> URL slug mapping so each stream has its own /panel/<slug>.
 const STREAM_SLUG = {
@@ -140,7 +154,7 @@ function buildQueryForItem(item, settings, includeCondition, useFullTitle) {
   return { query, nameTokens, set: null, csvItem: null, cardNumber: numMatch ? numMatch[1].replace(/\s+/g, "") : null };
 }
 
-export default function Panel({ initialSection = "dashboard" }) {
+export default function Panel({ initialSection = "dashboard", initialBatchId = null }) {
   const [pastedText, setPastedText] = useState("");
   const [csvItems, setCsvItems] = useState(null);
   const [csvSummary, setCsvSummary] = useState("");
@@ -244,7 +258,169 @@ export default function Panel({ initialSection = "dashboard" }) {
   // the same file back with only the prices changed.
   const [csvRaw, setCsvRaw] = useState(null); // { text, name }
 
+  // The saved run the results on screen came from — set both when one is
+  // re-opened and when a fresh run has just been saved, so the screen can say
+  // which it is and a later active-listing check updates the right record.
+  const [openBatch, setOpenBatch] = useState(null);
+  const [openingBatch, setOpeningBatch] = useState(false);
+  const [batchNotice, setBatchNotice] = useState("");
+  const [batchesNonce, setBatchesNonce] = useState(0);
+
   const settings = CompFinderPricing.DEFAULT_SETTINGS;
+
+  const currentFilters = () => ({
+    ebaySite,
+    itemLocation,
+    itemCondition,
+    soldWithin,
+    minPrice,
+    maxPrice,
+    includeCondition,
+    useFullTitle,
+    fetchActiveAlways
+  });
+
+  // A saved run is restored together with the filters it ran under, so the
+  // controls above the results never describe something other than the results
+  // below them — a 30-day window on screen over a 90-day run is a quiet lie.
+  const applyFilters = useCallback((filters) => {
+    if (!filters) return;
+    const setters = {
+      ebaySite: setEbaySite,
+      itemLocation: setItemLocation,
+      itemCondition: setItemCondition,
+      soldWithin: setSoldWithin,
+      minPrice: setMinPrice,
+      maxPrice: setMaxPrice,
+      includeCondition: setIncludeCondition,
+      useFullTitle: setUseFullTitle,
+      fetchActiveAlways: setFetchActiveAlways
+    };
+    for (const key of FILTER_KEYS) {
+      if (filters[key] != null && setters[key]) setters[key](filters[key]);
+    }
+  }, []);
+
+  /** Load a saved run into the results screen. Costs nothing upstream: the
+   *  comps are the ones it was priced from, frozen, not a fresh lookup. */
+  const openSavedBatch = useCallback(async (id) => {
+    setOpeningBatch(true);
+    setBatchNotice("");
+    try {
+      const loaded = await loadBatch(createClient(), id);
+      if (!loaded) {
+        setBatchNotice("That run is no longer saved — it may have passed its keep-by date.");
+        return;
+      }
+      setResults(loaded.results);
+      setActiveByIndex(loaded.activeByIndex);
+      setCsvRaw(loaded.batch.csv_text ? { text: loaded.batch.csv_text, name: loaded.batch.csv_name || "batch.csv" } : null);
+      setCsvItems(null);
+      setCsvSummary("");
+      applyFilters(loaded.batch.filters);
+      setOpenBatch(loaded.batch);
+      setStatus(
+        `Re-opened ${loaded.batch.label} — priced ${new Date(loaded.batch.created_at).toLocaleString()}, and showing exactly what it was priced from.`
+      );
+      setStatusIsError(false);
+    } catch (err) {
+      setBatchNotice(`Could not open that run: ${err.message}`);
+    } finally {
+      setOpeningBatch(false);
+    }
+  }, [applyFilters]);
+
+  // Re-opening pushes /panel/batch/<id> rather than loading in place: a slug
+  // change remounts this component, so putting the id in the URL is what makes
+  // a re-opened run survive the NEXT deep dive as well.
+  const goToBatch = useCallback((id) => {
+    router.push(`/panel/batch/${id}`, { scroll: false });
+  }, [router]);
+
+  // The live copy of the current run, kept across the remount that navigation
+  // causes. Opening a deep dive pushes /panel/search, which remounts this
+  // component and resets its state — that is exactly how a finished 59-card
+  // run used to vanish. Written on the way out and once at the end of a run,
+  // rather than on every row: a run's worth of comps is around a megabyte of
+  // JSON, and serialising it after each of 59 cards would be felt.
+  const liveRef = useRef(null);
+  const skipLiveWrite = useRef(false);
+  useEffect(() => {
+    liveRef.current = { results, activeByIndex, csvRaw, csvSummary, status, statusIsError, openBatch };
+  });
+  const writeLive = useCallback(() => {
+    const live = liveRef.current;
+    if (skipLiveWrite.current || !live || live.results.length === 0) return;
+    try {
+      sessionStorage.setItem(
+        LIVE_BATCH_KEY,
+        JSON.stringify({
+          items: batchRows(live.results, live.activeByIndex),
+          csvRaw: live.csvRaw,
+          csvSummary: live.csvSummary,
+          status: live.status,
+          statusIsError: live.statusIsError,
+          openBatch: live.openBatch
+        })
+      );
+    } catch {
+      /* Private mode, or a run bigger than the tab's storage quota. The
+         Supabase copy is the one that has to hold, and it isn't bounded by
+         this — so failing here is quiet on purpose. */
+    }
+  }, []);
+  useEffect(() => () => writeLive(), [writeLive]);
+  useEffect(() => {
+    if (!running && results.length > 0) writeLive();
+  }, [running, results.length, writeLive]);
+
+  // On mount: an id in the URL wins (that is someone deliberately re-opening a
+  // run), otherwise restore whatever this tab was last looking at. Only on the
+  // Batch screen — a run is a megabyte of JSON to parse, and the Dashboard has
+  // no use for it.
+  const restoredLive = useRef(false);
+  useEffect(() => {
+    if (restoredLive.current || stream !== "batch") return;
+    restoredLive.current = true;
+    if (initialBatchId) {
+      openSavedBatch(initialBatchId);
+      return;
+    }
+    let payload = null;
+    try {
+      payload = JSON.parse(sessionStorage.getItem(LIVE_BATCH_KEY) || "null");
+    } catch {
+      /* nothing to restore */
+    }
+    if (!payload || !payload.items || payload.items.length === 0) return;
+    const restored = restoreResults(payload.items);
+    setResults(restored.results);
+    setActiveByIndex(restored.activeByIndex);
+    if (payload.csvRaw) setCsvRaw(payload.csvRaw);
+    if (payload.csvSummary) setCsvSummary(payload.csvSummary);
+    if (payload.status) {
+      setStatus(payload.status);
+      setStatusIsError(!!payload.statusIsError);
+    }
+    if (payload.openBatch) setOpenBatch(payload.openBatch);
+  }, [stream, initialBatchId, openSavedBatch]);
+
+  /** Clear the screen for a fresh run, and stop the one being cleared from
+   *  being written back out on the way to the empty page. */
+  const startNewBatch = useCallback(() => {
+    skipLiveWrite.current = true;
+    try { sessionStorage.removeItem(LIVE_BATCH_KEY); } catch { /* ignore */ }
+    setResults([]);
+    setActiveByIndex({});
+    setCsvRaw(null);
+    setCsvItems(null);
+    setCsvSummary("");
+    setOpenBatch(null);
+    setBatchNotice("");
+    setStatus("");
+    setStatusIsError(false);
+    router.push("/panel/batch", { scroll: false });
+  }, [router]);
 
   // Load our live listings and our own price history once, so every batch row
   // can say "we already sell this at £X" without another round trip. Failure
@@ -446,6 +622,9 @@ export default function Panel({ initialSection = "dashboard" }) {
     }
 
     setRunning(true);
+    skipLiveWrite.current = false;
+    setOpenBatch(null);
+    setBatchNotice("");
     try {
       await runBatchInner(items);
     } finally {
@@ -604,11 +783,19 @@ export default function Panel({ initialSection = "dashboard" }) {
 
     // Opt-in: fetch active (asking-price) listings for every priced item too.
     // Off by default because it's a second API call per item (~2× quota).
+    // Collected locally as well as into state because the save below has to
+    // include them: a re-opened run that had lost the asking prices this run
+    // paid for would send you to fetch them a second time.
+    const activeLocal = {};
     if (fetchActiveAlways && !stoppedEarly) {
       for (let i = 0; i < collected.length; i++) {
-        if (collected[i].rec) await fetchActiveFor(collected[i], i);
+        if (!collected[i].rec) continue;
+        const activeRec = await fetchActiveFor(collected[i], i);
+        if (activeRec) activeLocal[i] = { loading: false, rec: activeRec };
       }
     }
+
+    await saveBatchRun(collected, activeLocal, stoppedEarly ? "stopped" : "complete");
   }
 
   /** Fetch active (asking-price) listings for one already-priced item and
@@ -638,8 +825,16 @@ export default function Panel({ initialSection = "dashboard" }) {
         result.set || null
       );
       setActiveByIndex((m) => ({ ...m, [index]: { loading: false, rec: activeRec } }));
+      // When this row belongs to a saved run, the record should say what the
+      // screen now says — otherwise re-opening it a third time asks for these
+      // listings again. Best-effort: the figure is already on screen either way.
+      if (openBatch?.id) {
+        updateItemActive(createClient(), openBatch.id, index, activeRec).catch(() => {});
+      }
+      return activeRec;
     } catch (err) {
       setActiveByIndex((m) => ({ ...m, [index]: { loading: false, error: err.message } }));
+      return null;
     }
   }
 
@@ -678,6 +873,42 @@ export default function Panel({ initialSection = "dashboard" }) {
       if (error) console.warn("Could not save price history:", error.message);
     } catch (err) {
       console.warn("Could not save price history:", err.message);
+    }
+  }
+
+  /** Persist a finished run — every card, with the comps behind it and the
+   *  filters it ran under. saveHistory above keeps the flat prices for the
+   *  History screen; this keeps the working, which is the part that costs
+   *  59 SoldComps requests to reproduce.
+   *
+   *  Unlike saveHistory, a failure here is worth saying out loud: the whole
+   *  promise is that the run can be got back, and quietly not saving it would
+   *  only be discovered at the moment it was needed. */
+  async function saveBatchRun(rows, activeLocal, status) {
+    if (!rows.some((r) => r.rec)) return;
+    try {
+      const supabase = createClient();
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const batch = await saveBatch(supabase, user.id, {
+        results: rows,
+        activeByIndex: activeLocal,
+        filters: currentFilters(),
+        csvRaw,
+        status
+      });
+      if (!batch) return;
+      setOpenBatch(batch);
+      setBatchesNonce((n) => n + 1);
+      setBatchNotice(`Saved — kept for ${RETENTION_DAYS} days, comps and all, and re-opening it spends nothing.`);
+    } catch (err) {
+      setBatchNotice(
+        /price_batch|does not exist|schema cache/i.test(err.message || "")
+          ? "This run could NOT be saved — migration 023 hasn't been applied in Supabase yet. It's still on screen and it survives moving around the panel, but not a reload."
+          : `This run could NOT be saved: ${err.message}. It's still on screen — export the CSV if you need it kept.`
+      );
     }
   }
 
@@ -866,6 +1097,22 @@ export default function Panel({ initialSection = "dashboard" }) {
       <div className="status-strip">
         <span className="chip">{`SoldComps: ${budget.count} this month (local estimate)`}</span>
       </div>
+
+      {openBatch ? (
+        <div className="sb-open">
+          <div className="sb-open-t">
+            <span className="eyebrow">Saved run</span>
+            <span className="hint-small">
+              {openBatch.label} · {new Date(openBatch.created_at).toLocaleString()} · comps frozen as they were priced
+            </span>
+          </div>
+          <button type="button" className="btn btn-ghost" onClick={startNewBatch}>Start a new batch</button>
+        </div>
+      ) : null}
+      {openingBatch ? <p className="hint hint-small">Opening that run…</p> : null}
+      {batchNotice ? <p className="hint hint-small sb-notice">{batchNotice}</p> : null}
+
+      <SavedBatches onOpen={goToBatch} refreshNonce={batchesNonce} openId={openBatch?.id || null} />
 
       <section className="panel">
         <div className="panel-head"><span className="eyebrow">Search</span></div>
@@ -1068,7 +1315,7 @@ export default function Panel({ initialSection = "dashboard" }) {
         ) : null}
 
         {results.length === 0 ? (
-          <p className="dd-empty">Run a search or upload a CSV to see priced results here.</p>
+          <p className="dd-empty">Run a search or upload a CSV to see priced results here — finished runs are saved for {RETENTION_DAYS} days and listed above.</p>
         ) : resultsView === "cards" ? (
           <div className="rc-grid rise-grid">
             {filteredResults.map(({ r, origIndex, known: k }) => (
