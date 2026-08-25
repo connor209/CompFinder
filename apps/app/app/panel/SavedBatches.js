@@ -41,6 +41,7 @@ export default function SavedBatches({ onOpen, refreshNonce = 0, openId = null }
       setRows(await listBatches(supabase, user.id));
       setError("");
     } catch (err) {
+      console.error("Saved runs could not be listed:", err);
       setRows([]);
       setError(
         /price_batches/.test(err.message || "")
@@ -65,7 +66,6 @@ export default function SavedBatches({ onOpen, refreshNonce = 0, openId = null }
     }
   }
 
-  if (rows !== null && rows.length === 0 && !error) return null;
 
   return (
     <section className="panel">
@@ -76,6 +76,15 @@ export default function SavedBatches({ onOpen, refreshNonce = 0, openId = null }
 
       {error ? <p className="hint hint-small compfinder-error">{error}</p> : null}
       {rows === null ? <p className="hint hint-small">Looking for earlier runs…</p> : null}
+
+      {rows && rows.length === 0 && !error ? (
+        // Says so rather than hiding, because an empty list and a save that
+        // failed used to look identical: nothing on the screen at all.
+        <p className="hint hint-small">
+          Nothing saved yet. Finishing a batch puts it here, comps and all — if a finished run
+          isn&rsquo;t listed, it didn&rsquo;t save, and the panel above says why.
+        </p>
+      ) : null}
 
       {rows && rows.length > 0 ? (
         <div className="sb-list">

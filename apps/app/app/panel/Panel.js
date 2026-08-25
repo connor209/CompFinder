@@ -264,6 +264,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const [openBatch, setOpenBatch] = useState(null);
   const [openingBatch, setOpeningBatch] = useState(false);
   const [batchNotice, setBatchNotice] = useState("");
+  const [batchNoticeIsError, setBatchNoticeIsError] = useState(false);
+  const [savingBatch, setSavingBatch] = useState(false);
   const [batchesNonce, setBatchesNonce] = useState(0);
 
   const settings = CompFinderPricing.DEFAULT_SETTINGS;
@@ -324,7 +326,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       );
       setStatusIsError(false);
     } catch (err) {
+      console.error("Saved run could not be opened:", err);
       setBatchNotice(`Could not open that run: ${err.message}`);
+      setBatchNoticeIsError(true);
     } finally {
       setOpeningBatch(false);
     }
@@ -346,7 +350,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const liveRef = useRef(null);
   const skipLiveWrite = useRef(false);
   useEffect(() => {
-    liveRef.current = { results, activeByIndex, csvRaw, csvSummary, status, statusIsError, openBatch };
+    liveRef.current = { results, activeByIndex, csvRaw, csvSummary, status, statusIsError, openBatch, batchNotice, batchNoticeIsError };
   });
   const writeLive = useCallback(() => {
     const live = liveRef.current;
@@ -360,7 +364,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           csvSummary: live.csvSummary,
           status: live.status,
           statusIsError: live.statusIsError,
-          openBatch: live.openBatch
+          openBatch: live.openBatch,
+          batchNotice: live.batchNotice,
+          batchNoticeIsError: live.batchNoticeIsError
         })
       );
     } catch {
@@ -403,6 +409,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       setStatusIsError(!!payload.statusIsError);
     }
     if (payload.openBatch) setOpenBatch(payload.openBatch);
+    if (payload.batchNotice) {
+      setBatchNotice(payload.batchNotice);
+      setBatchNoticeIsError(!!payload.batchNoticeIsError);
+    }
   }, [stream, initialBatchId, openSavedBatch]);
 
   /** Clear the screen for a fresh run, and stop the one being cleared from
@@ -417,6 +427,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     setCsvSummary("");
     setOpenBatch(null);
     setBatchNotice("");
+    setBatchNoticeIsError(false);
     setStatus("");
     setStatusIsError(false);
     router.push("/panel/batch", { scroll: false });
@@ -625,6 +636,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     skipLiveWrite.current = false;
     setOpenBatch(null);
     setBatchNotice("");
+    setBatchNoticeIsError(false);
     try {
       await runBatchInner(items);
     } finally {
@@ -886,30 +898,55 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
    *  only be discovered at the moment it was needed. */
   async function saveBatchRun(rows, activeLocal, status) {
     if (!rows.some((r) => r.rec)) return;
+    setSavingBatch(true);
     try {
       const supabase = createClient();
       const {
         data: { user }
       } = await supabase.auth.getUser();
-      if (!user) return;
-      const batch = await saveBatch(supabase, user.id, {
+      if (!user) {
+        setBatchNotice("This run could NOT be saved — you appear to be signed out. Sign in again and press Save this run.");
+        setBatchNoticeIsError(true);
+        return;
+      }
+      const saved = await saveBatch(supabase, user.id, {
         results: rows,
         activeByIndex: activeLocal,
         filters: currentFilters(),
         csvRaw,
         status
       });
-      if (!batch) return;
-      setOpenBatch(batch);
+      if (!saved) return;
+      setOpenBatch(saved.batch);
       setBatchesNonce((n) => n + 1);
-      setBatchNotice(`Saved — kept for ${RETENTION_DAYS} days, comps and all, and re-opening it spends nothing.`);
-    } catch (err) {
+      setBatchNoticeIsError(saved.degraded.length > 0);
       setBatchNotice(
-        /price_batch|does not exist|schema cache/i.test(err.message || "")
-          ? "This run could NOT be saved — migration 023 hasn't been applied in Supabase yet. It's still on screen and it survives moving around the panel, but not a reload."
-          : `This run could NOT be saved: ${err.message}. It's still on screen — export the CSV if you need it kept.`
+        saved.degraded.length === 0
+          ? `Saved — kept for ${RETENTION_DAYS} days, comps and all, and re-opening it spends nothing.`
+          : `Saved, but ${saved.degraded.length} card(s) kept their price without the comps behind it: ${saved.degraded.slice(0, 3).join(", ")}${saved.degraded.length > 3 ? "…" : ""}. Those rows say so when the run is re-opened.`
       );
+    } catch (err) {
+      // The message is the only thing that can tell us what went wrong on a
+      // machine we can't see, so log the whole error object too.
+      console.error("Batch run could not be saved:", err);
+      const detail = [err.message, err.code, err.details, err.hint].filter(Boolean).join(" · ");
+      setBatchNoticeIsError(true);
+      setBatchNotice(
+        /price_batch|does not exist|schema cache/i.test(detail)
+          ? `This run could NOT be saved — the saved-runs tables aren't reachable (${detail}). Migration 023 may not have been applied, or Supabase's schema cache hasn't picked it up yet. The run is still on screen; press Save this run to try again.`
+          : `This run could NOT be saved: ${detail}. The run is still on screen — press Save this run to try again, or export the CSV.`
+      );
+    } finally {
+      setSavingBatch(false);
     }
+  }
+
+  /** Save whatever is on screen, on demand. The automatic save at the end of a
+   *  run is the normal path; this is what makes a failure recoverable instead
+   *  of terminal, and it is the only thing standing between a run that didn't
+   *  save and re-pricing every card in it. */
+  async function saveCurrentRun() {
+    await saveBatchRun(results, activeByIndex, "complete");
   }
 
   function getPastedItems() {
@@ -1110,7 +1147,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         </div>
       ) : null}
       {openingBatch ? <p className="hint hint-small">Opening that run…</p> : null}
-      {batchNotice ? <p className="hint hint-small sb-notice">{batchNotice}</p> : null}
+      {batchNotice ? (
+        <p className={`hint hint-small sb-notice${batchNoticeIsError ? " compfinder-error" : ""}`}>{batchNotice}</p>
+      ) : null}
 
       <SavedBatches onOpen={goToBatch} refreshNonce={batchesNonce} openId={openBatch?.id || null} />
 
@@ -1238,6 +1277,16 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 </button>
               );
             })()}
+            {!openBatch && results.length > 0 ? (
+              <button
+                className="btn btn-ghost"
+                disabled={savingBatch || running}
+                onClick={saveCurrentRun}
+                title="Keep this run — every comp and exclusion — so it can be re-opened without pricing it again"
+              >
+                {savingBatch ? "Saving…" : "💾 Save this run"}
+              </button>
+            ) : null}
             {csvRaw ? (
               <button
                 className="btn btn-ghost"

@@ -55,6 +55,34 @@ export function labelFor({ csvName = null, count = 0 } = {}) {
   return csvName ? `${cards} from ${csvName}` : `${cards} pasted`;
 }
 
+// Characters Postgres will not accept, and eBay listing titles sometimes
+// carry. A NUL byte is rejected outright in both text and jsonb
+// ("unsupported Unicode escape sequence"), and a lone surrogate — half of a
+// character pair, left behind when a title was truncated mid-emoji — is not
+// valid UTF-8 on the wire. One of either in one comp used to cost the whole
+// run, and an 89-card run holds several thousand scraped titles.
+const NEEDS_CLEANING = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uD800-\uDFFF]/;
+
+export function storableText(value) {
+  if (typeof value !== "string") return value ?? null;
+  if (!NEEDS_CLEANING.test(value)) return value;
+  let out = "";
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code === 0 || (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d)) continue;
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      // A complete pair is a real character (an emoji in a seller's title) and
+      // is kept; a high surrogate with nothing after it is dropped.
+      if (next >= 0xdc00 && next <= 0xdfff) { out += value[i] + value[i + 1]; i += 1; }
+      continue;
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) continue;
+    out += value[i];
+  }
+  return out;
+}
+
 /**
  * One comp, cut down to what the results screen actually reads off it.
  *
@@ -72,14 +100,14 @@ export function labelFor({ csvName = null, count = 0 } = {}) {
 export function slimComp(c) {
   if (!c) return null;
   const out = {
-    title: c.title ?? null,
+    title: storableText(c.title),
     itemPricePence: c.itemPricePence ?? null,
     postagePence: c.postagePence ?? null,
     totalPence: c.totalPence ?? null,
-    itemLocation: c.itemLocation ?? null
+    itemLocation: storableText(c.itemLocation)
   };
   if (c.exclusionReason) out.exclusionReason = c.exclusionReason;
-  const url = c._source?.url ?? null;
+  const url = storableText(c._source?.url);
   const endedAt = c._source?.endedAt ?? null;
   if (url || endedAt) out._source = { url, endedAt };
   return out;
@@ -93,7 +121,7 @@ export function slimRec(rec) {
     finalPence: rec.finalPence ?? null,
     confidence: rec.confidence ?? null,
     dataSource: rec.dataSource ?? null,
-    note: rec.note ?? null,
+    note: storableText(rec.note),
     graded: rec.graded ?? [],
     included: (rec.included || []).map(slimComp),
     excluded: (rec.excluded || []).map(slimComp)
@@ -111,10 +139,10 @@ export function slimRec(rec) {
 export function batchRows(results, activeByIndex = {}) {
   return (results || []).map((r, i) => ({
     position: i,
-    title: r.title || "",
-    sku: r.sku || null,
-    query: r.query || null,
-    failed: r.failed || null,
+    title: storableText(r.title) || "",
+    sku: storableText(r.sku) || null,
+    query: storableText(r.query) || null,
+    failed: storableText(r.failed) || null,
     rec: slimRec(r.rec),
     active_rec: slimRec(activeByIndex?.[i]?.rec),
     csv_item: r.csvItem || null,
@@ -156,12 +184,31 @@ export function restoreResults(items) {
 // Supabase. Every caller passes its own client — see the note at the top.
 // ---------------------------------------------------------------------------
 
+// Small enough that one card's comps never make a request too big to send,
+// and that a failure costs few enough retries to be worth doing row by row.
+const CHUNK_SIZE = 10;
+
 const BATCH_COLUMNS =
   "id, created_at, expires_at, label, source, csv_name, filters, item_count, priced_count, status";
 
-/** Insert a finished run. Items go in chunks: a 60-card run is around a
- *  megabyte of comps, and one insert that size is the kind of request that
- *  fails at a proxy rather than at the database. */
+// Structural failures — the table isn't there, or we aren't allowed to write
+// to it. Nothing about retrying a smaller slice helps, so don't spend thirty
+// round trips finding that out.
+const STRUCTURAL = new Set(["42P01", "42501", "PGRST205", "PGRST301", "PGRST106"]);
+
+/**
+ * Insert a finished run.
+ *
+ * Items go in small chunks: an 89-card run is a couple of megabytes of comps,
+ * and one insert that size is the kind of request that fails at a proxy rather
+ * than at the database. When a chunk does fail, it retries row by row instead
+ * of giving up — the first version of this deleted the whole batch on any
+ * failure, which turned "one comp with a character Postgres won't take" into
+ * an 89-card run that vanished with nothing to show for it. Eighty-eight saved
+ * cards beat none, and a card that still won't store is kept WITHOUT its comps
+ * and says so on the row, rather than silently coming back looking priced from
+ * nothing.
+ */
 export async function saveBatch(supabase, userId, { results, activeByIndex = {}, filters = {}, csvRaw = null, status = "complete" }) {
   const rows = results || [];
   if (rows.length === 0) return null;
@@ -185,16 +232,38 @@ export async function saveBatch(supabase, userId, { results, activeByIndex = {},
   if (error) throw error;
 
   const items = batchRows(rows, activeByIndex).map((it) => ({ ...it, batch_id: batch.id, user_id: userId }));
-  for (let i = 0; i < items.length; i += 25) {
-    const { error: itemsError } = await supabase.from("price_batch_items").insert(items.slice(i, i + 25));
-    if (itemsError) {
-      // A half-written run is worse than none: it would re-open looking
-      // complete while missing its last cards.
-      await supabase.from("price_batches").delete().eq("id", batch.id);
-      throw itemsError;
+  const degraded = [];
+  const giveUp = async (err) => {
+    // Nothing was storable, so leave no half-written run behind: it would
+    // re-open looking complete while missing most of its cards.
+    await supabase.from("price_batches").delete().eq("id", batch.id);
+    throw err;
+  };
+
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    const { error: chunkError } = await supabase.from("price_batch_items").insert(chunk);
+    if (!chunkError) continue;
+    if (STRUCTURAL.has(chunkError.code)) await giveUp(chunkError);
+
+    for (const row of chunk) {
+      const { error: rowError } = await supabase.from("price_batch_items").insert(row);
+      if (!rowError) continue;
+
+      const stripped = {
+        ...row,
+        rec: row.rec ? { ...row.rec, included: [], excluded: [] } : null,
+        active_rec: null,
+        failed: [row.failed, `The comps behind this price could not be stored (${rowError.message}).`]
+          .filter(Boolean)
+          .join(" ")
+      };
+      const { error: strippedError } = await supabase.from("price_batch_items").insert(stripped);
+      if (strippedError) await giveUp(strippedError);
+      degraded.push(row.title);
     }
   }
-  return batch;
+  return { batch, degraded };
 }
 
 /** One saved run, ready to render: `{ batch, results, activeByIndex }`. */

@@ -25,6 +25,7 @@ import {
   batchRows,
   restoreResults,
   slimComp,
+  storableText,
   labelFor,
   expiresAtIso,
   RETENTION_DAYS
@@ -177,12 +178,35 @@ const reordered = restoreResults(shuffled);
 eq("out-of-order rows are sorted by position", reordered.results.map((r) => r.title), RESULTS.map((r) => r.title));
 eq("asking prices follow the sort", Object.keys(reordered.activeByIndex), ["2"]);
 
-// --- 4. what the list says about a run ------------------------------------
+// --- 4. characters Postgres won't take -------------------------------------
+// eBay titles are scraped, and an 89-card run carries several thousand of
+// them. A NUL byte is rejected outright in text and jsonb; a lone surrogate —
+// half a character pair, left where a title was cut mid-emoji — is not valid
+// UTF-8 on the wire. Either one used to fail the insert, and the insert
+// failing used to delete the whole run.
+eq("a NUL byte is dropped", storableText("Umbreon\u0000 VMAX"), "Umbreon VMAX");
+eq("a lone high surrogate is dropped", storableText("Charizard \ud83d"), "Charizard ");
+eq("a lone low surrogate is dropped", storableText("Charizard \ude00 holo"), "Charizard  holo");
+// A complete pair is a real character in a real seller's title, and stays.
+eq("a whole emoji survives", storableText("Charizard \ud83d\ude00 holo"), "Charizard 😀 holo");
+eq("ordinary punctuation survives", storableText("Pokémon — Umbreon VMAX 215/203 (NM)"), "Pokémon — Umbreon VMAX 215/203 (NM)");
+eq("a clean title is returned untouched", storableText("Charizard 4/102"), "Charizard 4/102");
+eq("a missing value stays missing", storableText(null), null);
+
+// The cleaning has to happen where a comp is stored, not only in the helper —
+// that is the path every scraped title actually takes.
+const dirty = slimComp(comp({ title: "Umbreon\u0000 VMAX \ud83d", itemLocation: "Germany\u0000" }));
+eq("a stored comp's title is storable", dirty.title, "Umbreon VMAX ");
+eq("a stored comp's location is storable", dirty.itemLocation, "Germany");
+const dirtyRow = batchRows([{ title: "Card\u0000", query: "q\u0000", sku: "S\u0000", rec: null, failed: "why\u0000" }])[0];
+eq("a row's own text is storable too", [dirtyRow.title, dirtyRow.query, dirtyRow.sku, dirtyRow.failed], ["Card", "q", "S", "why"]);
+
+// --- 5. what the list says about a run ------------------------------------
 eq("a CSV run is named after its file", labelFor({ csvName: "stock-aug.csv", count: 59 }), "59 cards from stock-aug.csv");
 eq("a pasted run says so", labelFor({ count: 59 }), "59 cards pasted");
 eq("one card is not 1 cards", labelFor({ count: 1 }), "1 card pasted");
 
-// --- 5. the retention promise ---------------------------------------------
+// --- 6. the retention promise ---------------------------------------------
 // A run is a working document — priced, then listed off over the following
 // days — so anything under a week defeats the point of saving it.
 if (!(RETENTION_DAYS >= 7)) fail(`RETENTION_DAYS is ${RETENTION_DAYS} — a saved run has to outlast processing it`);
@@ -196,7 +220,7 @@ const interval = /now\(\)\s*\+\s*interval\s*'(\d+)\s*days'/.exec(migration);
 if (!interval) fail("migration 023 no longer sets a default expires_at");
 else eq("migration default matches RETENTION_DAYS", Number(interval[1]), RETENTION_DAYS);
 
-// --- 6. one definition of a saved run -------------------------------------
+// --- 7. one definition of a saved run -------------------------------------
 // The Supabase copy and the sessionStorage copy go through the same
 // serialiser. Two of them would disagree eventually, and the disagreement
 // would surface as a run that re-opens looking complete.

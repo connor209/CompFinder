@@ -536,9 +536,22 @@ way.
   are fat and their value decays fast: a run is a working document you list off
   over a few days, not an archive. Expired runs are swept when the saved-runs
   list loads, rather than by a cron that can quietly stop working.
-- **A save that fails says so.** Everything else on this screen is
-  fire-and-forget; this isn't, because the promise is that the run can be got
-  back and the failure would otherwise only surface at the moment it was needed.
+- **A save that fails says so, and can be retried.** Everything else on this
+  screen is fire-and-forget; this isn't, because the promise is that the run
+  can be got back and the failure would otherwise only surface at the moment it
+  was needed. **Save this run** saves whatever is on screen on demand — which
+  is what makes a failed automatic save recoverable rather than terminal, and
+  covers the run that was navigated away from before it finished.
+- **One bad comp must not cost the run.** The first version deleted the whole
+  batch if any chunk of rows failed to insert, so a single unstorable character
+  in one of several thousand scraped titles took an 89-card run with it. Rows
+  go in small chunks, a failed chunk is retried row by row, and a row that
+  still won't store keeps its price without its comps and says so. Titles are
+  cleaned of what Postgres rejects (`storableText`): a NUL byte is refused
+  outright in text and jsonb, and a lone surrogate — half a character pair,
+  left where a title was cut mid-emoji — isn't valid UTF-8 on the wire.
+- **An empty saved-runs list says it is empty.** It used to hide itself, so
+  "nothing saved yet" and "the save failed" looked identical: an empty screen.
 
 Migration 023 has to be applied in Supabase. Until it is, the panel says so on
 the run it couldn't save, and the sessionStorage copy still carries the run
