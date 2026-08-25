@@ -188,6 +188,23 @@ ok(`${ROUTE} checks against DRAWABLE_TYPES`, route.includes("DRAWABLE_TYPES.incl
 ok(`${ROUTE} buffers the image so a draw failure is catchable`,
    /arrayBuffer\(\)/.test(route) && route.includes("drawOrDropArt"));
 
+/* -- 8. the share sheet is for phones, not for desktops ------------------ */
+// `navigator.canShare({files})` reads like a mobile check and is not: Chrome
+// and Edge on Windows implement Web Share with files, so gating on it alone
+// opened the Windows share dialog on a desktop click — from which the only
+// route to a pasteable image was the snipping tool this button exists to
+// replace. The POINTER is the signal.
+const BUTTON = "apps/public/app/ShareButton.js";
+const button = read(BUTTON);
+ok(`${BUTTON} decides on the pointer`, button.includes("(pointer: coarse)"));
+ok(`${BUTTON} only reaches the share sheet behind that`,
+   /touch && navigator\.canShare/.test(button));
+ok(`${BUTTON} still has a plain download`, button.includes("a.download"));
+// Passing the blob rather than a promise breaks Safari, which needs the
+// ClipboardItem constructed inside the gesture.
+ok(`${BUTTON} hands the clipboard a promise, not an awaited blob`,
+   /ClipboardItem\(\{ "image\/png": png\(\) \}\)/.test(button));
+
 if (failed) {
   console.error(`\ncheck-share: ${failed} failed`);
   process.exit(1);

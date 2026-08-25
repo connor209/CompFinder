@@ -421,6 +421,16 @@ sibling, the content-type check is an ALLOW-LIST (`startsWith("image/")` is
 what let it through), and the render is buffered so a draw failure falls back
 to the image without art instead of killing the connection.
 
+**The share sheet is for phones, and `canShare` does not tell you that.**
+Chrome and Edge on Windows implement Web Share with files, so gating on
+`navigator.canShare({files})` opened the Windows share dialog on a desktop
+click — and the only route from there to a pasteable image was the snipping
+tool the button exists to replace. `ShareButton` decides on `(pointer:
+coarse)`: a phone gets the share sheet, everything else gets a download plus a
+Copy button where the clipboard takes images. The clipboard is handed a
+PROMISE inside the click, not an awaited blob, because Safari requires the
+`ClipboardItem` be constructed within the gesture.
+
 **Nothing on that image is an asking price.** "Buy it today for" is the
 headline everywhere else and is forbidden here for the same reason it is never
 server-rendered — except worse, because a PNG pasted into a Facebook group is
