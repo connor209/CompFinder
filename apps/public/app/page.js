@@ -38,12 +38,11 @@ export default function Home() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {/* The splash measures this and travels the mark here rather than
               fading it out, so the brand lands where it lives. */}
+          {/* No "Sign in". It pointed at the business app's login — a product
+              a visitor here has never heard of and has no account for — while
+              the privacy page promises "no accounts here, nothing to sign up
+              for". Nothing goes back until there is an offer worth making. */}
           <Wordmark href={null} id="lc-header-mark" />
-          <span style={{ flex: 1 }} />
-          <a
-            href={process.env.NEXT_PUBLIC_APP_URL || "#pro"}
-            style={{ fontSize: 12.5, color: "var(--ink-soft)", textDecoration: "none" }}
-          >Sign in</a>
         </div>
         <h1 className="hero-h">Found a card.<br />What&rsquo;s it worth?</h1>
         <p className="body" style={{ margin: "10px 0 0", maxWidth: "30ch" }}>

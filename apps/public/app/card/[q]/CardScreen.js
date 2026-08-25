@@ -446,18 +446,6 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
           </div>
         )}
 
-        {/* The most valuable conversion on the site, on the screen where
-            someone has just got what they came for. One subscriber is worth
-            about 2,200 searches of affiliate commission — see
-            docs/EPN_EXPECTED_RETURN.md — so this belongs here rather than
-            only on the home page. */}
-        <a className="panel propitch" href={process.env.NEXT_PUBLIC_APP_URL || "/"}>
-          <span className="section-title">Got a stack of these?</span>
-          <span className="body soft">
-            CompFinder Pro prices a whole pile at once and syncs your live eBay listings.
-          </span>
-          <span className="link">See Pro &rarr;</span>
-        </a>
       </div>
     </main>
   );

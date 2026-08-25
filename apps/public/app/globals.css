@@ -515,8 +515,3 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
 .sibling:hover { border-color:var(--accent); }
 .sibling .mt { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
 
-.propitch {
-  display:flex; flex-direction:column; gap:5px; margin-top:10px; padding:14px;
-  text-decoration:none; color:inherit;
-}
-.propitch:hover { border-color:var(--accent); }
