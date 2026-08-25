@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { shareFields } from "@/lib/share-card";
 import { windowFromParam } from "@/lib/windows";
+import { serverCard } from "@/lib/card-page";
+import { priceCard } from "@/lib/price";
 
 /**
  * The answer, as a PNG you can paste into a thread.
@@ -12,19 +14,23 @@ import { windowFromParam } from "@/lib/windows";
  * This draws the same figures deliberately, at a fixed size, with the mark and
  * the date on it.
  *
- * POST, not GET, and that is the whole design. The figures come from the
- * client, which already has them: the alternative is reading the cache here,
- * and the cache only holds the 455 published cards — while the card someone
- * actually needs to price for a customer is usually not one of them. A GET
- * that worked on a twentieth of the site would be worse than no button.
+ * TWO METHODS, because there are two ways this gets shared, and they cannot be
+ * served the same way.
  *
- * It costs NOTHING upstream. No SoldComps request, no Supabase read: every
- * number arrives in the body, already paid for by the search that drew the
- * screen. That is also why it can't be scraped for prices — it renders what
- * you hand it, so there is nothing here to take that you didn't bring.
+ * POST is the Save-image button, and it is a POST on purpose. The figures come
+ * from the client, which already has them — so it works for EVERY card,
+ * including the one someone actually needs to price for a customer, which
+ * usually isn't one of the 455 we publish. It costs nothing upstream and there
+ * is nothing here to scrape, because it renders what you hand it.
  *
- * 1200x630, which is the OpenGraph size. Nothing links to it that way yet, but
- * an image built for sharing may as well be the shape every platform expects.
+ * GET is the OpenGraph image, and it can only be the published set, because a
+ * crawler hands us nothing and the only other source is the cache. That is the
+ * right limit rather than a sad one: the published cards are exactly the ones
+ * whose links get posted, and an unpublished card has no cached price to draw.
+ * It READS the cache and never fills it — a crawler must never cost a
+ * SoldComps request. Same rule as lib/card-page.js.
+ *
+ * 1200x630, the size every platform unfurls at.
  */
 export const runtime = "nodejs";
 
@@ -70,6 +76,71 @@ async function artDataUri(src) {
   }
 }
 
+/** The picture. Both methods reach the same one, from different data. */
+async function render(fields, artSrc) {
+  const [art, font] = await Promise.all([artDataUri(artSrc), archivo()]);
+  return { fields, art, font };
+}
+
+/**
+ * The OpenGraph image: what a link to this card unfurls as in Discord,
+ * WhatsApp, Slack or a Facebook post.
+ *
+ * A published card with nothing cached still renders — without a figure. A
+ * broken image on a shared link is worse than one that says only which card
+ * it is, and the warmer usually fills these within the week anyway.
+ */
+export async function GET(request, { params }) {
+  const { q } = await params;
+  const query = decodeURIComponent(q || "");
+  const windowDays = windowFromParam(new URL(request.url).searchParams.get("days"));
+
+  // Cache read only, published cards only. Null for everything else, and the
+  // page doesn't advertise an image it can't draw — see canonicalFor's twin
+  // reasoning in page.js.
+  // Caught rather than allowed to throw: an unfurler that gets a 500 caches
+  // the failure and the link stays plain long after Supabase recovers, where
+  // a 404 is simply retried.
+  let found = null;
+  try {
+    found = await serverCard(query, windowDays);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+  if (!found) return new Response("Not found", { status: 404 });
+
+  const { card, sold } = found;
+  // The SAME function the answer screen's headline comes from, so the unfurl
+  // and the page cannot disagree about the number.
+  const priced = priceCard(card, sold.comps || []);
+  const included = (priced.rec && priced.rec.included) || [];
+  const last = included
+    .map((c) => ({
+      pence: c.totalPence ?? c.itemPricePence,
+      endedAt: c._source && c._source.endedAt,
+      t: c._source && c._source.endedAt ? new Date(c._source.endedAt).getTime() : 0
+    }))
+    .sort((a, b) => b.t - a.t)[0] || null;
+
+  const { fields, art, font } = await render(
+    shareFields({
+      card,
+      marketPence: priced.pence,
+      used: priced.used,
+      windowDays,
+      lastSale: last,
+      now: new Date()
+    }),
+    card.image
+  );
+
+  return image(fields, art, font, {
+    // Unfurlers re-fetch, and the underlying price only moves when the warmer
+    // runs. An hour at the edge keeps a popular link off the function.
+    "Cache-Control": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"
+  });
+}
+
 export async function POST(request) {
   let body;
   try {
@@ -98,9 +169,17 @@ export async function POST(request) {
     now: new Date()
   });
 
-  const art = await artDataUri(typeof card.image === "string" ? card.image : null);
-  const font = await archivo();
+  const { fields, art, font } = await render(f, typeof card.image === "string" ? card.image : null);
+  // Drawn from the body, so there is nothing for a shared cache to key on.
+  return image(fields, art, font, { "Cache-Control": "no-store" });
+}
 
+/**
+ * The picture itself, drawn once. GET and POST differ only in where the
+ * numbers came from; if they drew different pictures they would eventually
+ * disagree about which one is the shareable card.
+ */
+function image(fields, art, font, headers) {
   return new ImageResponse(
     (
       <div style={{
@@ -115,7 +194,7 @@ export async function POST(request) {
             <span style={{ color: C.accent }}>Comp</span>
           </div>
           <div style={{ display: "flex", whiteSpace: "nowrap", fontSize: 19, color: C.inkFaint, letterSpacing: 2, textTransform: "uppercase" }}>
-            {f.domain}
+            {fields.domain}
           </div>
         </div>
 
@@ -132,25 +211,25 @@ export async function POST(request) {
 
           <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
             <div style={{ display: "flex", fontSize: 22, color: C.inkFaint, letterSpacing: 3, textTransform: "uppercase" }}>
-              {f.setLine}
+              {fields.setLine}
             </div>
             <div style={{ display: "flex", fontSize: 52, marginTop: 10, color: C.ink, lineHeight: 1.1 }}>
-              {f.name}
+              {fields.name}
             </div>
 
             <div style={{ display: "flex", fontSize: 20, color: C.inkFaint, letterSpacing: 3, textTransform: "uppercase", marginTop: 34 }}>
-              {f.figureLabel}
+              {fields.figureLabel}
             </div>
             <div style={{ display: "flex", fontSize: 104, color: C.accentLight, lineHeight: 1, marginTop: 4 }}>
-              {f.figure}
+              {fields.figure}
             </div>
 
             <div style={{ display: "flex", fontSize: 23, color: C.inkSoft, marginTop: 22, textTransform: "uppercase", letterSpacing: 1 }}>
-              {f.basis}
+              {fields.basis}
             </div>
-            {f.lastSale ? (
+            {fields.lastSale ? (
               <div style={{ display: "flex", fontSize: 23, color: C.inkSoft, marginTop: 8, textTransform: "uppercase", letterSpacing: 1 }}>
-                {f.lastSale}
+                {fields.lastSale}
               </div>
             ) : null}
           </div>
@@ -164,7 +243,7 @@ export async function POST(request) {
           {/* display:flex + nowrap on BOTH children, or Satori wraps them into
               each other instead of pushing them apart — it lays a bare text
               node out differently from a flex child. */}
-          <span style={{ display: "flex", whiteSpace: "nowrap" }}>{f.stamp}</span>
+          <span style={{ display: "flex", whiteSpace: "nowrap" }}>{fields.stamp}</span>
           <span style={{ display: "flex", whiteSpace: "nowrap" }}>We show our working</span>
         </div>
       </div>
@@ -173,10 +252,7 @@ export async function POST(request) {
       width: W,
       height: H,
       fonts: [{ name: "Archivo", data: font, style: "normal", weight: 800 }],
-      headers: {
-        // Built from the body, so there is nothing for a shared cache to key on.
-        "Cache-Control": "no-store"
-      }
+      headers
     }
   );
 }

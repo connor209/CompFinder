@@ -38,15 +38,43 @@ const cachedServerCard = unstable_cache(
 export async function generateMetadata({ params }) {
   const { q } = await params;
   const query = decodeURIComponent(q || "");
+  const title = query ? `${query} — what's it worth?` : "What's it worth?";
+  const description = `Real eBay UK sold prices for ${query}, and the cheapest one you could buy today.`;
+  const og = ogImageFor(query);
+
   return {
-    title: query ? `${query} — what's it worth?` : "What's it worth?",
-    description: `Real eBay UK sold prices for ${query}, and the cheapest one you could buy today.`,
+    title,
+    description,
     // Any string is a valid card URL, so the same card is reachable under
     // every spelling, ordering and typo someone searches. Without a canonical
     // those are all separate pages competing with each other; with one they
     // are the published spelling. Only claimed for a card we publish — a
     // canonical pointing at a URL we don't stand behind would be worse.
-    alternates: canonicalFor(query)
+    alternates: canonicalFor(query),
+    openGraph: { title, description, type: "website", ...(og ? { images: [og] } : {}) },
+    twitter: { card: og ? "summary_large_image" : "summary", title, description,
+               ...(og ? { images: [og.url] } : {}) }
+  };
+}
+
+/**
+ * The picture a link to this card unfurls as, in Discord, WhatsApp or a
+ * Facebook post — the places people actually pass a price around.
+ *
+ * Published cards only, and the same reason as the canonical above: the image
+ * route can only read the cache, and the cache only holds cards we publish.
+ * Claiming an image we cannot draw would unfurl as a broken one, which is
+ * worse than the plain link this replaces. `findPublished` is a manifest
+ * lookup, so gating on it costs nothing on a page render.
+ */
+function ogImageFor(query) {
+  const entry = findPublished(query);
+  if (!entry) return undefined;
+  return {
+    url: `/card/${encodeURIComponent(entry.q)}/share.png`,
+    width: 1200,
+    height: 630,
+    alt: `${entry.q} — recent eBay UK sold prices`
   };
 }
 

@@ -372,7 +372,7 @@ root layout renders nothing.
 /card/[q]                which one? when ambiguous, otherwise the answer
 /card/[q]?days=30        the same answer over a shorter sold window
 /card/[q]/workings       every sale counted, every sale excluded, net after fees
-/card/[q]/share.png      POST only — the answer as a 1200x630 PNG
+/card/[q]/share.png      the answer as a 1200x630 PNG — POST any card, GET published
 ```
 
 **The answer screen carries the mark, because it is the screen people
@@ -385,13 +385,29 @@ thing allowed to shrink: it is already on screen in larger type just below,
 and a narrow phone pushing the mark off would undo the point of putting it
 there.
 
-**`share.png` is POST, and that is the design rather than an accident.** The
-figures arrive in the body from the client that already has them. The
-alternative — reading the cache on a GET — only works for the 455 published
-cards, and the card someone actually needs to price for a customer usually
-isn't one of them; a button that worked on a twentieth of the site would be
-worse than no button. It costs nothing upstream: no SoldComps call, no
-Supabase read, nothing to scrape, because it renders what you hand it.
+**`share.png` answers to both methods, and the split is the point.** POST is
+the Save-image button: the figures arrive in the body from the client that
+already has them, so it works for EVERY card — including the one someone needs
+to price for a customer, which usually isn't one of the 455. It costs nothing
+upstream and there is nothing on it to scrape, because it renders what you
+hand it. GET is the OpenGraph image, and it can only be the published set,
+because a crawler hands us nothing and the only other source is the cache.
+That is the right limit rather than a sad one: published cards are the ones
+whose links get posted. **The GET reads the cache and never fills it** — the
+same rule as `card-page.js` — and it 404s rather than throwing, because an
+unfurler caches a 500 and the link then stays plain long after Supabase
+recovers.
+
+**Both methods draw through one `image()`.** Two renderers would eventually
+disagree about which one is the shareable card; `check-share.mjs` counts the
+`ImageResponse` calls. GET takes its headline from `priceCard`, the same
+function the answer screen's figure comes from, so an unfurl and the page
+cannot quote different numbers.
+
+**A card page only claims an OG image it can actually draw.** `ogImageFor()`
+gates on `findPublished` — a manifest lookup, free on a page render — and an
+unpublished card falls back to `twitter:card=summary` rather than
+`summary_large_image`, which would unfurl as a broken box.
 
 **Nothing on that image is an asking price.** "Buy it today for" is the
 headline everywhere else and is forbidden here for the same reason it is never

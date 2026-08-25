@@ -99,14 +99,45 @@ ok("the share payload is actually built on the answer screen", payload.length > 
 for (const term of ["cheapest", "listings", "askPence"]) {
   ok(`the share payload does not carry ${term}`, !payload.includes(term));
 }
-// The image is drawn from the body, so it must never read the price cache —
-// that is what keeps a button click from costing a SoldComps request.
-for (const term of ["serverCard", "loadCachedSold", "priceCard", "createPublicClient"]) {
-  ok(`${ROUTE} does not read the cache (${term})`, !route.includes(term));
+/* -- 4. the two methods, and which may touch the cache ------------------- */
+// POST is handed its figures, so it must never read anything: that is what
+// keeps a button click free, and what leaves nothing on it to scrape.
+const postBody = route.slice(route.indexOf("export async function POST"));
+ok("the route still has a POST", postBody.length > 40);
+for (const term of ["serverCard", "loadCachedSold", "createPublicClient"]) {
+  ok(`the POST handler does not read the cache (${term})`, !postBody.includes(term));
 }
+
+// GET is the OpenGraph image and may read the cache — but only read it. The
+// standing rule is that a crawler never costs a SoldComps request, so an
+// unfurl must not be able to reach the fetch path.
+const getBody = route.slice(route.indexOf("export async function GET"), route.indexOf("export async function POST"));
+ok("the route has a GET", getBody.length > 40);
+ok("the GET reads the cache through serverCard", getBody.includes("serverCard"));
+ok("the GET 404s rather than inventing a card", /404/.test(getBody));
+for (const term of ["fetchSold", "/api/price", "soldcomps", "SoldComps("]) {
+  ok(`the GET cannot reach SoldComps (${term})`, !getBody.includes(term));
+}
+
+// One picture. Two renderers would eventually disagree about which is the
+// shareable card.
+ok(`${ROUTE} draws through a single image()`,
+   (route.match(/new ImageResponse\(/g) || []).length === 1);
+
+/* -- 5. the page only claims an image it can actually draw --------------- */
+const PAGE = "apps/public/app/card/[q]/page.js";
+const page = read(PAGE);
+ok(`${PAGE} gates the OG image on findPublished`,
+   /function ogImageFor[\s\S]{0,400}findPublished/.test(page));
+ok(`${PAGE} points at the share route`, page.includes("/share.png"));
+ok(`${PAGE} declares the size platforms expect`,
+   page.includes("width: 1200") && page.includes("height: 630"));
+// summary_large_image on a card with no image renders as a broken box.
+ok(`${PAGE} only claims summary_large_image when there is an image`,
+   /og \? "summary_large_image" : "summary"/.test(page));
 
 if (failed) {
   console.error(`\ncheck-share: ${failed} failed`);
   process.exit(1);
 }
-console.log("share image: dated, sold-only, long names cut, no cache read and no asking price.");
+console.log("share image: dated, sold-only, long names cut; POST reads nothing, GET reads only the cache.");
