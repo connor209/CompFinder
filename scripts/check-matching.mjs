@@ -19,7 +19,8 @@
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
-  dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE
+  dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
+  poolDisagrees, needsActiveCheck
 } from "../apps/app/lib/matching.js";
 
 const { DEFAULT_SETTINGS, extractNameTokens, recommend } = CompFinderPricing;
@@ -165,5 +166,31 @@ check("zero comps is handled elsewhere, not here", tooThinToPrice(recOf(0)), fal
 check("an active-listing result is not re-judged", tooThinToPrice(recOf(2, "active")), false);
 check("a missing rec is safe", tooThinToPrice(null), false);
 
+// ── 6. Comps that disagree about what product this is ───────────────────────
+// After the matching and postage fixes, the 71 rows with no disagreement
+// warning had a median of £2.49 — right — and the 18 that warned about
+// themselves had £5.74. Every remaining bad price was one of the 18. The
+// ratio is priceOutlierMultiplier, reused rather than invented.
+const spread = (...totals) => ({ included: totals.map((t) => ({ totalPence: t })) });
+// Golbat No. 042 as it actually came back: three products blended into £7.99.
+check("a 21x span is not one product", poolDisagrees(spread(117, 260, 508, 1299, 2499)), true);
+check("Sunkern's 17x span likewise", poolDisagrees(spread(117, 200, 250, 1936)), true);
+check("exactly 8x trips it", poolDisagrees(spread(100, 800)), true);
+// FALSE POSITIVES. Wooper's 4x span priced at £3.49 and is plausible — an
+// ordinary condition spread on a cheap card is not evidence of two products,
+// which is the same reason splitPriceOutliers runs wide in the first place.
+check("Wooper's 4x span is an ordinary condition spread", poolDisagrees(spread(117, 200, 300, 499)), false);
+check("just under 8x holds", poolDisagrees(spread(100, 799)), false);
+check("a single comp cannot disagree with itself", poolDisagrees(spread(500)), false);
+check("an empty pool is safe", poolDisagrees(spread()), false);
+check("a missing rec is safe", poolDisagrees(null), false);
+// A free comp would make every ratio infinite, so zero totals are ignored.
+check("free comps don't manufacture a span", poolDisagrees(spread(0, 250, 300)), false);
+
+// Both routes to the live-market check, and neither for a healthy pool.
+check("too few comps asks the market", needsActiveCheck(spread(117, 200)), true);
+check("a disagreeing pool asks too", needsActiveCheck(spread(117, 260, 508, 1299, 2499)), true);
+check("a healthy pool asks nothing", needsActiveCheck(spread(200, 250, 300, 400)), false);
+
 if (failures) { console.error(`\nmatching: ${failures} case(s) failed.`); process.exit(1); }
-console.log("matching: prefix, set-guard, foreign-postage and thin-pool cases pass; packages/core confirmed untouched.");
+console.log("matching: prefix, set-guard, foreign-postage, thin-pool and pool-disagreement cases pass; packages/core confirmed untouched.");

@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens, dropForeignPostage, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
+import { APP_SETTINGS, appNameTokens, dropForeignPostage, needsActiveCheck, poolDisagrees, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
@@ -166,10 +166,16 @@ function buildQueryForItem(item, settings, includeCondition, useFullTitle) {
  * KEPT so the deep dive still shows what was found and why it wasn't enough;
  * only the figure is withheld, and the row says so rather than going quiet.
  */
-function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic) {
-  const why = soldCount === 0
-    ? `No sold comps matched this card out of ${fetched} fetched`
-    : `Only ${soldCount} sold comp(s) matched this card out of ${fetched} fetched — too few to price from`;
+function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic, disagrees = false) {
+  const totals = (rec.included || []).map((c) => c.totalPence).filter((t) => t > 0);
+  const range = totals.length
+    ? ` (${CompFinderPricing.toPoundsStr(Math.min(...totals))}-${CompFinderPricing.toPoundsStr(Math.max(...totals))})`
+    : "";
+  const why = disagrees
+    ? `The ${soldCount} sold comp(s) for this card range too widely${range} to be the same product, so any single figure would be right for none of them`
+    : soldCount === 0
+      ? `No sold comps matched this card out of ${fetched} fetched`
+      : `Only ${soldCount} sold comp(s) matched this card out of ${fetched} fetched — too few to price from`;
   const active = activeCount == null
     ? ""
     : activeCount === 0
@@ -886,27 +892,41 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // recommendation off a single £19.36 comp while twelve live UK listings
       // for it sat at £1.99-£2.24. The active market is the sanity check that
       // was already one API call away and only ever got made at zero comps.
-      if (rec.included.length < MIN_SOLD_COMPS_TO_PRICE) {
+      if (needsActiveCheck(rec, settings)) {
         const soldCount = rec.included.length;
+        // Two different reasons, one remedy: ask the live market. Too few sold
+        // comps to price from, or a pool whose comps disagree so widely they
+        // cannot all be the same product — Golbat No. 042 blended 15 comps at
+        // £12.99, 6 at £5.08 and 3 at £2.60 into £7.99, a figure right for none
+        // of them, and said so in its own note while printing it.
+        const disagrees = soldCount >= MIN_SOLD_COMPS_TO_PRICE;
         setStatus(
           soldCount === 0
             ? `Item ${i + 1} of ${items.length}: no sold comps for "${query}" — checking active listings…`
-            : `Item ${i + 1} of ${items.length}: only ${soldCount} sold comp(s) for "${query}" — checking what it's listed at…`
+            : disagrees
+              ? `Item ${i + 1} of ${items.length}: sold comps for "${query}" disagree — checking what it's listed at…`
+              : `Item ${i + 1} of ${items.length}: only ${soldCount} sold comp(s) for "${query}" — checking what it's listed at…`
         );
         try {
           const activeResult = await fetchSoldCompsWithRetry(query, { ...searchOptions, sold: false });
           const { comps: ukActive } = dropForeignPostage(activeResult.comps);
           const activeRec = CompFinderPricing.recommend(ukActive, settings, nameTokens, "active", cardNumber, set);
-          if (activeRec.included.length >= MIN_SOLD_COMPS_TO_PRICE) {
-            if (soldCount > 0) {
-              activeRec.note = `${activeRec.note} (Only ${soldCount} sold comp(s) matched this card out of ${soldComps.length} fetched — too few to price from, so this is the live asking market instead.)`;
-            }
+          // The live market only helps if it agrees with itself. Actives that
+          // span as widely as the sold comps did are the same pooling problem
+          // seen from the other side, and swapping one blend for another would
+          // just move the fault.
+          if (activeRec.included.length >= MIN_SOLD_COMPS_TO_PRICE && !poolDisagrees(activeRec, settings)) {
+            activeRec.note = `${activeRec.note} ${
+              disagrees
+                ? `(The ${soldCount} sold comp(s) for this card ranged too widely to be one product, so this is the live asking market instead.)`
+                : `(Only ${soldCount} sold comp(s) matched this card out of ${soldComps.length} fetched — too few to price from, so this is the live asking market instead.)`
+            }`;
             rec = activeRec;
           } else {
-            rec = heldRec(rec, soldCount, soldComps.length, activeRec.included.length, apiDiagnostic);
+            rec = heldRec(rec, soldCount, soldComps.length, activeRec.included.length, apiDiagnostic, disagrees);
           }
         } catch (err) {
-          rec = heldRec(rec, soldCount, soldComps.length, null, apiDiagnostic);
+          rec = heldRec(rec, soldCount, soldComps.length, null, apiDiagnostic, disagrees);
           rec.note = `${rec.note} (Active-listing check also failed: ${err.message})`;
         }
       }

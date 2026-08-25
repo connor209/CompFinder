@@ -153,7 +153,45 @@ export function tooThinToPrice(rec) {
     && rec.included.length < MIN_SOLD_COMPS_TO_PRICE;
 }
 
+/**
+ * Do the comps disagree about what product this even is?
+ *
+ * Measured on the 2026-08-25 re-run, once the matching and postage faults were
+ * fixed: 71 rows carried no disagreement warning and their median was £2.49,
+ * which is right. The 18 rows that warned about themselves had a median of
+ * £5.74, and every remaining bad price was one of them. The engine already
+ * knew — it printed the blend anyway.
+ *
+ * Golbat No. 042 is the case: eBay's own catalog split its comps into three
+ * products — 15 at £12.99, 6 at £5.08, 3 at £2.60 — and the recommendation
+ * was £7.99, which is right for none of them. Same shape as the Yu-Gi-Oh
+ * finding in CLAUDE.md, where a confident number built on pooled printings is
+ * worse than no answer.
+ *
+ * The ratio is priceOutlierMultiplier, deliberately NOT a new number. That is
+ * the engine's own "this comp is implausibly high" threshold, already measured
+ * across 278 cards, and a pool whose cheapest and dearest comps differ by more
+ * than a single comp is allowed to differ from the median is not one product.
+ * Against this run it separates cleanly: it catches Golbat at 21x, Sunkern at
+ * 17x, Farfetch'd at 14x, Zubat at 11x and Magmar at 9x — the five worst
+ * remaining prices — and leaves Wooper at 4x, whose £3.49 is plausible.
+ */
+export function poolDisagrees(rec, settings = APP_SETTINGS) {
+  const totals = ((rec && rec.included) || []).map((c) => c.totalPence).filter((t) => t > 0);
+  if (totals.length < 2) return false;
+  const lo = Math.min(...totals);
+  const hi = Math.max(...totals);
+  return hi / lo >= settings.priceOutlierMultiplier;
+}
+
+/** Either reason the sold pool can't be trusted on its own. */
+export function needsActiveCheck(rec, settings = APP_SETTINGS) {
+  if (!rec) return false;
+  return (rec.included || []).length < MIN_SOLD_COMPS_TO_PRICE || poolDisagrees(rec, settings);
+}
+
 export default {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
-  dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE
+  dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
+  poolDisagrees, needsActiveCheck
 };
