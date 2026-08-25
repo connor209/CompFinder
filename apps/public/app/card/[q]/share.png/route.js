@@ -38,7 +38,17 @@ export const runtime = "nodejs";
 // bundler cannot infer a readFile path, so next.config.js force-traces it.
 let fontData;
 async function archivo() {
-  if (!fontData) fontData = await readFile(join(process.cwd(), "assets", "Archivo-Expanded-800.ttf"));
+  if (fontData === undefined) {
+    try {
+      fontData = await readFile(join(process.cwd(), "assets", "Archivo-Expanded-800.ttf"));
+    } catch (err) {
+      // Null, not a throw. A missing font is a tracing mistake — it has
+      // happened once — and the right failure for it is an image in the wrong
+      // face, not a dead button. Loud in the log so it doesn't stay unnoticed.
+      console.error("share.png: Archivo not on disk, falling back to the default face", err);
+      fontData = null;
+    }
+  }
   return fontData;
 }
 
@@ -251,7 +261,9 @@ function image(fields, art, font, headers) {
     {
       width: W,
       height: H,
-      fonts: [{ name: "Archivo", data: font, style: "normal", weight: 800 }],
+      // Omitted entirely when the file is missing: next/og falls back to its
+      // own bundled face rather than refusing to draw.
+      ...(font ? { fonts: [{ name: "Archivo", data: font, style: "normal", weight: 800 }] } : {}),
       headers
     }
   );

@@ -25,7 +25,13 @@ export default function ShareButton({ payload, filename }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      if (!res.ok) throw new Error("render failed");
+      if (!res.ok) {
+        // Say which failure it was. The first production bug here showed as a
+        // bare "didn't save" with the reason — a 500 from a font the deploy
+        // never traced — visible only in the Vercel log.
+        const detail = await res.text().catch(() => "");
+        throw new Error(`share.png ${res.status}${detail ? `: ${detail.slice(0, 200)}` : ""}`);
+      }
       const blob = await res.blob();
       const file = new File([blob], filename, { type: "image/png" });
 
@@ -52,8 +58,13 @@ export default function ShareButton({ payload, filename }) {
     } catch (err) {
       // AbortError is the visitor dismissing the share sheet, which is not a
       // failure and must not be reported as one.
-      setState(err && err.name === "AbortError" ? "idle" : "error");
-      if (!err || err.name !== "AbortError") setTimeout(() => setState("idle"), 3200);
+      if (err && err.name === "AbortError") {
+        setState("idle");
+        return;
+      }
+      console.error("Save image failed:", err);
+      setState("error");
+      setTimeout(() => setState("idle"), 3200);
     }
   }
 

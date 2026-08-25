@@ -136,6 +136,30 @@ ok(`${PAGE} declares the size platforms expect`,
 ok(`${PAGE} only claims summary_large_image when there is an image`,
    /og \? "summary_large_image" : "summary"/.test(page));
 
+/* -- 6. the font actually reaches the deployment ------------------------- */
+// These keys are GLOBS, not route names: "/card/[q]/share.png" reads like the
+// route and matches /card/q/share.png instead, because `[q]` is a character
+// class. Today the font still reaches the route through the /launch-image
+// entry, so the mistake is currently harmless — which is exactly why it needs
+// a test rather than a comment. Remove that entry and the share image loses
+// its font with nothing failing at build time.
+const CONFIG = "apps/public/next.config.js";
+const config = read(CONFIG);
+const keys = [...config.matchAll(/^\s*"([^"]+)":\s*\[/gm)].map((m) => m[1]);
+ok(`${CONFIG} declares tracing keys`, keys.length > 0);
+for (const key of keys) {
+  ok(`tracing key ${JSON.stringify(key)} has no [brackets] — they are character classes, not route segments`,
+     !key.includes("["));
+}
+// ...and something has to cover the share route, or the font is missing again.
+ok("a tracing key covers the share route",
+   keys.some((k) => k.startsWith("/card/") || k === "/card/**"));
+// The file it reaches for must exist under the traced directory.
+ok("the Archivo file is where the route looks for it",
+   readFileSync(join(ROOT, "apps/public/assets/Archivo-Expanded-800.ttf")).byteLength > 1000);
+// A missing font degrades rather than throwing.
+ok(`${ROUTE} survives a missing font`, /fontData = null/.test(route));
+
 if (failed) {
   console.error(`\ncheck-share: ${failed} failed`);
   process.exit(1);
