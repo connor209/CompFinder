@@ -16,25 +16,29 @@ import { TIMELINE } from "@/lib/splash-frame";
  *
  * Shown on a home-screen launch every time, and once a session in a browser.
  * A splash on every page view is an obstacle, not an identity.
+ *
+ * WHETHER it shows is decided in layout.js, in a blocking script that runs
+ * before the first paint. This component only animates what that decision
+ * already made visible — see the note on `done` below.
  */
 export default function Splash() {
   const [stage, setStage] = useState("frame-one");
-  const [gone, setGone] = useState(true);
+  // Starts VISIBLE, and that is the fix. It used to start hidden and be
+  // switched on inside the effect — but an effect runs after the browser has
+  // painted, so the page appeared and then the splash landed on top of it.
+  // Now the markup is in the server HTML, CSS keeps it hidden unless the
+  // decider in layout.js opted this visitor in before the first paint, and
+  // nothing here can make it arrive late.
+  const [done, setDone] = useState(false);
   const markRef = useRef(null);
 
   useEffect(() => {
-    // Decorative: under reduced motion there is nothing to gain and a second
-    // of held-back content to lose.
-    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const installed = window.matchMedia("(display-mode: standalone)").matches
-      || window.navigator.standalone === true;
+    // The decision was already made, before paint. This only reads it.
+    if (document.documentElement.getAttribute("data-splash") !== "show") {
+      setDone(true);
+      return undefined;
+    }
 
-    let seen = false;
-    try { seen = sessionStorage.getItem("lc-splash") === "1"; } catch { /* private mode */ }
-    if (still || (seen && !installed)) return undefined;
-    try { sessionStorage.setItem("lc-splash", "1"); } catch { /* fine */ }
-
-    setGone(false);
     const timers = [
       setTimeout(() => setStage("warm"), TIMELINE.compWarms),
       setTimeout(() => setStage("rule"), TIMELINE.ruleFills),
@@ -53,12 +57,17 @@ export default function Splash() {
         }
         setStage("out");
       }, TIMELINE.handoff),
-      setTimeout(() => setGone(true), TIMELINE.handoff + TIMELINE.handoffMs)
+      setTimeout(() => {
+        // Clear the flag as well as the DOM: a client-side navigation back to
+        // the home page must not find it still saying "show".
+        document.documentElement.removeAttribute("data-splash");
+        setDone(true);
+      }, TIMELINE.handoff + TIMELINE.handoffMs)
     ];
     return () => timers.forEach(clearTimeout);
   }, []);
 
-  if (gone) return null;
+  if (done) return null;
 
   return (
     <div className="splash" data-stage={stage} aria-hidden="true">

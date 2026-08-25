@@ -434,7 +434,11 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
    colour and the rule change. See lib/splash-frame.js for the geometry both
    this and the launch image are generated from.
 --------------------------------------------------------------------------- */
-.splash {
+/* Hidden until the decider in layout.js says otherwise, which it does before
+   the first paint. Default-hidden is deliberate: a broken decider means no
+   splash, never a splash that arrives after the page has loaded. */
+.splash { display:none; }
+:root[data-splash="show"] .splash {
   position:fixed; inset:0; z-index:100; background:var(--ground);
   display:flex; flex-direction:column; align-items:center; justify-content:center;
   overflow:hidden; opacity:1; transition:opacity 220ms ease-in-out;

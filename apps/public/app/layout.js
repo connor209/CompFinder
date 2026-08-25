@@ -97,6 +97,35 @@ export const viewport = {
   initialScale: 1
 };
 
+
+/**
+ * Decides whether the splash shows BEFORE the first paint.
+ *
+ * It used to be decided in an effect, and an effect runs after the browser has
+ * painted — so the page appeared, then the splash dropped on top of it. On a
+ * fast connection the gap is invisible; on a slow one it is a splash screen
+ * arriving after the site has loaded, which is the one thing a splash must
+ * never do. (Same lesson as seeding the card price into useState rather than
+ * setting it in an effect: an effect is too late for anything the first paint
+ * depends on.)
+ *
+ * The decision needs matchMedia and sessionStorage, so it cannot be made on
+ * the server. A blocking inline script is the only thing that runs earlier
+ * than paint. It sets an attribute; CSS does the rest.
+ *
+ * Fails safe: the splash is display:none until this says otherwise, so a
+ * broken script means no splash rather than a late one.
+ */
+const SPLASH_DECIDER = `(function(){try{
+var m=window.matchMedia;
+if(m&&m("(prefers-reduced-motion: reduce)").matches)return;
+var installed=(m&&m("(display-mode: standalone)").matches)||window.navigator.standalone===true;
+var seen=false;try{seen=sessionStorage.getItem("lc-splash")==="1"}catch(e){}
+if(seen&&!installed)return;
+try{sessionStorage.setItem("lc-splash","1")}catch(e){}
+document.documentElement.setAttribute("data-splash","show");
+}catch(e){}})();`;
+
 export default function RootLayout({ children }) {
   return (
     <html
@@ -104,6 +133,10 @@ export default function RootLayout({ children }) {
       className={`${display.variable} ${figure.variable} ${mono.variable} ${sans.variable}`}
     >
       <body>
+        {/* First thing in the body so it runs before anything below it is
+            painted. Not in a hand-written <head>: the App Router hoists
+            metadata and a <head> here renders nothing. */}
+        <script dangerouslySetInnerHTML={{ __html: SPLASH_DECIDER }} />
         <div className="app">{children}</div>
       </body>
     </html>
