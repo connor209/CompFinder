@@ -21,8 +21,16 @@
  * should look like it is still working, not like it has looped.
  */
 
-/** Long enough to read, short enough that all four show inside a cold fetch. */
-export const STEP_MS = 1600;
+/**
+ * Long enough to read, short enough that all four land inside a cold fetch.
+ *
+ * The budget is the pricing stage, not the whole wait: resolve takes about a
+ * second and the sold set about five more, so there are ~5.2s to spend across
+ * four lines. At 1600 the fourth appeared with 400ms left and read as a
+ * flicker; at 1300 each gets roughly an equal turn and the last still holds
+ * the tail on a slower card.
+ */
+export const STEP_MS = 1300;
 
 /** Stage one: before the resolver has answered. Often skipped — a card picked
  *  from the dropdown arrives already resolved and starts at "pricing". */
