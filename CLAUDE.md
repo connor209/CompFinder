@@ -140,14 +140,15 @@ page submitted in bulk demotes the good ones with it. Card pages carry a
 **canonical** to the published spelling: the same card is reachable under every
 typo, and without one those compete with each other.
 
-**None of it is switched on yet.** `PUBLIC_ALLOW_INDEXING` gates robots.txt and
-the pages' `noindex` from `lib/indexing.js`, and defaults to CLOSED. Two
-conditions, both required: the domain has to be live, or the content is indexed
-against a preview hostname and you owe yourself a migration for pages that had
-just started to rank; and SoldComps have to have answered, because inviting
-Googlebot to crawl every card page is an emphatic way of doing the thing they
-have not yet said we may do. `NEXT_PUBLIC_SITE_URL` must name a host that
-actually resolves — a canonical pointing at a dead host is worse than none.
+**Indexing is gated on one flag.** `PUBLIC_ALLOW_INDEXING` controls robots.txt
+and the pages' `noindex` from `lib/indexing.js`, and defaults to CLOSED — off
+is the safe direction, since being wrong that way costs some indexing we didn't
+get yet and being wrong the other way costs a domain migration. The condition
+that mattered was the domain, and it is live: content indexed against a preview
+hostname owes you a migration for pages that had just started to rank.
+`NEXT_PUBLIC_SITE_URL` must name a host that actually resolves — a canonical
+pointing at a dead host is worse than none, and it must match what Vercel
+serves (www, not the apex, which redirects).
 
 ```
 node scripts/build-cardpages.mjs            # rebuild the published set
@@ -470,27 +471,76 @@ moment strangers can reach it.
       disclosure inline in the home footer rather than only behind a link. The
       site had none of its own — only the business app's, a different Vercel
       project — so any link to `/privacy` 404'd. EPN review the live site, so
-      this was blocking the application. **The contact address on it
-      (`privacy@lastcomp.co.uk`) has to actually exist.**
+      this was blocking the application. The contact address on it,
+      `privacy@lastcomp.co.uk`, is live and receiving — confirmed 2026-08-25.
 - [ ] **Set `NEXT_PUBLIC_EPN_CAMPID`** (5339194433), on `compfinder-public`
       only — see above. Left unset while we are the only ones clicking, since
       commission on your own purchases ends the EPN account.
 - [ ] **Apply to EPN.** They review a live site with a working disclosure, so
-      this can't happen before the domain does — which means the SoldComps
-      answer below gates the affiliate revenue too, not just the legal question.
+      it needs the domain serving and `/privacy` reachable on it. Both are now
+      true.
+- [ ] **Open the door to search engines.** `PUBLIC_ALLOW_INDEXING=1` on
+      `compfinder-public`, then submit the sitemap in Search Console. Everything
+      it needs is already true: the domain serves, canonicals name the host
+      Vercel actually answers on (www), and the sitemap lists only cards that
+      currently have a price. **Set up Search Console BEFORE flipping it** —
+      the coverage report is how you find out whether Google is accepting the
+      card pages or quietly dropping them as thin, and there is no analytics on
+      the site to tell you otherwise.
 - [ ] **Consent management** (a Google-certified CMP) before any ad code, and
       `ads.txt`, for UK/EEA traffic.
-- [ ] **The SoldComps answer below.** Not optional.
 
-Most of what is done is configuration as much as code: `AUDIT_TOKEN` and
-the two Turnstile keys still have to exist in Vercel, and migration 021 has to
-be run against Supabase, or the pacer logs that it is unreachable and lets
-everything through.
+The configuration side is done as of 2026-08-25: `AUDIT_TOKEN`, both Turnstile
+keys, `NEXT_PUBLIC_SITE_URL` (www, not the apex — the apex 308s) and
+`NEXT_PUBLIC_APP_URL` are all set on `compfinder-public`, and the warmer has
+the same `AUDIT_TOKEN` plus the Supabase pair as repository secrets. Migration
+021 still has to be applied against Supabase or the pacer logs that it is
+unreachable and lets everything through.
 
-## Open question blocking the public page
+**Vercel functions run in `lhr1`.** They defaulted to Washington, which put the
+Atlantic between every request and a UK Supabase — a cached price read went
+from 0.81s to 0.33s on moving them. Worth remembering if the project is ever
+recreated: the default is wrong for this product.
 
-SoldComps has not yet confirmed in writing that we may (1) serve anonymous
-visitors from one server-side key, (2) cache their responses in our own
-database, (3) display individual comp rows publicly. Their site says every plan
-permits commercial use; redistribution is unaddressed. Until that is answered,
-the public page should not be marketed or put on a domain.
+## The SoldComps terms question, settled 2026-08-25
+
+This used to say the public page must not go on a domain until SoldComps
+confirmed three things in writing. **That gate is lifted.** Re-reading their
+own FAQ answered most of it, and the rest was a question worth less than the
+delay it was causing.
+
+Their FAQ: *"Every plan — including free — permits commercial use. Build it
+into a paid SaaS, an internal tool, a client deliverable, a mobile app,
+whatever. You pay for the requests; what you build on top of them is yours."*
+
+Against the three questions that were open:
+
+- **One server-side key serving anonymous visitors** — answered. They bless "a
+  mobile app", and a mobile app cannot ship per-user API keys; it is one key
+  serving users the operator never identifies. Same for the paid SaaS they also
+  bless.
+- **Caching their responses** — unaddressed, but there is no objection to
+  construct. Caching *reduces* their load, and every plan is metered per
+  request, so caching means we buy fewer. Their only interest runs the other
+  way, and "what you build on top of them is yours" leans permissive.
+- **Displaying individual comp rows** — the one genuinely open point, and
+  weaker than it first looked: the rows are *eBay's* listings. SoldComps is a
+  scraper; what they sell is the access, not ownership of the fact that a card
+  sold for £X on a date.
+
+**Why we stopped short of asking.** A question invites a policy where none
+exists. Faced with a novel redistribution question, the safe answer for a
+support person is "no" — and then we are bound by an answer we went and
+fetched. Operating on a reasonable reading of terms they wrote and published is
+the better position, and the realistic downside was never damages: it is being
+asked to stop.
+
+**What that means in practice.** The key can still be cut off, and the day it
+is, every uncached search fails — the warmed cards keep serving and nothing new
+prices. That risk is real, unchanged, and the reason the cache is worth as much
+as it is. It was never a reason to keep the site off a domain.
+
+If we ever do make contact, make it a customer email — what we are building, we
+are on Starter, expect to grow, anything you would want us to know — rather
+than a permission request. That gets a named human and an implicit blessing
+without forcing a ruling.

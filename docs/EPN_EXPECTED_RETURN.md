@@ -341,10 +341,11 @@ stack, and a stack is what Pro is for.
 
 ## Sequencing, including the bit that is easy to miss
 
-1. **The SoldComps written answer.** `CLAUDE.md` already says the page is not
-   to be marketed or put on a domain until this lands. It is also on the
-   critical path to the affiliate revenue, which is less obvious: EPN reviews a
-   *live* site, so no domain means no application means no campaign ID.
+1. ~~**The SoldComps written answer.**~~ **Settled 2026-08-25 without asking** —
+   see CLAUDE.md, "The SoldComps terms question". Their FAQ covers the shared
+   key and the caching; the comp rows are eBay's data rather than theirs; and a
+   question invites a policy where none exists. The domain is live and
+   `/privacy` is reachable on it, so nothing here waits on them any more.
 2. **The public privacy and disclosure page**, with the `#affiliate` anchor.
 3. **Apply to EPN**, set `NEXT_PUBLIC_EPN_CAMPID` on `compfinder-public` only.
 4. **Card pages, sitemap, internal linking.** Months, not weeks, before it

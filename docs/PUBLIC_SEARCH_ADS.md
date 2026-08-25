@@ -386,6 +386,18 @@ want. Which is why this should ship **before** display ads, not after.
 
 ## The API key question
 
+> **Settled 2026-08-25 — this section is kept for the reasoning, not the
+> conclusion.** The three questions below were never sent. Re-reading
+> SoldComps' own FAQ answered two of them: they bless building this into "a
+> mobile app", which cannot ship per-user keys, so one server-side key serving
+> anonymous users is covered; and caching only reduces their metered load, so
+> there is no objection to construct. The third — displaying individual comp
+> rows — is weaker than it reads here, because the rows are eBay's listings and
+> what SoldComps sells is the access, not ownership of the fact that a card
+> sold for £X. We stopped short of asking because a question invites a policy
+> where none exists, and the safe answer to a novel redistribution question is
+> "no". See CLAUDE.md, "The SoldComps terms question".
+
 This is the crux, and the position has moved since `app/api/soldcomps/route.js`
 was written. That route's comment records a hosted-shared-key model being
 "explicitly deferred pending written clarification". SoldComps now state
