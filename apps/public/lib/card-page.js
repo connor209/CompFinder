@@ -67,6 +67,7 @@ export async function loadCard(cardmarketId) {
   return cardFromRow(data);
 }
 
+
 /** Cached sold comps for a card, or null. Never fetches. */
 export async function loadCachedSold(card, { windowDays = DEFAULT_SOLD_WINDOW, maxAgeDays = MAX_SERVER_PRICE_AGE_DAYS } = {}) {
   let supabase;
