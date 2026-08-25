@@ -119,6 +119,10 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
   letter-spacing:.01em; color:var(--ink); text-decoration:none;
 }
 .wordmark b { display:block; font-weight:800; color:var(--accent); }
+/* The horizontal form: same two-tone, one line, for the crumb bar where the
+   stacked lockup would make the row twice as tall as the card name beside it. */
+.wordmark.inline { line-height:1; }
+.wordmark.inline b { display:inline; }
 
 .tile {
   display:grid; place-items:center; background:var(--panel);
@@ -178,9 +182,16 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
   display:flex; align-items:center; gap:11px;
   padding:15px var(--pad); border-bottom:1px solid var(--line);
 }
-.crumb a.back { color:var(--ink-soft); font-size:18px; line-height:1; text-decoration:none; }
-.crumb .q { font:600 14px var(--font-mono); }
-.crumb .scope { margin-left:auto; font-size:11.5px; color:var(--ink-faint); }
+.crumb a.back { color:var(--ink-soft); font-size:18px; line-height:1; text-decoration:none; flex:0 0 auto; }
+/* The card name is the only thing here allowed to shrink. It is already on
+   screen in larger type a few pixels below; the mark is not repeated anywhere,
+   and a narrow phone pushing the brand off the row would undo the reason it
+   is on the row. */
+.crumb .q {
+  font:600 14px var(--font-mono);
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.crumb .scope { margin-left:auto; font-size:11.5px; color:var(--ink-faint); flex:0 0 auto; }
 
 /* ---------------------------------------------------------------------------
    Search
@@ -552,3 +563,23 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
     background:var(--accent);
   }
 }
+
+/* The mark in the crumb: present enough to survive a screenshot, quiet enough
+   not to compete with the card name beside it. */
+.crumb .wordmark { margin-left:auto; opacity:.85; flex:0 0 auto; }
+.crumb .scope + .wordmark { margin-left:12px; }
+.crumb .wordmark:hover { opacity:1; }
+
+/* Save image — beside "see the workings", both being things you do when you
+   mean to pass the answer on to somebody. */
+.sharebtn {
+  font:700 10.5px var(--font-display); letter-spacing:.1em; text-transform:uppercase;
+  font-variation-settings:"wdth" 125;
+  color:var(--ink-soft); background:transparent;
+  border:1px solid var(--line-strong); border-radius:7px;
+  padding:7px 11px; cursor:pointer;
+  transition:border-color .15s, color .15s;
+}
+.sharebtn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent-light); }
+.sharebtn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.sharebtn:disabled { opacity:.6; cursor:default; }

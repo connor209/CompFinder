@@ -12,6 +12,7 @@ import { SOLD_WINDOWS, cardHref } from "@/lib/windows";
 import { VARIANTS, variantQueryTerms } from "@/lib/variants";
 import TrendChart from "../../TrendChart";
 import { CardArt, Crumb, SearchProgress, gbp } from "../../ui";
+import ShareButton from "../../ShareButton";
 
 function when(iso) {
   const d = new Date(iso);
@@ -158,6 +159,19 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
   // module — the EPN dashboard is the only per-page traffic signal this site
   // has, and "which sets earn" is what decides what gets published next.
   const tag = (slot) => cardCustomId(slot, card);
+  // What the shareable PNG is drawn from. Sold figures only — see
+  // lib/share-card.js for why "buy it today for" is deliberately absent from
+  // an image that will still be legible in a thread six months from now.
+  const sharePayload = {
+    query,
+    card: { name: card.name, set: card.set, number: card.number, image: card.image },
+    marketPence: d.marketPence,
+    used: d.used,
+    windowDays: days,
+    lastSale: d.sales && d.sales[0]
+      ? { pence: d.sales[0].pence, endedAt: d.sales[0].endedAt }
+      : null
+  };
   const searchUrl = ebaySearchUrl(card.q || query, { sold: false, customId: tag("buy-see-all") });
 
   return (
@@ -293,9 +307,16 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
             {[0, 1, 2].map((i) => <i key={i} data-on={i < d.confidence.filled} />)}
           </div>
           <p className="body" style={{ margin: "9px 0 0", fontSize: 12.5 }}>{d.confidence.prose}</p>
-          <a className="link" style={{ display: "inline-block", marginTop: 9 }} href={workings}>
-            See the workings →
-          </a>
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, marginTop: 9 }}>
+            <a className="link" href={workings}>See the workings →</a>
+            {/* Sits beside the workings rather than under the price: both are
+                for someone who intends to pass the answer on. */}
+            <ShareButton
+              payload={sharePayload}
+              filename={`lastcomp-${[card.name, card.number].filter(Boolean).join("-")
+                .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "card"}.png`}
+            />
+          </div>
         </div>
 
         {d.bands && (

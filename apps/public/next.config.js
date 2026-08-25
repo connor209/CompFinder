@@ -5,7 +5,8 @@ const nextConfig = {
   // imports it, so tracing can't infer it and the route 500s in production
   // while building perfectly well locally.
   outputFileTracingIncludes: {
-    "/launch-image": ["./assets/**"]
+    "/launch-image": ["./assets/**"],
+    "/card/[q]/share.png": ["./assets/**"]
   }
 };
 

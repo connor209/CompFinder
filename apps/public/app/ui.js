@@ -7,11 +7,20 @@ import { DEFAULT_SOLD_WINDOW } from "@/lib/windows";
 
 export const gbp = (pence) => (pence == null ? "—" : CompFinderPricing.toPoundsStr(pence));
 
-/** The whole mark is the two-tone split across two lines. No symbol beside it. */
-export function Wordmark({ href = "/", size = 13, id }) {
+/**
+ * The whole mark is the two-tone split across two lines. No symbol beside it.
+ *
+ * `inline` sets the same two-tone on ONE line, for a single-row bar where the
+ * stacked lockup would double the height. It is still the mark — the two-tone
+ * is the identity and it is untouched — just laid horizontally, the way any
+ * logo has a stacked and a horizontal form. The Tile remains the answer where
+ * neither fits.
+ */
+export function Wordmark({ href = "/", size = 13, id, inline = false }) {
   const El = href ? "a" : "span";
   return (
-    <El className="wordmark" id={id} href={href || undefined} style={{ fontSize: size }}>
+    <El className={`wordmark${inline ? " inline" : ""}`} id={id}
+        href={href || undefined} style={{ fontSize: size }}>
       Last<b>Comp</b>
     </El>
   );
@@ -58,12 +67,24 @@ export function CardArt({ src, alt, className = "", width }) {
   );
 }
 
+/**
+ * The bar above every answer.
+ *
+ * The mark on the right is not decoration. People give price guidance by
+ * screenshotting this screen into a thread, and before it was here a snipped
+ * rectangle of the answer said nothing about where the answer came from — the
+ * one screen most likely to be passed around was the one screen with no brand
+ * on it. For a deliberate share there is the PNG button, which puts the mark,
+ * the domain and the date on it properly; this is what catches the snipping
+ * tool.
+ */
 export function Crumb({ back = "/", label, scope = null }) {
   return (
     <div className="crumb">
       <a className="back" href={back} aria-label="Back">←</a>
       <span className="q">{label}</span>
       {scope ? <span className="scope">{scope}</span> : null}
+      <Wordmark href="/" size={12} inline />
     </div>
   );
 }

@@ -27,6 +27,8 @@ export const CHANGELOG = [
   {
     date: "2026-08-25",
     changes: [
+      "There's a Save image button on every answer now. It gives you a tidy PNG of the price, how many sales it's based on, the last one, and the date — for pasting into a thread when someone asks what their card is worth. On a phone it offers to share it straight to wherever you're sending it.",
+      "The site's name is now on the answer screen, so a screenshot of a price says where the price came from.",
       "Looking up a card we haven't priced before takes a few seconds, and the page now says what it's doing while it works rather than showing a bare spinner. It isn't a percentage, because we'd have to make the percentage up.",
       "Every card in a set now has its own page, sorted by what it's worth — and each card links to others from the same set, so there's somewhere to go next.",
       "The whole site is quicker. It was running from a server in Washington while its data sat in the UK; moving it to London cut the wait on a price from about eight tenths of a second to a third.",

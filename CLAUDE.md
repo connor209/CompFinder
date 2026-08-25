@@ -46,7 +46,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs thirteen table tests, no framework, non-zero exit on failure:
+`npm run check` runs fourteen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -65,6 +65,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   that everything else falls through to the client.
 - `scripts/check-indexing.mjs` — that the door to search engines defaults shut,
   and that robots.txt and the page metadata give the same answer.
+- `scripts/check-share.mjs` — the shareable PNG: always dated, sold figures
+  only, long names cut, and greps against it ever reading the price cache or
+  growing an asking price.
 - `scripts/check-epn-tag.mjs` — what an affiliate link reports about itself:
   the sub-IDs, that the slot prefix still selects what it always did, that
   `epn.js` passes them through unrewritten, and a grep against hand-writing
@@ -369,7 +372,34 @@ root layout renders nothing.
 /card/[q]                which one? when ambiguous, otherwise the answer
 /card/[q]?days=30        the same answer over a shorter sold window
 /card/[q]/workings       every sale counted, every sale excluded, net after fees
+/card/[q]/share.png      POST only — the answer as a 1200x630 PNG
 ```
+
+**The answer screen carries the mark, because it is the screen people
+screenshot.** Price guidance gets given by snipping a rectangle of this site
+into a thread, and the one screen most likely to be passed around was the one
+screen with no brand on it. `Crumb` now ends with a horizontal `<Wordmark
+inline />` — the same two-tone, on one line, because the stacked lockup would
+double the height of a single-row bar. In that row the card NAME is the only
+thing allowed to shrink: it is already on screen in larger type just below,
+and a narrow phone pushing the mark off would undo the point of putting it
+there.
+
+**`share.png` is POST, and that is the design rather than an accident.** The
+figures arrive in the body from the client that already has them. The
+alternative — reading the cache on a GET — only works for the 455 published
+cards, and the card someone actually needs to price for a customer usually
+isn't one of them; a button that worked on a twentieth of the site would be
+worse than no button. It costs nothing upstream: no SoldComps call, no
+Supabase read, nothing to scrape, because it renders what you hand it.
+
+**Nothing on that image is an asking price.** "Buy it today for" is the
+headline everywhere else and is forbidden here for the same reason it is never
+server-rendered — except worse, because a PNG pasted into a Facebook group is
+still being quoted in March while the listing sold in August. Sold figures are
+facts about things that already happened. The image is also always DATED, for
+the same reason. `check-share.mjs` greps for both.
+
 
 Both card screens run off `lib/use-card.js`. That is deliberate: the workings
 exist to show the arithmetic behind the answer, and a second fetching path
