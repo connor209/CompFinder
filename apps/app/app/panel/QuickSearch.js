@@ -2,7 +2,7 @@
 
 import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens } from "@/lib/matching";
+import { APP_SETTINGS, appNameTokens, applyNumberGuards, dropForeignPostage, settingsForText } from "@/lib/matching";
 import { detectLanguage } from "@compfinder/core/catalog.js";
 import { cleanSearchName } from "@compfinder/core/cardname.js";
 import { ebaySearchUrl, cardmarketBestUrl } from "@compfinder/core/marketplace.js";
@@ -475,7 +475,7 @@ export default function QuickSearch({ seed }) {
     activePromise
       .then((actRes) => {
         if (actRes && actRes.ok) {
-          const a = CompFinderPricing.recommend(actRes.comps || [], settings, nameTokens, "active", effNumber, effSet);
+          const a = CompFinderPricing.recommend(dropForeignPostage(applyNumberGuards(actRes.comps || [], effNumber)).comps, settingsForText(query), nameTokens, "active", effNumber, effSet);
           setActiveState({ loading: false, rec: a });
         } else {
           setActiveState({ loading: false, rec: null });
@@ -487,7 +487,7 @@ export default function QuickSearch({ seed }) {
       const soldRes = await soldPromise;
       if (!soldRes || !soldRes.ok) throw new Error((soldRes && soldRes.error) || "Pricing request failed.");
       const comps = soldRes.comps || [];
-      const rec = CompFinderPricing.recommend(comps, settings, nameTokens, "sold", effNumber, effSet);
+      const rec = CompFinderPricing.recommend(dropForeignPostage(applyNumberGuards(comps, effNumber)).comps, settingsForText(query), nameTokens, "sold", effNumber, effSet);
       setData({ card, rec, comps });
       saveHistory(card, query, rec, lang);
     } catch (err) {

@@ -73,7 +73,8 @@ genuinely did sell for £2.20.
 
 ## 4. Decide which listings are actually your card
 
-Where most of them go. In order:
+Where most of them go. In order — steps 4 and 5 are ported from Last Comp,
+which has run both since it was written:
 
 1. **Name check.** The title must contain the card name and the number.
    Nothing else is required — the set and language steered the *search*, but
@@ -83,14 +84,25 @@ Where most of them go. In order:
    searched for one.
 3. **Not this kind of thing.** Graded slabs, bundles and counted lots, "choose
    your card" pick-lists, custom/fan-made/proxy cards, promo variants.
-4. **Non-UK sellers**, by eBay's own location field.
-5. **Wrong set** — when your CSV names a set and at least 4 comps confirm it,
+4. **Wrong printing of the same card** — a title carrying a *different*
+   explicit collector number, so `020/189` doesn't pool with the `074/189`
+   rainbow rare. Titles with no number at all stay in: they can't be ruled out,
+   and the honest majority isn't worth discarding to catch the ambiguous few.
+   Does nothing for a Japanese Neo card, whose "No. 178" has no denominator to
+   compare against.
+5. **Foreign-language prints**, when the card looks English — a title naming a
+   language (Japanese, German, Italian…) is taken as that card's language and
+   left alone; a title naming none is treated as English, and comps naming a
+   language are dropped. An English Charizard and a Japanese one are different
+   cards at different prices.
+6. **Non-UK sellers**, by eBay's own location field.
+7. **Wrong set** — when your CSV names a set and at least 4 comps confirm it,
    the ones that don't are dropped.
-6. **eBay says it's a different product** — using eBay's own catalogue ID, when
+8. **eBay says it's a different product** — using eBay's own catalogue ID, when
    6+ comps carry one and a clear majority agree. No clear majority, and it
    says so rather than picking a side.
-7. **Silly prices** — above 8× the middle, or below a twelfth of it.
-8. **Silly postage** — 8× the others', or dwarfing the card, on 6+ comps.
+9. **Silly prices** — above 8× the middle, or below a twelfth of it.
+10. **Silly postage** — 8× the others', or dwarfing the card, on 6+ comps.
 
 Every listing dropped is kept on screen with its reason. The deep dive shows
 all of them.

@@ -21,8 +21,11 @@ import CardUploaderCsv from "../apps/app/lib/carduploader.js";
 import {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
-  poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE
+  poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE,
+  settingsForText, applyNumberGuards, FOREIGN_LANGUAGE
 } from "../apps/app/lib/matching.js";
+// settings.js exports it on the default only, not as a named export.
+import publicSettings from "../apps/public/lib/settings.js";
 
 const { DEFAULT_SETTINGS, extractNameTokens, recommend } = CompFinderPricing;
 // What the engine does on its own, which is what Last Comp still gets.
@@ -262,5 +265,43 @@ check("useFullTitle still overrides everything",
     cardName: "Sunkern", cardNumber: "No. 191", set: "Neo Genesis" }, { useFullTitle: true }).query,
   "Sunkern NO. 191 Neo Genesis Pokemon Japanese MP");
 
+// ── 9. Ported from Last Comp: the language and number guards ────────────────
+// The app had neither. An English Charizard could pool Japanese comps with
+// nothing stopping it — a different card at a different price, and invisible,
+// because a batch of English cards never shows the warning that would give it
+// away.
+const langOf = (t) => !!settingsForText(t).excludeKeywords.foreignPrint;
+check("an English title blocks foreign comps", langOf("Charizard VMAX 020/189 Darkness Ablaze NM"), true);
+check("a Japanese title does not", langOf("Sunkern NO. 191 Neo Genesis Pokemon Japanese MP"), false);
+check("nor a German one", langOf("Glurak 020/189 Deutsch"), false);
+// FALSE POSITIVES. The two products decide "is this English" from different
+// evidence and that is deliberate, but the LIST must not drift — a language
+// Last Comp knows and the app doesn't is a silent gap on exactly the cards
+// where they would disagree.
+check("the language list matches Last Comp's, exactly",
+  [...FOREIGN_LANGUAGE].sort(), [...publicSettings.FOREIGN_LANGUAGE].sort());
+check("empty text is treated as English", langOf(""), true);
+check("a word merely containing a language name doesn't count", langOf("Frenchie Pikachu Promo"), true);
+
+// The number guards. Both stand down when the number has no denominator, which
+// is why they do nothing for the Japanese Neo cards that prompted this week —
+// "No. 178" has nothing to compare. They earn their place on English stock.
+const titled = (title) => ({ title });
+const numberPool = [
+  titled("Charizard VMAX 020/189 Darkness Ablaze NM"), titled("Pokemon Charizard VMAX 020/189 Darkness Ablaze"),
+  titled("Charizard VMAX 020/189 DAA LP"), titled("Charizard VMAX 020/189 holo"),
+  titled("Charizard VMAX 074/189 Darkness Ablaze RAINBOW"), titled("Charizard VMAX Darkness Ablaze")
+];
+check("a different numerator is dropped", applyNumberGuards(numberPool, "020/189").length, 5);
+check("...and a title with NO number is kept — it can't be ruled out",
+  applyNumberGuards(numberPool, "020/189").some((c) => c.title === "Charizard VMAX Darkness Ablaze"), true);
+// FALSE POSITIVES.
+check("no card number is a no-op", applyNumberGuards(numberPool, null).length, 6);
+check("a bare number has no denominator to compare", applyNumberGuards(numberPool, "178").length, 6);
+check("an empty pool is safe", applyNumberGuards([], "020/189").length, 0);
+// The guard stands down rather than cut a pool below what it can price from.
+check("it will not strip a pool down to nothing",
+  applyNumberGuards([titled("Charizard 020/189"), titled("Charizard 074/189"), titled("Charizard 099/189")], "020/189").length, 3);
+
 if (failures) { console.error(`\nmatching: ${failures} case(s) failed.`); process.exit(1); }
-console.log("matching: prefix, set-guard, foreign-postage, thin-pool, pool-disagreement and query-scoping cases pass; packages/core confirmed untouched.");
+console.log("matching: prefix, set-guard, foreign-postage, thin-pool, disagreement, sanity, query-scoping, language and number-guard cases pass.");

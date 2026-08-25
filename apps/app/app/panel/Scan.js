@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens } from "@/lib/matching";
+import { APP_SETTINGS, appNameTokens, applyNumberGuards, dropForeignPostage, settingsForText } from "@/lib/matching";
 import { openRearCameraStream } from "@/lib/camera.js";
 
 const settings = APP_SETTINGS;
@@ -200,7 +200,7 @@ export default function Scan({ onDeepDive }) {
         body: JSON.stringify({ query, options: { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 } })
       }).then((r) => r.json());
       if (!pr.ok) throw new Error(pr.error || "Pricing failed.");
-      const rec = CompFinderPricing.recommend(pr.comps || [], settings, nameTokens, "sold", card.number || null, card.set || null);
+      const rec = CompFinderPricing.recommend(dropForeignPostage(applyNumberGuards(pr.comps || [], card.number || null)).comps, settingsForText(query), nameTokens, "sold", card.number || null, card.set || null);
       const totals = (rec.included || []).map((c) => c.totalPence).sort((a, b) => a - b);
       const med = totals.length ? totals[Math.floor(totals.length / 2)] : null;
       const view = {

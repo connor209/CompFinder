@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens, dropForeignPostage, needsActiveCheck, poolDisagrees, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
+import { APP_SETTINGS, appNameTokens, applyNumberGuards, dropForeignPostage, needsActiveCheck, poolDisagrees, settingsForText, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
@@ -781,9 +781,12 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     let soldFailStreak = 0;
     let soldEndpointDown = false;
 
-    const priceFromActive = (q, tokens, num, st) =>
+    const priceFromActive = (q, tokens, num, st, title) =>
       fetchSoldCompsWithRetry(q, { ...searchOptions, sold: false }).then((r) =>
-        CompFinderPricing.recommend(r.comps, settings, tokens, "active", num, st)
+        CompFinderPricing.recommend(
+          dropForeignPostage(applyNumberGuards(r.comps, num)).comps,
+          settingsForText(title || q), tokens, "active", num, st
+        )
       );
 
     for (let i = 0; i < items.length; i++) {
@@ -836,7 +839,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         if (query) {
           setStatus(`Item ${i + 1} of ${items.length}: sold lookup failed — trying active listings…`);
           try {
-            const activeRec = await priceFromActive(query, nameTokens, cardNumber, set);
+            const activeRec = await priceFromActive(query, nameTokens, cardNumber, set, title);
             if (activeRec.included.length > 0) {
               activeRec.note = `Priced from active listings (asking prices), not sold comps — the sold lookup failed: ${err.message}`;
               salvaged = activeRec;
@@ -879,9 +882,12 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // Dropped BEFORE pricing so every downstream rule sees the card rather
       // than somebody's international shipping — measured across this batch,
       // 74-82% of each recommended price was the postage.
-      const { comps: ukPostageComps, changed: postageDropped } = dropForeignPostage(soldComps);
+      // Per CARD, not per run: an English card excludes foreign-language comps,
+      // a card whose title names a language does not. See settingsForText.
+      const cardSettings = settingsForText(title || query);
+      const { comps: ukPostageComps, changed: postageDropped } = dropForeignPostage(applyNumberGuards(soldComps, cardNumber));
 
-      let rec = CompFinderPricing.recommend(ukPostageComps, settings, nameTokens, "sold", cardNumber, set);
+      let rec = CompFinderPricing.recommend(ukPostageComps, cardSettings, nameTokens, "sold", cardNumber, set);
       if (apiDiagnostic) rec.note = apiDiagnostic;
       if (postageDropped > 0) {
         rec.note = `${rec.note ? rec.note + " " : ""}(Note: postage was dropped from ${postageDropped} comp(s) charging more than any UK seller charges to post a single card — the sale still counts, their international shipping doesn't.)`;
@@ -892,7 +898,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // recommendation off a single £19.36 comp while twelve live UK listings
       // for it sat at £1.99-£2.24. The active market is the sanity check that
       // was already one API call away and only ever got made at zero comps.
-      if (needsActiveCheck(rec, settings)) {
+      if (needsActiveCheck(rec, cardSettings)) {
         const soldCount = rec.included.length;
         // A sold pool can be internally consistent and still not be the card.
         // Golbat No. 042 priced £29.99 off four comps spanning £12.00-£44.33 —
@@ -900,7 +906,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         // live at £3.48. Nothing in the pool could catch it, so above
         // SANITY_CHECK_ABOVE_PENCE the sold answer is checked against the live
         // market rather than trusted on its own shape.
-        const sanityOnly = soldCount >= MIN_SOLD_COMPS_TO_PRICE && !poolDisagrees(rec, settings);
+        const sanityOnly = soldCount >= MIN_SOLD_COMPS_TO_PRICE && !poolDisagrees(rec, cardSettings);
         // Two different reasons, one remedy: ask the live market. Too few sold
         // comps to price from, or a pool whose comps disagree so widely they
         // cannot all be the same product — Golbat No. 042 blended 15 comps at
@@ -916,13 +922,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         );
         try {
           const activeResult = await fetchSoldCompsWithRetry(query, { ...searchOptions, sold: false });
-          const { comps: ukActive } = dropForeignPostage(activeResult.comps);
-          const activeRec = CompFinderPricing.recommend(ukActive, settings, nameTokens, "active", cardNumber, set);
+          const { comps: ukActive } = dropForeignPostage(applyNumberGuards(activeResult.comps, cardNumber));
+          const activeRec = CompFinderPricing.recommend(ukActive, cardSettings, nameTokens, "active", cardNumber, set);
           // The live market only helps if it agrees with itself. Actives that
           // span as widely as the sold comps did are the same pooling problem
           // seen from the other side, and swapping one blend for another would
           // just move the fault.
-          const activeUsable = activeRec.included.length >= MIN_SOLD_COMPS_TO_PRICE && !poolDisagrees(activeRec, settings);
+          const activeUsable = activeRec.included.length >= MIN_SOLD_COMPS_TO_PRICE && !poolDisagrees(activeRec, cardSettings);
           if (sanityOnly) {
             // The sold pool looked fine, so it is kept unless the live market
             // flatly contradicts it. Asking prices run ABOVE sold ones, so a
@@ -1006,8 +1012,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     try {
       const activeResult = await fetchSoldCompsWithRetry(result.query, activeOptions);
       const activeRec = CompFinderPricing.recommend(
-        activeResult.comps,
-        settings,
+        dropForeignPostage(applyNumberGuards(activeResult.comps, result.cardNumber || null)).comps,
+        settingsForText(result.title || result.query),
         result.nameTokens || null,
         "active",
         result.cardNumber || null,

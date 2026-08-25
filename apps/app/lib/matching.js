@@ -12,6 +12,7 @@
  * docs/APP_BATCH_RECURSION.md for the measurements.
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { dropWrongNumerator, dropWrongSetTotal } from "@compfinder/core/cardnumber.js";
 
 /**
  * "No.", "No", "#" — a numbering prefix, at the front of a card NUMBER.
@@ -83,6 +84,69 @@ export const APP_SETTINGS = {
   ...CompFinderPricing.DEFAULT_SETTINGS,
   setMismatchExcludeBelowRatio: 1
 };
+
+/**
+ * The languages a seller writes in a title. Same list Last Comp uses
+ * (apps/public/lib/settings.js), kept in step deliberately — a language it
+ * knows and this doesn't would be a silent gap on exactly the cards where the
+ * two products disagree.
+ */
+export const FOREIGN_LANGUAGE = [
+  "russian", "italian", "italiano", "french", "française", "francaise",
+  "german", "deutsch", "spanish", "español", "espanol",
+  "portuguese", "português", "portugues",
+  "japanese", "korean", "chinese", "thai", "indonesian"
+];
+
+/**
+ * Settings for one card, given the text describing it.
+ *
+ * Ported from Last Comp, which has always excluded foreign-language comps when
+ * pricing an English card and which the app had no equivalent of at all. An
+ * English Charizard here could pool Japanese comps with nothing stopping it —
+ * a different card at a different price, and invisible, because a batch of
+ * English cards never shows the warning that would give it away.
+ *
+ * The two products decide "is this English" from different evidence, and that
+ * asymmetry is the whole reason this lives in the app rather than in core.
+ * Last Comp reads a catalogue row's language field. The app has only what the
+ * lister typed, so a title naming a language IS the card's language and one
+ * naming none is taken as English — which is also what the eBay title of an
+ * English card looks like.
+ *
+ * The failure mode is a Japanese card whose title forgot to say so: its comps
+ * would be excluded as foreign and the pool would empty. That is caught rather
+ * than silent — the pool falls under MIN_SOLD_COMPS_TO_PRICE, the run checks
+ * the live market, and the row says how many comps went and why.
+ */
+export function settingsForText(text) {
+  const t = String(text || "");
+  const namesALanguage = FOREIGN_LANGUAGE.some((l) => new RegExp(`\\b${l}\\b`, "i").test(t));
+  if (namesALanguage) return APP_SETTINGS;   // not an English card — leave the pool alone
+  return {
+    ...APP_SETTINGS,
+    excludeKeywords: { ...APP_SETTINGS.excludeKeywords, foreignPrint: FOREIGN_LANGUAGE }
+  };
+}
+
+/**
+ * The collector-number guards, applied to a comp pool before it is priced.
+ *
+ * Also ported from Last Comp, which has run both since it was written and
+ * measured dropWrongSetTotal as the thing that stops "223/165" (a 151
+ * Charizard, ~£259) pooling with "223/197" (an Obsidian Flames one, ~£96).
+ * The app had neither, so the same collision was live on every English card in
+ * inventory.
+ *
+ * Both stand down when the number carries no denominator, which is why they do
+ * nothing for the Japanese Neo cards that prompted this week's work — those
+ * are numbered "No. 178" with nothing to compare. They earn their place on the
+ * English stock instead.
+ */
+export function applyNumberGuards(comps, cardNumber) {
+  if (!cardNumber) return comps || [];
+  return dropWrongNumerator(dropWrongSetTotal(comps || [], cardNumber), cardNumber);
+}
 
 /**
  * Postage that no UK seller charges to post one card.
@@ -240,5 +304,6 @@ export function needsActiveCheck(rec, settings = APP_SETTINGS) {
 export default {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
-  poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE
+  poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE,
+  settingsForText, applyNumberGuards, FOREIGN_LANGUAGE
 };
