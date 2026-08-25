@@ -519,3 +519,8 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
 .sibling:hover { border-color:var(--accent); }
 .sibling .mt { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
 
+
+/* --- changelog --- */
+.changelist { margin:0; padding-left:18px; }
+.changelist li { margin:0 0 9px; }
+.changelist li:last-child { margin-bottom:0; }

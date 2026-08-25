@@ -361,6 +361,7 @@ root layout renders nothing.
 
 ```
 /                        search
+/changelog               what changed, and what was wrong
 /card/[q]                which one? when ambiguous, otherwise the answer
 /card/[q]?days=30        the same answer over a shorter sold window
 /card/[q]/workings       every sale counted, every sale excluded, net after fees
@@ -394,6 +395,18 @@ after it), the graded tiers from `gradedBreakdown()`, and the daily-median
 trend chart. Graded rows are a reference table, deliberately quieter than the
 headline, because a slab is a different market and none of those sales feed the
 price above.
+
+**The changelog is written by hand, and the fixes matter more than the
+features.** `lib/changelog.js` is prose for visitors, not generated from
+commits — the messages in this repo are internal reasoning and a visitor should
+not have to decode them. An entry earns its place by being something someone
+using the site would notice; if you cannot write it without naming a file, it
+is not an entry. The £44.75 entry is the most valuable one there precisely
+because it is embarrassing: a site whose proposition is that it shows its
+working cannot run a changelog that only lists new things. And a changelog that
+stops being updated says the project is abandoned, louder than never having had
+one — so keep entries cheap to add and only add them when something visible
+ships.
 
 **Anything quoting a constant must be generated from it.** The workings screen
 prints "Based on £200.01 at 13.25% fees, 30p fixed, plus £1.35 postage" under a

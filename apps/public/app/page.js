@@ -69,7 +69,8 @@ export default function Home() {
           {" "}Some eBay links are affiliate links &mdash; we may earn a commission at no extra cost to you, and it
           never changes the prices shown.{" "}
           <a className="link" href="/privacy">Privacy</a> &middot;{" "}
-          <a className="link" href="/privacy#affiliate">Affiliate disclosure</a>.
+          <a className="link" href="/privacy#affiliate">Affiliate disclosure</a> &middot;{" "}
+          <a className="link" href="/changelog">What&rsquo;s changed</a>.
         </p>
       </div>
     </main>
