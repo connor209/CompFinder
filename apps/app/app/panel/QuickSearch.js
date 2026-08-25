@@ -2,6 +2,7 @@
 
 import { useState, useRef, useMemo, useEffect } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { APP_SETTINGS, appNameTokens } from "@/lib/matching";
 import { detectLanguage } from "@compfinder/core/catalog.js";
 import { cleanSearchName } from "@compfinder/core/cardname.js";
 import { ebaySearchUrl, cardmarketBestUrl } from "@compfinder/core/marketplace.js";
@@ -10,7 +11,7 @@ import { createClient } from "@/lib/supabase/client";
 import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
 
-const settings = CompFinderPricing.DEFAULT_SETTINGS;
+const settings = APP_SETTINGS;
 
 function pounds(pence) {
   return pence == null ? "—" : CompFinderPricing.toPoundsStr(pence);
@@ -451,7 +452,7 @@ export default function QuickSearch({ seed }) {
         })
       )
       .catch(() => setMine({ loading: false, configured: true, error: "eBay check failed.", listings: [] }));
-    const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
+    const nameTokens = appNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
     // The card database is English-first: a card's English collector number and
     // set name don't map to Japanese/Korean/Chinese prints (different numbering,
     // localised set names). When a language is selected, drop them so comp

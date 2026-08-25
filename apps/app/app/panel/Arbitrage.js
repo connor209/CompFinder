@@ -2,8 +2,9 @@
 
 import { useState, useRef } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { APP_SETTINGS } from "@/lib/matching";
 
-const settings = CompFinderPricing.DEFAULT_SETTINGS;
+const settings = APP_SETTINGS;
 
 function pounds(pence) {
   return pence == null ? "—" : CompFinderPricing.toPoundsStr(pence);

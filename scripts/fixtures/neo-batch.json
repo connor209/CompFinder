@@ -1,0 +1,72 @@
+{
+  "note": [
+    "Grounded fixture for the APP's batch pricing path (apps/app/app/panel/Panel.js).",
+    "Cards are from the 2026-08-25 Neo-era Japanese batch run, CSV exported by the app.",
+    "",
+    "PROVENANCE MATTERS HERE. Every comp below carries an `src` field:",
+    "  'screenshot' — title, price, postage, sold date and location read verbatim off the",
+    "                 batch results panel for that card. These are real SoldComps rows.",
+    "  'backsolved' — a row the screenshot did not scroll far enough to show, whose total",
+    "                 and date are solved from the published recency-weighted figure in the",
+    "                 CSV so the fixture reproduces that figure exactly. The TITLE is",
+    "                 written to the observed template and is NOT evidence about wording.",
+    "",
+    "`observed` restates what the app itself reported for that card in the CSV/panel, so a",
+    "harness can compare its own arithmetic against the shipped run rather than against my",
+    "reading of it. `observed.fetched` is the true page size; the comps below are only the",
+    "rows we can see, so nothing here may be read as 'this was the whole pool'."
+  ],
+  "asOf": "2026-08-25",
+  "cards": [
+    {
+      "sku": "AN9",
+      "title": "Xatu NO. 178 Neo Genesis Pokemon Japanese LP",
+      "query": "Xatu No. 178",
+      "set": "Neo Genesis",
+      "observed": { "fetched": 74, "used": 2, "excluded": 72, "rawPence": 1297, "finalPence": 1299, "confidence": "Low",
+                    "reasons": { "nameMismatch": 59, "bundle": 1, "nonUkLocation": 12 } },
+      "comps": [
+        { "src": "screenshot", "verdict": "used", "title": "Pokémon TCG Xatu Neo Genesis No.178 Japanese Card LP", "itemPricePence": 220, "postagePence": 984, "itemLocation": null, "endedAt": "2026-06-03" },
+        { "src": "screenshot", "verdict": "used", "title": "Xatu No.178 Non Holo Pokemon Card Japanese Played Neo Discovery Old Back NM", "itemPricePence": 325, "postagePence": 986, "itemLocation": null, "endedAt": "2026-08-23" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "Xatu #178, Neo Genesis, Pokemon, Japanese, MP", "itemPricePence": 149, "postagePence": 981, "itemLocation": null, "endedAt": "2026-06-19" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "HP/DMG Pokemon TCG Xatu No. 178 Neo Genesis Japanese US Seller", "itemPricePence": 117, "postagePence": 0, "itemLocation": "United States", "endedAt": "2026-08-09" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "Xatu No. 178 Japanese Neo Genesis Pokemon Card", "itemPricePence": 170, "postagePence": 1072, "itemLocation": null, "endedAt": "2026-06-13" }
+      ]
+    },
+    {
+      "sku": "AN8",
+      "title": "Snubbull NO. 209 Neo Genesis Pokemon Japanese LP",
+      "query": "Snubbull No. 209",
+      "set": "Neo Genesis",
+      "observed": { "fetched": 51, "used": 4, "excluded": 47, "rawPence": 1024, "finalPence": 1049, "confidence": "Medium",
+                    "reasons": { "nameMismatch": 44, "graded": 1, "nonUkLocation": 2 } },
+      "comps": [
+        { "src": "screenshot", "verdict": "used", "title": "Snubbull No.209 Non Holo Pokemon Card Japanese Played Neo Destiny Old Back", "itemPricePence": 99, "postagePence": 0, "itemLocation": null, "endedAt": "2026-07-09" },
+        { "src": "screenshot", "verdict": "used", "title": "Snubbull No.209 Non Holo Pokemon Card Japanese Played Neo Destiny Old Back", "itemPricePence": 116, "postagePence": 0, "itemLocation": null, "endedAt": "2026-07-16" },
+        { "src": "screenshot", "verdict": "used", "title": "Snubbull Japanese Pokémon Common Card Neo Revelations No.209", "itemPricePence": 116, "postagePence": 1069, "itemLocation": null, "endedAt": "2026-07-26" },
+        { "src": "screenshot", "verdict": "used", "title": "Pokemon TCG - Snubbull No.209 - Japanese - Neo Revelation - NM", "itemPricePence": 276, "postagePence": 1412, "itemLocation": null, "endedAt": "2026-08-20" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "SNUBBULL NO. 209 C NEO GENESIS JAPANESE LP - UK SELLER", "itemPricePence": 330, "postagePence": 1130, "itemLocation": null, "endedAt": "2026-07-12" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "Gold, Silver, to a New World... - NM - Snubbull NO. 209 US Seller", "itemPricePence": 293, "postagePence": 0, "itemLocation": "United States", "endedAt": "2026-07-11" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "Snubbull No. 209 - Neo Genesis Japanese Pokemon Card", "itemPricePence": 116, "postagePence": 0, "itemLocation": null, "endedAt": "2026-07-16" }
+      ]
+    },
+    {
+      "sku": "AN6",
+      "title": "Gligar NO. 207 Neo Genesis Pokemon Japanese LP",
+      "query": "Gligar No. 207",
+      "set": "Neo Genesis",
+      "observed": { "fetched": 74, "used": 5, "excluded": 69, "rawPence": 1231, "finalPence": 1249, "confidence": "Medium",
+                    "reasons": { "nameMismatch": 65, "nonUkLocation": 4 } },
+      "comps": [
+        { "src": "screenshot", "verdict": "used", "title": "Pokemon Gligar Japanese Neo Genesis No.207 NM", "itemPricePence": 437, "postagePence": 1417, "itemLocation": null, "endedAt": "2026-07-03" },
+        { "src": "screenshot", "verdict": "used", "title": "Gligar No.207 | Neo Genesis | Japanese Pokemon Card | LP - NM 3", "itemPricePence": 269, "postagePence": 839, "itemLocation": null, "endedAt": "2026-07-31" },
+        { "src": "screenshot", "verdict": "used", "title": "Gligar No.207 - Neo Genesis 2001 - Japanese Old Back - Pokémon TCG - NEAR MINT", "itemPricePence": 116, "postagePence": 0, "itemLocation": null, "endedAt": "2026-06-08" },
+        { "src": "screenshot", "verdict": "used", "title": "Gligar No.207 | Neo Genesis | Japanese Pokemon Card | LP - NM 2", "itemPricePence": 269, "postagePence": 839, "itemLocation": null, "endedAt": "2026-06-05" },
+        { "src": "backsolved", "verdict": "used", "title": "Gligar No.207 Japanese Neo Genesis Pokemon Card LP", "itemPricePence": 390, "postagePence": 1017, "itemLocation": null, "endedAt": "2026-07-26" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "2001 POKEMON TAZO'S - Vintage- Walkers Tazos/Pogs - Gligar no 24 #207", "itemPricePence": 514, "postagePence": 1419, "itemLocation": null, "endedAt": "2026-06-30" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "Gligar No. 207 Japanese Neo Destiny Pokémon Card", "itemPricePence": 112, "postagePence": 78, "itemLocation": "United States", "endedAt": "2026-08-12" },
+        { "src": "screenshot", "verdict": "excluded:nameMismatch", "title": "POKEMON TAZO'S - Vintage Walkers Tazos Pogs Gligar", "itemPricePence": 399, "postagePence": 499, "itemLocation": null, "endedAt": "2026-08-04" }
+      ]
+    }
+  ]
+}
