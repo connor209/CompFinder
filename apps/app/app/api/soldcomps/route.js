@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import SoldCompsApi from "@compfinder/core/soldcomps.js";
+import { readCache, writeCache } from "@/lib/comp-cache";
 
 // How long to wait on SoldComps before giving up on one request.
 const SOLDCOMPS_TIMEOUT_MS = 20_000;
@@ -57,8 +58,19 @@ export async function POST(request) {
     return NextResponse.json({ ok: false, error: "Missing search query." }, { status: 400 });
   }
 
+  // Cache first, before the key is even read — a cached answer costs nothing
+  // and a batch run re-priced the same day is the normal case rather than the
+  // exception. Best effort throughout: migration 025 is applied by hand, and
+  // without it this returns null and the run behaves exactly as it did before.
+  const cached = await readCache(supabase, query, options);
+  if (cached) return NextResponse.json({ ok: true, ...cached });
+
   try {
     const result = await fetchSoldComps(profile.soldcomps_api_key, query, options);
+    // Only a real answer is worth keeping. Caching an empty result would pin a
+    // card at "no comps" for a day over one bad moment upstream, and the whole
+    // point of a miss is that it is cheap to retry.
+    if (result.comps.length > 0) await writeCache(supabase, query, options, result);
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     return NextResponse.json(

@@ -712,8 +712,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       }).then((r) => r.json());
 
       if (response && response.ok) {
-        const next = incrementLocalBudget();
-        setBudget(next);
+        // A cache hit spent nothing upstream, so it must not count against the
+        // quota estimate — otherwise re-running a list looks as expensive as
+        // the first run and the number stops being worth reading.
+        if (!response.cached) {
+          const next = incrementLocalBudget();
+          setBudget(next);
+        }
         return response;
       }
 
@@ -732,6 +737,34 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       e.isQuotaExceeded = response && response.isQuotaExceeded;
       throw e;
     }
+  }
+
+  /**
+   * Active listings, preferring eBay's own Browse API over SoldComps.
+   *
+   * Browse is first-party, 5,000 calls a day free, and needs no per-user key —
+   * so a live-market check costs nothing and no longer has to be rationed to
+   * suspicious rows. SoldComps stays as the fallback for the cases Browse
+   * can't serve: eBay app credentials not configured, or a Browse call that
+   * fails. The caller cannot tell the difference; both return the same shape.
+   *
+   * Deliberately NOT counted against the local quota estimate when Browse
+   * answers, because nothing was spent. `budgetSpent` says which happened.
+   */
+  async function fetchActiveListings(query, opts) {
+    try {
+      const res = await fetch("/api/active", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, options: opts })
+      }).then((r) => r.json());
+      if (res && res.ok && Array.isArray(res.comps)) return { ...res, budgetSpent: false };
+    } catch {
+      /* fall through to SoldComps — a live-market check is worth one metered
+         request when the free route is unavailable, and silently skipping it
+         would quietly re-introduce the £29.99 Golbat. */
+    }
+    return { ...(await fetchSoldCompsWithRetry(query, { ...opts, sold: false })), budgetSpent: true };
   }
 
   async function runBatch(items, { poolName = null } = {}) {
@@ -782,7 +815,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     let soldEndpointDown = false;
 
     const priceFromActive = (q, tokens, num, st, title) =>
-      fetchSoldCompsWithRetry(q, { ...searchOptions, sold: false }).then((r) =>
+      fetchActiveListings(q, { ...searchOptions, sold: false }).then((r) =>
         CompFinderPricing.recommend(
           dropForeignPostage(applyNumberGuards(r.comps, num)).comps,
           settingsForText(title || q), tokens, "active", num, st
@@ -796,7 +829,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       setStatus(`Pricing ${i + 1} of ${items.length}: "${title}"`);
 
       let query, nameTokens, set, csvItem, cardNumber;
-      let soldComps, apiDiagnostic;
+      let soldComps, apiDiagnostic, fromCache = false;
       try {
         // Inside the try on purpose: a single malformed row must fail that
         // row like any other error, not reject out of runBatch and leave the
@@ -811,6 +844,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           setStatus(`Item ${i + 1} of ${items.length}: SoldComps rate limit — retry ${attempt} in ${Math.round(delay / 1000)}s…`)
         );
         soldComps = result.comps;
+        fromCache = !!result.cached;
         if (result.comps.length === 0) {
           apiDiagnostic =
             result.rawItemCount > 0
@@ -921,7 +955,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               : `Item ${i + 1} of ${items.length}: only ${soldCount} sold comp(s) for "${query}" — checking what it's listed at…`
         );
         try {
-          const activeResult = await fetchSoldCompsWithRetry(query, { ...searchOptions, sold: false });
+          const activeResult = await fetchActiveListings(query, { ...searchOptions, sold: false });
           const { comps: ukActive } = dropForeignPostage(applyNumberGuards(activeResult.comps, cardNumber));
           const activeRec = CompFinderPricing.recommend(ukActive, cardSettings, nameTokens, "active", cardNumber, set);
           // The live market only helps if it agrees with itself. Actives that
@@ -962,7 +996,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         }
       }
 
-      collected.push({ title, sku, query, csvItem, rec, nameTokens, set, cardNumber });
+      collected.push({ title, sku, query, csvItem, rec, nameTokens, set, cardNumber, fromCache });
       setResults([...collected]);
 
       if (i < items.length - 1) await new Promise((r) => setTimeout(r, Math.min(settings.interItemDelayMs, 1200)));
@@ -972,7 +1006,12 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     saveHistory(collected);
     const failedCount = collected.filter((r) => r.failed).length;
     if (!stoppedEarly) {
-      setStatus(`Done — ${collected.length} of ${items.length} item(s) processed` + (failedCount ? `, ${failedCount} failed.` : "."));
+      const freeCount = collected.filter((r) => r.fromCache).length;
+      setStatus(
+        `Done — ${collected.length} of ${items.length} item(s) processed` +
+        (failedCount ? `, ${failedCount} failed` : "") +
+        (freeCount ? `, ${freeCount} served from the last 24 hours at no cost` : "") + "."
+      );
       setStatusIsError(false);
     }
 
@@ -1010,7 +1049,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       sold: false
     };
     try {
-      const activeResult = await fetchSoldCompsWithRetry(result.query, activeOptions);
+      const activeResult = await fetchActiveListings(result.query, activeOptions);
       const activeRec = CompFinderPricing.recommend(
         dropForeignPostage(applyNumberGuards(activeResult.comps, result.cardNumber || null)).comps,
         settingsForText(result.title || result.query),

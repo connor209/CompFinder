@@ -101,8 +101,64 @@ export async function browseActiveListings({ q, limit = 20, sort = "newlyListed"
         ? Number(it.shippingOptions[0].shippingCost.value)
         : null,
     seller: it.seller?.username || null,
-    condition: it.condition || null
+    condition: it.condition || null,
+    // eBay's own catalogue id and the seller's country, both used by the
+    // pricing engine and neither previously mapped — the Arbitrage tab, this
+    // function's only caller until now, needs a price and a link and nothing
+    // else. See browseComps() for why the country is normalised the way it is.
+    epid: it.epid || null,
+    categoryId: (Array.isArray(it.categories) && it.categories[0]?.categoryId) || null,
+    country: it.itemLocation?.country || null
   }));
+}
+
+/**
+ * Active listings in the shape pricing.js wants, so the app can ask what a
+ * card is LISTED at without spending a SoldComps request.
+ *
+ * The reason this exists: every live-market check in a batch run used to cost
+ * a metered SoldComps call, which is what made the check something to spend
+ * sparingly on suspicious rows. Browse is eBay's own API, 5,000 calls a day on
+ * a standard keyset, and this client was already here serving the Arbitrage
+ * tab. First-party data, no scraping question, and the quota argument against
+ * checking every card against the live market goes away.
+ *
+ * `sortOrder: "price"` and a generous limit on purpose: the check is asking
+ * "what can this be bought for", so the cheap end of the market is the part
+ * that matters and is also where wrong printings and fakes collect — which is
+ * exactly why the answer still goes through recommend() rather than being
+ * read off the top.
+ */
+export async function browseComps({ q, limit = 50, marketplace = "EBAY_GB", ukOnly = true } = {}) {
+  const items = await browseActiveListings({
+    q,
+    limit,
+    sort: "price",
+    marketplace,
+    // Ask eBay for UK-located stock directly. SoldComps' own domestic filter
+    // has been measured returning sellers posting from abroad for £14, so
+    // taking eBay's word first-hand is strictly better evidence.
+    extraFilter: ukOnly ? "itemLocationCountry:GB" : undefined
+  });
+  const toPence = (v) => (v == null ? 0 : Math.round(Number(v) * 100));
+  return items
+    // A listing with no price is not a comp. Browse returns these for auctions
+    // whose current bid is absent, and a zero would sink any median.
+    .filter((it) => it.price != null && it.price > 0)
+    .map((it) => ({
+      title: it.title || "",
+      itemPricePence: toPence(it.price),
+      postagePence: toPence(it.postage),
+      condition: it.condition || null,
+      epid: it.epid || null,
+      categoryId: it.categoryId || null,
+      // splitByNonUkLocation reads a NON-NULL location as "not a UK sale",
+      // because SoldComps returns null for domestic items. Browse names every
+      // country including GB, so GB has to become null or every comp would be
+      // excluded as foreign and the pool would empty.
+      itemLocation: it.country && it.country !== "GB" ? it.country : null,
+      _source: { itemId: it.itemId, url: it.url, currency: it.currency }
+    }));
 }
 
 /** Build the consent URL we send the user to. `state` guards against CSRF. */
