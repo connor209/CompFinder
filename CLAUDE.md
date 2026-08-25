@@ -39,6 +39,7 @@ apps/app/        the business tool — eBay OAuth, inventory, batch, scan
 apps/public/     the free price page — no accounts, shared key, cached
 supabase/        migrations, shared by both
 docs/            research reports; MARKETING.md is the current acquisition plan
+                 HOW_PRICING_WORKS.md is the app's pricing in plain English
 ```
 
 Run everything from the repo root: `npm run dev` / `npm run build` (the app),
