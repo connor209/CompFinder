@@ -27,7 +27,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCANNED = ["apps/public/app", "apps/public/lib", "scripts"];
 const SKIP_DIRS = new Set([".next", "node_modules"]);
 
-// Five files are exempt wholesale. This one has to name the field in code to
+// Six files are exempt wholesale. This one has to name the field in code to
 // look for it. The other three assert BUSINESS-app behaviour, where a
 // recommended listing price is the right answer and the whole point of the
 // screen, and none of them reads anything under apps/public: check-batchsave.mjs
@@ -35,15 +35,17 @@ const SKIP_DIRS = new Set([".next", "node_modules"]);
 // show-table sticker, which is derived from finalPence precisely because it is
 // a price to SELL at rather than a valuation, recurse-batch.mjs re-runs the
 // Batch screen's own pipeline, where the figure under test is the one the
-// screen prints, and dump-batch.mjs copies a saved business-app run out of
-// the database verbatim. Everywhere else may DISCUSS finalPence in a comment — the
+// screen prints, dump-batch.mjs copies a saved business-app run out of
+// the database verbatim, and check-matching.mjs asserts the Batch screen's own
+// rules, one of which reads the ladder price by design. Everywhere else may DISCUSS finalPence in a comment — the
 // explanation of why we don't use it is worth keeping — but must not read it.
 const EXEMPT = new Set([
   "scripts/check-public-price.mjs",
   "scripts/check-batchsave.mjs",
   "scripts/check-showstock.mjs",
   "scripts/recurse-batch.mjs",
-  "scripts/dump-batch.mjs"
+  "scripts/dump-batch.mjs",
+  "scripts/check-matching.mjs"
 ]);
 
 /** Strips line comments and whole-line block-comment bodies. */

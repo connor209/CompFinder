@@ -112,7 +112,7 @@ down to Low if the comps visibly disagree with each other.
 
 ## 6. Refuse, when it can't be trusted
 
-Two triggers:
+Three triggers:
 
 - **Fewer than 3 usable sold comps.** Across the 2026-08-25 batch, prices built
   from 2 comps or fewer had a median of £15.49 against £9.99 for those from 4
@@ -121,9 +121,24 @@ Two triggers:
   card. Golbat No. 042 came back as 15 comps at £12.99, 6 at £5.08 and 3 at
   £2.60, and blended to £7.99 — right for none of them.
 
-Either one, and it asks **what the card is listed at right now** instead of
-trusting the sales. That is what took Sunkern No. 191 from £19.49 to £2.49
+- **The price comes out above £4.98** (twice the floor). Not because that is
+  suspicious in itself, but because a sold pool can look perfectly healthy and
+  still not be the card. Golbat No. 042 priced £29.99 off four comps between
+  £12.00 and £44.33 — no outlier, no disagreement, Medium confidence — on a
+  card listed live at £3.48. The cheapest comp in that pool was £12, so there
+  was nothing inside it to catch. Only the live market could. A price at the
+  floor is not worth the request: list it and it sells. The money is lost at
+  the top, so that is where the check is spent.
+
+The first two mean the sold comps can't be used at all, so it asks **what the
+card is listed at right now** instead. That is what took Sunkern No. 191 from £19.49 to £2.49
 against a live market of £2.00.
+
+The third is only a second opinion — the sold price stands unless the live
+market flatly contradicts it. **Asking prices run above sold prices**, so a
+sold figure more than twice what the card is listed at today is not a strong
+card; it means those sales were something else. Golbat's was 8.5x its asking
+market, Sunkern's 9.7x.
 
 If the live listings don't agree either, it gives **no price** and says why.
 A number you have to know to distrust is worse than no number — the same

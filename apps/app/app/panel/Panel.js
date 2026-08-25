@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens, dropForeignPostage, needsActiveCheck, poolDisagrees, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
+import { APP_SETTINGS, appNameTokens, dropForeignPostage, needsActiveCheck, poolDisagrees, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
@@ -894,6 +894,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // was already one API call away and only ever got made at zero comps.
       if (needsActiveCheck(rec, settings)) {
         const soldCount = rec.included.length;
+        // A sold pool can be internally consistent and still not be the card.
+        // Golbat No. 042 priced £29.99 off four comps spanning £12.00-£44.33 —
+        // no outlier, no disagreement, Medium confidence — on a card listed
+        // live at £3.48. Nothing in the pool could catch it, so above
+        // SANITY_CHECK_ABOVE_PENCE the sold answer is checked against the live
+        // market rather than trusted on its own shape.
+        const sanityOnly = soldCount >= MIN_SOLD_COMPS_TO_PRICE && !poolDisagrees(rec, settings);
         // Two different reasons, one remedy: ask the live market. Too few sold
         // comps to price from, or a pool whose comps disagree so widely they
         // cannot all be the same product — Golbat No. 042 blended 15 comps at
@@ -915,7 +922,18 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           // span as widely as the sold comps did are the same pooling problem
           // seen from the other side, and swapping one blend for another would
           // just move the fault.
-          if (activeRec.included.length >= MIN_SOLD_COMPS_TO_PRICE && !poolDisagrees(activeRec, settings)) {
+          const activeUsable = activeRec.included.length >= MIN_SOLD_COMPS_TO_PRICE && !poolDisagrees(activeRec, settings);
+          if (sanityOnly) {
+            // The sold pool looked fine, so it is kept unless the live market
+            // flatly contradicts it. Asking prices run ABOVE sold ones, so a
+            // sold figure well above what the card is listed at today is not a
+            // strong card — it is evidence those sales were something else.
+            if (activeUsable && soldContradictsAsking(rec, activeRec)) {
+              const wasPence = rec.rawPence;
+              activeRec.note = `${activeRec.note} (The ${soldCount} sold comp(s) for this card averaged ${CompFinderPricing.toPoundsStr(wasPence)} — well above what it is listed at right now, which means those sales were most likely a different product. Priced from the live market instead; the sold figure is in the deep dive if you want to judge it yourself.)`;
+              rec = activeRec;
+            }
+          } else if (activeUsable) {
             activeRec.note = `${activeRec.note} ${
               disagrees
                 ? `(The ${soldCount} sold comp(s) for this card ranged too widely to be one product, so this is the live asking market instead.)`
@@ -926,8 +944,15 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             rec = heldRec(rec, soldCount, soldComps.length, activeRec.included.length, apiDiagnostic, disagrees);
           }
         } catch (err) {
-          rec = heldRec(rec, soldCount, soldComps.length, null, apiDiagnostic, disagrees);
-          rec.note = `${rec.note} (Active-listing check also failed: ${err.message})`;
+          if (sanityOnly) {
+            // The sold price stands. It was never in doubt from its own shape;
+            // this call was a second opinion, and not getting one is no reason
+            // to withhold an answer.
+            rec.note = `${rec.note} (Could not check this against the live market: ${err.message})`;
+          } else {
+            rec = heldRec(rec, soldCount, soldComps.length, null, apiDiagnostic, disagrees);
+            rec.note = `${rec.note} (Active-listing check also failed: ${err.message})`;
+          }
         }
       }
 

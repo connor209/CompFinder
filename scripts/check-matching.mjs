@@ -21,7 +21,7 @@ import CardUploaderCsv from "../apps/app/lib/carduploader.js";
 import {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
-  poolDisagrees, needsActiveCheck
+  poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE
 } from "../apps/app/lib/matching.js";
 
 const { DEFAULT_SETTINGS, extractNameTokens, recommend } = CompFinderPricing;
@@ -193,7 +193,36 @@ check("too few comps asks the market", needsActiveCheck(spread(117, 200)), true)
 check("a disagreeing pool asks too", needsActiveCheck(spread(117, 260, 508, 1299, 2499)), true);
 check("a healthy pool asks nothing", needsActiveCheck(spread(200, 250, 300, 400)), false);
 
-// ── 7. The set and the language steer the search, never the match ──────────
+// ── 7. A consistent pool can still be the wrong card ────────────────────────
+// Golbat No. 042: four comps, £12.00-£44.33, a 3.7x span under the 8x trigger,
+// four comps over the three minimum, Medium confidence — £29.99 on a card
+// listed live at £3.48. Nothing inside the pool could catch it, because the
+// cheapest comp in it was £12. Only the live market can.
+const healthy = (pence, ...totals) => ({
+  finalPence: pence, rawPence: pence, included: totals.map((t) => ({ totalPence: t }))
+});
+check("the threshold is twice the floor", SANITY_CHECK_ABOVE_PENCE, APP_SETTINGS.floorPence * 2);
+check("Golbat's healthy-looking £29.99 gets checked", needsActiveCheck(healthy(2999, 1200, 2000, 3000, 4433)), true);
+// FALSE POSITIVES. A price at the floor cannot be wrong in a way that costs
+// anything — you list it and it sells — so it must not spend a request.
+check("a floor price is not worth a request", needsActiveCheck(healthy(249, 200, 250, 300, 280)), false);
+check("just under the threshold is left alone", needsActiveCheck(healthy(497, 400, 500, 520, 480)), false);
+check("exactly at it is checked", needsActiveCheck(healthy(498, 400, 500, 520, 480)), true);
+
+// Asking runs ABOVE sold, so sold well above asking is a contradiction, not a
+// strong card. Golbat was 8.5x its asking market, Sunkern 9.7x.
+const sold = (p) => ({ rawPence: p });
+check("Golbat: £29.73 sold against £3.48 asking", soldContradictsAsking(sold(2973), sold(348)), true);
+check("Sunkern: £19.36 against £2.00", soldContradictsAsking(sold(1936), sold(200)), true);
+// FALSE POSITIVES — the multiple is loose on purpose. A card genuinely on the
+// way up sells above stale listings, and this must never fire on that.
+check("sold a little above asking is ordinary", soldContradictsAsking(sold(300), sold(250)), false);
+check("sold below asking is the normal case", soldContradictsAsking(sold(200), sold(300)), false);
+check("exactly 2x does not trip it", soldContradictsAsking(sold(500), sold(250)), false);
+check("no asking figure means no contradiction", soldContradictsAsking(sold(2973), sold(null)), false);
+check("no sold figure either", soldContradictsAsking(sold(null), sold(348)), false);
+
+// ── 8. The set and the language steer the search, never the match ──────────
 // The single biggest source of pooled prices was a query of name + number
 // only. Measured on the same eight cards priced both ways: Golbat 042 without
 // them returned 30 comps spanning 21x that eBay split into three products and

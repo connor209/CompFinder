@@ -184,14 +184,61 @@ export function poolDisagrees(rec, settings = APP_SETTINGS) {
   return hi / lo >= settings.priceOutlierMultiplier;
 }
 
-/** Either reason the sold pool can't be trusted on its own. */
+/**
+ * Above this, a sold price is worth one API call to check against the live
+ * market before it goes on a card.
+ *
+ * Golbat No. 042 is why. Its sold pool looked HEALTHY — four comps, £12.00 to
+ * £44.33, a 3.7x span well under the disagreement trigger, four comps well over
+ * the minimum, Medium confidence — and it priced at £29.99 on a card whose live
+ * UK market is £3.48. Nothing inside the pool could catch that: the cheapest
+ * comp in it was £12, so there was no outlier to find and no disagreement to
+ * measure. The pool was consistent and simply wasn't the card.
+ *
+ * Only the live market can see that, which is what makes this an absolute
+ * threshold rather than another shape-of-the-data heuristic.
+ *
+ * Twice the floor. A price at or near £2.49 cannot be wrong in a way that costs
+ * anything — you list it, it sells. The money is lost at the top, where a bulk
+ * common priced as a chase card sits unsold, so that is where the extra request
+ * is worth spending. Measured on the 89-card run it fires on 10 rows.
+ */
+export const SANITY_CHECK_ABOVE_PENCE = APP_SETTINGS.floorPence * 2;
+
+/**
+ * Asking prices run ABOVE sold prices — that is what "asking" means, and the
+ * engine already says so on every active-sourced row. So a sold figure well
+ * above the live asking market is not a strong card, it is a contradiction:
+ * those sales are a different product.
+ *
+ * The multiple is deliberately loose. A card genuinely on the way up can sell
+ * above stale listings, and this must not fire on that. Golbat's sold price was
+ * 8.5x its asking market and Sunkern's was 9.7x; nothing legitimate looks like
+ * that.
+ *
+ * NOT corpus-validated — it rests on the market structure above plus those two
+ * observed cases. It is the first rule here that isn't measured over a run, and
+ * it should be the first re-examined when there is a corpus to do it with.
+ */
+const ASKING_CONTRADICTION_MULTIPLE = 2;
+
+export function soldContradictsAsking(soldRec, activeRec) {
+  const sold = soldRec && soldRec.rawPence;
+  const asking = activeRec && activeRec.rawPence;
+  if (!sold || !asking) return false;
+  return sold > asking * ASKING_CONTRADICTION_MULTIPLE;
+}
+
+/** Every reason to spend one more request asking what the card is listed at. */
 export function needsActiveCheck(rec, settings = APP_SETTINGS) {
   if (!rec) return false;
-  return (rec.included || []).length < MIN_SOLD_COMPS_TO_PRICE || poolDisagrees(rec, settings);
+  if ((rec.included || []).length < MIN_SOLD_COMPS_TO_PRICE) return true;
+  if (poolDisagrees(rec, settings)) return true;
+  return rec.finalPence != null && rec.finalPence >= SANITY_CHECK_ABOVE_PENCE;
 }
 
 export default {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
-  poolDisagrees, needsActiveCheck
+  poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE
 };
