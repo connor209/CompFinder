@@ -26,6 +26,7 @@
  * and reverses that specific, confirmed pattern.
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { appNameTokens, stripNumberingPrefix } from "./matching.js";
 
 const CardUploaderCsv = (() => {
 
@@ -189,8 +190,12 @@ const CardUploaderCsv = (() => {
     const wantsReverseHolo = /\breverse\s*holo\b/i.test(item.title || "");
     const setIsUsable = item.set && !GENERIC_SET_VALUES.has(item.set.trim().toLowerCase());
 
-    const nameTokens = CompFinderPricing.extractNameTokens(
-      [item.cardName, wantsReverseHolo ? "Reverse Holo" : "", item.cardNumber].filter(Boolean).join(" ")
+    // The number goes into the QUERY as the lister typed it — "No.178" is how
+    // plenty of sellers write it and eBay's search should see that — but the
+    // prefix is stripped out of the match TOKENS, where it is not a fact about
+    // the card. This CSV column is where "No. 178" enters the app at all.
+    const nameTokens = appNameTokens(
+      [item.cardName, wantsReverseHolo ? "Reverse Holo" : "", stripNumberingPrefix(item.cardNumber)].filter(Boolean).join(" ")
     );
 
     let query;

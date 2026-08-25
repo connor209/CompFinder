@@ -89,31 +89,6 @@ const CompFinderPricing = (() => {
     // instead of acting on a tiny sample.
     setMismatchExcludeBelowRatio: 0.5,
     setMismatchMinKept: 4,
-    // ⚠ BOTH FLAGS BELOW ARE UNDER AUDIT (2026-08-25) and are the two halves of
-    // one repair — see docs/APP_BATCH_RECURSION.md. They exist as settings so
-    // audit-rulechange.mjs can price the SAME comps both ways in one process,
-    // which is the only way to A/B a rule against a source whose page
-    // composition churns between identical calls. Collapse them into the
-    // behaviour once the corpus has spoken; do not leave a permanent knob.
-    //
-    // A numbering prefix — "No.", "No", "#", "Nr" — is punctuation with a word
-    // in it, not part of a card's name. It became a REQUIRED match token on
-    // every card numbered without a denominator, and \bNo\.\b cannot match
-    // "No. 178" with a space after the stop, only "No.178" without one. So a
-    // comp survived on the seller's spacing and nothing else: 47-85 comps a
-    // card excluded as nameMismatch across the 2026-08-25 Neo-era batch.
-    // The number itself stays a required token and already tolerates leading
-    // zeros, so nothing that identifies the card is given up.
-    dropNumberingPrefixTokens: true,
-    // The set guard fired only when the set-matching comps were a MINORITY
-    // (ratio <= setMismatchExcludeBelowRatio). The intent was "trust a
-    // confirmed set even when it is outvoted", and the effect was that a
-    // confirmed set which won the vote excluded nothing at all — a Neo
-    // Discovery print sat inside a 4-of-5 Neo Genesis pool and was priced.
-    // With this on, the ratio ceiling is dropped and the guard fires whenever
-    // enough confirmed-set comps remain to price from, whichever side of the
-    // vote they are on. setMismatchMinKept still holds it off a tiny sample.
-    setMismatchPreferConfirmed: true,
     // Catalog-signal exclusion (2026-08-12) — uses eBay's own epid
     // (catalog product ID) and categoryId fields, when SoldComps returns
     // them, as a more authoritative alternative to text-based matching.
@@ -521,15 +496,10 @@ const CompFinderPricing = (() => {
     const nonMatching = included.filter((c) => !setRe.test(c.title));
     const matchRatio = matching.length / included.length;
 
-    // The ratio ceiling is what made a confirmed set powerless as soon as it
-    // won its own vote. setMismatchMinKept still stands the guard down on a
-    // sample too small to price from, which is deliberate: a pool of two is
-    // not a mandate to exclude, it is a reason to stop claiming a price.
-    const ratioAllows = settings.setMismatchPreferConfirmed || matchRatio <= settings.setMismatchExcludeBelowRatio;
     if (
       matching.length > 0 &&
       nonMatching.length > 0 &&
-      ratioAllows &&
+      matchRatio <= settings.setMismatchExcludeBelowRatio &&
       matching.length >= settings.setMismatchMinKept
     ) {
       return {
@@ -673,18 +643,7 @@ const CompFinderPricing = (() => {
   // the actual card name at all) — this doesn't rely on eBay's search
   // quality alone to keep the wrong card out of the comp pool. ----
 
-  // "No.", "No", "#" — the forms this actually appears in. Anchored, so a card
-  // named "Nova" or "Number" is untouched.
-  //
-  // "Nr" and "Num" were in the first draft and came out again: probe-tokenchange.mjs
-  // ran it over 2,132 catalogue cards and "NR" is the SET CODE for Neo Revelation
-  // ("Shining Magikarp NR 66"), not a numbering prefix. Dropping a set code is a
-  // different change from dropping a prefix, it loosens matching, and nothing in
-  // the batch that prompted this ever wrote "Nr". Neither form buys anything
-  // measured, and one of them costs something measured, so neither is here.
-  const NUMBERING_PREFIX = /^(?:no|#)\.?$/i;
-
-  function extractNameTokens(simplifiedQuery, settings = DEFAULT_SETTINGS) {
+  function extractNameTokens(simplifiedQuery) {
     // The query is "<name words> <number>" — strip the trailing number
     // token, drop punctuation that isn't part of a meaningful word (card
     // names like "Kingdra (Cosmos Holo)" or "Unown (E)" would otherwise
@@ -695,12 +654,7 @@ const CompFinderPricing = (() => {
       .replace(/[()[\]#]/g, " ")
       .split(/\s+/)
       .map((w) => w.trim())
-      .filter((w) => w.length >= 2)
-      // Yu-Gi-Oh really does print "No." inside a card's name ("No.39 Utopia"),
-      // so this does drop a token that is genuinely part of the name there. It
-      // costs nothing: the numeral is a separate token and is still required,
-      // so "No.39 Utopia" still has to be a Utopia with a 39 in it.
-      .filter((w) => !((settings || DEFAULT_SETTINGS).dropNumberingPrefixTokens && NUMBERING_PREFIX.test(w)));
+      .filter((w) => w.length >= 2);
   }
 
   /**

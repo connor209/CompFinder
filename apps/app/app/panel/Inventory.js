@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { APP_SETTINGS } from "@/lib/matching";
 import EbayActivity from "./EbayActivity";
 import MarketLinks from "./MarketLinks";
 import ColumnPicker, { useColumns } from "./ColumnPicker";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 
-const settings = CompFinderPricing.DEFAULT_SETTINGS;
+const settings = APP_SETTINGS;
 
 /**
  * "My listings" stream — the user's active eBay listings (cached in Supabase),

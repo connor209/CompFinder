@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { APP_SETTINGS, appNameTokens } from "@/lib/matching";
 import { openRearCameraStream } from "@/lib/camera.js";
 
-const settings = CompFinderPricing.DEFAULT_SETTINGS;
+const settings = APP_SETTINGS;
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 
 /**
@@ -192,7 +193,7 @@ export default function Scan({ onDeepDive }) {
       }
       const query = card.suggested_query;
       setPhase("pricing");
-      const nameTokens = CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
+      const nameTokens = appNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
       const pr = await fetch("/api/soldcomps", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -47,6 +47,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { APP_SETTINGS, appNameTokens } from "../apps/app/lib/matching.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -78,20 +79,27 @@ function toComp(c) {
 }
 
 /**
- * The rules as deployed on 2026-08-25, before the repair. R0 has to reproduce
- * the run that PROMPTED this, so it pins them rather than reading whatever
- * DEFAULT_SETTINGS currently says — otherwise the reproduction test quietly
- * turns into a test of today's behaviour and stops being evidence of anything.
+ * The two ways the app can tokenise and price a card:
+ *
+ *   SHIPPED  what ran on 2026-08-25 — core's DEFAULT_SETTINGS, and
+ *            extractNameTokens straight, so "No." is a required token.
+ *   APP      apps/app/lib/matching.js — the prefix is dropped from the tokens
+ *            and the app sets its own set-mismatch ratio.
+ *
+ * R0 pins SHIPPED rather than reading whatever the app currently does, or the
+ * reproduction test quietly turns into a test of today's behaviour and stops
+ * being evidence of anything.
  */
-const SHIPPED = { ...DEFAULT_SETTINGS, dropNumberingPrefixTokens: false, setMismatchPreferConfirmed: false };
+const SHIPPED = { settings: DEFAULT_SETTINGS, tokens: (q) => extractNameTokens(q) };
+const APP = { settings: APP_SETTINGS, tokens: appNameTokens };
 const LEGACY = args.includes("--legacy");
-const RULES = LEGACY ? SHIPPED : DEFAULT_SETTINGS;
+const RULES = LEGACY ? SHIPPED : APP;
 
 /** Exactly the three calls Panel.js's runBatchInner makes for one card. */
-function priceLikeTheApp(card, comps, settings = RULES) {
-  const query = card.query ?? simplifyTitle(card.title, settings.stripWords);
-  const nameTokens = extractNameTokens(query, settings);
-  return { query, nameTokens, rec: recommend(comps, settings, nameTokens, "sold", card.cardNumber || null, card.set || null) };
+function priceLikeTheApp(card, comps, rules = RULES) {
+  const query = card.query ?? simplifyTitle(card.title, rules.settings.stripWords);
+  const nameTokens = rules.tokens(query);
+  return { query, nameTokens, rec: recommend(comps, rules.settings, nameTokens, "sold", card.cardNumber || null, card.set || null) };
 }
 
 const reasonsOf = (rec) => {
@@ -218,9 +226,8 @@ bar("R5 · Counterfactual — the same comps, with the starved guards allowed to
 for (const card of fixture.cards) {
   const comps = card.comps.map(toComp);
   const asShipped = priceLikeTheApp(card, comps).rec;
-  const relaxed = { ...DEFAULT_SETTINGS, postageOutlierMinComps: 2, catalogSignalMinComps: 2, catalogSignalMinKept: 1 };
-  const query = card.query;
-  const rec = recommend(comps, relaxed, extractNameTokens(query), "sold", null, card.set || null);
+  const relaxed = { ...RULES.settings, postageOutlierMinComps: 2, catalogSignalMinComps: 2, catalogSignalMinKept: 1 };
+  const rec = recommend(comps, relaxed, RULES.tokens(card.query), "sold", null, card.set || null);
   const removed = rec.excluded.filter((e) => !asShipped.excluded.some((x) => x.title === e.title && x.itemPricePence === e.itemPricePence));
   console.log(`  ${card.sku.padEnd(5)} ${card.query.padEnd(18)} as shipped ${gbp(asShipped.finalPence).padStart(7)} from ${asShipped.included.length}  →  ${gbp(rec.finalPence).padStart(7)} from ${rec.included.length}`);
   for (const r of removed) {
@@ -246,11 +253,11 @@ console.log(
 // of the evidence; audit-rulechange.mjs is the public-side half, and the set
 // flag is live on all 455 published cards, so nothing ships on this alone.
 if (!LEGACY) {
-  bar("R6 · The candidate rules — dropNumberingPrefixTokens + setMismatchPreferConfirmed");
+  bar("R6 · apps/app/lib/matching.js — the app's own tokens and set-mismatch ratio");
   for (const card of fixture.cards) {
     const comps = card.comps.map(toComp);
     const was = priceLikeTheApp(card, comps, SHIPPED).rec;
-    const now = priceLikeTheApp(card, comps, DEFAULT_SETTINGS).rec;
+    const now = priceLikeTheApp(card, comps, APP).rec;
     const setOf = (rec) => {
       if (!card.set) return "";
       const re = new RegExp(`\\b${card.set.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
@@ -264,7 +271,8 @@ if (!LEGACY) {
     };
   }
   console.log(
-    "\n  Run with --legacy to price the same fixture under the rules as deployed."
+    "\n  Run with --legacy to price the same fixture the way 2026-08-25 did.\n" +
+    "  Nothing in packages/core differs between these two columns — the app owns both."
   );
 }
 

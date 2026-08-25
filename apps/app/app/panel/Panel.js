@@ -4,6 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { APP_SETTINGS, appNameTokens } from "@/lib/matching";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
@@ -140,7 +141,7 @@ function buildQueryForItem(item, settings, includeCondition, useFullTitle) {
     return { query: built.query, nameTokens: built.nameTokens, set: built.set, csvItem: item.csvItem, cardNumber: item.csvItem.cardNumber };
   }
   const baseQuery = CompFinderPricing.simplifyTitle(item.title, settings.stripWords);
-  const nameTokens = CompFinderPricing.extractNameTokens(baseQuery);
+  const nameTokens = appNameTokens(baseQuery);
   let query;
   if (useFullTitle && item.title && item.title.trim()) {
     query = item.title.trim().replace(/\s+/g, " ");
@@ -284,7 +285,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const [savingBatch, setSavingBatch] = useState(false);
   const [batchesNonce, setBatchesNonce] = useState(0);
 
-  const settings = CompFinderPricing.DEFAULT_SETTINGS;
+  const settings = APP_SETTINGS;
 
   const currentFilters = () => ({
     ebaySite,

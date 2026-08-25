@@ -16,6 +16,9 @@ const settings = CompFinderPricing.DEFAULT_SETTINGS;
  * know it. The number is what separates 186/196 from 130/196 — dropping the
  * set code without adding the number back would swing the fault the other way
  * and pool every print of the card together.
+ *
+ * @param {object} card  { name, number } — number may be "186/196" or "186"
+ * @param {string} fallbackQuery  used when no catalogue card was matched
  */
 /**
  * A printed LEVEL ("Lv.12"), which the catalogue keeps in the name and eBay
@@ -30,19 +33,10 @@ const settings = CompFinderPricing.DEFAULT_SETTINGS;
  */
 const PRINTED_LEVEL = /\s*\bLv\.?\s*\d+\b/gi;
 
-/**
- * @param {object} card  { name, number } — number may be "186/196" or "186"
- * @param {string} fallbackQuery  used when no catalogue card was matched
- * @param {object} [opts]  settings override, so audit-rulechange.mjs can build
- *   tokens under a candidate rule without a second copy of this function. The
- *   page never passes it.
- */
-export function buildCompTokens(card, fallbackQuery, opts = settings) {
-  const cs = opts || settings;
+export function buildCompTokens(card, fallbackQuery) {
   const nameSource = String((card && card.name) || fallbackQuery || "").replace(PRINTED_LEVEL, "");
   const tokens = CompFinderPricing.extractNameTokens(
-    CompFinderPricing.simplifyTitle(nameSource, cs.stripWords || settings.stripWords),
-    cs
+    CompFinderPricing.simplifyTitle(nameSource, settings.stripWords)
   );
 
   const bare = bareNumber(card && card.number);

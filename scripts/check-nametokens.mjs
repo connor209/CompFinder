@@ -1,6 +1,12 @@
 /**
- * Table check for the two rules added 2026-08-25 — the numbering prefix and
- * the set guard's ratio ceiling. See docs/APP_BATCH_RECURSION.md.
+ * Table check for apps/app/lib/matching.js — the numbering prefix and the set
+ * guard's ratio ceiling, both added 2026-08-25. See docs/APP_BATCH_RECURSION.md.
+ *
+ * Both rules live in the APP. packages/core is untouched by either, and this
+ * check is also the tripwire for that: it asserts core's own behaviour is
+ * unchanged, so a later "tidy-up" that pushes one of these down into the
+ * shared engine — and therefore into Last Comp — fails here rather than
+ * silently repricing a stranger's card.
  *
  *   node scripts/check-nametokens.mjs      (or: npm run check)
  *
@@ -11,9 +17,11 @@
  * kept so a later widening fails loudly instead of quietly pooling two cards.
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { APP_SETTINGS, appNameTokens, stripNumberingPrefix } from "../apps/app/lib/matching.js";
 
 const { DEFAULT_SETTINGS, extractNameTokens, recommend } = CompFinderPricing;
-const SHIPPED = { ...DEFAULT_SETTINGS, dropNumberingPrefixTokens: false, setMismatchPreferConfirmed: false };
+// What the engine does on its own, which is what Last Comp still gets.
+const CORE = DEFAULT_SETTINGS;
 
 let failures = 0;
 const check = (label, got, want) => {
@@ -47,25 +55,33 @@ const TOKENS = [
   ["Nova 12", ["Nova", "12"]],
   ["Number 39 Utopia", ["Number", "39", "Utopia"]]
 ];
-for (const [query, want] of TOKENS) check(`tokens: ${query}`, extractNameTokens(query), want);
+for (const [query, want] of TOKENS) check(`app tokens: ${query}`, appNameTokens(query), want);
 
-// The prefix reaching the tokens is what shipped, and is what the fixture in
-// recurse-batch.mjs reproduces — so it has to stay reachable, or R0 stops
-// being a reproduction of anything.
-check("tokens under the shipped rules still carry the prefix",
-  extractNameTokens("Xatu No. 178", SHIPPED), ["Xatu", "No.", "178"]);
+// THE TRIPWIRE. core still emits the prefix, because Last Comp never passes one
+// and nothing there asked for this. If this line starts failing, the rule has
+// been moved into the shared engine and Last Comp's prices moved with it.
+check("core is untouched — it still emits the prefix",
+  extractNameTokens("Xatu No. 178"), ["Xatu", "No.", "178"]);
+check("core's set-mismatch ratio is untouched", CORE.setMismatchExcludeBelowRatio, 0.5);
+check("the app sets its own", APP_SETTINGS.setMismatchExcludeBelowRatio, 1);
+
+// The number as it arrives from a CardUploader CSV's *C:Card Number column.
+check("strip: No. 178", stripNumberingPrefix("No. 178"), "178");
+check("strip: NO.178", stripNumberingPrefix("NO.178"), "178");
+check("strip: #44", stripNumberingPrefix("#44"), "44");
+check("strip: a bare number is left alone", stripNumberingPrefix("178"), "178");
+check("strip: a slashed number is left alone", stripNumberingPrefix("215/203"), "215/203");
 
 // ── 2. A prefix in the LISTING must match a query without one ───────────────
 // The whole point: every spelling a seller uses has to reach the same price.
 const comp = (title) => ({ title, itemPricePence: 200, postagePence: 100 });
 const SPELLINGS = ["Xatu No.178 Neo Genesis Japanese", "Xatu No. 178 Neo Genesis Japanese",
                    "Xatu #178, Neo Genesis, Japanese", "Pokemon Xatu 178 Neo Genesis Japanese"];
-const tok = extractNameTokens("Xatu No. 178");
-check("every spelling of the number now matches",
-  SPELLINGS.map((t) => recommend([comp(t)], DEFAULT_SETTINGS, tok, "sold").included.length),
+check("every spelling of the number now matches in the app",
+  SPELLINGS.map((t) => recommend([comp(t)], APP_SETTINGS, appNameTokens("Xatu No. 178"), "sold").included.length),
   [1, 1, 1, 1]);
 check("...and only one of them did before",
-  SPELLINGS.map((t) => recommend([comp(t)], SHIPPED, extractNameTokens("Xatu No. 178", SHIPPED), "sold").included.length),
+  SPELLINGS.map((t) => recommend([comp(t)], CORE, extractNameTokens("Xatu No. 178"), "sold").included.length),
   [1, 0, 0, 0]);
 
 // ── 3. A confirmed set excludes even when it WINS its own vote ──────────────
@@ -75,30 +91,30 @@ check("...and only one of them did before",
 // exclude, it is a reason to stop claiming a price.
 const pool = (setNames) => setNames.map((s, i) => comp(`Snubbull No.209 Japanese ${s} card ${i}`));
 const usedUnder = (settings, sets) =>
-  recommend(pool(sets), settings, extractNameTokens("Snubbull No. 209"), "sold", null, "Neo Genesis").included.length;
+  recommend(pool(sets), settings, appNameTokens("Snubbull No. 209"), "sold", null, "Neo Genesis").included.length;
 
 const MAJORITY = ["Neo Genesis", "Neo Genesis", "Neo Genesis", "Neo Genesis", "Neo Destiny"];
-check("majority-confirmed set now excludes the odd one out", usedUnder(DEFAULT_SETTINGS, MAJORITY), 4);
-check("...and used to price it", usedUnder(SHIPPED, MAJORITY), 5);
+check("majority-confirmed set now excludes the odd one out", usedUnder(APP_SETTINGS, MAJORITY), 4);
+check("...and core still prices it, as Last Comp still does", usedUnder(CORE, MAJORITY), 5);
 
 const MINORITY = ["Neo Genesis", "Neo Genesis", "Neo Genesis", "Neo Genesis", "Neo Destiny", "Neo Destiny", "Neo Destiny", "Neo Destiny", "Neo Destiny"];
-check("minority-confirmed set still excludes, as it always did", usedUnder(DEFAULT_SETTINGS, MINORITY), 4);
-check("...unchanged from the shipped behaviour", usedUnder(SHIPPED, MINORITY), 4);
+check("minority-confirmed set still excludes, as it always did", usedUnder(APP_SETTINGS, MINORITY), 4);
+check("...and core is unchanged there too", usedUnder(CORE, MINORITY), 4);
 
 // FALSE POSITIVE. Too few confirmed comps to price from, so the guard must
 // stand down and leave the ⚠ note rather than cut the pool to one.
 const THIN = ["Neo Genesis", "Neo Destiny", "Neo Destiny", "Neo Destiny"];
-check("a thin confirmed set stands down rather than pricing off one comp", usedUnder(DEFAULT_SETTINGS, THIN), 4);
+check("a thin confirmed set stands down rather than pricing off one comp", usedUnder(APP_SETTINGS, THIN), 4);
 
 // FALSE POSITIVE. Nothing to exclude — every comp names the set — so the guard
 // must not fire and must not touch the pool.
-check("an all-matching pool is left alone", usedUnder(DEFAULT_SETTINGS, ["Neo Genesis", "Neo Genesis", "Neo Genesis", "Neo Genesis"]), 4);
+check("an all-matching pool is left alone", usedUnder(APP_SETTINGS, ["Neo Genesis", "Neo Genesis", "Neo Genesis", "Neo Genesis"]), 4);
 
 // FALSE POSITIVE. No confirmed set at all (the app's paste path passes none) —
 // the guard has nothing to judge against and must be a no-op.
 check("no confirmed set is a no-op",
   recommend(pool(["Neo Genesis", "Neo Destiny", "Neo Destiny", "Neo Destiny", "Neo Destiny"]),
-    DEFAULT_SETTINGS, extractNameTokens("Snubbull No. 209"), "sold", null, null).included.length, 5);
+    APP_SETTINGS, appNameTokens("Snubbull No. 209"), "sold", null, null).included.length, 5);
 
 if (failures) { console.error(`\nname tokens: ${failures} case(s) failed.`); process.exit(1); }
-console.log("name tokens: prefix cases + set-guard cases pass (set codes, Nova/Number, thin and all-matching pools held).");
+console.log("name tokens: app prefix + set-guard cases pass; packages/core confirmed untouched.");

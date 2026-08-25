@@ -25,6 +25,7 @@
  * behind it makes the price worse, not better.
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { appNameTokens } from "../apps/app/lib/matching.js";
 
 const { extractNameTokens, classifyExclusion, DEFAULT_SETTINGS } = CompFinderPricing;
 
@@ -60,17 +61,15 @@ const CASES = [
 const CANDIDATES = {
   "current (shipped)": (q) => extractNameTokens(q),
 
-  // A numbering prefix is punctuation with a word in it, not part of the card's
-  // name — "No.", "No", "#", "Nr" all mean "the number that follows". The
-  // number itself is still a required token, and already tolerates leading
-  // zeros, so dropping the prefix loses no identifying signal.
-  "drop the numbering prefix": (q) =>
-    extractNameTokens(q).filter((t) => !/^(no\.?|nr\.?|num\.?|#)$/i.test(t)),
+  // What shipped: apps/app/lib/matching.js. A numbering prefix is punctuation
+  // with a word in it, not part of the card's name. The number itself is still
+  // a required token and already tolerates leading zeros, so dropping the
+  // prefix loses no identifying signal.
+  "drop the numbering prefix (shipped)": appNameTokens,
 
-  // Same idea, kept as a token but matched against every spelling a seller
-  // uses. Strictly weaker than dropping it — a title reading "Xatu 178" with
-  // no prefix at all is still thrown away — and listed to show that.
-  "match every spelling of the prefix": (q) =>
+  // Considered and rejected: strictly weaker than dropping the prefix, since a
+  // title reading "Xatu 178" with no prefix at all is still thrown away.
+  "match every spelling of the prefix (rejected)": (q) =>
     extractNameTokens(q).map((t) => (/^(no\.?|nr\.?|#)$/i.test(t) ? "__PREFIX__" : t))
 };
 
@@ -148,7 +147,7 @@ console.log("──────────────────────�
 console.log(`  thresholds: fires only when ≥1 comp matches the set, the match ratio is ≤ ` +
   `${DEFAULT_SETTINGS.setMismatchExcludeBelowRatio}, and ≥ ${DEFAULT_SETTINGS.setMismatchMinKept} comps would survive\n`);
 for (const group of CASES) {
-  const tokens = CANDIDATES["drop the numbering prefix"](group.q);
+  const tokens = CANDIDATES["drop the numbering prefix (shipped)"](group.q);
   const kept = group.rows.filter((r) => !classify(r.t, tokens, group.set));
   const matching = kept.filter((r) => setPresent(r.t, group.set));
   const ratio = kept.length ? matching.length / kept.length : 0;
