@@ -17,6 +17,7 @@
  * kept so a later widening fails loudly instead of quietly pooling two cards.
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import CardUploaderCsv from "../apps/app/lib/carduploader.js";
 import {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
@@ -192,5 +193,45 @@ check("too few comps asks the market", needsActiveCheck(spread(117, 200)), true)
 check("a disagreeing pool asks too", needsActiveCheck(spread(117, 260, 508, 1299, 2499)), true);
 check("a healthy pool asks nothing", needsActiveCheck(spread(200, 250, 300, 400)), false);
 
+// ── 7. The set and the language steer the search, never the match ──────────
+// The single biggest source of pooled prices was a query of name + number
+// only. Measured on the same eight cards priced both ways: Golbat 042 without
+// them returned 30 comps spanning 21x that eBay split into three products and
+// blended to £7.99; with them the pool was clean at £3.49. Sunkern 191 went
+// £6.99 to £2.49 against a live market of £2.00.
+const q = (over = {}) => CardUploaderCsv.buildQueryFromItem({
+  title: "Sunkern NO. 191 Neo Genesis Pokemon Japanese MP",
+  cardName: "Sunkern", cardNumber: "No. 191", set: "Neo Genesis", condition: "MP", ...over
+}, {});
+check("the set and language reach the query", q().query, "Sunkern No. 191 Neo Genesis Japanese");
+
+// THE ONE THAT MATTERS. nameTokensMatch requires EVERY token, so a required
+// "Neo Genesis" would throw out each comp whose seller wrote "Neo" or nothing
+// — the fault that made "Giratina V 186/196 LOR" reject all forty of its own
+// comps on the public page. Steering a search is not demanding a word.
+check("...and NEITHER becomes a required match token", q().nameTokens, ["Sunkern", "191"]);
+
+// FALSE POSITIVES.
+check("a generic set is not put in the query",
+  q({ set: "Miscellaneous Cards & Products", title: "Kingdra 42" }).query, "Sunkern No. 191");
+check("no language in the title adds none",
+  q({ title: "Sunkern NO. 191 Neo Genesis Pokemon MP" }).query, "Sunkern No. 191 Neo Genesis");
+check("an English card is untouched by the language rule",
+  CardUploaderCsv.buildQueryFromItem({ title: "Umbreon VMAX 215/203 Evolving Skies",
+    cardName: "Umbreon VMAX", cardNumber: "215/203", set: "Evolving Skies" }, {}).query,
+  "Umbreon VMAX 215/203 Evolving Skies");
+check("language detection is a closed list, not a guess",
+  [CardUploaderCsv.languageInTitle("Sunkern Japanese NM"),
+   CardUploaderCsv.languageInTitle("Sunkern Korean NM"),
+   CardUploaderCsv.languageInTitle("Sunkern Japan NM"),
+   CardUploaderCsv.languageInTitle("Sunkern NM")],
+  ["Japanese", "Korean", null, null]);
+// useFullTitle still wins outright — it is the escape hatch for a card the
+// structured fields describe badly, and must not be second-guessed.
+check("useFullTitle still overrides everything",
+  CardUploaderCsv.buildQueryFromItem({ title: "Sunkern NO. 191 Neo Genesis Pokemon Japanese MP",
+    cardName: "Sunkern", cardNumber: "No. 191", set: "Neo Genesis" }, { useFullTitle: true }).query,
+  "Sunkern NO. 191 Neo Genesis Pokemon Japanese MP");
+
 if (failures) { console.error(`\nmatching: ${failures} case(s) failed.`); process.exit(1); }
-console.log("matching: prefix, set-guard, foreign-postage, thin-pool and pool-disagreement cases pass; packages/core confirmed untouched.");
+console.log("matching: prefix, set-guard, foreign-postage, thin-pool, pool-disagreement and query-scoping cases pass; packages/core confirmed untouched.");
