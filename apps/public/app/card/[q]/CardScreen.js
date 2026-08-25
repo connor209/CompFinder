@@ -26,7 +26,7 @@ function median(nums) {
   return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 }
 
-export default function CardScreen({ query, days, initial = null }) {
+export default function CardScreen({ query, days, initial = null, set = null, siblings = [] }) {
   const router = useRouter();
   // The window comes from the URL, the same way a variant does: changing it is
   // a different search, not a filter over what we already hold, and the
@@ -62,7 +62,7 @@ export default function CardScreen({ query, days, initial = null }) {
   }
 
   return (
-    <Answer query={query} card={state.card} d={state.derived} pending={state.listingsPending}
+    <Answer query={query} card={state.card} d={state.derived} set={set} siblings={siblings} pending={state.listingsPending}
             days={days} setDays={setDays} />
   );
 }
@@ -134,7 +134,7 @@ function WhichOne({ query, candidates, fuzzy }) {
 /* -------------------------------------------------------------------------
    Screen 3 — the answer
 ------------------------------------------------------------------------- */
-function Answer({ query, card, d, pending, days, setDays }) {
+function Answer({ query, card, d, set = null, siblings = [], pending, days, setDays }) {
   const [ask, setAsk] = useState("");
 
   const askPence = useMemo(() => {
@@ -161,6 +161,11 @@ function Answer({ query, card, d, pending, days, setDays }) {
         label={[card.name, card.number].filter(Boolean).join(" ")}
         scope={`🇬🇧 ${days}d`}
       />
+      {set && (
+        <p className="body soft" style={{ margin: "-4px 0 10px", fontSize: 12.5 }}>
+          in <a className="link" href={`/set/${set.slug}`}>{set.name}</a> · {set.total} cards priced
+        </p>
+      )}
 
       <div className="headblock answer">
         <span className="wash" aria-hidden="true" />
@@ -416,6 +421,43 @@ function Answer({ query, card, d, pending, days, setDays }) {
             </a>
           </div>
         )}
+
+        {/* Somewhere to go next, and the internal linking this site had none
+            of. Rendered from the manifest, so it costs no query — the prices
+            live on the set page, one click away, which does the database work
+            once for the whole set instead of on every card view. */}
+        {set && siblings.length > 0 && (
+          <div className="panel list" style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8, paddingTop: 9 }}>
+              <span className="section-title">More from {set.name}</span>
+              <span className="spacer" style={{ flex: 1 }} />
+              <a className="link" style={{ fontSize: 12 }} href={`/set/${set.slug}`}>
+                All {set.total} by value →
+              </a>
+            </div>
+            <div className="siblings">
+              {siblings.map((c) => (
+                <a className="sibling" key={c.q} href={`/card/${encodeURIComponent(c.q)}`}>
+                  <span className="nm">{c.name}</span>
+                  <span className="mt">{c.number}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* The most valuable conversion on the site, on the screen where
+            someone has just got what they came for. One subscriber is worth
+            about 2,200 searches of affiliate commission — see
+            docs/EPN_EXPECTED_RETURN.md — so this belongs here rather than
+            only on the home page. */}
+        <a className="panel propitch" href={process.env.NEXT_PUBLIC_APP_URL || "/"}>
+          <span className="section-title">Got a stack of these?</span>
+          <span className="body soft">
+            CompFinder Pro prices a whole pile at once and syncs your live eBay listings.
+          </span>
+          <span className="link">See Pro &rarr;</span>
+        </a>
       </div>
     </main>
   );

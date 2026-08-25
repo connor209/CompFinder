@@ -1,7 +1,7 @@
 import { unstable_cache } from "next/cache";
 import CardScreen from "./CardScreen";
 import { windowFromParam } from "@/lib/windows";
-import { serverCard, findPublished } from "@/lib/card-page";
+import { serverCard, findPublished, siblingsOf } from "@/lib/card-page";
 
 /**
  * The answer lives at its own URL so it can be shared, linked and cached —
@@ -69,5 +69,10 @@ export default async function CardPage({ params, searchParams }) {
   // a crawler never costs a SoldComps request. See lib/card-page.js.
   const initial = await cachedServerCard(query, window);
 
-  return <CardScreen query={query} days={window} initial={initial} />;
+  // Manifest-only, so it costs nothing: the set this card belongs to and six
+  // others from it, for the strip at the bottom. Unpublished cards get null
+  // and the strip simply doesn't render.
+  const { set, siblings } = siblingsOf(query);
+
+  return <CardScreen query={query} days={window} initial={initial} set={set} siblings={siblings} />;
 }

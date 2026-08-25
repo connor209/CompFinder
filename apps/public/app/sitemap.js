@@ -1,4 +1,4 @@
-import { pricedCards } from "@/lib/card-page";
+import { pricedCards, publishedSets } from "@/lib/card-page";
 import { siteUrl } from "@/lib/indexing";
 
 /**
@@ -31,8 +31,23 @@ export default async function sitemap() {
     return staticPages;
   }
 
+  // Set pages carry the queries with volume that individual cards don't
+  // ("most valuable cards in 151"), and they are how a crawler reaches the
+  // cards. Every published set has a page, priced or not — unlike the cards,
+  // a set page with some prices missing still lists real cards and reads as a
+  // real page, so the thin-content reasoning doesn't apply the same way.
+  const sets = publishedSets();
+
   return [
     ...staticPages,
+    ...sets.map((set) => ({
+      url: `${base}/set/${set.slug}`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      // Above the individual cards: a set page carries more of the volume and
+      // is the route by which the cards get found.
+      priority: 0.8
+    })),
     ...queries.map((q) => ({
       url: `${base}/card/${encodeURIComponent(q)}`,
       lastModified: now,

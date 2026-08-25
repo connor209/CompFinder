@@ -20,15 +20,17 @@
  * It is also a budget. Every published card is a card to keep warm, and on a
  * 2,000-request month that is the binding constraint (see warm-cardpages.mjs).
  *
- * The entry carries the catalogue id and the query string. The id is the
- * truth — names and images are read from the catalogue at render time so a
- * later backfill shows up without a rebuild — and the query is only an index,
- * for matching an incoming URL to a card without a database round trip.
+ * The entry carries the catalogue id, the query string, and enough text to
+ * render a link. The id is the truth — images and prices are read at render
+ * time so a later backfill shows up without a rebuild — the query is the index
+ * that matches an incoming URL to a card, and the name/number/set exist so the
+ * sibling strip and the set index can be built with no database work.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { queryForCard, normaliseQuery } from "../apps/public/lib/card-query.js";
+import { setSlug } from "../apps/public/lib/slug.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = join(ROOT, "scripts/bigset-en2.json");
@@ -55,10 +57,16 @@ for (const card of source) {
     continue;
   }
   seen.set(key, card);
-  entries.push({ id: card.id, q });
+  // `name`/`number`/`set` are carried for LINK TEXT only — the sibling strip on
+  // a card page renders straight from this file so it costs no database round
+  // trip at all. They are never an input to pricing: `q` is what the next page
+  // resolves and prices from, and the catalogue is still the truth for
+  // everything that page shows. A name going stale here costs a slightly wrong
+  // label on a link, not a wrong price.
+  entries.push({ id: card.id, q, name: card.name, number: card.number || "", set: card.set || "", slug: setSlug(card) });
 }
 
-entries.sort((a, b) => a.q.localeCompare(b.q));
+entries.sort((a, b) => (a.slug === b.slug ? a.q.localeCompare(b.q) : a.slug.localeCompare(b.slug)));
 const collisions = problems.filter((p) => p.startsWith("COLLISION"));
 for (const p of problems) console.warn(`  ${p}`);
 if (collisions.length) {
@@ -75,7 +83,7 @@ if (!dryRun) {
  * rendered with a price. \`id\` is the catalogue row; \`q\` is the query string
  * its URL carries, used only to match an incoming /card/<query> to a card.
  *
- * ${entries.length} cards.
+ * ${entries.length} cards across ${new Set(entries.map((e) => e.slug)).size} sets.
  */
 export default ${JSON.stringify(entries, null, 1)};
 `);

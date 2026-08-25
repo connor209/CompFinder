@@ -17,7 +17,7 @@
  * Anything else must come back loading, so the existing client path runs
  * unchanged rather than a half-rendered page being served.
  */
-import { findPublished, publishedCards } from "../apps/public/lib/card-page.js";
+import { findPublished, publishedCards, publishedSets, siblingsOf } from "../apps/public/lib/card-page.js";
 import { seeded } from "../apps/public/lib/use-card.js";
 
 // card-handoff.js talks to sessionStorage, which doesn't exist under node.
@@ -132,8 +132,43 @@ eq("unparseable handoff is ignored", take(HIT), null);
 remember(null);
 eq("remembering nothing stores nothing", take(HIT), null);
 
+// --- 5. internal linking actually spreads ----------------------------------
+// The sibling strip exists so 450 card pages stop being dead ends. Taking the
+// first six of each set would defeat it: six pages would collect every
+// internal link in the set and the rest none, which is the opposite of the
+// point. The window starts at each card's own position and wraps, so this
+// asserts the property rather than the implementation.
+const SETS = publishedSets();
+if (SETS.length < 50) fail(`only ${SETS.length} sets — expected ~92`);
+
+const multi = SETS.filter((s2) => s2.cards.length > 8).slice(0, 5);
+if (!multi.length) fail("no set big enough to test link spread");
+for (const set of multi) {
+  const linked = new Set();
+  for (const c of set.cards) for (const s2 of siblingsOf(c.q).siblings) linked.add(s2.id);
+  if (linked.size !== set.cards.length) {
+    fail(`${set.name}: only ${linked.size} of ${set.cards.length} cards receive an internal link`);
+  }
+  // A card must never link to itself — a self-link is a dead end wearing a
+  // different hat, and it wastes one of only six slots.
+  for (const c of set.cards) {
+    if (siblingsOf(c.q).siblings.some((s2) => s2.id === c.id)) fail(`${c.name} links to itself`);
+  }
+}
+
+// Every sibling has to carry its collector number, or three different
+// Duraludon VMAX in one set render as three identical links.
+const sample = siblingsOf(multi[0].cards[0].q).siblings;
+if (sample.some((c) => !c.number)) fail("a sibling has no collector number to distinguish it");
+if (sample.some((c) => !c.q)) fail("a sibling has no query, so its link would go nowhere");
+
+// An unpublished card has no set and no strip — it must not throw.
+const orphan = siblingsOf("something nobody published");
+eq("an unpublished card has no set", orphan.set, null);
+eq("and no siblings", orphan.siblings.length, 0);
+
 if (failures) {
   console.error(`\ncard page: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log(`card page: ${CARDS.length} published, collision-free; a cached card server-renders a price, everything else falls through; the dropdown handoff only answers for its own card.`);
+console.log(`card page: ${CARDS.length} published, collision-free; a cached card server-renders a price, everything else falls through; the dropdown handoff only answers for its own card; internal links reach every card in a set.`);

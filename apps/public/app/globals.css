@@ -491,3 +491,32 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
   background:var(--input); color:var(--ink-faint); cursor:default;
   border:1px solid var(--line-strong);
 }
+
+/* --- set pages, sibling strip, Pro pitch --- */
+.setgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(208px,1fr)); gap:10px; margin-top:14px; }
+.setcard {
+  display:flex; gap:11px; align-items:flex-start; text-decoration:none; color:inherit;
+  padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--surface);
+}
+.setcard:hover { border-color:var(--accent); }
+.setart { width:50px; flex:none; border-radius:5px; overflow:hidden; }
+.setart img { width:100%; height:100%; object-fit:cover; display:block; }
+.setmeta { display:flex; flex-direction:column; min-width:0; }
+.setname { font-weight:600; font-size:13.5px; line-height:1.3; }
+.setnum { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); margin-top:2px; }
+.setprice { font-family:var(--font-display); font-weight:700; font-size:17px; margin-top:5px; }
+
+.siblings { display:flex; flex-wrap:wrap; gap:7px; padding-bottom:10px; }
+.sibling {
+  display:inline-flex; align-items:baseline; gap:6px; text-decoration:none; color:inherit;
+  padding:6px 10px; border:1px solid var(--line); border-radius:999px; background:var(--surface-sink);
+  font-size:12.5px;
+}
+.sibling:hover { border-color:var(--accent); }
+.sibling .mt { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+
+.propitch {
+  display:flex; flex-direction:column; gap:5px; margin-top:10px; padding:14px;
+  text-decoration:none; color:inherit;
+}
+.propitch:hover { border-color:var(--accent); }

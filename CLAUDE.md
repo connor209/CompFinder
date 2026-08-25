@@ -140,6 +140,22 @@ page submitted in bulk demotes the good ones with it. Card pages carry a
 **canonical** to the published spelling: the same card is reachable under every
 typo, and without one those compete with each other.
 
+**Set pages are the internal linking, not just content.** `/set/<name>` lists
+every card in a set by value, and each card page links up to its set and across
+to six others. Before that, a card page's only outbound link was the home page:
+450 URLs each at the end of a dead end, with the sitemap as their sole route
+in, which is a poor way to get a site understood — Google leans on internal
+links to judge what matters. "Most valuable cards in Prismatic Evolutions" also
+carries volume an individual card page never will.
+
+**The sibling window WRAPS from each card's own position**, which is the whole
+point rather than a detail: taking the first six of a set would have all 48
+Prismatic Evolutions cards linking to the same six pages, so six get every
+internal link in the set and forty-two get none. `check-cardpage.mjs` asserts
+that every card in a set receives one. The strip is rendered from the manifest
+and carries no prices, so it costs no query on the hot path; the prices are on
+the set page, one click away, which does the work once for the whole set.
+
 **Indexing is gated on one flag.** `PUBLIC_ALLOW_INDEXING` controls robots.txt
 and the pages' `noindex` from `lib/indexing.js`, and defaults to CLOSED — off
 is the safe direction, since being wrong that way costs some indexing we didn't

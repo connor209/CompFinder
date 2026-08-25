@@ -24,6 +24,7 @@ import { selectCatalog } from "./catalog-select.js";
 import { cardFromRow, queryForCard, normaliseQuery } from "./card-query.js";
 import { cacheKeyFor } from "./cache-key.js";
 import { DEFAULT_SOLD_WINDOW } from "./windows.js";
+import { priceCard } from "./price.js";
 import PUBLISHED from "./published-cards.js";
 
 /**
@@ -160,4 +161,125 @@ export async function pricedCards({ windowDays = DEFAULT_SOLD_WINDOW, maxAgeDays
   return wanted.filter((w) => present.has(w.key)).map((w) => w.q);
 }
 
-export default { publishedCards, findPublished, loadCard, loadCachedSold, serverCard, pricedCards, MAX_SERVER_PRICE_AGE_DAYS };
+
+/**
+ * The sets we publish, each with its cards. Straight off the manifest — no
+ * database, no API — because a card page's sibling strip renders on every view
+ * and must not add a round trip to the hot path.
+ */
+export function publishedSets() {
+  const bySlug = new Map();
+  for (const entry of PUBLISHED) {
+    if (!bySlug.has(entry.slug)) bySlug.set(entry.slug, { slug: entry.slug, name: entry.set, cards: [] });
+    bySlug.get(entry.slug).cards.push(entry);
+  }
+  return [...bySlug.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** One set, or null. Manifest only. */
+export function findSet(slug) {
+  return publishedSets().find((s) => s.slug === slug) || null;
+}
+
+/**
+ * The other cards in a card's set, for the strip at the bottom of its page.
+ * Manifest only, so it is free — no prices, deliberately. The prices live on
+ * the set page, which is one click away and does the database work once for
+ * the whole set rather than on every card view.
+ *
+ * THE WINDOW WRAPS, and that is the point rather than a detail. Taking the
+ * first six of the set would have all 48 Prismatic Evolutions cards linking to
+ * the same six pages: six cards get every internal link in the set and the
+ * other forty-two get none, which is the opposite of what internal linking is
+ * for. Starting from each card's own position and wrapping spreads the links
+ * evenly across the set, so every page is reachable from several others.
+ */
+export function siblingsOf(query, limit = 6) {
+  const entry = findPublished(query);
+  if (!entry) return { set: null, siblings: [] };
+  const set = findSet(entry.slug);
+  if (!set) return { set: null, siblings: [] };
+
+  const cards = set.cards;
+  const at = cards.findIndex((c) => c.id === entry.id);
+  const out = [];
+  for (let step = 1; step < cards.length && out.length < limit; step++) {
+    out.push(cards[(at + step) % cards.length]);
+  }
+  return { set: { slug: set.slug, name: set.name, total: cards.length }, siblings: out };
+}
+
+/**
+ * Every card in one set, priced from cache, dearest first.
+ *
+ * "Most valuable cards in Prismatic Evolutions" is a query with real volume and
+ * the kind of page other people link to, which an individual card page is not.
+ * It is also the internal linking: before this, every card page was a dead end
+ * whose only route in was the sitemap, which is a poor way to get 450 URLs
+ * understood — Google leans on internal links to judge what matters.
+ *
+ * One catalogue read and one cache read for the WHOLE set, not one per card.
+ * Costs no SoldComps requests at all: everything here is already paid for.
+ */
+export async function loadSetCards(slug, { windowDays = DEFAULT_SOLD_WINDOW, maxAgeDays = MAX_SERVER_PRICE_AGE_DAYS } = {}) {
+  const set = findSet(slug);
+  if (!set) return null;
+
+  const supabase = createPublicClient();
+  const { data: rows, error } = await selectCatalog((columns) =>
+    supabase.from("card_catalog").select(columns).in("cardmarket_id", set.cards.map((c) => c.id))
+  );
+  // A failed query is a fault, not an empty set — returning [] would render a
+  // page claiming the set has no cards in it.
+  if (error) throw new Error(`card_catalog read failed for set ${slug}: ${error.message}`);
+
+  const byId = new Map((rows || []).map((row) => [row.cardmarket_id, cardFromRow(row)]));
+  const wanted = set.cards
+    .map((entry) => {
+      const card = byId.get(entry.id);
+      return card ? { entry, card, key: cacheKeyFor(queryForCard(card), true, windowDays) } : null;
+    })
+    .filter(Boolean);
+
+  const cached = new Map();
+  try {
+    const service = createServiceClient();
+    const notBefore = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
+    for (let i = 0; i < wanted.length; i += 40) {
+      const { data } = await service
+        .from("soldcomps_cache")
+        .select("cache_key, payload, fetched_at")
+        .in("cache_key", wanted.slice(i, i + 40).map((w) => w.key))
+        .gte("fetched_at", notBefore);
+      for (const row of data || []) cached.set(row.cache_key, row);
+    }
+  } catch {
+    // No service key — the set still lists its cards, just without prices.
+  }
+
+  const cards = wanted.map(({ entry, card, key }) => {
+    const row = cached.get(key);
+    const priced = row
+      ? priceCard(
+          { name: card.name, number: card.number, set: card.set, q: queryForCard(card) },
+          row.payload?.comps || []
+        )
+      : null;
+    return {
+      q: entry.q,
+      name: card.name,
+      number: card.number,
+      rarity: card.rarity,
+      image: card.image,
+      pence: priced?.pence ?? null,
+      used: priced?.used ?? 0
+    };
+  });
+
+  // Dearest first: on a "what is this set worth" page the chase cards are the
+  // answer. Unpriced cards sort last rather than reading as worthless.
+  cards.sort((a, b) => (b.pence ?? -1) - (a.pence ?? -1));
+  return { slug: set.slug, name: set.name, cards };
+}
+
+export default { publishedCards, findPublished, publishedSets, findSet, siblingsOf, loadSetCards, loadCard, loadCachedSold, serverCard, pricedCards, MAX_SERVER_PRICE_AGE_DAYS };
