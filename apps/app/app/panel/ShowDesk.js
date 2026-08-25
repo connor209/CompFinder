@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import {
@@ -61,6 +62,7 @@ export default function ShowDesk() {
   const [capacity, setCapacity] = useState(DEFAULT_STACK_CAPACITY);
   const [plan, setPlan] = useState(null); // proposed reallocation, awaiting confirm
   const profileSettings = useRef({});
+  const router = useRouter();
 
   const supabase = () => createClient();
 
@@ -370,7 +372,15 @@ export default function ShowDesk() {
   }
 
   async function markSold(co) {
-    const raw = prompt(`Sold "${co.sku || co.title || "card"}" at the show for £… (leave blank to record without a price)`);
+    // Pre-filled with the sticker where there is one: the number on the card is
+    // what was actually asked at the table, so typing it again is a chance to
+    // get it wrong. Still editable — haggling is the norm at a show, and what
+    // goes in the P&L has to be what changed hands, not what was printed.
+    const asked = co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : "";
+    const raw = prompt(
+      `Sold "${co.sku || co.title || "card"}" at the show for £… (leave blank to record without a price)`,
+      asked
+    );
     if (raw === null) return;
     const pence = parsePricePence(raw);
     setBusy(true);
@@ -548,6 +558,16 @@ export default function ShowDesk() {
         <div className="panel-head">
           <h3>Away at the show</h3>
           <span className="badge2">{open.length} out</span>
+          {open.length > 0 ? (
+            <button
+              className="btn btn-ghost"
+              onClick={() => router.push("/panel/batch?pool=show")}
+              title="Price everything that's checked out and get a recommended sticker price for each"
+              disabled={busy}
+            >
+              🏷 Price this pool
+            </button>
+          ) : null}
         </div>
         {open.length === 0 ? (
           <p className="dd-empty">Nothing checked out. Enter a SKU above as you pack for a show — numbering in its stack adjusts automatically while it&apos;s away.</p>
@@ -637,6 +657,11 @@ export default function ShowDesk() {
                     <span className="stack-title">{co.title || <em>—</em>}</span>
                     {co.stack_name ? <span className="badge2" title="Stack it left">{co.stack_name}</span> : null}
                     {co.event ? <span className="badge2" title="Event">{co.event}</span> : null}
+                    {co.sticker_pence != null ? (
+                      <span className="sd-price" title="Recommended sticker price — priced from the Batch screen">
+                        {pounds(co.sticker_pence)}
+                      </span>
+                    ) : null}
                     <span className="hint-small" style={{ color: chip.color, flex: "none" }} title={chip.title}>{chip.text}</span>
                     <span className="sd-rowacts">
                       <button className="stack-pull" style={{ color: "var(--conf-high)", borderColor: "var(--line-strong)" }} onClick={(e) => { e.preventDefault(); markSold(co); }} disabled={busy}>£ Sold</button>

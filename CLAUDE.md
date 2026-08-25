@@ -46,7 +46,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs fifteen table tests, no framework, non-zero exit on failure:
+`npm run check` runs sixteen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -75,6 +75,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-batchsave.mjs` — what survives saving and re-opening a batch
   run: every comp, every exclusion reason, the asking prices on the right card,
   and a grep against a second definition of the saved shape.
+- `scripts/check-showstock.mjs` — the show pool and the price that reaches a
+  label: the cash ladder as a table, which prices are held back, and that a
+  column added by a hand-applied migration degrades instead of breaking.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -556,6 +559,49 @@ way.
 Migration 023 has to be applied in Supabase. Until it is, the panel says so on
 the run it couldn't save, and the sessionStorage copy still carries the run
 across the panel — but not across a reload.
+
+## A show sticker is not a listing price
+
+The Show Desk checks stock out to a show (migration 016), and those open
+`stock_checkouts` rows are the show stock list — so the pool needs no table of
+its own. **"🏷 Price this pool" on the Show Desk goes to
+`/panel/batch?pool=show`**, which prices everything that is away and hands the
+prices back as sticker prices. In the URL, not in state, for the same reason a
+saved run is: state is the thing a remount throws away.
+
+`apps/app/lib/showstock.js` owns both rules, and `packages/core` is untouched —
+a price for a table at a show has no business changing what Last Comp tells a
+stranger their card is worth.
+
+- **The ladder is cash, not charm.** `finalPence` sits on a 50p ladder off a
+  £2.49 floor because that is what an eBay listing wants; nobody hands 50p
+  pieces across a table. Stickers round to £1 to £20, £5 to £100, £10 above,
+  ties up. £2.49 and £2.99 landing on neighbouring rungs is intended. The
+  resolution loss at the bottom is real: below about £2 everything collapses to
+  £1, which is right for a show table and wrong for bulk — that wants a "3 for
+  £5" tub, not a label each.
+- **A thin price is HELD, not printed.** Low or no confidence, or a price built
+  from active listings, gets no sticker. Everywhere else a bad price is
+  absorbed or editable; this one is stuck to a card and carried to a table,
+  where the only correction is peeling it off in front of a customer. Nothing
+  is held quietly — the count and the reason are both on screen.
+- **Stickers are written back on a click, not silently**, onto the checkout
+  they came from, matched by SKU rather than row order — the results list gets
+  filtered and re-sorted, and a sticker on the wrong card is a card sold for
+  the wrong money. Held rows are skipped rather than written null, so a card
+  keeps a good sticker from an earlier run. `£ Sold` then pre-fills from it.
+- **Migration 024** adds `sticker_pence` to `stock_checkouts` and `pool_name`
+  to `price_batches`. `pool_name` is read and written OPTIONALLY: migrations
+  here are applied by hand, so the code always ships first, and Postgres
+  rejects a whole statement that names a missing column — a required one would
+  take out the saved-runs list and every save with it, show-related or not.
+
+**The Nimbot label CSV is not built yet.** The Sticker CSV button is interim,
+with our own columns, until the printer's template lands. It already carries a
+BOM so £ survives Excel, and never ships a bare card number in a cell of its
+own — see `repairExcelDateMangling` in `lib/carduploader.js` for the "4/99" ->
+"Apr-99" case that avoids. The writer belongs in `apps/app/lib/labelexport.js`,
+reading `stickerRows()` rather than rounding again.
 
 ## Merging to main deploys — batch it
 

@@ -49,10 +49,14 @@ export function expiresAtIso(now = Date.now()) {
   return new Date(now + RETENTION_DAYS * 86400000).toISOString();
 }
 
-/** "59 cards from stock-aug.csv" / "59 pasted titles" — what the list shows. */
-export function labelFor({ csvName = null, count = 0 } = {}) {
+/** "59 cards from stock-aug.csv" / "43 cards from London Expo" / "59 cards
+ *  pasted" — what the saved-runs list shows. A pool run names its show for the
+ *  same reason a CSV run names its file: weeks later, "43 cards pasted" tells
+ *  you nothing about which trip it was for. */
+export function labelFor({ csvName = null, count = 0, poolName = null } = {}) {
   const cards = `${count} card${count === 1 ? "" : "s"}`;
-  return csvName ? `${cards} from ${csvName}` : `${cards} pasted`;
+  const from = csvName || poolName;
+  return from ? `${cards} from ${from}` : `${cards} pasted`;
 }
 
 // Characters Postgres will not accept, and eBay listing titles sometimes
@@ -191,6 +195,39 @@ const CHUNK_SIZE = 10;
 const BATCH_COLUMNS =
   "id, created_at, expires_at, label, source, csv_name, filters, item_count, priced_count, status";
 
+/**
+ * `pool_name` (migration 024) is read and written OPTIONALLY, and that is
+ * worth the small amount of machinery below.
+ *
+ * Migrations here are applied by hand in the Supabase SQL editor, so there is
+ * always a window where the code is deployed and the column is not. Naming an
+ * absent column in a select is not a degraded read — Postgres rejects the whole
+ * statement — so a required `pool_name` would take out the saved-runs list and
+ * every save with it, including runs that have nothing to do with a show. The
+ * feature failing to remember which show it priced is a fair price for that;
+ * losing a 59-card run is not.
+ *
+ * The flag latches on the first rejection, so the retry happens once per page
+ * rather than on every call.
+ */
+let poolNameColumn = true;
+const POOL_NAME_MISSING = /pool_name/i;
+
+export function batchColumns() {
+  return poolNameColumn ? `${BATCH_COLUMNS}, pool_name` : BATCH_COLUMNS;
+}
+
+/** True when an error is Postgres refusing a statement that names pool_name. */
+export function isMissingPoolName(error) {
+  if (!error || !poolNameColumn) return false;
+  return POOL_NAME_MISSING.test(error.message || "") || POOL_NAME_MISSING.test(error.details || "");
+}
+
+/** Latch the column off after a rejection, so callers retry without it once. */
+function dropPoolNameColumn() {
+  poolNameColumn = false;
+}
+
 // Structural failures — the table isn't there, or we aren't allowed to write
 // to it. Nothing about retrying a smaller slice helps, so don't spend thirty
 // round trips finding that out.
@@ -209,26 +246,34 @@ const STRUCTURAL = new Set(["42P01", "42501", "PGRST205", "PGRST301", "PGRST106"
  * and says so on the row, rather than silently coming back looking priced from
  * nothing.
  */
-export async function saveBatch(supabase, userId, { results, activeByIndex = {}, filters = {}, csvRaw = null, status = "complete" }) {
+export async function saveBatch(supabase, userId, { results, activeByIndex = {}, filters = {}, csvRaw = null, poolName = null, status = "complete" }) {
   const rows = results || [];
   if (rows.length === 0) return null;
 
-  const { data: batch, error } = await supabase
-    .from("price_batches")
-    .insert({
-      user_id: userId,
-      label: labelFor({ csvName: csvRaw?.name || null, count: rows.length }),
-      source: csvRaw ? "csv" : "paste",
-      csv_name: csvRaw?.name || null,
-      csv_text: csvRaw?.text || null,
-      filters,
-      item_count: rows.length,
-      priced_count: rows.filter((r) => r.rec && r.rec.finalPence != null).length,
-      status,
-      expires_at: expiresAtIso()
-    })
-    .select(BATCH_COLUMNS)
-    .single();
+  const record = {
+    user_id: userId,
+    label: labelFor({ csvName: csvRaw?.name || null, count: rows.length, poolName }),
+    source: csvRaw ? "csv" : poolName ? "stock" : "paste",
+    csv_name: csvRaw?.name || null,
+    csv_text: csvRaw?.text || null,
+    pool_name: poolName,
+    filters,
+    item_count: rows.length,
+    priced_count: rows.filter((r) => r.rec && r.rec.finalPence != null).length,
+    status,
+    expires_at: expiresAtIso()
+  };
+  const insert = () =>
+    supabase.from("price_batches").insert(record).select(batchColumns()).single();
+
+  let { data: batch, error } = await insert();
+  if (isMissingPoolName(error)) {
+    // Migration 024 isn't applied. The run still saves — it just won't
+    // remember which show it was for. The label already carries the name.
+    dropPoolNameColumn();
+    delete record.pool_name;
+    ({ data: batch, error } = await insert());
+  }
   if (error) throw error;
 
   const items = batchRows(rows, activeByIndex).map((it) => ({ ...it, batch_id: batch.id, user_id: userId }));
@@ -268,7 +313,12 @@ export async function saveBatch(supabase, userId, { results, activeByIndex = {},
 
 /** One saved run, ready to render: `{ batch, results, activeByIndex }`. */
 export async function loadBatch(supabase, id) {
-  const { data: batch, error } = await supabase.from("price_batches").select(BATCH_COLUMNS).eq("id", id).maybeSingle();
+  const read = () => supabase.from("price_batches").select(batchColumns()).eq("id", id).maybeSingle();
+  let { data: batch, error } = await read();
+  if (isMissingPoolName(error)) {
+    dropPoolNameColumn();
+    ({ data: batch, error } = await read());
+  }
   if (error) throw error;
   if (!batch) return null;
 
@@ -283,12 +333,19 @@ export async function loadBatch(supabase, id) {
 }
 
 export async function listBatches(supabase, userId, limit = 50) {
-  const { data, error } = await supabase
-    .from("price_batches")
-    .select(BATCH_COLUMNS)
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
+  const read = () =>
+    supabase
+      .from("price_batches")
+      .select(batchColumns())
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+  let { data, error } = await read();
+  if (isMissingPoolName(error)) {
+    dropPoolNameColumn();
+    ({ data, error } = await read());
+  }
   if (error) throw error;
   return data || [];
 }
