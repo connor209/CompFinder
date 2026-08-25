@@ -135,28 +135,93 @@ ratio clause blocks it and the one Neo Discovery comp is priced in). The guard
 is weakest exactly where the pool is thinnest, which is where this bug leaves
 every card.
 
-## Proposed order of work
+## The two fixes, and where the audit stands
 
-Nothing below has been done. The first two items are in `packages/core` and
-change **both products**, so they need confirming against Last Comp first.
+Both are implemented in `packages/core/pricing.js` behind settings flags, so
+`audit-rulechange.mjs` can price the same comps under both rule sets in one
+process. **They are flags to be collapsed once the audit lands, not a knob to
+keep.**
 
-1. **`packages/core/pricing.js` — the numbering prefix.** Drop
-   `no` / `no.` / `nr` / `#` from `extractNameTokens`, or stop
-   `nameTokensMatch` demanding a boundary after a trailing non-word character.
-   The number stays a required token and already tolerates leading zeros, so
-   no identifying signal is lost. On its own this makes these prices *worse* —
-   ship it with item 2.
-2. **`packages/core/pricing.js` — the set-mismatch hole.** Give the guard
-   something to stand on when the pool is thin and when set-matchers are a
-   majority. Judge it on a corpus, not on these three cards.
-3. **Tell the user a guard was starved.** The app already says how many comps
+- **`dropNumberingPrefixTokens`** — `no` / `no.` / `#` stop being required
+  match tokens. The number stays required and already tolerates leading zeros,
+  so nothing identifying is given up.
+- **`setMismatchPreferConfirmed`** — the set guard's ratio ceiling is dropped,
+  so a confirmed set excludes even when it wins its own vote.
+  `setMismatchMinKept` still holds it off a sample too small to price from.
+
+### What the offline evidence says
+
+**The full check suite passes, 17 of 17**, including `check-exclusions.mjs`'s
+55 real titles from the 11,063-comp audit corpus and `check-listings.mjs`'s
+£44.75 Umbreon case. `check-nametokens.mjs` is new and pins both rules.
+
+**`probe-tokenchange.mjs`: the token rule is provably inert on Last Comp.**
+Across every card set in the repo — bigset, bigset-en, bigset-en2, wideset and
+the 455 published cards, 2,132 cards in all — it changes **zero** tokens on the
+public path and zero on the app path. Last Comp tokenises the card *name* and
+appends the bare number itself, so a numbering prefix can only reach the tokens
+if a card is literally named with one, and no Pokémon card is.
+
+That probe also caught a real false positive before it shipped. The first draft
+of the pattern included `nr`, and **`NR` is the set code for Neo Revelation** —
+"Shining Magikarp NR 66". Dropping a set code is a looser, different change
+from dropping a prefix, nothing in the Neo batch ever wrote `Nr`, and it bought
+nothing measured. `nr` and `num` are both out; the pattern is `no`, `no.`, `#`.
+
+**On the app's own batch (R6 in `recurse-batch.mjs`), both fixes together:**
+
+| card | before | after | what changed |
+|---|---|---|---|
+| Snubbull No. 209 | £10.49 from 4, **0/4** say Neo Genesis | **£2.49** from 3, 1/3 say Neo Genesis | pool reached 6, so `highPostage` finally fired on 3 comps |
+| Xatu No. 178 | £12.99 from 2, 1/2 say Neo Genesis | £12.99 from **4**, 3/4 say Neo Genesis | better evidence, same answer — every comp is high-postage, so the guard refuses to empty the set |
+| Gligar No. 207 | £12.49 from 5, 3 × `nameMismatch` | £12.49 from 5, `nameMismatch` + `nonUkLocation` + `setMismatch` | same price, but the Neo Destiny print is now excluded as a set mismatch instead of by accident |
+
+Xatu is the honest outcome: the fix improves the evidence and leaves the answer
+alone, because there is no clean UK-domestic sold data for that card.
+
+### What is still outstanding
+
+**The live public audit has not run.** The set flag is live on all 455 published
+cards and only comps can say what it does to them.
+
+`/api/price` serves its cache to anyone, but a **miss** is gated on Turnstile —
+and the sold cache is 24h while the warmer runs weekly, so an audit is all
+misses. Every query returns `403 needsChallenge` without `AUDIT_TOKEN`, which
+is the bot protection working rather than a fault. The token lives on
+`compfinder-public` and is not in this environment.
+
+```
+AUDIT_TOKEN=… node scripts/audit-rulechange.mjs --corpus-out corpus.json --json before-after.json
+node scripts/audit-rulechange.mjs --corpus-in corpus.json    # every re-run after that is free
+```
+
+Run it from `apps/public`, like `audit-big.mjs`. Read the **LOST** column
+first. One invariant is worth checking against: neither flag can lose a price —
+the token rule only ever loosens matching, and the set rule cannot cut below
+`setMismatchMinKept` — so a non-zero LOST count means something else is going
+on and the flags should not ship.
+
+### Why not audit-big + diff-runs
+
+That pair is right for "did the site get better between Tuesday and Thursday":
+two runs, two fetches, diffed. It is the wrong tool for judging a *rule*, and
+the finding above is why — diffing two live runs measures the rule change
+**plus** a day of upstream churn, with nothing separating them, and on a thin
+card the churn is big enough to hide or invent a result. `audit-rulechange.mjs`
+fetches once and prices both ways from the same bytes, so every difference is
+the rule. It also halves the SoldComps cost and makes re-runs free, which
+matters when a threshold wants trying at four values.
+
+## The rest of the work
+
+1. **Tell the user a guard was starved.** The app already says how many comps
    were excluded and why. It should also say when a rule could not run —
    "priced from 2 comps; the postage and catalogue checks need 6" is the
    sentence that would have made this visible on the day.
-4. **Put the set in the query.** `Snubbull No. 209 Neo Genesis` is a different
+2. **Put the set in the query.** `Snubbull No. 209 Neo Genesis` is a different
    search from `Snubbull No. 209`, and for Japanese Neo cards it is the only
    thing that separates four different cards.
-5. **Make the thin-pool case say so.** A price from 1–2 comps on a card with
+3. **Make the thin-pool case say so.** A price from 1–2 comps on a card with
    70+ fetched is not a Low-confidence price, it is a failed match.
 
 ## Files
@@ -170,6 +235,15 @@ change **both products**, so they need confirming against Last Comp first.
   written to the observed template and is not evidence about wording).
 - `scripts/probe-nametokens.mjs` — scores candidate repairs against the real
   titles. Writes nothing.
+- `scripts/probe-tokenchange.mjs` — blast radius of the token rule across every
+  card set in the repo. Writes nothing, fetches nothing, needs no token.
+- `scripts/audit-rulechange.mjs` — the public-side gate. One fetch, both rule
+  sets, diffed, with attribution per flag.
+- `scripts/fixtures/rulechange-smoke.json` — synthetic, and a mechanism test
+  only: proof the audit prices and detects movement before a token run is spent
+  on it. Never quote it as a result.
+- `scripts/check-nametokens.mjs` — table check for both rules, in
+  `npm run check`.
 
 R1 and R2 both pass on every card: given the same comps the pipeline is
 deterministic and reaches its fixed point in one pass. The instability is

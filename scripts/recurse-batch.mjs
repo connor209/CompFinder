@@ -77,11 +77,21 @@ function toComp(c) {
   };
 }
 
+/**
+ * The rules as deployed on 2026-08-25, before the repair. R0 has to reproduce
+ * the run that PROMPTED this, so it pins them rather than reading whatever
+ * DEFAULT_SETTINGS currently says — otherwise the reproduction test quietly
+ * turns into a test of today's behaviour and stops being evidence of anything.
+ */
+const SHIPPED = { ...DEFAULT_SETTINGS, dropNumberingPrefixTokens: false, setMismatchPreferConfirmed: false };
+const LEGACY = args.includes("--legacy");
+const RULES = LEGACY ? SHIPPED : DEFAULT_SETTINGS;
+
 /** Exactly the three calls Panel.js's runBatchInner makes for one card. */
-function priceLikeTheApp(card, comps) {
-  const query = card.query ?? simplifyTitle(card.title, DEFAULT_SETTINGS.stripWords);
-  const nameTokens = extractNameTokens(query);
-  return { query, nameTokens, rec: recommend(comps, DEFAULT_SETTINGS, nameTokens, "sold", card.cardNumber || null, card.set || null) };
+function priceLikeTheApp(card, comps, settings = RULES) {
+  const query = card.query ?? simplifyTitle(card.title, settings.stripWords);
+  const nameTokens = extractNameTokens(query, settings);
+  return { query, nameTokens, rec: recommend(comps, settings, nameTokens, "sold", card.cardNumber || null, card.set || null) };
 }
 
 const reasonsOf = (rec) => {
@@ -98,10 +108,10 @@ const report = { asOf: fixture.asOf, runs: RUNS, cards: [], csv: null };
 // carries the whole used set, the price it computes must equal the price the
 // app printed into the CSV — otherwise the model of the pipeline is wrong and
 // the instability measured further down is the harness's, not the app's.
-bar(`R0 · Does this harness reproduce the shipped run? (fixture as of ${fixture.asOf})`);
+bar(`R0 · Does this harness reproduce the shipped run? (fixture as of ${fixture.asOf}, rules as deployed)`);
 for (const card of fixture.cards) {
   const comps = card.comps.map(toComp);
-  const { rec, nameTokens } = priceLikeTheApp(card, comps);
+  const { rec, nameTokens } = priceLikeTheApp(card, comps, SHIPPED);
   const usedInFixture = card.comps.filter((c) => c.verdict === "used").length;
   const okPrice = rec.rawPence === card.observed.rawPence;
   const okUsed = rec.included.length === usedInFixture;
@@ -230,6 +240,33 @@ console.log(
   "  £2 Japanese common, and splitPostageOutliers exists precisely to say so. It\n" +
   "  needs six comps to have an opinion, and the name-token filter never leaves it six."
 );
+
+// ── R6: the candidate rules ─────────────────────────────────────────────────
+// Same comps, the two flags under audit turned on. This is the app-side half
+// of the evidence; audit-rulechange.mjs is the public-side half, and the set
+// flag is live on all 455 published cards, so nothing ships on this alone.
+if (!LEGACY) {
+  bar("R6 · The candidate rules — dropNumberingPrefixTokens + setMismatchPreferConfirmed");
+  for (const card of fixture.cards) {
+    const comps = card.comps.map(toComp);
+    const was = priceLikeTheApp(card, comps, SHIPPED).rec;
+    const now = priceLikeTheApp(card, comps, DEFAULT_SETTINGS).rec;
+    const setOf = (rec) => {
+      if (!card.set) return "";
+      const re = new RegExp(`\\b${card.set.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+      return `${rec.included.filter((c) => re.test(c.title)).length}/${rec.included.length} say "${card.set}"`;
+    };
+    console.log(`  ${card.sku.padEnd(5)} ${card.query.padEnd(18)} ${gbp(was.finalPence).padStart(7)} from ${was.included.length} (${setOf(was)})  →  ${gbp(now.finalPence).padStart(7)} from ${now.included.length} (${setOf(now)})`);
+    console.log(`        ${fmtReasons(reasonsOf(was))}  →  ${fmtReasons(reasonsOf(now))}`);
+    cardOf(card.sku).tests.candidate = {
+      wasPence: was.finalPence, wasUsed: was.included.length, wasReasons: reasonsOf(was),
+      nowPence: now.finalPence, nowUsed: now.included.length, nowReasons: reasonsOf(now)
+    };
+  }
+  console.log(
+    "\n  Run with --legacy to price the same fixture under the rules as deployed."
+  );
+}
 
 // ── CSV cross-run test ──────────────────────────────────────────────────────
 // The app's own export is a free recursion test that has already been run: a
