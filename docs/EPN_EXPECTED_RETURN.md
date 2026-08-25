@@ -198,13 +198,26 @@ growing traffic.
 
 ## What to measure, from day one
 
-The wiring already segments by `customid`, so this costs nothing:
+The wiring segments by `customid`, so this costs nothing. **Updated 2026-08-25**
+— what shipped differs from the table this section first carried, which was
+written before the buy module existed. There is no `sold-comp`: the sold rows
+don't link out on either card screen, which is right, since an ended listing
+earns only by incidental attribution.
 
-| `customid` | What it tells you |
+Sub-IDs are built by `apps/public/lib/epn-tag.js` as `<slot>-<set>-<number>`,
+e.g. `buy-hero-prismatic-evolutions-131`, so the dashboard answers two
+questions rather than one:
+
+| slot prefix | What it tells you |
 |---|---|
-| `buy-active` | The money module. Should dominate. |
-| `buy-see-all` | Whether people prefer to browse eBay themselves — if this beats `buy-active`, our six rows aren't the right six. |
-| `sold-comp` | Near-zero expected (ended listings, incidental attribution only). If it isn't near-zero, visitors are using the comp rows as a browse surface and the module is in the wrong place. |
+| `buy-hero` | The money module — the cheapest-listing CTA. Should dominate. |
+| `buy-row` | The listings table under it. If it beats the hero, the hero isn't picking the right listing. |
+| `buy-see-all` | Whether people prefer to browse eBay themselves — if this beats `buy-hero`, our rows aren't the right rows. |
+
+And the second question, which is the one that compounds: **filter by set
+instead of by slot and you have per-page earnings.** That is the closest thing
+to traffic data this site will ever have — the privacy page promises no
+analytics and means it — and it is the input to what gets published next.
 
 The two numbers to pull out of the EPN dashboard in month one are **EPC** and
 **click-to-sale conversion**. Both are in the table above as assumptions; a
@@ -275,6 +288,14 @@ happens and the page says how many. Silence there would be worse than the
 listing.
 
 ## Marketing: there is nothing to market yet, and that is the answer
+
+> **Superseded 2026-08-25 — kept for the reasoning, not the conclusion.** The
+> premise below expired: `apps/public` is no longer one route. 455 cards across
+> 92 sets are published and warmed, set pages carry the internal linking, the
+> sitemap is submitted and indexing is open. The surface that markets itself
+> exists, so "how do we market it" is now a real question with a different
+> answer. See **`docs/MARKETING.md`**. The five numbered points below still
+> hold as written and are carried forward there.
 
 `apps/public` is one route, 53 lines, with no `sitemap`, no `robots`, no card
 pages and page-level metadata only at the root. Phase 3 of
@@ -347,7 +368,10 @@ stack, and a stack is what Pro is for.
    question invites a policy where none exists. The domain is live and
    `/privacy` is reachable on it, so nothing here waits on them any more.
 2. **The public privacy and disclosure page**, with the `#affiliate` anchor.
-3. **Apply to EPN**, set `NEXT_PUBLIC_EPN_CAMPID` on `compfinder-public` only.
+3. ~~**Apply to EPN**, set `NEXT_PUBLIC_EPN_CAMPID` on `compfinder-public`
+   only.~~ **Done 2026-08-25** — campaign `5339194433`, on `compfinder-public`
+   only, confirmed. Every number above stops being a model and starts being
+   measurable from here.
 4. **Card pages, sitemap, internal linking.** Months, not weeks, before it
    shows in the numbers.
 5. **Communities**, in parallel with 4, for the first users and the feedback.

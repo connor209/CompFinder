@@ -38,7 +38,7 @@ packages/core/   pricing · soldcomps · cardname · marketplace · epn · catal
 apps/app/        the business tool — eBay OAuth, inventory, batch, scan
 apps/public/     the free price page — no accounts, shared key, cached
 supabase/        migrations, shared by both
-docs/            research reports; PUBLIC_SEARCH_ADS.md covers the public page plan
+docs/            research reports; MARKETING.md is the current acquisition plan
 ```
 
 Run everything from the repo root: `npm run dev` / `npm run build` (the app),
@@ -46,7 +46,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twelve table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirteen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -65,6 +65,10 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   that everything else falls through to the client.
 - `scripts/check-indexing.mjs` — that the door to search engines defaults shut,
   and that robots.txt and the page metadata give the same answer.
+- `scripts/check-epn-tag.mjs` — what an affiliate link reports about itself:
+  the sub-IDs, that the slot prefix still selects what it always did, that
+  `epn.js` passes them through unrewritten, and a grep against hand-writing
+  one at a call site.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -448,19 +452,30 @@ is wrong: a missed deploy looks exactly like a bug that didn't take.
 
 ## EPN affiliate links
 
-`packages/core/epn.js` tags eBay links, and is inert until
-`NEXT_PUBLIC_EPN_CAMPID` is set. Two standing rules:
+`packages/core/epn.js` tags eBay links. **Live since 2026-08-25** — campaign
+`5339194433`, set on `compfinder-public`. It is inert wherever
+`NEXT_PUBLIC_EPN_CAMPID` is unset, which is how it stays safe on the app. Two
+standing rules:
 
 - **Never tag a link the account holder is expected to click** — their own
   listings (Inventory, the my-listings banner, ListForm) and the whole
   Arbitrage tab. Commission on your own purchases gets the account terminated.
-- **Leave the campaign ID unset until the public page has real visitors.**
 - **Set it on `compfinder-public` only, never on `comp-finder`.** The variable
   is read once in `packages/core/epn.js`, which both apps share, and
   `apps/app/.env.local.example` carries the same name. Set on the app it tags
   QuickSearch's own "Buy one now" rows and the batch comp rows — links the
   account holder clicks. Separate Vercel projects are what keep this safe; it
-  is one dropdown away from not being.
+  is one dropdown away from not being, so re-check it after any project change
+  rather than assuming.
+
+**Every tagged link says which card it was on.** `apps/public/lib/epn-tag.js`
+builds the sub-ID — `buy-hero-prismatic-evolutions-131` — from a fixed list of
+slots and the card's own set and number. The slot stays the FIRST segment on
+purpose: those three have been reporting since the campaign went live, so a
+prefix match still selects what it always did and the card is additive. There
+is no analytics on this site and the privacy page promises there never will be,
+which makes the EPN dashboard the only per-page traffic signal there is —
+reading it by set is what decides which cards to publish next.
 
 What it is likely to earn, with the sums, is in `docs/EPN_EXPECTED_RETURN.md`:
 ~3p per outbound click, ~£0.0045 per search, so **~740 searches a day for £100
@@ -502,12 +517,22 @@ moment strangers can reach it.
       project — so any link to `/privacy` 404'd. EPN review the live site, so
       this was blocking the application. The contact address on it,
       `privacy@lastcomp.co.uk`, is live and receiving — confirmed 2026-08-25.
-- [ ] **Set `NEXT_PUBLIC_EPN_CAMPID`** (5339194433), on `compfinder-public`
-      only — see above. Left unset while we are the only ones clicking, since
-      commission on your own purchases ends the EPN account.
-- [ ] **Apply to EPN.** They review a live site with a working disclosure, so
-      it needs the domain serving and `/privacy` reachable on it. Both are now
-      true.
+- [x] **Apply to EPN, and set `NEXT_PUBLIC_EPN_CAMPID`** (5339194433). Done
+      2026-08-25: the campaign is live and the ID is set on `compfinder-public`
+      **only** — confirmed, and the thing to re-confirm if the projects are ever
+      recreated, because commission on your own purchases ends the account and
+      `apps/app/.env.local.example` carries the same variable name.
+
+      Every tagged link now reports which card it was on, not just which module
+      (`lib/epn-tag.js`, pinned by `check-epn-tag.mjs`). That matters more here
+      than it would elsewhere: the privacy page promises no analytics and means
+      it, so **the EPN dashboard is the only per-page traffic signal this site
+      has**, and it only says as much as the sub-ID puts in. Reading it by set
+      is what decides which cards to publish next — see `docs/MARKETING.md`.
+
+      Still open, and worth a row in `MKRID` once there is evidence of the
+      traffic: the rotation is UK-only, so a US visitor clicks an untagged
+      link.
 - [x] **Open the door to search engines.** Done 2026-08-25.
       `PUBLIC_ALLOW_INDEXING=1` on `compfinder-public`; robots.txt allows all
       but `/api/` and the `noindex` is gone. Search Console is a **Domain**

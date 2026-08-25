@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
+import { cardCustomId } from "@/lib/epn-tag";
 import { assessAsk } from "@/lib/verdict";
 import { useCard, queryForCard } from "@/lib/use-card";
 import { SOLD_WINDOWS, cardHref } from "@/lib/windows";
@@ -153,7 +154,11 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
   const heroPence = cheapest ? cheapest.totalPence : d.marketPence;
   const med = median(d.usedComps.map((c) => c.totalPence ?? c.itemPricePence).filter(Boolean));
   const workings = cardHref(query, days, "/workings");
-  const searchUrl = ebaySearchUrl(card.q || query, { sold: false, customId: "buy-see-all" });
+  // Every outbound eBay link reports which card it was on, not just which
+  // module — the EPN dashboard is the only per-page traffic signal this site
+  // has, and "which sets earn" is what decides what gets published next.
+  const tag = (slot) => cardCustomId(slot, card);
+  const searchUrl = ebaySearchUrl(card.q || query, { sold: false, customId: tag("buy-see-all") });
 
   return (
     <main>
@@ -196,7 +201,7 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
         </div>
 
         {cheapest && cheapest.url ? (
-          <a className="cta" href={epnLink(cheapest.url, { customId: "buy-hero" })}
+          <a className="cta" href={epnLink(cheapest.url, { customId: tag("buy-hero") })}
              target="_blank" rel={relFor(cheapest.url, "noopener noreferrer")}>
             See it on eBay UK →
           </a>
@@ -407,7 +412,7 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
               </p>
             )}
             {d.listings.slice(0, 4).map((l, i) => (
-              <a key={l.url || i} className="listing" href={epnLink(l.url, { customId: "buy-row" })}
+              <a key={l.url || i} className="listing" href={epnLink(l.url, { customId: tag("buy-row") })}
                  target="_blank" rel={relFor(l.url, "noopener noreferrer")}>
                 <span className="rowprice">{gbp(l.totalPence)}</span>
                 <span className="title">{l.title}</span>
