@@ -64,4 +64,25 @@ export function shareFields({ card, marketPence, used = 0, windowDays = 90, last
   };
 }
 
-export default { shareFields, shortDate, fit };
+/**
+ * The drawable version of a card's art URL.
+ *
+ * The catalogue stores `image_small`, which scripts/lib/card-images.mjs builds
+ * as `<card>/low.webp` — right for the page, where the browser decodes WEBP in
+ * its sleep, and fatal here: Satori cannot decode WEBP and throws INSIDE
+ * ImageResponse, past every try/catch around the fetch. That is what made the
+ * Save-image button 500 on every card that had art.
+ *
+ * The sibling is `<card>/high.png`, from the same line in that file. Anything
+ * that isn't the known WEBP shape is handed back untouched and then has to
+ * pass the content-type check at the fetch.
+ */
+export function drawableArt(url) {
+  if (typeof url !== "string" || !url) return null;
+  return url.replace(/\/low\.webp$/i, "/high.png");
+}
+
+/** The formats Satori can actually rasterise. WEBP and AVIF are not among them. */
+export const DRAWABLE_TYPES = ["image/png", "image/jpeg"];
+
+export default { shareFields, shortDate, fit, drawableArt, DRAWABLE_TYPES };

@@ -409,6 +409,18 @@ gates on `findPublished` — a manifest lookup, free on a page render — and an
 unpublished card falls back to `twitter:card=summary` rather than
 `summary_large_image`, which would unfurl as a broken box.
 
+**The catalogue's art is WEBP and Satori cannot draw it.** `image_small` is
+`<card>/low.webp` (`scripts/lib/card-images.mjs`), which is right for the page
+— a browser decodes WEBP without blinking — and took the Save-image button
+down on every card that had art. Two things made it hard to see: it built
+clean and passed a hand-written local test that used a `high.png` URL, and
+Satori raises while PIPING the response rather than when `ImageResponse` is
+constructed, so it surfaced as Next's own 500 page with nothing in it and no
+try/catch of ours could reach it. `drawableArt()` swaps in the `high.png`
+sibling, the content-type check is an ALLOW-LIST (`startsWith("image/")` is
+what let it through), and the render is buffered so a draw failure falls back
+to the image without art instead of killing the connection.
+
 **Nothing on that image is an asking price.** "Buy it today for" is the
 headline everywhere else and is forbidden here for the same reason it is never
 server-rendered — except worse, because a PNG pasted into a Facebook group is

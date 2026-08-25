@@ -19,7 +19,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { shareFields, fit, shortDate } from "../apps/public/lib/share-card.js";
+import { shareFields, fit, shortDate, drawableArt, DRAWABLE_TYPES } from "../apps/public/lib/share-card.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
@@ -159,6 +159,34 @@ ok("the Archivo file is where the route looks for it",
    readFileSync(join(ROOT, "apps/public/assets/Archivo-Expanded-800.ttf")).byteLength > 1000);
 // A missing font degrades rather than throwing.
 ok(`${ROUTE} survives a missing font`, /fontData = null/.test(route));
+
+/* -- 7. the artwork, which took the whole button down once ---------------- */
+// The catalogue stores image_small as <card>/low.webp. A browser draws WEBP
+// without blinking; Satori cannot, and it raises while PIPING the response —
+// after the handler has returned — so it arrived as Next's own 500 page with
+// nothing in it. Two rules, and both need to hold or it comes back.
+eq("the stored webp is swapped for its png sibling",
+   drawableArt("https://assets.tcgdex.net/en/sv/sv08/115/low.webp"),
+   "https://assets.tcgdex.net/en/sv/sv08/115/high.png");
+eq("a png is left alone",
+   drawableArt("https://assets.tcgdex.net/en/swsh/swsh7/215/high.png"),
+   "https://assets.tcgdex.net/en/swsh/swsh7/215/high.png");
+eq("case doesn't matter", drawableArt("https://x/a/LOW.WEBP"), "https://x/a/high.png");
+eq("nothing in, nothing out", drawableArt(null), null);
+// The sibling name has to stay in step with scripts/lib/card-images.mjs, which
+// is where these URLs are built in the first place.
+const IMAGES = read("scripts/lib/card-images.mjs");
+ok("card-images.mjs still builds low.webp / high.png",
+   IMAGES.includes("low.webp") && IMAGES.includes("high.png"));
+
+ok("webp is not on the drawable list", !DRAWABLE_TYPES.includes("image/webp"));
+ok("png is", DRAWABLE_TYPES.includes("image/png"));
+// An ALLOW-list. `startsWith("image/")` is what let the webp through.
+ok(`${ROUTE} does not admit any image/* type`, !route.includes('startsWith("image/")'));
+ok(`${ROUTE} checks against DRAWABLE_TYPES`, route.includes("DRAWABLE_TYPES.includes"));
+// And the render is read to completion, or a pipe failure is uncatchable.
+ok(`${ROUTE} buffers the image so a draw failure is catchable`,
+   /arrayBuffer\(\)/.test(route) && route.includes("drawOrDropArt"));
 
 if (failed) {
   console.error(`\ncheck-share: ${failed} failed`);

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
-import { shareFields } from "@/lib/share-card";
+import { shareFields, drawableArt, DRAWABLE_TYPES } from "@/lib/share-card";
 import { windowFromParam } from "@/lib/windows";
 import { serverCard } from "@/lib/card-page";
 import { priceCard } from "@/lib/price";
@@ -72,12 +72,16 @@ const C = {
  * picture on it — and the picture is the least important thing here.
  */
 async function artDataUri(src) {
-  if (!src || !/^https:\/\//.test(src)) return null;
+  const url = drawableArt(src);
+  if (!url || !/^https:\/\//.test(url)) return null;
   try {
-    const res = await fetch(src, { signal: AbortSignal.timeout(2500) });
+    const res = await fetch(url, { signal: AbortSignal.timeout(2500) });
     if (!res.ok) return null;
-    const type = res.headers.get("content-type") || "image/png";
-    if (!type.startsWith("image/")) return null;
+    const type = (res.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    // An ALLOW-LIST, not "starts with image/". WEBP is an image and Satori
+    // cannot draw it — it throws inside ImageResponse where no catch of ours
+    // can reach, which is exactly how this shipped broken.
+    if (!DRAWABLE_TYPES.includes(type)) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.byteLength > 3_000_000) return null;
     return `data:${type};base64,${buf.toString("base64")}`;
@@ -144,7 +148,7 @@ export async function GET(request, { params }) {
     card.image
   );
 
-  return image(fields, art, font, {
+  return await drawOrDropArt(fields, art, font, {
     // Unfurlers re-fetch, and the underlying price only moves when the warmer
     // runs. An hour at the edge keeps a popular link off the function.
     "Cache-Control": "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"
@@ -152,6 +156,18 @@ export async function GET(request, { params }) {
 }
 
 export async function POST(request) {
+  try {
+    return await renderFromBody(request);
+  } catch (err) {
+    // Next's own 500 page told the browser nothing, which cost a round trip
+    // of guessing. Say what happened.
+    console.error("share.png POST failed", err);
+    return new Response(`share.png: ${err && err.message ? err.message : "render failed"}`,
+                        { status: 500, headers: { "Content-Type": "text/plain" } });
+  }
+}
+
+async function renderFromBody(request) {
   let body;
   try {
     body = await request.json();
@@ -181,7 +197,44 @@ export async function POST(request) {
 
   const { fields, art, font } = await render(f, typeof card.image === "string" ? card.image : null);
   // Drawn from the body, so there is nothing for a shared cache to key on.
-  return image(fields, art, font, { "Cache-Control": "no-store" });
+  return await drawOrDropArt(fields, art, font, { "Cache-Control": "no-store" });
+}
+
+/**
+ * Draw, and never 500 over the artwork.
+ *
+ * Satori raises from INSIDE ImageResponse on anything it can't rasterise, so a
+ * try/catch around the fetch is not enough — the first version of this route
+ * returned Next's own 500 page on every card that had art, because the
+ * catalogue stores WEBP. The art is the least important thing on this image;
+ * losing it must cost the picture, not the button.
+ */
+async function drawOrDropArt(fields, art, font, headers) {
+  try {
+    return await settled(image(fields, art, font, headers), headers);
+  } catch (err) {
+    if (!art) throw err;
+    console.error("share.png: could not draw the card art, rendering without it", err);
+    return await settled(image(fields, null, font, headers), headers);
+  }
+}
+
+/**
+ * Read an ImageResponse to completion so a failure is catchable.
+ *
+ * Satori raises while the body is being PIPED, not when ImageResponse is
+ * constructed — the observed shape is "failed to pipe response / TypeError: u2
+ * is not iterable", which arrives after the handler has already returned and
+ * kills the connection outright. A try/catch around the constructor sees
+ * nothing. Buffering the ~340KB here is what turns that into an error this
+ * code can actually handle.
+ */
+async function settled(response, headers) {
+  const buf = Buffer.from(await response.arrayBuffer());
+  return new Response(buf, {
+    status: 200,
+    headers: { "Content-Type": "image/png", ...headers }
+  });
 }
 
 /**
