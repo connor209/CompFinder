@@ -58,9 +58,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22'
           cache: npm
@@ -107,14 +107,34 @@ jobs:
           echo "Running with: ${args[*]}"
           node scripts/warm-cardpages.mjs "${args[@]}" | tee run.log
 
+      # The summary is what the run looks like from a browser. head -1 plus
+      # tail -4 cut a dry run's fifteen examples down to two, which was the
+      # half worth reading — so a dry run now shows its whole list, and a real
+      # run shows the counts, anything that failed, and the totals rather than
+      # 120 lines of success.
       - name: Summary
         if: always()
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
           {
             echo "### Card page warming"
             echo
             echo '```'
-            head -1 run.log 2>/dev/null || true
-            tail -4 run.log 2>/dev/null || echo "(no output — see the step log above)"
+            if [ ! -s run.log ]; then
+              echo "(no output — see the step log above)"
+            elif [ "$DRY_RUN" = "true" ]; then
+              head -20 run.log
+            else
+              head -1 run.log
+              failures=$(grep -c '✗' run.log || true)
+              if [ "${failures:-0}" -gt 0 ]; then
+                echo
+                echo "$failures failed:"
+                grep '✗' run.log | head -10
+              fi
+              echo
+              tail -3 run.log
+            fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

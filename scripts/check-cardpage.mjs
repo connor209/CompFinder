@@ -20,6 +20,19 @@
 import { findPublished, publishedCards } from "../apps/public/lib/card-page.js";
 import { seeded } from "../apps/public/lib/use-card.js";
 
+// card-handoff.js talks to sessionStorage, which doesn't exist under node.
+// Stubbed rather than skipped: the guard it implements is the whole reason the
+// handoff is safe, so it has to be exercised somewhere.
+globalThis.sessionStorage = (() => {
+  const map = new Map();
+  return {
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k)
+  };
+})();
+const { remember, take } = await import("../apps/public/lib/card-handoff.js");
+
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
 const eq = (label, got, want) => { if (got !== want) fail(`${label} — expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`); };
@@ -92,8 +105,35 @@ for (const [label, initial] of [
   eq(`falls back to the client: ${label}`, seeded(initial, HIT, 90).status, "loading");
 }
 
+// --- 4. the dropdown handoff can only answer for its own card --------------
+// The dropdown hands the clicked card forward so the next screen doesn't have
+// to re-resolve it. That saves half a second and introduces one risk worth
+// testing: a handoff that outlives its journey would show someone a card they
+// never asked for — silently, and with a confident price on it.
+const PICKED = { id: 574273, name: "Umbreon VMAX", number: "215", set: "Evolving Skies" };
+
+remember(PICKED);
+const wrongCard = take("Charizard ex 199 151");
+eq("a handoff never answers for a different card", wrongCard, null);
+// ...and taking it for the wrong card clears it, so it can't lie in wait.
+remember(PICKED);
+eq("the right query gets the card", take(HIT)?.id, PICKED.id);
+eq("and it is single use", take(HIT), null);
+
+// Spacing and case are how the same card arrives from a link versus a click.
+remember(PICKED);
+eq("matching survives spacing and case", take("  umbreon  VMAX 215   evolving skies ")?.id, PICKED.id);
+
+// Nothing stored, nothing claimed.
+eq("no handoff, no card", take(HIT), null);
+// Junk in storage must not throw on the way to a page.
+sessionStorage.setItem("lc-handoff", "{not json");
+eq("unparseable handoff is ignored", take(HIT), null);
+remember(null);
+eq("remembering nothing stores nothing", take(HIT), null);
+
 if (failures) {
   console.error(`\ncard page: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log(`card page: ${CARDS.length} published, collision-free; a cached card server-renders a price, everything else falls through.`);
+console.log(`card page: ${CARDS.length} published, collision-free; a cached card server-renders a price, everything else falls through; the dropdown handoff only answers for its own card.`);

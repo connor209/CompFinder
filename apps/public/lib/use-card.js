@@ -20,6 +20,7 @@ import { DEFAULT_SOLD_WINDOW } from "./windows.js";
 // warmer all build this same string on the server, and this file is "use
 // client". Re-exported so existing callers are unchanged.
 import { queryForCard } from "./card-query.js";
+import { take as takeHandoff } from "./card-handoff.js";
 
 export { queryForCard };
 
@@ -111,21 +112,32 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
     setState({ status: "loading", query });
 
     (async () => {
-      let resolved = null;
-      try {
-        const res = await fetch(`/api/resolve?q=${encodeURIComponent(query)}`).then((r) => r.json());
-        const candidates = (res && res.candidates) || [];
-        // One confident hit prices straight away; anything else is a question
-        // for the visitor, because guessing between two printings of the same
-        // number is how you price a £200 card at 60p.
-        if (candidates.length && (res.confident || candidates.length === 1)) {
-          resolved = candidates[0];
-        } else if (candidates.length) {
-          if (alive) setState({ status: "choose", query, candidates, fuzzy: !!res.fuzzy });
-          return;
+      // A card the visitor clicked in the dropdown was already resolved once,
+      // on the way here. Asking /api/resolve to work it out again costs half a
+      // second of the critical path for an answer we were handed. Single use
+      // and guarded on the query, so it can only ever answer for its own card.
+      // A card the visitor clicked in the dropdown was already resolved once,
+      // on the way here. Asking /api/resolve to work it out again costs half a
+      // second of the critical path for an answer we were handed. Single use
+      // and guarded on the query, so it can only ever answer for its own card.
+      let resolved = takeHandoff(query);
+
+      if (!resolved) {
+        try {
+          const res = await fetch(`/api/resolve?q=${encodeURIComponent(query)}`).then((r) => r.json());
+          const candidates = (res && res.candidates) || [];
+          // One confident hit prices straight away; anything else is a question
+          // for the visitor, because guessing between two printings of the same
+          // number is how you price a £200 card at 60p.
+          if (candidates.length && (res.confident || candidates.length === 1)) {
+            resolved = candidates[0];
+          } else if (candidates.length) {
+            if (alive) setState({ status: "choose", query, candidates, fuzzy: !!res.fuzzy });
+            return;
+          }
+        } catch {
+          /* the resolver is an optimisation, not a gate — fall through to raw text */
         }
-      } catch {
-        /* the resolver is an optimisation, not a gate — fall through to raw text */
       }
 
       const card = resolved || { name: query, q: query };

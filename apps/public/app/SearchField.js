@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { queryForCard } from "@/lib/card-query";
+import { remember } from "@/lib/card-handoff";
 import { gbp } from "./ui";
 
 /**
@@ -48,6 +50,18 @@ export default function SearchField({ seeds = [] }) {
     router.push(`/card/${encodeURIComponent(trimmed)}`);
   }
 
+  /**
+   * A card the visitor actually picked. We already hold everything the next
+   * screen needs, so hand it over rather than making it ask /api/resolve for
+   * the card it was just given — half a second on the critical path.
+   * queryForCard rather than joining the fields here: that string is what the
+   * cache key hashes, and it wants one definition.
+   */
+  function goToCard(card) {
+    remember(card);
+    go(queryForCard(card));
+  }
+
   function onType(value) {
     setQ(value);
     setActive(-1);
@@ -74,7 +88,7 @@ export default function SearchField({ seeds = [] }) {
     else if (e.key === "Enter") {
       e.preventDefault();
       const pick = active >= 0 ? sugs[active] : null;
-      go(pick ? [pick.name, pick.number, pick.set].filter(Boolean).join(" ") : q);
+      if (pick) goToCard(pick); else go(q);
     }
   }
 
@@ -104,7 +118,7 @@ export default function SearchField({ seeds = [] }) {
                 type="button"
                 data-active={i === active}
                 onMouseEnter={() => setActive(i)}
-                onClick={() => go([c.name, c.number, c.set].filter(Boolean).join(" "))}
+                onClick={() => goToCard(c)}
               >
                 <span className="nm">{c.name}</span>
                 <span className="mt">{[c.number, c.set].filter(Boolean).join(" · ")}</span>
