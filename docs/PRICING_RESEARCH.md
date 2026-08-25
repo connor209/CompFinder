@@ -189,11 +189,14 @@ you last priced something at.
 
 ## What I would do, in order
 
+**1–3 shipped 2026-08-25.** The table is kept as written so the estimates can
+be judged against what actually happened; 4–8 are still proposals.
+
 | | change | effort | why |
 |---|---|---|---|
-| 1 | Active checks via the **Browse API** | small — client exists | frees the quota argument; makes the live-market check universal |
-| 2 | **24h cache** on comps | small — mirrors Last Comp | four runs cost one; tuning becomes free |
-| 3 | **3-way concurrency** + the existing pacer | small | 5.3 min → 1.7 min |
+| 1 ✅ | Active checks via the **Browse API** | small — client exists | frees the quota argument; makes the live-market check universal |
+| 2 ✅ | **24h cache** on comps | small — mirrors Last Comp | four runs cost one; tuning becomes free |
+| 3 ✅ | **3-way concurrency** + a gate | small | 5.3 min → 1.7 min |
 | 4 | **Confidence gate + review queue** | medium | 80% of rows stop needing you |
 | 5 | **Condition multipliers** | medium, needs measuring | the largest remaining per-card error |
 | 6 | **Your own sales as comps** | medium | best data you own, currently unused |

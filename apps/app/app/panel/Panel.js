@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { APP_SETTINGS, appNameTokens, applyNumberGuards, dropForeignPostage, needsActiveCheck, poolDisagrees, settingsForText, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
+import { createGate, runPool, SOLDCOMPS_GAP_MS, BROWSE_GAP_MS, BATCH_CONCURRENCY } from "@/lib/pace";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
@@ -307,6 +308,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // state: runBatchInner reads it in the same tick it is set.
   const [poolRun, setPoolRun] = useState(null);
   const poolRunRef = useRef(null);
+  // Rate gates for the batch's outbound calls. Refs rather than state: they are
+  // machinery, and re-rendering when a slot is taken would be absurd.
+  const soldGate = useRef(createGate(SOLDCOMPS_GAP_MS));
+  const browseGate = useRef(createGate(BROWSE_GAP_MS));
   const [stickerNotice, setStickerNotice] = useState("");
   const [applyingStickers, setApplyingStickers] = useState(false);
 
@@ -705,6 +710,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   async function fetchSoldCompsWithRetry(query, opts, onRetry) {
     let attempt = 0;
     while (true) {
+      // Every attempt takes a slot, retries included — a retry is a request
+      // like any other and SoldComps counts it the same way.
+      await soldGate.current();
       const response = await fetch("/api/soldcomps", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -753,6 +761,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
    */
   async function fetchActiveListings(query, opts) {
     try {
+      await browseGate.current();
       const res = await fetch("/api/active", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -795,11 +804,16 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
 
   async function runBatchInner(items) {
     setResults([]);
+    // Fresh per run, so one run's pacing never delays the next.
+    soldGate.current = createGate(SOLDCOMPS_GAP_MS);
+    browseGate.current = createGate(BROWSE_GAP_MS);
     setActiveByIndex({});
     let consecutiveFailures = 0;
     let stoppedEarly = false;
     let stopReason = "";
-    const collected = [];
+    // Indexed by position, not pushed: cards complete out of order under
+    // concurrency, and the run has to keep the order the list was given.
+    const collected = new Array(items.length).fill(null);
 
     const searchOptions = { ebaySite, itemLocation, itemCondition, minPrice: minPrice || null, maxPrice: maxPrice || null, soldAfterDays: Number(soldWithin) };
 
@@ -822,11 +836,17 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         )
       );
 
-    for (let i = 0; i < items.length; i++) {
+    // One card. Runs BATCH_CONCURRENCY at a time — see lib/pace.js for why
+    // three, and why the old 1.2s sleep between cards was the wrong tool.
+    // Writes into its own slot rather than pushing, so a run stays in the
+    // order the list was given however the cards actually complete.
+    let done = 0;
+    const priceOne = async (i) => {
       const item = items[i];
       const { title, sku } = item;
 
-      setStatus(`Pricing ${i + 1} of ${items.length}: "${title}"`);
+      done++;
+      setStatus(`Pricing ${done} of ${items.length}: "${title}"`);
 
       let query, nameTokens, set, csvItem, cardNumber;
       let soldComps, apiDiagnostic, fromCache = false;
@@ -855,13 +875,16 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         soldFailStreak = 0;
       } catch (err) {
         if (err.isAuthError || err.isQuotaExceeded) {
+          // Nothing after this can succeed, so stop pulling new cards. Work
+          // already in flight still finishes and its results are kept —
+          // throwing away a card we have already paid for helps nobody.
           stoppedEarly = true;
-          stopReason = `Stopped at item ${i + 1} of ${items.length} — ${err.message}`;
-          collected.push({ title, sku, query, csvItem, rec: null, failed: err.message });
-          setResults([...collected]);
+          stopReason = `Stopped at item ${done} of ${items.length} — ${err.message}`;
+          collected[i] = { title, sku, query, csvItem, rec: null, failed: err.message };
+          setResults(collected.filter(Boolean));
           setStatus(stopReason);
           setStatusIsError(true);
-          break;
+          return;
         }
 
         // The sold lookup failed (or was skipped). Before writing the card
@@ -891,25 +914,27 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             setStatus(`SoldComps' sold-listing endpoint is failing — pricing the rest of this run from active listings instead.`);
           }
           consecutiveFailures = 0;
-          collected.push({ title, sku, query, csvItem, rec: salvaged, nameTokens, set, cardNumber });
-          setResults([...collected]);
-          if (i < items.length - 1) await new Promise((r) => setTimeout(r, Math.min(settings.interItemDelayMs, 1200)));
-          continue;
+          collected[i] = { title, sku, query, csvItem, rec: salvaged, nameTokens, set, cardNumber };
+          setResults(collected.filter(Boolean));
+          return;
         }
 
+        // "Consecutive" now means consecutive COMPLETIONS with no success
+        // between them, since cards no longer finish in the order they start.
+        // Same intent — stop a run that is failing persistently rather than
+        // burn the rest of a list on it — and the count is still reset by any
+        // success, which is what makes it a streak rather than a total.
         consecutiveFailures++;
-        collected.push({ title, sku, query, csvItem, rec: null, failed: err.message });
-        setResults([...collected]);
-        setStatus(`Item ${i + 1} of ${items.length}: ${err.message}`);
+        collected[i] = { title, sku, query, csvItem, rec: null, failed: err.message };
+        setResults(collected.filter(Boolean));
+        setStatus(`Item ${done} of ${items.length}: ${err.message}`);
         setStatusIsError(true);
         if (consecutiveFailures >= settings.maxConsecutiveFailures) {
           stoppedEarly = true;
-          stopReason = `Stopped after ${consecutiveFailures} failures in a row (item ${i + 1} of ${items.length}).`;
+          stopReason = `Stopped after ${consecutiveFailures} failures in a row (item ${done} of ${items.length}).`;
           setStatus(stopReason);
-          break;
         }
-        await new Promise((r) => setTimeout(r, settings.interItemDelayMs));
-        continue;
+        return;
       }
 
       // Postage that no UK seller charges to post one card is not card value.
@@ -996,11 +1021,20 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         }
       }
 
-      collected.push({ title, sku, query, csvItem, rec, nameTokens, set, cardNumber, fromCache });
-      setResults([...collected]);
+      collected[i] = { title, sku, query, csvItem, rec, nameTokens, set, cardNumber, fromCache };
+      setResults(collected.filter(Boolean));
+    };
 
-      if (i < items.length - 1) await new Promise((r) => setTimeout(r, Math.min(settings.interItemDelayMs, 1200)));
-    }
+    // The gates in fetchSoldCompsWithRetry and fetchActiveListings do the
+    // pacing now, so the pool only decides how many cards may be in the air.
+    await runPool(items.length, BATCH_CONCURRENCY, priceOne, () => stoppedEarly);
+
+    // Pulling stops at the first stop signal, but cards already running finish
+    // — so compact away the slots that were never reached.
+    const finished = collected.filter(Boolean);
+    collected.length = 0;
+    collected.push(...finished);
+    setResults(finished);
 
     setRunning(false);
     saveHistory(collected);
