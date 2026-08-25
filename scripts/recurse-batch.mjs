@@ -285,6 +285,16 @@ if (!LEGACY) {
 if (CORPUS) {
   bar(`Corpus · every card in a saved run, priced as shipped and as the app now prices`);
   const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
+  // Two producers, one shape: the Batch screen's "Download this run" button
+  // and scripts/dump-batch.mjs. The button carries the filters the run used,
+  // which dump-batch cannot know, so print them when they are there — a corpus
+  // compared against one priced over a different sold window is not a
+  // comparison of rules.
+  if (corpus.searchOptions) {
+    const o = corpus.searchOptions;
+    console.log(`  priced under: ${o.ebaySite}, ${o.itemLocation}, ${o.itemCondition}, ${o.soldAfterDays}d` +
+      `${o.minPrice || o.maxPrice ? `, £${o.minPrice || "0"}-£${o.maxPrice || "∞"}` : ""}\n`);
+  }
   const rows = [];
   for (const card of corpus.cards) {
     const comps = (card.comps || []).map((c) => ({ ...c, postagePence: c.postagePence || 0 }));

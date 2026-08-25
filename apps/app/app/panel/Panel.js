@@ -1169,6 +1169,66 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   }
 
   /**
+   * The whole run as JSON — every comp used, every comp excluded, with the
+   * reason each was dropped.
+   *
+   * Export CSV gives one row a card and is what you list from. This is the
+   * evidence UNDER those rows, and it exists because a pricing rule judged on
+   * the two cards that prompted it gets reversed later — the 2026-08-25 Neo
+   * batch took four rounds partly because the comps behind it were only ever
+   * in React state and every question cost another run.
+   *
+   * The saved run in Supabase holds the same thing, but reading it needs the
+   * service-role key and a terminal. This is the same data, one click, and it
+   * works when migration 023 hasn't been applied.
+   *
+   * `node scripts/recurse-batch.mjs --corpus <file>` prices every card in it
+   * both ways and costs nothing at SoldComps.
+   *
+   * Not small — a run is roughly a megabyte of comps — and it carries your
+   * SKUs and asking prices, so it belongs on your machine rather than in the
+   * repo.
+   */
+  function downloadRun() {
+    const payload = {
+      dumpedAt: new Date().toISOString(),
+      // What the run was priced UNDER. A corpus without its filters can't be
+      // compared against a later one — the sold window and the marketplace
+      // change what came back at least as much as any rule does.
+      searchOptions: { ebaySite, itemLocation, itemCondition, soldAfterDays: Number(soldWithin), minPrice: minPrice || null, maxPrice: maxPrice || null },
+      poolName: poolRunRef.current || null,
+      cards: results.map((r, i) => ({
+        sku: r.sku || "", title: r.title, query: r.query,
+        set: r.set || null, cardNumber: r.cardNumber || null,
+        nameTokens: r.nameTokens || null,
+        failed: r.failed || null,
+        shipped: r.rec
+          ? {
+              rawPence: r.rec.rawPence ?? null, finalPence: r.rec.finalPence ?? null,
+              confidence: r.rec.confidence ?? null, dataSource: r.rec.dataSource ?? null,
+              priceHeld: !!r.rec.priceHeld, note: r.rec.note || "",
+              used: (r.rec.included || []).length, excluded: (r.rec.excluded || []).length
+            }
+          : null,
+        activeShipped: activeByIndex[i]?.rec
+          ? { rawPence: activeByIndex[i].rec.rawPence ?? null, used: (activeByIndex[i].rec.included || []).length }
+          : null,
+        // included + excluded IS the pool as fetched. Reassembling them gives
+        // a harness back what SoldComps returned, which is what it needs to
+        // re-price the card under a different rule.
+        comps: r.rec ? [...(r.rec.included || []), ...(r.rec.excluded || [])] : []
+      }))
+    };
+    const blob = new Blob([JSON.stringify(payload)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `compfinder-run-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /**
    * Write the run's sticker prices back onto the open checkouts they came
    * from, so the Show Desk can price a card at the table and the label export
    * has one number to print.
@@ -1680,6 +1740,14 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               </button>
             ) : null}
             <button className="btn btn-ghost" disabled={results.length === 0} onClick={exportCsv}>Export CSV</button>
+            <button
+              className="btn btn-ghost"
+              disabled={results.length === 0}
+              onClick={downloadRun}
+              title="Every comp behind every price, as JSON — the evidence under the CSV. About a megabyte; stays on your machine."
+            >
+              ⬇ Download this run
+            </button>
           </div>
         </div>
 
