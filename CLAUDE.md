@@ -40,6 +40,7 @@ apps/public/     the free price page — no accounts, shared key, cached
 supabase/        migrations, shared by both
 docs/            research reports; MARKETING.md is the current acquisition plan
                  HOW_PRICING_WORKS.md is the app's pricing in plain English
+                 PRICING_RESEARCH.md is where to strengthen it next
 ```
 
 Run everything from the repo root: `npm run dev` / `npm run build` (the app),
