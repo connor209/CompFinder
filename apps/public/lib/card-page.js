@@ -23,7 +23,7 @@ import { createServiceClient, createPublicClient } from "./supabase.js";
 import { selectCatalog } from "./catalog-select.js";
 import { cardFromRow, queryForCard, normaliseQuery } from "./card-query.js";
 import { cacheKeyFor } from "./cache-key.js";
-import { DEFAULT_SOLD_WINDOW } from "./windows.js";
+import { DEFAULT_SOLD_WINDOW, deriveWindow } from "./windows.js";
 import { priceCard } from "./price.js";
 import PUBLISHED from "./published-cards.js";
 
@@ -108,8 +108,20 @@ export async function serverCard(query, windowDays = DEFAULT_SOLD_WINDOW) {
   if (!entry) return null;
   const card = await loadCard(entry.id);
   if (!card) return null;
-  const sold = await loadCachedSold(card, { windowDays });
+
+  // ALWAYS read the ninety-day entry, whatever window was asked for. It is the
+  // only one the warmer fills, and a shorter window is a subset of it — so
+  // reading it and narrowing gives ?days=30 a server-rendered price too, where
+  // before it found nothing under its own key and fell through to the client
+  // every single time.
+  const wide = await loadCachedSold(card, { windowDays: DEFAULT_SOLD_WINDOW });
+  if (!wide || !wide.comps.length) return null;
+
+  // Null when the wide set was capped, and then the client fetches the real
+  // narrow window — see deriveWindow for why a capped set can't be filtered.
+  const sold = deriveWindow(wide, windowDays);
   if (!sold || !sold.comps.length) return null;
+
   return { card: { ...card, q: queryForCard(card) }, sold };
 }
 

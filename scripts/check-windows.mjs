@@ -23,7 +23,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
-  SOLD_WINDOWS, DEFAULT_SOLD_WINDOW, windowFromParam, cardHref
+  SOLD_WINDOWS, DEFAULT_SOLD_WINDOW, windowFromParam, cardHref,
+  deriveWindow
 } from "../apps/public/lib/windows.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -123,8 +124,55 @@ for (const rel of ["apps/public/app/card/[q]/CardScreen.js",
   }
 }
 
+// --- the shorter window is taken out of the longer one ----------------------
+// Thirty days of sales sit inside ninety days of sales, and the warmer only
+// ever fills the ninety-day entry — so before this, ?days=30 was a guaranteed
+// cache miss on all 455 published cards: a SoldComps request, several seconds
+// and a bot check, every time, for a subset we were already holding.
+const DAY = 86400000;
+const NOW = Date.now();
+const aged = (days, pence) => ({
+  totalPence: pence,
+  title: "Umbreon VMAX 215/203 Evolving Skies",
+  _source: { endedAt: new Date(NOW - days * DAY).toISOString() }
+});
+const WIDE = {
+  comps: [aged(2, 80000), aged(15, 82000), aged(29, 79000), aged(45, 85000), aged(80, 91000)],
+  hasNextPage: false,
+  rawItemCount: 5
+};
+const check = (label, got, want) => {
+  if (got !== want) { console.error(`  ${label} — expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`); failed++; }
+};
+
+check("the default window passes straight through", deriveWindow(WIDE, 90), WIDE);
+check("thirty days keeps only the last thirty", deriveWindow(WIDE, 30).comps.length, 3);
+check("and reports the count it actually has", deriveWindow(WIDE, 30).rawItemCount, 3);
+check("a derived set is complete, not capped", deriveWindow(WIDE, 30).hasNextPage, false);
+check("and says where it came from", deriveWindow(WIDE, 30).derivedFrom, 90);
+
+// THE CASE THAT MATTERS. SoldComps returns one page, newest first, so a fast
+// card comes back capped — and a capped ninety-day set is not "the last ninety
+// days", it is "the last forty sales". Filtering that gives a different answer
+// from a real thirty-day search, so it has to be fetched instead.
+check("a capped set is never filtered", deriveWindow({ ...WIDE, hasNextPage: true }, 30), null);
+// An older cache entry predating the field says null. "We don't know" and
+// "there is no next page" lead to opposite conclusions; the safe one is to ask.
+check("an unknown cap is treated as capped", deriveWindow({ ...WIDE, hasNextPage: null }, 30), null);
+
+// A window nobody offers must not be derivable either, or the allow-list that
+// stops the cache fragmenting is bypassed by the back door.
+check("an off-list window is refused", deriveWindow(WIDE, 60), null);
+check("nothing to narrow", deriveWindow(null, 30), null);
+check("a response with no comps array", deriveWindow({ hasNextPage: false }, 30), null);
+
+// A comp with no date can't be placed in a window. Excluding it is the honest
+// reading; including it would assert a date we do not have.
+const undated = { ...WIDE, comps: [...WIDE.comps, { totalPence: 500, title: "x", _source: {} }] };
+check("an undated comp is left out rather than assumed recent", deriveWindow(undated, 30).comps.length, 3);
+
 if (failed) {
   console.error(`\n${failed} sold-window case(s) failed.`);
   process.exit(1);
 }
-console.log(`windows: ${PARAM_CASES.length} param cases + URL round trip, one list, no local window state.`);
+console.log(`windows: ${PARAM_CASES.length} param cases + URL round trip, one list, no local window state, and 30d derived from 90d unless capped.`);

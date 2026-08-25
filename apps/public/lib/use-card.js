@@ -15,7 +15,7 @@ import { caveatsFor } from "./caveats.js";
 import { safeListings } from "./listings.js";
 import { foreignCount } from "./settings.js";
 import { challengeAvailable, ensurePass } from "./turnstile-client.js";
-import { DEFAULT_SOLD_WINDOW } from "./windows.js";
+import { DEFAULT_SOLD_WINDOW, deriveWindow } from "./windows.js";
 // Defined in card-query.js, not here: the sitemap, the card page and the
 // warmer all build this same string on the server, and this file is "use
 // client". Re-exported so existing callers are unchanged.
@@ -93,7 +93,9 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
     if (initial && initial.card && initial.sold) {
       const card = initial.card;
       const searchText = card.q || query;
-      price(searchText, false, windowDays)
+      // The window is meaningless to live listings, and passing it would key
+      // the same listings under two cache entries.
+      price(searchText, false, DEFAULT_SOLD_WINDOW)
         .catch(() => ({ comps: [] }))
         .then((listings) => {
           if (!alive) return;
@@ -150,12 +152,24 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
       // price calls have nothing to do with each other and the sold set is the
       // only one the page can't draw without. Fired together and rendered on
       // the first, the same card is readable in about six.
-      const soldPromise = price(searchText, true, windowDays);
-      const livePromise = price(searchText, false, windowDays).catch(() => ({ comps: [] }));
+      // The WIDE window is always what gets asked for, then narrowed. Thirty
+      // days is a subset of ninety, the warmer only fills ninety, and asking
+      // for a subset we already hold costs a request, several seconds and a bot
+      // check on a toggle the visitor expects to be instant.
+      const soldPromise = price(searchText, true, DEFAULT_SOLD_WINDOW);
+      // Live listings ignore the window; passing the default keeps them on one
+      // cache entry rather than one per window.
+      const livePromise = price(searchText, false, DEFAULT_SOLD_WINDOW).catch(() => ({ comps: [] }));
 
       let sold;
       try {
         sold = await soldPromise;
+        if (windowDays !== DEFAULT_SOLD_WINDOW) {
+          // Only a capped set has to be fetched properly. That costs a second
+          // request where the old code cost one — the trade is deliberate,
+          // because the uncapped majority now cost none at all.
+          sold = deriveWindow(sold, windowDays) || (await price(searchText, true, windowDays));
+        }
       } catch (err) {
         // Swallow the live one too, or an unhandled rejection follows the
         // failure out.

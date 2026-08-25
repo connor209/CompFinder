@@ -111,7 +111,10 @@ export async function POST(request) {
     return NextResponse.json({ ok: false, error: "Pricing is temporarily unavailable." }, { status: 503 });
   }
 
-  const key = cacheKeyFor(query, sold, soldAfterDays);
+  // Active listings ignore the sold window entirely — attemptSoldComps sends 0
+  // for them — so keying on it stored the SAME listings twice, once under 30
+  // and once under 90, and made a window toggle refetch them for nothing.
+  const key = cacheKeyFor(query, sold, sold ? soldAfterDays : 0);
   const ttl = sold ? TTL_SECONDS.sold : TTL_SECONDS.active;
   const freshAfter = new Date(Date.now() - ttl * 1000).toISOString();
 
