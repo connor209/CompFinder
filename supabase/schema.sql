@@ -70,8 +70,8 @@ create trigger on_profile_updated
 -- Deliberately stores the flat, already-computed result the results table
 -- shows — title, query, recommended price, confidence, etc. — rather than
 -- the raw comps, so the History page is a plain SELECT with no re-computation.
--- Rows are tiny (a few hundred bytes), so even heavy daily use stays well
--- within the free tier.
+-- Rows are tiny (a few hundred bytes), so even heavy daily use costs almost
+-- nothing to keep. The fat table is price_batches (migration 023), not this one.
 -- ---------------------------------------------------------------------------
 create table public.price_checks (
   id uuid primary key default gen_random_uuid(),

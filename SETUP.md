@@ -79,7 +79,9 @@ this project.
    npm install
    ```
 
-2. **Create a Supabase project** at [supabase.com](https://supabase.com) (free tier is comfortably enough for this scale).
+2. **Create a Supabase project** at [supabase.com](https://supabase.com). The
+   free tier's 500 MB is enough to develop against; the live project outgrew it
+   and is on Pro as of 2026-08-25 (see CLAUDE.md).
 
 3. **Run the schema.** Supabase dashboard → SQL Editor → New query → paste
    the contents of `supabase/schema.sql` → Run.

@@ -557,6 +557,40 @@ Migration 023 has to be applied in Supabase. Until it is, the panel says so on
 the run it couldn't save, and the sessionStorage copy still carries the run
 across the panel — but not across a reload.
 
+## Supabase is on Pro — since 2026-08-25
+
+The free tier's **500 MB of database** was the ceiling, and we were over it. Pro
+lifts the included space to **8 GB**, with anything beyond that billed per GB
+(the dashboard has the current rate — don't quote one from memory).
+
+**What this does not change.** Two limits in this file look like disk limits and
+aren't:
+
+- **Retention on a saved batch run stays 30 days.** `RETENTION_DAYS` is set by
+  how fast a run's value decays — it is a working document you list off over a
+  few days — not by what it costs to keep. A run is ~1 MB of comps; sixteen
+  times the headroom does not make a four-month-old run worth re-opening.
+- **The warmer's weekly 120 is a SoldComps budget, not a Supabase one.** Starter
+  is 2,000 requests a month shared with live visitors. Raising it still waits on
+  the SoldComps plan changing, which this isn't.
+
+**What it does change** is that growth is no longer the emergency it was, which
+is exactly when housekeeping quietly stops getting done. Two things to know
+before the next 8 GB:
+
+- **`prune_public_price_page()` is defined in migration 019 and nothing calls
+  it.** `prune_price_history()` has `pricesync.js` calling it; this one has no
+  caller anywhere in the repo. So `soldcomps_cache` has never shed a row past
+  180 days and `public_rate_limit` has never shed one past two days. That is
+  the likeliest thing that filled the 500 MB — unverified, since it wants a
+  look at the table sizes in the dashboard rather than a guess from here.
+- **Only one of those two is garbage.** `public_rate_limit` is one row per
+  IP-hour and worth nothing the moment the hour passes. `soldcomps_cache` is
+  deliberately an asset: SoldComps only exposes a 90-day window, so the cache
+  accumulating past it is the only price history we can build. Pruning it at
+  180 days throws that away. If disk ever gets tight again, sweep the rate
+  limit table first and think hard before touching the cache.
+
 ## Merging to main deploys — batch it
 
 Both Vercel projects build from this repo, so every push to `main` triggers
