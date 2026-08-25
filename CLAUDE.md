@@ -479,14 +479,24 @@ moment strangers can reach it.
 - [ ] **Apply to EPN.** They review a live site with a working disclosure, so
       it needs the domain serving and `/privacy` reachable on it. Both are now
       true.
-- [ ] **Open the door to search engines.** `PUBLIC_ALLOW_INDEXING=1` on
-      `compfinder-public`, then submit the sitemap in Search Console. Everything
-      it needs is already true: the domain serves, canonicals name the host
-      Vercel actually answers on (www), and the sitemap lists only cards that
-      currently have a price. **Set up Search Console BEFORE flipping it** —
-      the coverage report is how you find out whether Google is accepting the
-      card pages or quietly dropping them as thin, and there is no analytics on
-      the site to tell you otherwise.
+- [x] **Open the door to search engines.** Done 2026-08-25.
+      `PUBLIC_ALLOW_INDEXING=1` on `compfinder-public`; robots.txt allows all
+      but `/api/` and the `noindex` is gone. Search Console is a **Domain**
+      property (verified by DNS TXT, so it covers www and the apex together),
+      and `https://www.lastcomp.co.uk/sitemap.xml` is submitted — the full URL
+      including www, because a Domain property prefills nothing and the apex
+      308s. 450 URLs discovered.
+
+      **URL Inspection confirmed Googlebot sees the price in the HTML** without
+      running JavaScript — the whole point of the server-rendering work, and
+      the one thing worth re-checking if the card page is ever refactored.
+
+      **What to watch now, because there is no analytics.** The Pages report:
+      "Crawled — currently not indexed" at scale is the thin-content verdict
+      and the only real risk to the whole approach. "Discovered — currently not
+      indexed" early on is just a queue. And the Performance report's query
+      list is the closest thing to traffic data the site has — it tells you
+      which cards to publish next.
 - [ ] **Consent management** (a Google-certified CMP) before any ad code, and
       `ads.txt`, for UK/EEA traffic.
 
