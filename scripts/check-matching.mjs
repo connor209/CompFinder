@@ -1,6 +1,6 @@
 /**
- * Table check for apps/app/lib/matching.js — the numbering prefix and the set
- * guard's ratio ceiling, both added 2026-08-25. See docs/APP_BATCH_RECURSION.md.
+ * Table check for apps/app/lib/matching.js — every rule the business app adds
+ * on top of the shared engine. See docs/APP_BATCH_RECURSION.md.
  *
  * Both rules live in the APP. packages/core is untouched by either, and this
  * check is also the tripwire for that: it asserts core's own behaviour is
@@ -17,7 +17,10 @@
  * kept so a later widening fails loudly instead of quietly pooling two cards.
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens, stripNumberingPrefix } from "../apps/app/lib/matching.js";
+import {
+  APP_SETTINGS, appNameTokens, stripNumberingPrefix,
+  dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE
+} from "../apps/app/lib/matching.js";
 
 const { DEFAULT_SETTINGS, extractNameTokens, recommend } = CompFinderPricing;
 // What the engine does on its own, which is what Last Comp still gets.
@@ -116,5 +119,51 @@ check("no confirmed set is a no-op",
   recommend(pool(["Neo Genesis", "Neo Destiny", "Neo Destiny", "Neo Destiny", "Neo Destiny"]),
     APP_SETTINGS, appNameTokens("Snubbull No. 209"), "sold", null, null).included.length, 5);
 
-if (failures) { console.error(`\nname tokens: ${failures} case(s) failed.`); process.exit(1); }
-console.log("name tokens: app prefix + set-guard cases pass; packages/core confirmed untouched.");
+// ── 4. Postage that no UK seller charges is not card value ──────────────────
+// 74-82% of every recommended price in the 2026-08-25 batch WAS the postage.
+// The comp is kept and its postage zeroed rather than the comp excluded —
+// the sale happened and the card did go for £2.20; only the shipping is not
+// evidence about the UK market, and these pools are too thin to bin comps.
+const post = (item, postage) => ({ title: "Xatu No.178 Neo Genesis", itemPricePence: item, postagePence: postage });
+const dropped = (item, postage) => {
+  const r = dropForeignPostage([post(item, postage)]);
+  return [r.comps[0].postagePence, r.changed];
+};
+check("£9.84 postage on a £2.20 card is not a UK cost", dropped(220, 984), [0, 1]);
+check("£14.12 on a £2.76 card likewise", dropped(276, 1412), [0, 1]);
+
+// FALSE POSITIVES — the ones that decide whether this rule is safe anywhere
+// except this batch.
+check("£1.35 on a £1.16 card is ordinary UK postage", dropped(116, 135), [135, 0]);
+check("£5.00 delivery, seen live on a real UK Sunkern listing, survives", dropped(200, 500), [500, 0]);
+// Postage is only ever material relative to a cheap card, which is the whole
+// reason this can fire hard without touching the top of the market. £8 of
+// signed-for on an £800 Umbreon is a real cost and must be left alone.
+check("£8 signed-for on an £800 card is untouched", dropped(80000, 800), [800, 0]);
+check("free postage is left alone", dropped(99, 0), [0, 0]);
+// Both clauses have to hold: over the ceiling AND more than the card itself.
+check("£7 postage on a £30 card stays — dear, but not more than the card", dropped(3000, 700), [700, 0]);
+
+check("the whole set is reported, not just changed comps", (() => {
+  const r = dropForeignPostage([post(220, 984), post(116, 135), post(276, 1412)]);
+  return [r.comps.length, r.changed, r.comps.map((c) => c.postagePence)];
+})(), [3, 2, [0, 135, 0]]);
+check("an empty comp list is safe", (() => { const r = dropForeignPostage([]); return [r.comps.length, r.changed]; })(), [0, 0]);
+
+// ── 5. Two comps is not a price ─────────────────────────────────────────────
+// Prices from ≤2 comps had a median of £15.49 across the batch against £9.99
+// for those from 4+. Sunkern No. 191 was £19.49 off one sold comp while twelve
+// live UK listings sat at £1.99-£2.24.
+const recOf = (n, source = "sold") => ({ dataSource: source, included: Array.from({ length: n }, () => ({})) });
+check("one comp is too thin", tooThinToPrice(recOf(1)), true);
+check("two comps is too thin", tooThinToPrice(recOf(2)), true);
+check("three comps prices", tooThinToPrice(recOf(3)), false);
+check("the minimum is what the app says it is", MIN_SOLD_COMPS_TO_PRICE, 3);
+// FALSE POSITIVES. Zero comps is a different case with its own message, and an
+// active-listing result has already been through this test on the sold side.
+check("zero comps is handled elsewhere, not here", tooThinToPrice(recOf(0)), false);
+check("an active-listing result is not re-judged", tooThinToPrice(recOf(2, "active")), false);
+check("a missing rec is safe", tooThinToPrice(null), false);
+
+if (failures) { console.error(`\nmatching: ${failures} case(s) failed.`); process.exit(1); }
+console.log("matching: prefix, set-guard, foreign-postage and thin-pool cases pass; packages/core confirmed untouched.");

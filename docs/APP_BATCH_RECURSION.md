@@ -135,6 +135,104 @@ ratio clause blocks it and the one Neo Discovery comp is priced in). The guard
 is weakest exactly where the pool is thinnest, which is where this bug leaves
 every card.
 
+## What was actually wrong: postage, not matching
+
+**74–82% of every recommended price in this batch was POSTAGE.** The cards
+comped at £1.16–£4.37, which is right for a Japanese Neo common. The postage
+attached to them was £8.39–£14.17.
+
+| card | recommended | of which postage | the cards themselves |
+|---|---|---|---|
+| Xatu 178 | £12.66 | £10.06 (82%) | £2.20, £3.25, £1.49, £1.70 |
+| Gligar 207 | £12.31 | £8.22 (74%) | £4.37, £2.69, £1.16, £2.69, £3.90 |
+
+`freePostage: true` adds the buyer's postage to the seller's price, and that is
+right — a £2 card posted for £1.35 did cost somebody £3.35. It stops being
+right the moment the postage is somebody's international shipping. No UK seller
+charges £14 to post one card: a live ebay.co.uk search for Sunkern No. 191 on
+2026-08-25 showed twelve listings at **£1.99–£2.24**, every one of them free
+delivery, £0.99 or £1.00, with a single £5.00 outlier.
+
+`dropForeignPostage()` zeroes the postage on a comp charging more than
+`£6.00` **and** more than the card itself. Both clauses matter: £8 of
+signed-for on an £800 Umbreon is a real UK cost, and postage is only ever
+material relative to a cheap card — which is exactly where this fires.
+
+**The comp is kept and its postage zeroed, not excluded.** Excluding is what
+`splitPostageOutliers` already does and it is measurably the wrong shape here:
+it needs six comps to hold an opinion, it stands down rather than empty a pool
+where every comp is foreign, and these pools are too thin to bin evidence. The
+sale happened and the card did go for £2.20; only the shipping says nothing
+about the UK market. Snubbull's pool actually **grows** from 3 to 6 under this
+rule, because once the postage is gone those comps stop looking like outliers.
+
+## Two comps is not a price
+
+37% of the batch was priced from two comps or fewer — and those skew **high**:
+
+| built from | median recommended price |
+|---|---|
+| ≤ 2 comps | **£15.49** |
+| ≥ 4 comps | £9.99 |
+
+Thinner pool, bigger number, because nothing absorbs a bad comp and every
+downstream guard is under its own minimum.
+
+**Sunkern No. 191 is the case to remember.** One sold comp at £19.36 became a
+£19.49 recommendation, while twelve live UK listings for that card sat at
+£2.00. The app had the means to know: it fetches active listings — but only
+when there are *zero* sold comps, so with one bad comp it never looked.
+
+Two changes follow, and they are the same change:
+
+- Below `MIN_SOLD_COMPS_TO_PRICE` (3), the run now **checks the active market**
+  rather than trusting one sale. The fallback already existed; only its trigger
+  moved, from "no sold comps" to "too few sold comps to trust". It costs one
+  extra SoldComps request on the thin rows only.
+- If the actives are too thin as well, the price is **held**: `Recommended
+  Price` is blank and the row says why. The comps are kept, so the deep dive
+  still shows what was found and why it wasn't enough. A number you have to
+  know to distrust is worse than no number — the same reasoning that holds a
+  thin price back from a show sticker.
+
+## Where that leaves the batch
+
+Measured on the three cards whose comps we have, all four app rules together:
+
+| card | as shipped | + matching rules | + foreign postage dropped |
+|---|---|---|---|
+| Xatu 178 | £12.99 / 2 comps | £12.99 / 4 | **£2.99** / 4 |
+| Snubbull 209 | £10.49 / 4 | £2.49 / 3 | **£2.49** / 6 |
+| Gligar 207 | £12.49 / 5 | £12.49 / 5 | **£3.49** / 5 |
+
+Against a live market of about £2 for this tier of card.
+
+## Stop tuning on three cards
+
+Everything above is measured on **three** cards reconstructed from screenshots.
+That is three anecdotes, and `CLAUDE.md` is explicit about what happens to a
+rule judged on the examples that prompted it. `apps/public` has
+`probe-rules.mjs` for this reason; the app had no equivalent because its comps
+only ever lived in React state.
+
+Migration 023 changed that and nobody noticed. **A saved run already stores the
+full recommendation for every card** — `included[]` and `excluded[]`, each comp
+with its price, postage, sold date, location and exclusion reason. The comps
+behind a 67-card run are sitting in the database, and reading them costs
+nothing upstream, because a saved run is a record of a price decision rather
+than a live quote.
+
+```
+NEXT_PUBLIC_SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/dump-batch.mjs --list
+NEXT_PUBLIC_SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/dump-batch.mjs --batch <id> --out corpus.json
+node scripts/recurse-batch.mjs --corpus corpus.json
+```
+
+That prices every card in the run both ways and reports the median move, what
+was held, how many comps had postage dropped, and — read this one — **anything
+that went UP**. Don't commit the corpus: a run carries your SKUs and asking
+prices.
+
 ## The two fixes, and why neither is in `packages/core`
 
 Both live in **`apps/app/lib/matching.js`**. `packages/core` is untouched, and
@@ -235,10 +333,12 @@ on all 455 published cards, and only comps can say what it does to them.
   written to the observed template and is not evidence about wording).
 - `scripts/probe-nametokens.mjs` — scores candidate repairs against the real
   titles. Writes nothing.
-- `apps/app/lib/matching.js` — both rules, and the app's first settings module
-  of its own.
-- `scripts/check-nametokens.mjs` — table check for both rules plus the tripwire
+- `apps/app/lib/matching.js` — all four rules, and the app's first settings
+  module of its own.
+- `scripts/check-matching.mjs` — table check for all four plus the tripwire
   asserting `packages/core` is unchanged. In `npm run check`.
+- `scripts/dump-batch.mjs` — a saved run out of Supabase and into a corpus.
+  Costs nothing at SoldComps.
 
 R1 and R2 both pass on every card: given the same comps the pipeline is
 deterministic and reaches its fixed point in one pass. The instability is

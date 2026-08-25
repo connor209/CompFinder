@@ -47,7 +47,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens } from "../apps/app/lib/matching.js";
+import { APP_SETTINGS, appNameTokens, dropForeignPostage, MIN_SOLD_COMPS_TO_PRICE } from "../apps/app/lib/matching.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -56,6 +56,7 @@ const RUNS = Number(argOf("--runs", "4"));
 const CSV = argOf("--csv", null);
 const JSON_OUT = argOf("--json", null);
 const FIXTURE = argOf("--fixture", join(HERE, "fixtures", "neo-batch.json"));
+const CORPUS = argOf("--corpus", null);
 
 const { recommend, simplifyTitle, extractNameTokens, toPoundsStr, DEFAULT_SETTINGS } = CompFinderPricing;
 const gbp = (p) => (p == null ? "—" : toPoundsStr(p));
@@ -90,8 +91,8 @@ function toComp(c) {
  * reproduction test quietly turns into a test of today's behaviour and stops
  * being evidence of anything.
  */
-const SHIPPED = { settings: DEFAULT_SETTINGS, tokens: (q) => extractNameTokens(q) };
-const APP = { settings: APP_SETTINGS, tokens: appNameTokens };
+const SHIPPED = { settings: DEFAULT_SETTINGS, tokens: (q) => extractNameTokens(q), postage: (c) => c };
+const APP = { settings: APP_SETTINGS, tokens: appNameTokens, postage: (c) => dropForeignPostage(c).comps };
 const LEGACY = args.includes("--legacy");
 const RULES = LEGACY ? SHIPPED : APP;
 
@@ -99,7 +100,8 @@ const RULES = LEGACY ? SHIPPED : APP;
 function priceLikeTheApp(card, comps, rules = RULES) {
   const query = card.query ?? simplifyTitle(card.title, rules.settings.stripWords);
   const nameTokens = rules.tokens(query);
-  return { query, nameTokens, rec: recommend(comps, rules.settings, nameTokens, "sold", card.cardNumber || null, card.set || null) };
+  const priced = rules.postage(comps);
+  return { query, nameTokens, rec: recommend(priced, rules.settings, nameTokens, "sold", card.cardNumber || null, card.set || null) };
 }
 
 const reasonsOf = (rec) => {
@@ -274,6 +276,54 @@ if (!LEGACY) {
     "\n  Run with --legacy to price the same fixture the way 2026-08-25 did.\n" +
     "  Nothing in packages/core differs between these two columns — the app owns both."
   );
+}
+
+// ── Whole-run corpus ────────────────────────────────────────────────────────
+// The fixture is three cards read off screenshots. This prices EVERY card in a
+// saved run — see dump-batch.mjs — which is the difference between three
+// anecdotes and something a rule can be judged on.
+if (CORPUS) {
+  bar(`Corpus · every card in a saved run, priced as shipped and as the app now prices`);
+  const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
+  const rows = [];
+  for (const card of corpus.cards) {
+    const comps = (card.comps || []).map((c) => ({ ...c, postagePence: c.postagePence || 0 }));
+    if (!comps.length) continue;
+    const was = priceLikeTheApp(card, comps, SHIPPED).rec;
+    const now = priceLikeTheApp(card, comps, APP).rec;
+    const held = now.included.length < MIN_SOLD_COMPS_TO_PRICE;
+    rows.push({ card, was, now, held, postageDropped: dropForeignPostage(comps).changed });
+  }
+  const med = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : null; };
+  const wasP = rows.filter((r) => r.was.finalPence != null).map((r) => r.was.finalPence);
+  const nowP = rows.filter((r) => !r.held && r.now.finalPence != null).map((r) => r.now.finalPence);
+
+  console.log(`  ${rows.length} cards with comps stored`);
+  console.log(`  median recommended price   ${gbp(med(wasP))}  →  ${gbp(med(nowP))}`);
+  console.log(`  cards priced               ${wasP.length}  →  ${nowP.length}  (${rows.filter((r) => r.held).length} held as too thin, for the active check)`);
+  console.log(`  comps with postage dropped ${rows.reduce((a, r) => a + r.postageDropped, 0)} of ${rows.reduce((a, r) => a + r.card.comps.length, 0)}`);
+  console.log(`  median comps used          ${med(rows.map((r) => r.was.included.length))}  →  ${med(rows.map((r) => r.now.included.length))}`);
+
+  const moved = rows.filter((r) => r.was.finalPence != null && !r.held && r.now.finalPence != null)
+    .map((r) => ({ ...r, pct: ((r.now.finalPence - r.was.finalPence) / r.was.finalPence) * 100 }))
+    .sort((a, b) => a.pct - b.pct);
+  console.log(`\n  Biggest falls`);
+  for (const r of moved.slice(0, 12)) {
+    console.log(`    ${gbp(r.was.finalPence).padStart(8)} → ${gbp(r.now.finalPence).padStart(8)}  ${String(Math.round(r.pct)).padStart(5)}%  ${r.was.included.length}→${r.now.included.length} comps  ${r.card.query}`);
+  }
+  const rises = moved.filter((r) => r.pct > 5).reverse();
+  if (rises.length) {
+    console.log(`\n  Went UP — read these, a fix that raises a price wants explaining (${rises.length})`);
+    for (const r of rises.slice(0, 12)) {
+      console.log(`    ${gbp(r.was.finalPence).padStart(8)} → ${gbp(r.now.finalPence).padStart(8)}  ${String(Math.round(r.pct)).padStart(5)}%  ${r.was.included.length}→${r.now.included.length} comps  ${r.card.query}`);
+    }
+  } else {
+    console.log(`\n  No card went up by more than 5%.`);
+  }
+  report.corpus = { cards: rows.length, medianWas: med(wasP), medianNow: med(nowP), pricedWas: wasP.length, pricedNow: nowP.length,
+    held: rows.filter((r) => r.held).length,
+    rows: rows.map((r) => ({ query: r.card.query, sku: r.card.sku, was: r.was.finalPence, wasUsed: r.was.included.length,
+      now: r.held ? null : r.now.finalPence, nowUsed: r.now.included.length, held: r.held, postageDropped: r.postageDropped })) };
 }
 
 // ── CSV cross-run test ──────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens } from "@/lib/matching";
+import { APP_SETTINGS, appNameTokens, dropForeignPostage, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
@@ -154,6 +154,35 @@ function buildQueryForItem(item, settings, includeCondition, useFullTitle) {
   }
   const numMatch = /\b([A-Z]{0,3}\d{1,4}\s*\/\s*[A-Z]{0,3}\d{1,4})\b/i.exec(query);
   return { query, nameTokens, set: null, csvItem: null, cardNumber: numMatch ? numMatch[1].replace(/\s+/g, "") : null };
+}
+
+/**
+ * A recommendation with the number taken off it.
+ *
+ * Two sold comps is not a price — measured across the 2026-08-25 batch, the
+ * prices built from two comps or fewer had a median of £15.49 against £9.99
+ * for those built from four or more, because with two comps nothing absorbs a
+ * bad one and every downstream guard is below its own minimum. The comps are
+ * KEPT so the deep dive still shows what was found and why it wasn't enough;
+ * only the figure is withheld, and the row says so rather than going quiet.
+ */
+function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic) {
+  const why = soldCount === 0
+    ? `No sold comps matched this card out of ${fetched} fetched`
+    : `Only ${soldCount} sold comp(s) matched this card out of ${fetched} fetched — too few to price from`;
+  const active = activeCount == null
+    ? ""
+    : activeCount === 0
+      ? " No active listings matched either."
+      : ` Only ${activeCount} active listing(s) matched, which is too few to stand in for it.`;
+  return {
+    ...rec,
+    rawPence: null,
+    finalPence: null,
+    confidence: "Low",
+    priceHeld: true,
+    note: `${why}, so no price is given rather than a figure you'd have to know to distrust.${active}${apiDiagnostic ? " " + apiDiagnostic : ""}`
+  };
 }
 
 export default function Panel({ initialSection = "dashboard", initialBatchId = null, initialPool = null }) {
@@ -840,21 +869,45 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         continue;
       }
 
-      let rec = CompFinderPricing.recommend(soldComps, settings, nameTokens, "sold", cardNumber, set);
-      if (apiDiagnostic) rec.note = apiDiagnostic;
+      // Postage that no UK seller charges to post one card is not card value.
+      // Dropped BEFORE pricing so every downstream rule sees the card rather
+      // than somebody's international shipping — measured across this batch,
+      // 74-82% of each recommended price was the postage.
+      const { comps: ukPostageComps, changed: postageDropped } = dropForeignPostage(soldComps);
 
-      if (rec.included.length === 0) {
-        // No sold comps — fall back to SoldComps' own active-listings mode
-        // (sold=false, confirmed in their docs) instead of the old Terapeak
-        // bridge. No tab, no message-passing, just a second API call.
-        setStatus(`Item ${i + 1} of ${items.length}: no sold comps for "${query}" — checking active listings…`);
+      let rec = CompFinderPricing.recommend(ukPostageComps, settings, nameTokens, "sold", cardNumber, set);
+      if (apiDiagnostic) rec.note = apiDiagnostic;
+      if (postageDropped > 0) {
+        rec.note = `${rec.note ? rec.note + " " : ""}(Note: postage was dropped from ${postageDropped} comp(s) charging more than any UK seller charges to post a single card — the sale still counts, their international shipping doesn't.)`;
+      }
+
+      // Too few sold comps to be a price. Ask what the card is actually LISTED
+      // at rather than trusting one sale: Sunkern No. 191 became a £19.49
+      // recommendation off a single £19.36 comp while twelve live UK listings
+      // for it sat at £1.99-£2.24. The active market is the sanity check that
+      // was already one API call away and only ever got made at zero comps.
+      if (rec.included.length < MIN_SOLD_COMPS_TO_PRICE) {
+        const soldCount = rec.included.length;
+        setStatus(
+          soldCount === 0
+            ? `Item ${i + 1} of ${items.length}: no sold comps for "${query}" — checking active listings…`
+            : `Item ${i + 1} of ${items.length}: only ${soldCount} sold comp(s) for "${query}" — checking what it's listed at…`
+        );
         try {
           const activeResult = await fetchSoldCompsWithRetry(query, { ...searchOptions, sold: false });
-          const activeRec = CompFinderPricing.recommend(activeResult.comps, settings, nameTokens, "active", cardNumber, set);
-          if (activeRec.included.length > 0) rec = activeRec;
-          else rec.note = `No sold or active comps found after exclusions — no price forced.${apiDiagnostic ? " " + apiDiagnostic : ""}`;
+          const { comps: ukActive } = dropForeignPostage(activeResult.comps);
+          const activeRec = CompFinderPricing.recommend(ukActive, settings, nameTokens, "active", cardNumber, set);
+          if (activeRec.included.length >= MIN_SOLD_COMPS_TO_PRICE) {
+            if (soldCount > 0) {
+              activeRec.note = `${activeRec.note} (Only ${soldCount} sold comp(s) matched this card out of ${soldComps.length} fetched — too few to price from, so this is the live asking market instead.)`;
+            }
+            rec = activeRec;
+          } else {
+            rec = heldRec(rec, soldCount, soldComps.length, activeRec.included.length, apiDiagnostic);
+          }
         } catch (err) {
-          rec.note = `${rec.note ? rec.note + " " : ""}(Active-listing fallback also failed: ${err.message})`;
+          rec = heldRec(rec, soldCount, soldComps.length, null, apiDiagnostic);
+          rec.note = `${rec.note} (Active-listing check also failed: ${err.message})`;
         }
       }
 

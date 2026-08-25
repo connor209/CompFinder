@@ -84,4 +84,76 @@ export const APP_SETTINGS = {
   setMismatchExcludeBelowRatio: 1
 };
 
-export default { APP_SETTINGS, appNameTokens, stripNumberingPrefix };
+/**
+ * Postage that no UK seller charges to post one card.
+ *
+ * Measured against a live ebay.co.uk search for Sunkern No. 191 (2026-08-25):
+ * every UK listing was free delivery, £0.99 or £1.00, with a single £5.00
+ * outlier. The comps the batch priced from carried £8.39 to £14.17. That is
+ * not a UK-domestic sale, whatever eBay's itemLocation field says — and on
+ * these cards it says nothing, because the field is null for domestic items
+ * and null is also what a missing value looks like.
+ */
+const FOREIGN_POSTAGE_PENCE = 600;
+
+/**
+ * Drops the postage from comps that are not UK sales.
+ *
+ * freePostage adds the buyer's postage to the seller's price, and that is
+ * right: a £2 card posted for £1.35 did cost somebody £3.35. It stops being
+ * right the moment the postage is somebody's international shipping. Measured
+ * across the 2026-08-25 Neo-era batch, 74-82% of each recommended price WAS
+ * the postage — the cards themselves comped at £1.16 to £4.37, which is what
+ * a Japanese Neo common is worth, and £8 to £14 of shipping was being read as
+ * card value on top.
+ *
+ * The comp is kept and its postage zeroed, rather than the comp excluded.
+ * Excluding is what splitPostageOutliers already does and it is measurably the
+ * wrong shape here: it needs six comps to hold an opinion, it stands down
+ * rather than empty a pool where EVERY comp is foreign, and these pools are
+ * thin enough already. The sale still happened and the card still went for
+ * £2.20; only the shipping is not evidence about the UK market.
+ *
+ * BOTH conditions have to hold. £8 of tracked, signed postage on an £800 card
+ * is a real UK cost and the second clause is what keeps this off it — postage
+ * is only ever material relative to a cheap card, which is exactly where this
+ * fires.
+ */
+export function dropForeignPostage(comps) {
+  let changed = 0;
+  const out = (comps || []).map((c) => {
+    const postage = c.postagePence || 0;
+    if (postage > FOREIGN_POSTAGE_PENCE && postage > (c.itemPricePence || 0)) {
+      changed++;
+      return { ...c, postagePence: 0, postageDropped: postage };
+    }
+    return c;
+  });
+  return { comps: out, changed };
+}
+
+/**
+ * The fewest sold comps that may become a price.
+ *
+ * Across the 2026-08-25 batch, 37% of prices came from two comps or fewer and
+ * those skewed HIGH — median £15.49 against £9.99 for the prices built from
+ * four or more. Thinner pool, bigger number, because with two comps nothing
+ * absorbs a bad one and every downstream guard is below its own minimum.
+ *
+ * Sunkern No. 191 is the case to remember: one sold comp at £19.36 became a
+ * £19.49 recommendation, while twelve live UK listings for the same card sat
+ * at £1.99 to £2.24. A number you have to know to distrust is worse than no
+ * number — the same reasoning that HOLDS a thin price back from a show
+ * sticker rather than printing it.
+ */
+export const MIN_SOLD_COMPS_TO_PRICE = 3;
+
+export function tooThinToPrice(rec) {
+  return !!rec && rec.dataSource === "sold" && (rec.included || []).length > 0
+    && rec.included.length < MIN_SOLD_COMPS_TO_PRICE;
+}
+
+export default {
+  APP_SETTINGS, appNameTokens, stripNumberingPrefix,
+  dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE
+};
