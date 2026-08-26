@@ -24,7 +24,26 @@ Measured on the 89-card run after this week's fixes:
 Every remaining bad price was in the 18. The tool already separates them — it
 just presents all 89 identically and leaves you to read 89 notes.
 
-**Proposal: a confidence gate, and a review queue.** A row passes unattended
+**Shipped 2026-08-26 — and the calibration changed the design.**
+
+The first draft flagged everything doubtful — thin pools, wide spans, an
+unconfirmed set, a catalogue split — and caught **67%** of the batch, flagged
+median £2.99 against £2.49 for the rest. Measured signal by signal against a
+real run, the reason is that the app now ACTS on nearly everything that used to
+warrant a look: a span ≥8x survives to the results **zero** times, "fewer than
+4 comps" flags 17 rows whose median is identical to every other row, and "no
+comp names the set" flags 6 with no separation at all — the second time that
+plausible signal has been measured and found worthless.
+
+So the queue is not a warning pile. It is the two things the app **did that you
+might disagree with**: it could not answer, or it overruled the completed sales
+with the live market. **16 of 89 — 82% pass unattended.** Asking-price rows are
+reported as a different basis and filterable, never counted as needing
+attention; folding them in took the queue from 18% to 66%.
+
+Original proposal, kept for the record:
+
+**A confidence gate, and a review queue.** A row passes unattended
 when it has ≥N sold comps, no disagreement flag, and the sold figure agrees
 with the live market. Everything else goes to a queue. On this run that is
 **80% straight through, 20% needing eyes** — and the 20% is the part where
@@ -253,7 +272,7 @@ be judged against what actually happened; 4–8 are still proposals.
 | 1 ✅ | Active checks via the **Browse API** | small — client exists | frees the quota argument; makes the live-market check universal |
 | 2 ✅ | **24h cache** on comps | small — mirrors Last Comp | four runs cost one; tuning becomes free |
 | 3 ✅ | **3-way concurrency** + a gate | small | 5.3 min → 1.7 min |
-| 4 | **Confidence gate + review queue** | medium | 80% of rows stop needing you |
+| 4 ✅ | **Confidence gate + review queue** | medium | 80% of rows stop needing you |
 | 5 ✅ | **Condition preference** | medium, measured | the largest remaining per-card error |
 | 6 | **Your own sales as comps** | medium | best data you own, currently unused |
 | 7 | Cardmarket cross-check | medium | second source, catches the Golbat class |

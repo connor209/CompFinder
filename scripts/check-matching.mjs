@@ -23,7 +23,8 @@ import {
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
   poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE,
   settingsForText, applyNumberGuards, FOREIGN_LANGUAGE,
-  applyConditionPreference, conditionPreferenceHolds, claimsNearMint, CONDITION_MIN_KEPT
+  applyConditionPreference, conditionPreferenceHolds, claimsNearMint, CONDITION_MIN_KEPT,
+  reviewVerdict
 } from "../apps/app/lib/matching.js";
 // settings.js exports it on the default only, not as a named export.
 import publicSettings from "../apps/public/lib/settings.js";
@@ -346,5 +347,34 @@ check("a result that went too thin is rejected", conditionPreferenceHolds({ incl
 check("...and one that held is kept", conditionPreferenceHolds({ included: [1, 2, 3] }), true);
 check("a missing result is rejected", conditionPreferenceHolds(null), false);
 
+// ── 11. Which rows need a human ─────────────────────────────────────────────
+// Calibrated against the 2026-08-26 run, not guessed. The first draft flagged
+// everything that looked doubtful and caught 67% of the batch with a median of
+// £2.99 against £2.49 — a queue holding two thirds of a run saves nobody
+// anything. Measured signal by signal, the app now ACTS on nearly all of it:
+// span >= 8x survives to the results zero times, "fewer than 4 comps" flags 17
+// rows whose median is identical to everyone else's, and "no comp names the
+// set" flags 6 with no separation at all — the second time that plausible
+// signal has been measured and found worthless.
+const rv = (o) => reviewVerdict(o);
+check("a held row needs a look", rv({ finalPence: null, priceHeld: true, included: [] }).needsReview, true);
+check("...and says why", rv({ finalPence: null, priceHeld: true, included: [] }).reasons.length > 0, true);
+check("an overruled row needs a look",
+  rv({ finalPence: 349, soldOverruled: true, dataSource: "active", included: [1, 2, 3] }).needsReview, true);
+check("a missing rec needs a look", rv(null).needsReview, true);
+
+// FALSE POSITIVES — every one of these was in the first draft and measured out.
+const ok = { finalPence: 249, dataSource: "sold", included: [{ totalPence: 200 }, { totalPence: 250 }, { totalPence: 300 }] };
+check("an ordinary sold row passes", rv(ok).needsReview, false);
+check("three comps is not a fault on its own", rv({ ...ok, included: ok.included.slice(0, 3) }).needsReview, false);
+check("nor is an unconfirmed set — measured twice at no separation", rv(ok).needsReview, false);
+// Asking prices are a BASIS, not a fault: reported separately so they can be
+// filtered, never counted as needing attention. Folding them in took the queue
+// from 18% of a run to 66%.
+const asking = { finalPence: 349, dataSource: "active", included: [{ totalPence: 349 }, { totalPence: 360 }, { totalPence: 330 }] };
+check("an asking-price row does not need a look", rv(asking).needsReview, false);
+check("...but it is reported as a different basis", !!rv(asking).basis, true);
+check("a sold row has no basis note", rv(ok).basis, null);
+
 if (failures) { console.error(`\nmatching: ${failures} case(s) failed.`); process.exit(1); }
-console.log("matching: prefix, set-guard, foreign-postage, thin-pool, disagreement, sanity, query-scoping, language, number-guard and condition cases pass.");
+console.log("matching: prefix, set-guard, foreign-postage, thin-pool, disagreement, sanity, query-scoping, language, number-guard, condition and review-queue cases pass.");

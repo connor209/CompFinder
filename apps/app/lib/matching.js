@@ -419,10 +419,77 @@ export function needsActiveCheck(rec, settings = APP_SETTINGS) {
   return rec.finalPence != null && rec.finalPence >= SANITY_CHECK_ABOVE_PENCE;
 }
 
+/**
+ * Which rows need you, and why.
+ *
+ * The point of the batch screen is not to price every card perfectly. It is to
+ * tell you which prices to look at — you cannot read 89 notes, and being asked
+ * to is why the screen felt like work.
+ *
+ * CALIBRATED against the 2026-08-26 run rather than guessed, and the
+ * calibration changed the design. The first draft flagged anything that looked
+ * doubtful — thin pools, wide spans, an unconfirmed set, a catalogue split —
+ * and flagged 67% of the batch, with the flagged rows' median at £2.99 against
+ * £2.49 for the rest. A queue holding two thirds of a run saves nobody
+ * anything.
+ *
+ * Measured signal by signal over that run, the reason is that the app now ACTS
+ * on nearly everything that used to warrant a look:
+ *
+ *   span >= 8x        survives to the results ZERO times — poolDisagrees
+ *                     already routes those to the live market or holds them
+ *   fewer than 4 comps  flags 17 rows whose median is £2.49, the same as every
+ *                     other row: no discriminating power at all
+ *   no comp names the set  flags 6 rows, median £2.49 against £2.49 — none
+ *                     either, and this is the second time that plausible
+ *                     signal has been measured and found to be worth nothing
+ *   eBay's catalogue split  never fires: only 341 of 953 used comps carry an
+ *                     epid, and just 35 cards have four
+ *
+ * So what is left is not "suspicious rows". It is the two things the app did
+ * that you might disagree with, and neither is a defect:
+ *
+ *   it could not answer at all, or
+ *   it overruled the completed sales with the live market.
+ *
+ * That is 16 of 89 on this run. Everything else the app is prepared to stand
+ * behind, and says so by not asking.
+ *
+ * NOT the Confidence badge, which is a comp COUNT and points the wrong way: on
+ * the 2026-08-25 run the two worst prices in the batch were the two BEST-badged
+ * rows. Golbat No. 042 said Medium at £29.99 on a card listed live at £3.48;
+ * Misdreavus said High at £10.49 with none of its ten comps naming the set.
+ */
+export function reviewVerdict(rec) {
+  if (!rec) return { needsReview: true, reasons: ["no result for this card"], basis: null };
+  const reasons = [];
+
+  if (rec.finalPence == null) {
+    reasons.push(
+      rec.priceHeld
+        ? "no price — the evidence didn't support one"
+        : "no price was produced"
+    );
+  }
+  // The app took the live market over the completed sales. That is the single
+  // largest override it makes — Golbat No. 042 went from £29.99 to £3.49 on it
+  // — and it is worth seeing rather than discovering.
+  if (rec.soldOverruled) reasons.push("the sold comps were overruled by what it's listed at now");
+
+  return {
+    needsReview: reasons.length > 0,
+    reasons,
+    // Not a fault, so not a reason — but a materially different basis, and the
+    // one thing worth being able to filter on separately.
+    basis: rec.dataSource === "active" ? "asking prices, not completed sales" : null
+  };
+}
+
 export default {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
   poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE,
   settingsForText, applyNumberGuards, FOREIGN_LANGUAGE,
-  applyConditionPreference, conditionPreferenceHolds, claimsNearMint, cardIsNearMint, CONDITION_MIN_KEPT
+  applyConditionPreference, conditionPreferenceHolds, claimsNearMint, cardIsNearMint, CONDITION_MIN_KEPT,
+  reviewVerdict
 };

@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens, applyConditionPreference, applyNumberGuards, conditionPreferenceHolds, dropForeignPostage, needsActiveCheck, poolDisagrees, settingsForText, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
+import { APP_SETTINGS, appNameTokens, applyConditionPreference, applyNumberGuards, conditionPreferenceHolds, dropForeignPostage, needsActiveCheck, poolDisagrees, reviewVerdict, settingsForText, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
 import { createGate, runPool, SOLDCOMPS_GAP_MS, BROWSE_GAP_MS, BATCH_CONCURRENCY } from "@/lib/pace";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
@@ -291,6 +291,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const [showBulkList, setShowBulkList] = useState(false);
   const [resultsSearch, setResultsSearch] = useState("");
   const [confidenceFilter, setConfidenceFilter] = useState("");
+  const [reviewFilter, setReviewFilter] = useState("");
   const [reasonFilter, setReasonFilter] = useState("");
   const [showCurrentPrice, setShowCurrentPrice] = useState(false);
   const [resultsView, setResultsView] = useState("cards");
@@ -1030,6 +1031,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             if (activeUsable && soldContradictsAsking(rec, activeRec)) {
               const wasPence = rec.rawPence;
               activeRec.note = `${activeRec.note} (The ${soldCount} sold comp(s) for this card averaged ${CompFinderPricing.toPoundsStr(wasPence)} — well above what it is listed at right now, which means those sales were most likely a different product. Priced from the live market instead; the sold figure is in the deep dive if you want to judge it yourself.)`;
+              // Flagged structurally, not left to be read out of the note: the
+              // review queue has to know this happened, and a screen that
+              // regexes its own prose is one edit from silently reading nothing.
+              activeRec.soldOverruled = true;
               rec = activeRec;
             }
           } else if (activeUsable) {
@@ -1449,6 +1454,11 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // What we already know about each row — computed here so the filter, the
   // cards, the table and both exports all read the same answer.
   const knownFor = (r) => (known ? checkRow(r, known) : null);
+  // One verdict per row, read by the summary, the filter and the rows — the
+  // same reason knownFor is computed here rather than three times.
+  const verdictFor = (r) => reviewVerdict(r.rec);
+  const needsReviewCount = results.filter((r) => verdictFor(r).needsReview).length;
+  const askingCount = results.filter((r) => !verdictFor(r).needsReview && verdictFor(r).basis).length;
   const filteredResults = results
     .map((r, origIndex) => ({ r, origIndex, known: knownFor(r) }))
     .filter(({ r, known: k }) => {
@@ -1459,7 +1469,11 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       const reasons = r.rec ? Object.keys(countReasons(r.rec)) : [];
       const matchesReason = !reasonFilter || reasons.includes(reasonFilter);
       const matchesStock = !stockOnly || !!k?.stock;
-      return matchesSearch && matchesConfidence && matchesReason && matchesStock;
+      const v = verdictFor(r);
+      const matchesReview =
+        !reviewFilter ||
+        (reviewFilter === "needs" ? v.needsReview : reviewFilter === "asking" ? !!v.basis : !v.needsReview);
+      return matchesSearch && matchesConfidence && matchesReason && matchesStock && matchesReview;
     });
   const inStockCount = known ? results.filter((r) => knownFor(r)?.stock).length : 0;
 
@@ -1880,8 +1894,30 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
 
         {results.length > 0 ? (
           <>
+            {/* The whole point of the screen in one line. You cannot read 89
+                notes; this says how many you have to. */}
+            <p className="hint" style={{ marginBottom: ".5rem" }}>
+              {needsReviewCount === 0 ? (
+                <><strong>{results.length} priced, none needing a look.</strong> Nothing here disagreed with itself.</>
+              ) : (
+                <>
+                  <strong>{results.length - needsReviewCount} ready to list</strong>
+                  {" · "}
+                  <button className="comps-toggle" onClick={() => setReviewFilter(reviewFilter === "needs" ? "" : "needs")}>
+                    {needsReviewCount} need{needsReviewCount === 1 ? "s" : ""} a look
+                  </button>
+                  {askingCount ? <> · {askingCount} priced from asking prices</> : null}
+                </>
+              )}
+            </p>
             <div className="results-toolbar">
               <input type="text" placeholder="Filter by title, SKU, or query…" value={resultsSearch} onChange={(e) => setResultsSearch(e.target.value)} />
+              <select value={reviewFilter} onChange={(e) => setReviewFilter(e.target.value)}>
+                <option value="">All rows</option>
+                <option value="needs">Needs a look ({needsReviewCount})</option>
+                <option value="clear">Ready to list ({results.length - needsReviewCount})</option>
+                <option value="asking">On asking prices ({askingCount})</option>
+              </select>
               <select value={confidenceFilter} onChange={(e) => setConfidenceFilter(e.target.value)}>
                 <option value="">All confidence</option>
                 <option value="High">High</option>
@@ -2094,6 +2130,7 @@ function ResultRow({ r, known, showCurrentPrice, active, onCheckActive }) {
   const compsCell = `${rec.included.length} used / ${rec.excluded.length} excluded` + (reasonBreakdown ? ` (${reasonBreakdown})` : "");
   const isActive = rec.dataSource === "active";
   const confidenceLabel = isActive ? `${rec.confidence} (active)` : rec.confidence;
+  const verdict = reviewVerdict(rec);
 
   let currentCell = "—";
   let rowClass = "";
@@ -2120,7 +2157,13 @@ function ResultRow({ r, known, showCurrentPrice, active, onCheckActive }) {
             compsCell
           )}
         </td>
-        <td><span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span></td>
+        <td>
+          {verdict.needsReview ? (
+            <span className="review-badge" title={verdict.reasons.join("; ")}>⚑ Look</span>
+          ) : (
+            <span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span>
+          )}
+        </td>
         <td><KnownCell known={known} rec={rec} /></td>
         <td>{currentCell}</td><td>{priceStr}</td>
         <td><ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} /></td>
@@ -2158,6 +2201,7 @@ function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepD
   const compsCell = `${rec.included.length} used / ${rec.excluded.length} excluded` + (reasonBreakdown ? ` (${reasonBreakdown})` : "");
   const isActive = rec.dataSource === "active";
   const confidenceLabel = isActive ? `${rec.confidence} (active)` : rec.confidence;
+  const verdict = reviewVerdict(rec);
   const canExpand = rec.included.length + rec.excluded.length > 0 || !!(active && active.rec);
 
   let currentPence = null;
@@ -2172,8 +2216,10 @@ function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepD
     <div className={`rc${bigDelta ? " rc-big-delta" : ""}`}>
       <div className="rc-head">
         <span className="rc-title" title={r.title}>{r.title}</span>
+        {verdict.needsReview ? <span className="review-badge" title={verdict.reasons.join("; ")}>⚑ Needs a look</span> : null}
         <span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span>
       </div>
+      {verdict.needsReview ? <div className="review-why">{verdict.reasons.join(" · ")}</div> : null}
       {r.sku ? <div className="rc-sku">SKU {r.sku}</div> : null}
       {known?.stock || known?.history ? <div className="rc-known"><KnownCell known={known} rec={rec} /></div> : null}
       <div className="rc-q" title={r.query}>“{r.query}”</div>

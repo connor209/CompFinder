@@ -550,6 +550,13 @@ html, body { overflow-x: clip; max-width: 100%; }
 .conf-high { color:var(--good-ink); } .conf-medium { color:var(--warn-ink); } .conf-low,.conf-none { color:var(--bad-ink); }
 .conf-badge-active { opacity:.8; font-style:italic; }
 
+/* Needs-a-look marker. Sits next to the confidence badge deliberately: that
+   badge is a comp COUNT and has been measured pointing the wrong way — the two
+   worst prices of the 2026-08-25 run were its two best-badged rows — so this
+   is the one to read. */
+.review-badge { display:inline-flex; align-items:center; gap:4px; font-family:var(--font-body); font-weight:700; font-size:11.5px; letter-spacing:.02em; padding:4px 10px; border-radius:var(--radius-pill); color:var(--warn-ink); background:var(--warn-soft); border:1px solid transparent; white-space:nowrap; }
+.review-why { color:var(--warn-ink); font-size:12px; }
+
 /* ---------- Comps diagnostic (batch expandable) ---------- */
 .comps-toggle { background:none; border:none; padding:0; margin:0; font:inherit; color:var(--accent-2); cursor:pointer; text-align:left; display:inline; font-weight:600; }
 .comps-toggle:hover { text-decoration:underline; }
