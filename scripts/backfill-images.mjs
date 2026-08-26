@@ -3,18 +3,24 @@
  * Put card art on the catalogue.
  *
  *   NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
- *     node scripts/backfill-images.mjs [--dry-run] [--limit N] [--set "Name"] [--recheck]
+ *     node scripts/backfill-images.mjs [--dry-run] [--limit N] [--set "Name"] [--refill|--recheck]
  *
- * Reads catalogue rows with no image, asks tcgdex for the set they belong to,
- * matches on set + collector number, and writes the image URLs back. The
- * matching rules — and the guard that refuses a pairing whose card names
- * disagree — live in lib/card-images.mjs and are covered by
- * scripts/check-images.mjs.
+ * Reads catalogue rows with no image, asks the image sources for the set they
+ * belong to, matches on set + collector number, and writes the image URLs
+ * back. The matching rules — and the guard that refuses a pairing whose card
+ * names disagree — live in lib/card-images.mjs and are covered by
+ * scripts/check-images.mjs. Which sources are asked, and in what order, is
+ * lib/image-sources.mjs.
  *
  * RESUMABLE. Every row looked at gets image_checked_at, whether or not art was
  * found, so a second run skips the ones already answered rather than asking
- * about 20,000 cards again. --recheck ignores that, for when a source has
- * improved or the rules have changed.
+ * about 20,000 cards again.
+ *
+ *   --refill   the rows that still have no art, however long ago they were
+ *              checked. This is the one to run after a source is added or a
+ *              rule changes: it retries every gap and touches nothing else.
+ *   --recheck  every row, including ones that already have art. Only worth it
+ *              if a source is suspected of having given a WRONG picture.
  *
  * ENGLISH ONLY, for now. tcgdex indexes Japanese and Chinese printings too,
  * but under their own set names (ナイトワンダラー where Cardmarket says "Night
@@ -26,7 +32,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { languageOf } from "../apps/public/lib/resolve.js";
-import { setFamily, indexByNumber, matchCard } from "./lib/card-images.mjs";
+import { tcgdex, pokemontcg, readySources, matchSet } from "./lib/image-sources.mjs";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -40,36 +46,12 @@ const has = (f) => args.includes(f);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const DRY = has("--dry-run");
 const RECHECK = has("--recheck");
+const REFILL = has("--refill");
 const ONLY_SET = argOf("--set", null);
 const LIMIT = Number(argOf("--limit", "0")) || 0;
 
 const supabase = createClient(url, key, { auth: { persistSession: false } });
-const API = "https://api.tcgdex.net/v2/en";
-const SOURCE = "tcgdex";
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// tcgdex publishes no rate limit and asks for politeness. A whole-catalogue
-// run is a few hundred calls — one per set, not one per card — so there is no
-// reason to arrive all at once.
-const GAP_MS = 250;
-let last = 0, calls = 0, failed = 0;
-async function api(path) {
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const since = Date.now() - last;
-    if (since < GAP_MS) await sleep(GAP_MS - since);
-    last = Date.now();
-    calls++;
-    try {
-      const res = await fetch(`${API}${path}`, { signal: AbortSignal.timeout(25000) });
-      if (res.ok) return await res.json();
-    } catch { /* retried below */ }
-    await sleep(1200 * (attempt + 1));
-  }
-  failed++;
-  // null is "we don't know", never "empty" — a caller that treats a failed
-  // call as an empty set marks every card in it as having no art.
-  return null;
-}
+const sources = [tcgdex(), pokemontcg()];
 
 // --- what needs looking at --------------------------------------------------
 const SELECT = "cardmarket_id,name,collector_number,expansion,expansion_code,game";
@@ -79,7 +61,12 @@ async function fetchRows() {
   for (let from = 0; ; from += PAGE) {
     let q = supabase.from("card_catalog").select(SELECT).eq("game", "pokemon")
       .order("cardmarket_id").range(from, from + PAGE - 1);
-    if (!RECHECK) q = q.is("image_small", null).is("image_checked_at", null);
+    // --recheck asks about everything. --refill asks about every row that
+    // still has no art, whenever it was last checked — the mode for a new
+    // source or a changed rule. The default is the resumable one: rows nobody
+    // has looked at yet.
+    if (REFILL) q = q.is("image_small", null);
+    else if (!RECHECK) q = q.is("image_small", null).is("image_checked_at", null);
     if (ONLY_SET) q = q.eq("expansion", ONLY_SET);
     const { data, error } = await q;
     if (error) { console.error("catalogue read failed:", error.message); process.exit(1); }
@@ -101,9 +88,9 @@ for (const r of english) {
   bySet.get(r.expansion).push(r);
 }
 
-const theirSets = await api("/sets");
-if (!theirSets) { console.error("Couldn't reach tcgdex."); process.exit(1); }
-console.log(`tcgdex knows ${theirSets.length} English sets; we have ${bySet.size} to place\n`);
+const ready = await readySources(sources);
+if (!ready.length) { console.error("No image source would answer."); process.exit(1); }
+console.log(`${bySet.size} of our sets to place\n`);
 
 // --- match, and write as we go ----------------------------------------------
 const tally = { matched: 0, "no-art": 0, "no-number": 0, "name-clash": 0, "no-set": 0, unknown: 0 };
@@ -163,51 +150,39 @@ async function flush(updates) {
 
 const now = () => new Date().toISOString();
 
+const bySource = new Map();
+
 for (const [setName, cards] of bySet) {
-  const family = setFamily(setName, theirSets);
-  if (!family.length) {
-    tally["no-set"] += cards.length;
-    missingSets.set(setName, cards.length);
-    await flush(cards.map((c) => ({ cardmarket_id: c.cardmarket_id, name: c.name, image_checked_at: now() })));
-    console.log(`    —/${String(cards.length).padEnd(4)} ${setName}   (tcgdex has no such set)`);
-    continue;
-  }
-
-  const cardsBySetId = new Map();
-  let complete = true;
-  for (const part of family) {
-    const full = await api(`/sets/${encodeURIComponent(part.id)}`);
-    if (!full) { complete = false; break; }
-    cardsBySetId.set(part.id, full.cards || []);
-  }
-  if (!complete) {
-    // Nothing is written for these — not even image_checked_at — so the next
-    // run tries again rather than recording "no art" for a set we never read.
-    tally.unknown += cards.length;
-    console.log(`    ?/${String(cards.length).padEnd(4)} ${setName}   (tcgdex wouldn't answer; left for the next run)`);
-    continue;
-  }
-
-  const byNumber = indexByNumber(family, cardsBySetId);
+  const results = await matchSet(ready, setName, cards);
   const updates = [];
   let ok = 0;
-  for (const c of cards) {
-    const m = matchCard(c, byNumber);
-    tally[m.outcome] = (tally[m.outcome] || 0) + 1;
-    if (m.outcome === "matched") ok++;
-    if (m.outcome === "name-clash") clashes.push({ ...c, theirName: m.theirName });
-    if (m.outcome === "no-number") numberMisses.set(setName, (numberMisses.get(setName) || 0) + 1);
+  for (const { row, match, source } of results) {
+    tally[match.outcome] = (tally[match.outcome] || 0) + 1;
+    if (match.outcome === "matched") {
+      ok++;
+      bySource.set(source, (bySource.get(source) || 0) + 1);
+    }
+    if (match.outcome === "name-clash") clashes.push({ ...row, theirName: match.theirName });
+    if (match.outcome === "no-number") numberMisses.set(setName, (numberMisses.get(setName) || 0) + 1);
+    if (match.outcome === "no-set") missingSets.set(setName, (missingSets.get(setName) || 0) + 1);
+    // "unknown" is every source that has this set failing to answer. Nothing
+    // is written for those rows — not even image_checked_at — so the next run
+    // tries again rather than recording "no art" for a set we never read.
+    if (match.outcome === "unknown") continue;
     updates.push({
-      cardmarket_id: c.cardmarket_id,
-      name: c.name,
-      image_small: m.small || null,
-      image_large: m.large || null,
-      image_source: m.outcome === "matched" ? SOURCE : null,
+      cardmarket_id: row.cardmarket_id,
+      name: row.name,
+      image_small: match.small || null,
+      image_large: match.large || null,
+      image_source: match.outcome === "matched" ? source : null,
       image_checked_at: now()
     });
   }
   await flush(updates);
-  console.log(`  ${String(ok).padStart(4)}/${String(cards.length).padEnd(4)} ${setName}  →  ${family.map((f) => f.id).join(" + ")}`);
+
+  const unknown = results.filter((r) => r.match.outcome === "unknown").length;
+  const found = [...new Set(results.filter((r) => r.source).map((r) => r.source))].join(" + ") || "no source has this set";
+  console.log(`  ${String(ok).padStart(4)}/${String(cards.length).padEnd(4)} ${setName}  →  ${found}${unknown ? `   (${unknown} left for the next run)` : ""}`);
 }
 
 // --- what happened ----------------------------------------------------------
@@ -221,13 +196,18 @@ console.log(`  number not in their set    ${tally["no-number"]}`);
 console.log(`  set not in their index    ${tally["no-set"]}`);
 console.log(`  names disagreed, refused  ${tally["name-clash"]}`);
 if (tally.unknown) console.log(`  left for the next run     ${tally.unknown}  (their API didn't answer)`);
-console.log(`\ntcgdex calls ${calls}${failed ? `, gave up on ${failed}` : ""}`);
+for (const source of sources) {
+  const { calls, failed } = source.stats;
+  if (!calls) continue;
+  const found = bySource.get(source.name) || 0;
+  console.log(`  via ${source.name.padEnd(11)} ${String(found).padStart(6)}   (${calls} calls${failed ? `, gave up on ${failed}` : ""})`);
+}
 console.log(DRY ? "\nDRY RUN — nothing was written." : `\nwrote ${written} rows.`);
 
 const top = (map, n = 25) => [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
 
 if (missingSets.size) {
-  console.log(`\nSets tcgdex has no counterpart for (${missingSets.size} sets, ${tally["no-set"]} cards).`);
+  console.log(`\nSets no source has a counterpart for (${missingSets.size} sets, ${tally["no-set"]} cards).`);
   console.log(`Some are genuinely not indexed — World Championship decks, old promos — but a`);
   console.log(`set here with a familiar name is us and them spelling it differently, which is`);
   console.log(`fixable. Biggest first:`);
@@ -243,7 +223,7 @@ if (numberMisses.size) {
 
 if (clashes.length) {
   console.log(`\nRefused because the names disagree (${clashes.length}) — worth an eye, since each is`);
-  console.log(`either a set-name collision or a card tcgdex numbers differently:`);
+  console.log(`either a set-name collision or a card a source numbers differently:`);
   for (const c of clashes.slice(0, 20)) {
     console.log(`  ${c.expansion} #${c.collector_number}: ours "${c.name}" vs theirs "${c.theirName}"`);
   }

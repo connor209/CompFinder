@@ -25,6 +25,13 @@
  */
 export const CHANGELOG = [
   {
+    date: "2026-08-26",
+    changes: [
+      "A lot of cards were showing no picture, and they weren't a random selection — they were the expensive ones. Trainer Gallery, Galarian Gallery and Shiny Vault cards, Shining Legends, Dragon Majesty, and the older e-Card sets had no art at all, because the index we get pictures from doesn't hold any for them. We now fall back to a second index for anything the first one is missing, which covers around 1,700 cards. The Gold Star cards from the Holon sets are back too — those were being refused because the two indexes spell the name differently.",
+      "Where a picture still isn't there, it's genuinely not available anywhere we can get it: World Championship decks, Play! Prize Pack reprints and a handful of one-off promos. We'd rather show no picture than one of a different card."
+    ]
+  },
+  {
     date: "2026-08-25",
     changes: [
       "There's a Save image button on every answer now. It gives you a tidy PNG of the price, how many sales it's based on, the last one, and the date — for pasting into a thread when someone asks what their card is worth. On a computer you can copy it straight to the clipboard and paste it into a reply; on a phone it offers to share it wherever you're sending it.",

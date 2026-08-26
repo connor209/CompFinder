@@ -9,7 +9,16 @@
  * WRONG image: a picture is the most confident-looking thing on the page, and
  * one of the wrong card discredits the price beside it.
  */
-import { numKey, setFamily, nameAgrees, imageUrls, indexByNumber, matchCard } from "./lib/card-images.mjs";
+import { readFileSync, readdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import {
+  numKey, setFamily, nameAgrees, imageUrls, indexByNumber, matchCard,
+  tcgdexCards, pokemontcgCards
+} from "./lib/card-images.mjs";
+import { drawableArt } from "../apps/public/lib/share-card.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 let failures = 0;
 const fail = (m) => { console.error(`  ${m}`); failures++; };
@@ -55,7 +64,8 @@ const THEIR_SETS = [
   { id: "tk-xy-b", name: "XY trainer Kit (Bisharp)" },
   { id: "cel25", name: "Celebrations" },
   { id: "cel25cc", name: "Celebrations Classic Collection" },
-  { id: "ex10", name: "Unseen Forces" }
+  { id: "ex10", name: "Unseen Forces" },
+  { id: "svp", name: "SVP Black Star Promos" }
 ];
 const family = (name) => setFamily(name, THEIR_SETS).map((s) => s.id);
 
@@ -72,6 +82,13 @@ eq("family: EX-era prefix", family("EX Unseen Forces").join(","), "ex10");
 eq("family: EX Dragon is Dragon, not Dragon Frontiers", family("EX Dragon").join(","), "ex2");
 // Only on an exact match of what's left — it must not reach for a lookalike.
 eq("family: EX + nonsense stays unmatched", family("EX Nothing Like This").join(","), "");
+// One set, three names. The alias has to reach whichever source is being
+// asked — tcgdex writes "SVP Black Star Promos", pokemontcg.io writes
+// "Scarlet & Violet Black Star Promos", and ours is "SV Black Star Promos".
+eq("family: the SVP alias", family("SV Black Star Promos").join(","), "svp");
+eq("family: the other SVP alias",
+  setFamily("SV Black Star Promos", [{ id: "svp", name: "Scarlet & Violet Black Star Promos" }])
+    .map((x) => x.id).join(","), "svp");
 // Sets whose names extend another set's name but are separate products. Each
 // of these was merged by the first version of the rule, and merging any of
 // them puts one card's art on another card's number.
@@ -133,6 +150,11 @@ const REWRITTEN = [
   ["Dialga Lv.68", "Dialga"],                    // printed level, all of DP
   ["Torterra Lv.45", "Torterra"],
   ["Espeon Gold Star", "Espeon \u2606"],           // spelled vs the symbol
+  // The five Holon-era Gold Stars, which tcgdex writes as a word where it
+  // writes every other one as the symbol. All five are chase cards.
+  ["Pikachu Gold Star", "Pikachu Star"],
+  ["Mewtwo Gold Star", "Mewtwo Star"],
+  ["Metagross Gold Star", "Metagross Star"],
   ["Rainbow Energy Delta", "\u03b4 Rainbow Energy"] // and at the other end
 ];
 for (const [ours, theirs] of REWRITTEN) {
@@ -160,6 +182,11 @@ if (nameAgrees("Charizard", "Charizard V")) fail("nameAgrees: theirs must not be
 // two cards, and "ours is longer" alone would merge them.
 if (nameAgrees("Pikachu VMAX", "Pikachu V")) fail("nameAgrees: VMAX is not V");
 if (nameAgrees("Charizard VSTAR", "Charizard V")) fail("nameAgrees: VSTAR is not V");
+// The Gold Star rule reads a TRAILING "star" and nothing else: VSTAR has no
+// word boundary before it, and the word appears mid-name on real cards.
+if (nameAgrees("Pikachu VSTAR", "Pikachu Gold Star")) fail("nameAgrees: VSTAR is not a Gold Star");
+if (nameAgrees("Pikachu Star", "Mewtwo Star")) fail("nameAgrees: two Gold Stars are still two cards");
+if (!nameAgrees("Team Star Grunt", "Team Star Grunt")) fail("nameAgrees: a mid-name star is just a word");
 if (nameAgrees("Rattata Alolan", "Rattata")) fail("nameAgrees: a regional form is a different card");
 
 const DIFFERENT_CARDS = [
@@ -195,18 +222,51 @@ eq("large url", urls.large, "https://assets.tcgdex.net/en/sv/sv08.5/161/high.png
 eq("a trailing slash doesn't double up", imageUrls("https://x/1/").small, "https://x/1/low.webp");
 eq("no base means no url", imageUrls(null).small, null);
 
+// --- one card shape, whatever answered --------------------------------------
+// Each source describes a card its own way and the matcher must know neither.
+const fromTcgdex = tcgdexCards([
+  { id: "sv08.5-161", localId: "161", name: "Umbreon ex", image: "https://assets.tcgdex.net/en/sv/sv08.5/161" },
+  // Listed, but they hold no art for it. A gap, not a match with a null URL —
+  // which is the whole of Shining Fates Shiny Vault on tcgdex.
+  { id: "sv08.5-162", localId: "162", name: "Sylveon ex", image: null }
+]);
+eq("tcgdex small", fromTcgdex[0].small, "https://assets.tcgdex.net/en/sv/sv08.5/161/low.webp");
+eq("tcgdex large", fromTcgdex[0].large, "https://assets.tcgdex.net/en/sv/sv08.5/161/high.png");
+eq("tcgdex number", fromTcgdex[0].localId, "161");
+eq("tcgdex with no art", fromTcgdex[1].small, null);
+
+const fromPokemontcg = pokemontcgCards([
+  {
+    id: "swsh45sv-SV107", name: "Charizard VMAX", number: "SV107",
+    images: {
+      small: "https://images.pokemontcg.io/swsh45sv/SV107.png",
+      large: "https://images.pokemontcg.io/swsh45sv/SV107_hires.png"
+    }
+  },
+  { id: "swsh45sv-SV108", name: "Centiskorch V", number: "SV108" }
+]);
+// Their number lives under a different key, and their URLs are given rather
+// than derived — nothing here appends an extension to anything.
+eq("pokemontcg number", fromPokemontcg[0].localId, "SV107");
+eq("pokemontcg small", fromPokemontcg[0].small, "https://images.pokemontcg.io/swsh45sv/SV107.png");
+eq("pokemontcg large", fromPokemontcg[0].large, "https://images.pokemontcg.io/swsh45sv/SV107_hires.png");
+eq("pokemontcg with no images object", fromPokemontcg[1].small, null);
+// Already a PNG, so share.png's low.webp → high.png swap has nothing to do and
+// must not mangle it.
+eq("pokemontcg art is drawable as-is", drawableArt(fromPokemontcg[0].small), fromPokemontcg[0].small);
+
 // --- the whole decision -----------------------------------------------------
 const cardsBySetId = new Map([
-  ["swsh4.5", [
+  ["swsh4.5", tcgdexCards([
     { id: "swsh4.5-1", localId: "1", name: "Bulbasaur", image: "https://a/swsh4.5/1" },
     // A plain number that also exists in the vault: the parent must win.
     { id: "swsh4.5-72", localId: "072", name: "Zacian V", image: "https://a/swsh4.5/72" }
-  ]],
-  ["swsh4.5sv", [
+  ])],
+  ["swsh4.5sv", tcgdexCards([
     { id: "swsh4.5sv-SV099", localId: "SV099", name: "Skwovet", image: null },
     { id: "swsh4.5sv-SV007", localId: "SV007", name: "Blipbug", image: "https://a/sv/7" },
     { id: "swsh4.5sv-72", localId: "72", name: "Something Else", image: "https://a/sv/72" }
-  ]]
+  ])]
 ]);
 const idx = indexByNumber(setFamily("Shining Fates", THEIR_SETS), cardsBySetId);
 
@@ -228,10 +288,10 @@ eq("collector_number works too", matchCard({ name: "Bulbasaur", collector_number
 // Promo sets number their cards SWSH001 where our catalogue holds the bare
 // number — about 1,200 cards across the six Black Star Promos sets.
 const PROMOS = [{ id: "swshp", name: "SWSH Black Star Promos" }];
-const promoIdx = indexByNumber(setFamily("SWSH Black Star Promos", PROMOS), new Map([["swshp", [
+const promoIdx = indexByNumber(setFamily("SWSH Black Star Promos", PROMOS), new Map([["swshp", tcgdexCards([
   { id: "swshp-SWSH001", localId: "SWSH001", name: "Zacian V", image: "https://a/1" },
   { id: "swshp-SWSH002", localId: "SWSH002", name: "Zamazenta V", image: "https://a/2" }
-]]]));
+])]]));
 for (const num of ["1", "001", "SWSH001", "SWSH1"]) {
   eq(`promo number ${num}`, matchCard({ name: "Zacian V", number: num }, promoIdx).outcome, "matched");
 }
@@ -242,8 +302,8 @@ for (const num of ["1", "001", "SWSH001", "SWSH1"]) {
 // would put one card's picture on the other.
 const AMBIG_SETS = [{ id: "p", name: "Ambiguous" }, { id: "p2", name: "Ambiguous Shiny Vault" }];
 const ambiguous = indexByNumber(setFamily("Ambiguous", AMBIG_SETS), new Map([
-  ["p", [{ id: "p-A500", localId: "A500", name: "Alpha", image: "https://a/a" }]],
-  ["p2", [{ id: "p2-SV500", localId: "SV500", name: "Beta", image: "https://a/b" }]]
+  ["p", tcgdexCards([{ id: "p-A500", localId: "A500", name: "Alpha", image: "https://a/a" }])],
+  ["p2", tcgdexCards([{ id: "p2-SV500", localId: "SV500", name: "Beta", image: "https://a/b" }])]
 ]));
 eq("ambiguous digits are refused", matchCard({ name: "Alpha", number: "500" }, ambiguous).outcome, "no-number");
 // Unambiguous digits still resolve.
@@ -252,8 +312,28 @@ eq("unambiguous digits resolve", matchCard({ name: "Zacian V", number: "1" }, pr
 // SV7 isn't there, the answer is no, not "here is number 7".
 eq("a prefixed number doesn't fall back", matchCard({ name: "Zacian V", number: "TG1" }, promoIdx).outcome, "no-number");
 
+// --- one place knows where the pictures come from ---------------------------
+// Two sources now, and the reason to keep both behind lib/image-sources.mjs is
+// that the probe already drifted once: it looked our set names up exactly
+// where the backfill used setFamily, and reported a thousand EX-era cards as
+// belonging to sets tcgdex had never heard of. A second script reaching for an
+// API host of its own is how that happens again.
+const SOURCE_HOSTS = /api\.tcgdex\.net|api\.pokemontcg\.io/;
+const OWNER = "lib/image-sources.mjs";
+for (const file of readdirSync(HERE).filter((f) => f.endsWith(".mjs"))) {
+  const text = readFileSync(join(HERE, file), "utf8");
+  if (SOURCE_HOSTS.test(text)) fail(`${file} names an image API host directly — ask ${OWNER} instead`);
+}
+{
+  const text = readFileSync(join(HERE, "lib", "image-sources.mjs"), "utf8");
+  if (!SOURCE_HOSTS.test(text)) fail(`${OWNER} should be the one place the image APIs are named`);
+  // A source that can't answer must never look like a source that answered
+  // with nothing: that writes "no art" onto every card in a set nobody read.
+  if (!/return null;/.test(text)) fail(`${OWNER} must return null for an unanswered call`);
+}
+
 if (failures) {
   console.error(`\nimages: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log(`images: ${NUMBERS.length} number, ${SAME_CARD.length + DIFFERENT_CARDS.length + SUFFIX_CARDS.length + REWRITTEN.length + OURS_LONGER.length} name, plus set-family and match cases hold.`);
+console.log(`images: ${NUMBERS.length} number, ${SAME_CARD.length + DIFFERENT_CARDS.length + SUFFIX_CARDS.length + REWRITTEN.length + OURS_LONGER.length} name, plus set-family, two-source and match cases hold.`);

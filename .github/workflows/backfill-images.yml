@@ -13,6 +13,10 @@
 #   NEXT_PUBLIC_SUPABASE_URL     the project URL, https://xxxx.supabase.co
 #   SUPABASE_SERVICE_ROLE_KEY    the service_role key, NOT the anon one
 #
+# Optional, and only worth setting if the run is timing out: POKEMONTCG_API_KEY
+# lifts the second source's keyless 30-a-minute limit, which is what the pacing
+# between its calls is there to respect.
+#
 # Requires migration 022 to have been applied first, or every row fails to
 # write. Safe to run more than once: rows already answered are skipped.
 name: Backfill card images
@@ -32,8 +36,12 @@ on:
         description: 'Stop after this many rows (blank = no limit)'
         type: string
         default: ''
+      refill:
+        description: 'Retry every card that still has no art (run this after a source or rule changes)'
+        type: boolean
+        default: false
       recheck:
-        description: 'Re-ask about cards already checked'
+        description: 'Re-ask about every card, including ones that already have art'
         type: boolean
         default: false
 
@@ -41,8 +49,9 @@ on:
 permissions:
   contents: read
 
-# Two of these running at once would ask tcgdex for everything twice and race
-# each other's writes.
+# Two of these running at once would ask both sources for everything twice and
+# race each other's writes — and pokemontcg.io's keyless limit is 30 calls a
+# minute, which one run is already paced against.
 concurrency:
   group: backfill-images
   cancel-in-progress: false
@@ -50,7 +59,7 @@ concurrency:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
 
@@ -85,7 +94,9 @@ jobs:
         env:
           NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          POKEMONTCG_API_KEY: ${{ secrets.POKEMONTCG_API_KEY }}
           DRY_RUN: ${{ inputs.dry_run }}
+          REFILL: ${{ inputs.refill }}
           RECHECK: ${{ inputs.recheck }}
           ONLY_SET: ${{ inputs.only_set }}
           ROW_LIMIT: ${{ inputs.limit }}
@@ -93,6 +104,7 @@ jobs:
           set -o pipefail
           args=()
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          [ "$REFILL" = "true" ] && args+=(--refill)
           [ "$RECHECK" = "true" ] && args+=(--recheck)
           [ -n "$ONLY_SET" ] && args+=(--set "$ONLY_SET")
           [ -n "$ROW_LIMIT" ] && args+=(--limit "$ROW_LIMIT")

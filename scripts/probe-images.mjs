@@ -26,63 +26,22 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { languageOf } from "../apps/public/lib/resolve.js";
-import { norm, numKey, setFamily, indexByNumber, matchCard } from "./lib/card-images.mjs";
+import { setFamily } from "./lib/card-images.mjs";
+import { tcgdex, pokemontcg, readySources, matchSet } from "./lib/image-sources.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
 const JSON_OUT = argOf("--json", null);
 
-// TCGdex, not pokemontcg.io. Both were tried:
-//
-//   pokemontcg.io  174 English sets, one call per 250 cards, an API key for
-//                  20,000/day. It answered about a third of the time while
-//                  this was being written and then 500'd on every request for
-//                  an hour, paced at 3s. Its CDN stayed up throughout, so the
-//                  pictures are fine — it's the metadata that can't be relied
-//                  on, which rules it out of a request path either way.
-//   tcgdex.net     218 English sets and 177 Japanese, no key, and a set
-//                  endpoint that returns every card WITH its image in a single
-//                  call — 218 calls for the whole English catalogue.
-//
-// Image URLs come without an extension by their convention: append /low.webp
-// for a thumbnail (~35KB) or /high.png for the full card (~380KB).
-const API = "https://api.tcgdex.net/v2/en";
-const KEY = "";
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Paced anyway. TCGdex publishes no limit and asks for politeness; a backfill
- * of the whole English catalogue is a couple of hundred calls, so there is no
- * reason to arrive all at once.
- *
- * (The first version of this probe ran against pokemontcg.io with no pacing at
- * all, took 132 failures in 199 calls, and reported that as "their API is
- * unreliable". Their documented keyless limit is 30 a minute and going over it
- * returns a bare 500 rather than a 429, so most of that was self-inflicted.)
- */
-const GAP_MS = 250;
-let last = 0, calls = 0, retries = 0;
-
-async function api(path) {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const since = Date.now() - last;
-    if (since < GAP_MS) await sleep(GAP_MS - since);
-    last = Date.now();
-    calls++;
-    try {
-      const res = await fetch(`${API}${path}`, { signal: AbortSignal.timeout(25000) });
-      if (res.ok) return await res.json();
-      retries++;
-    } catch { retries++; }
-    await sleep(1500 * (attempt + 1));
-  }
-  // null means "we don't know", NOT "empty". The first version returned an
-  // empty page here and broke out of pagination, so a failed call looked
-  // exactly like the end of a set and 32 cards were reported missing that
-  // are not missing at all.
-  return null;
-}
+// Two sources, asked in that order, both defined in lib/image-sources.mjs —
+// the same module and the same order the backfill uses, so what this reports
+// is what a backfill would actually write. Measuring through a second copy of
+// that logic is how the probe ended up reporting a coverage failure the
+// backfill didn't have: it looked our set names up EXACTLY, which the backfill
+// never did, so every "EX Unseen Forces"-style name came back as a set tcgdex
+// has never heard of. setFamily is where that rule lives.
+const sources = [tcgdex(), pokemontcg()];
 
 // --- our side ---------------------------------------------------------------
 const ours = [
@@ -101,47 +60,28 @@ console.log(`${ours.length} catalogue cards — ${english.length} English across
 console.log(`(${ours.length - english.length} non-English are out of scope: pokemontcg.io indexes English printings)\n`);
 
 // --- their sets -------------------------------------------------------------
-const theirSets = await api("/sets");
-if (!theirSets) { console.error("Couldn't reach tcgdex at all."); process.exit(1); }
-const setIndex = new Map();
-for (const s of theirSets) setIndex.set(norm(s.name), s);
-console.log(`tcgdex knows ${theirSets.length} English sets\n`);
+console.log("asking the sources what they have:");
+const ready = await readySources(sources);
+if (!ready.length) { console.error("No image source would answer."); process.exit(1); }
+console.log("");
 
 // --- match set by set -------------------------------------------------------
 const rows = [];
 const unmatchedSets = [];
 const incompleteSets = [];
 for (const [setName, cards] of bySet) {
-  const theirs = setIndex.get(norm(setName));
-  if (!theirs) {
-    unmatchedSets.push({ setName, cards: cards.length });
-    for (const c of cards) rows.push({ ...c, outcome: "no-set" });
-    continue;
-  }
-
-  const family = setFamily(setName, theirSets);
-  const cardsBySetId = new Map();
-  let complete = true;
-  for (const part of family) {
-    const full = await api(`/sets/${encodeURIComponent(part.id)}`);
-    if (!full) { complete = false; break; }
-    cardsBySetId.set(part.id, full.cards || []);
-  }
-  if (!complete) {
-    incompleteSets.push({ setName, id: theirs.id, cards: cards.length });
-    for (const c of cards) rows.push({ ...c, outcome: "unknown", theirSet: theirs.id });
-    console.log(`  ???/${String(cards.length).padEnd(3)} ${setName}  →  ${theirs.id}  (couldn't read their set)`);
-    continue;
-  }
-  const byNumber = indexByNumber(family, cardsBySetId);
-
+  const results = await matchSet(ready, setName, cards);
   let ok = 0;
-  for (const c of cards) {
-    const m = matchCard(c, byNumber);
-    if (m.outcome === "matched") ok++;
-    rows.push({ ...c, theirSet: theirs.id, ...m, image: m.small || null, imageLarge: m.large || null });
+  for (const { row, match, source } of results) {
+    if (match.outcome === "matched") ok++;
+    rows.push({ ...row, ...match, source, image: match.small || null, imageLarge: match.large || null });
   }
-  console.log(`  ${String(ok).padStart(3)}/${String(cards.length).padEnd(3)} ${setName}  →  ${family.map((f) => f.id).join(" + ")}`);
+  const placed = ready
+    .map((src) => setFamily(setName, src.setList).map((f) => f.id).join(" + "))
+    .filter(Boolean).join(" / ");
+  if (!placed) unmatchedSets.push({ setName, cards: cards.length });
+  if (results.some((r) => r.match.outcome === "unknown")) incompleteSets.push({ setName, cards: cards.length });
+  console.log(`  ${String(ok).padStart(3)}/${String(cards.length).padEnd(3)} ${setName}  →  ${placed || "no source has this set"}`);
 }
 
 // --- what that adds up to ---------------------------------------------------
@@ -157,7 +97,12 @@ console.log(`  set found, number missing  ${count("no-number")}  (${pct(count("n
 console.log(`  set not in their index     ${count("no-set")}  (${pct(count("no-set"))})`);
 console.log(`  NAMES DISAGREE             ${count("name-clash")}   <- would show the wrong card`);
 console.log(`  listed but no art on file  ${count("no-art")}`);
-console.log(`\napi calls ${calls}, retried after a failure ${retries}`);
+for (const source of sources) {
+  const { calls, failed } = source.stats;
+  if (!calls) continue;
+  const found = rows.filter((r) => r.source === source.name).length;
+  console.log(`  via ${source.name.padEnd(11)} ${String(found).padStart(4)}   (${calls} calls${failed ? `, gave up on ${failed}` : ""})`);
+}
 
 const show = (title, list, fmt) => {
   if (!list.length) return;
@@ -166,10 +111,10 @@ const show = (title, list, fmt) => {
 };
 show("English sets with no counterpart", unmatchedSets.sort((a, b) => b.cards - a.cards),
   (s) => `${String(s.cards).padStart(3)} cards  ${s.setName}`);
-show("sets their API wouldn't return", incompleteSets, (s) => `${s.setName} (${s.id})`);
+show("sets a source wouldn't return", incompleteSets, (s) => `${s.setName} (${s.cards} cards)`);
 show("name clashes", rows.filter((r) => r.outcome === "name-clash"),
   (r) => `${r.set} ${r.number}: ours "${r.name}" vs theirs "${r.theirName}"`);
 show("numbers missing from a matched set", rows.filter((r) => r.outcome === "no-number"),
-  (r) => `${r.set} (${r.theirSet}) #${r.number} ${r.name}`);
+  (r) => `${r.set} #${r.number} ${r.name}`);
 
 if (JSON_OUT) { writeFileSync(JSON_OUT, JSON.stringify(rows, null, 2)); console.log(`\nwrote ${JSON_OUT}`); }

@@ -284,24 +284,34 @@ conjures sold data that doesn't exist.
 The catalogue is Cardmarket-derived and has no art of its own, so image URLs
 are matched in and stored on `card_catalog` (migration 022), never fetched
 inside a visitor's request. Two reasons: a public page shouldn't depend on a
-third party being up — the alternative source, pokemontcg.io, spent an hour
-returning 500 to every call on 2026-08-23 — and we store links, not copies, so
-the artwork stays The Pokémon Company's problem to license rather than ours to
-redistribute.
+third party being up — pokemontcg.io spent an hour returning 500 to every call
+on 2026-08-23, and did it again on 2026-08-26 — and we store links, not copies,
+so the artwork stays The Pokémon Company's problem to license rather than ours
+to redistribute.
 
 ```
 node scripts/probe-images.mjs                       # measure coverage, writes nothing
 NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
   node scripts/backfill-images.mjs --dry-run        # then without, to write
+node scripts/backfill-images.mjs --refill           # retry every card that still has none
 ```
 
-Or from the browser, with no checkout: **Actions → Backfill card images → Run
-workflow** (`.github/workflows/backfill-images.yml`). Manual trigger only — it
-holds the service-role key, so it never runs off a push. Needs the repository
-secrets `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and
-migration 022 applied first.
+**`--refill` is the mode to run after a source is added or a rule changes.**
+The default run is resumable — every row it looks at gets `image_checked_at`,
+so the next run skips it — which means a rule that would now find art for a row
+never gets the chance. `--refill` retries every row that still has no picture
+and touches nothing else. `--recheck` re-asks about all 32,365 and is only
+worth it if a source is suspected of having given a WRONG picture.
 
-Backfilled 2026-08-23: **21,162 of 32,365 English rows have art (65%)**. That
+Or from the browser, with no checkout: **Actions → Backfill card images → Run
+workflow** (`.github/workflows/backfill-images.yml`), which has `--refill` and
+`--recheck` as tickboxes. Manual trigger only — it holds the service-role key,
+so it never runs off a push. Needs the repository secrets
+`NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, and migration 022
+applied first.
+
+Backfilled 2026-08-23, tcgdex only: **21,162 of 32,365 English rows have art
+(65%)** — the figure to beat once the second source below has been run in. That
 whole-catalogue figure is dominated by things nobody prices here — sealed
 products, World Championship decks, Play! Prize Packs and Japanese-named sets
 tcgdex doesn't index. On the cards people actually search it is **84%, and 90%
@@ -316,6 +326,13 @@ missing data:
 | Cardmarket prefixes the 2003-07 era "EX Unseen Forces"; tcgdex doesn't | ~2,000 |
 | Promos are numbered `SWSH001` there, bare numbers here | ~1,100 |
 | `Dialga Lv.68`/`Dialga`, `Espeon Gold Star`/`Espeon ☆`, `Nidoran [M]`/`Nidoran♂` | ~1,300 |
+
+A fourth spelling turned up on 2026-08-26: tcgdex writes most Gold Stars as
+`Espeon ☆` but the five Holon-era ones as `Pikachu Star`, where Cardmarket
+spells "Gold Star" throughout. A **trailing** bare "star" is that marker and
+nothing else — the word only ever appears mid-name otherwise ("Team Star
+Grunt", "Star Piece"), and VSTAR carries no word boundary before it, so
+Charizard VSTAR is untouched. All five are chase cards.
 
 **Two hazards the tests caught before they shipped**, both in the name guard:
 it was folding Charizard, Charizard ex, Charizard V and Charizard LV.X into one
@@ -336,6 +353,40 @@ thing on the page. Two rules earn their place, both in `scripts/lib/card-images.
   caught it.
 - **Zero-padding comes off after the letter prefix.** SV001, SV01 and SV1 are
   one card; SV1 and SV10 are not.
+
+## Two sources, and the second one is where the chase cards were
+
+tcgdex is asked first and answers for most of the catalogue. Its gaps are not
+scattered, which is why "some images are missing" read on the site as *the
+expensive ones* missing — measured 2026-08-26, tcgdex holds no art at all for
+Shining Fates Shiny Vault (122 cards), Crown Zenith Galarian Gallery (70), all
+four Trainer Galleries (120), Shining Legends (78), Dragon Majesty (78),
+Aquapolis and Skyridge (72), and ~190 SM/SVP/MEP promos. 1,717 English cards.
+A Trainer Gallery card *is* a chase card.
+
+pokemontcg.io has every one of them, and is second rather than first because it
+is the less reliable of the two — 30 calls a minute keyless, and it was down
+entirely partway through this work. Second is where that belongs: it is asked
+only about cards tcgdex had no art for, it is never on a request path, and its
+"small" is a 180KB PNG against tcgdex's 35KB WEBP. `POKEMONTCG_API_KEY` lifts
+its rate limit and the pacing with it; it is optional.
+
+**A source that cannot answer must never look like a source that answered with
+nothing.** Both return `null` for a failed call, and a row whose sources all
+failed is left unwritten — no `image_checked_at` — so the next run tries again
+rather than recording a gap that isn't one and then skipping it forever.
+
+`lib/image-sources.mjs` is the only file that names either API host, and
+`check-images.mjs` greps to keep it that way. The probe had already drifted
+once: it looked our set names up EXACTLY where the backfill used `setFamily()`,
+so every "EX Unseen Forces" came back as a set tcgdex has never heard of and
+about a thousand cards were reported missing that were never missing. Both now
+run through the same module in the same order, so what the probe reports is
+what a backfill would write.
+
+On the 455 published cards: **423 with tcgdex alone, 438 with both.** The 17
+still without art are World Championship decks, Play! Prize Pack reprints and a
+few one-off promos, which neither index holds.
 
 ## Last Comp: the public page's design system
 

@@ -2,16 +2,22 @@
  * Matching our catalogue rows to card art.
  *
  * Our catalogue is Cardmarket-derived: set NAME, collector number, card name,
- * and no images. tcgdex is a different index with its own set ids, its own
- * zero-padding and its own idea of where a sub-set begins. So the join is
- * set + number, and the card NAME is a guard on the result rather than part of
- * the key — if set and number agree but the names don't, the mapping is wrong
- * and the image is refused. A missing picture is a gap; a picture of a
- * different card is a lie about what's being priced.
+ * and no images. Every source of art is a different index with its own set
+ * ids, its own zero-padding and its own idea of where a sub-set begins. So the
+ * join is set + number, and the card NAME is a guard on the result rather than
+ * part of the key — if set and number agree but the names don't, the mapping
+ * is wrong and the image is refused. A missing picture is a gap; a picture of
+ * a different card is a lie about what's being priced.
  *
- * Measured over the 400 English cards in the audit sets (2026-08-23): 87%
- * matched with names agreeing, no number misses, one name clash, and 84% end
- * up with art once tcgdex's own gaps are counted.
+ * NOTHING HERE KNOWS WHICH SOURCE ANSWERED. Both are flattened to one card
+ * shape first (tcgdexCards / pokemontcgCards below), which is what lets a
+ * second source be added without the rules that decide a match — the ones with
+ * the expensive failure mode — being touched at all. Which sources are asked,
+ * and in what order, is lib/image-sources.mjs.
+ *
+ * Measured over the 455 published cards (2026-08-26): 438 matched with names
+ * agreeing, no name clashes, and the 17 left are products neither index
+ * holds.
  *
  * Kept apart from the backfill so the rules can be tested without a network or
  * a database — see scripts/check-images.mjs.
@@ -63,7 +69,10 @@ const SUBSET_SUFFIXES = ["trainer gallery", "galarian gallery", "shiny vault"];
  * the wrong cards at once, which is the worst failure available here.
  */
 const SET_ALIASES = new Map([
-  ["sv black star promos", "svp black star promos"]
+  // Three names for one set: ours, tcgdex's, and pokemontcg.io's. A list
+  // rather than a single string because the alias has to reach whichever
+  // source is being asked — only one of them will be in any given set list.
+  ["sv black star promos", ["svp black star promos", "scarlet violet black star promos"]]
 ]);
 
 export function setFamily(ourSetName, theirSets) {
@@ -76,7 +85,8 @@ export function setFamily(ourSetName, theirSets) {
   // set. That one prefix accounts for around a thousand cards. Tried only
   // after the exact name fails, and only accepted on an exact match of what's
   // left, so it can't reach a set that merely looks similar.
-  let parent = find(key) || find(SET_ALIASES.get(key) || "");
+  let parent = find(key);
+  for (const alias of SET_ALIASES.get(key) || []) parent = parent || find(alias);
   if (!parent && key.startsWith("ex ")) parent = find(key.slice(3));
   if (!parent) return [];
   const subsets = theirSets.filter((s) => {
@@ -134,8 +144,13 @@ export function nameKey(n) {
   // The δ says "Delta Species" already; Cardmarket writes both, and puts it at
   // the opposite end: "Rainbow Energy Delta" against "δ Rainbow Energy".
   t = t.replace(/\u03b4/g, " ").replace(/\bdelta species\b/g, " ").replace(/\bdelta\b/g, " ");
-  // Gold Star cards: Cardmarket spells it, tcgdex uses the symbol.
-  t = t.replace(/\u2606|\u2605/g, " gold star ").replace(/\bgold star\b/g, " gold star ");
+  // Gold Star cards, which our sources write three ways: "Espeon \u2606" for most
+  // of them, but "Pikachu Star" and "Mewtwo Star" for the five Holon-era ones,
+  // against Cardmarket's "Espeon Gold Star" throughout. A trailing bare "star"
+  // is that marker and nothing else — the word only ever appears mid-name
+  // ("Team Star Grunt", "Star Piece"), and VSTAR carries no word boundary
+  // before it, so Charizard VSTAR is untouched.
+  t = t.replace(/\u2606|\u2605/g, " gold star ").replace(/\s*\b(?:gold\s+)?star\b\s*$/, " gold star ");
   // The printed level is decoration on a DP-era card and Cardmarket keeps it:
   // "Dialga Lv.68" is tcgdex's "Dialga". Not to be confused with LV.X, which
   // is a different card and has no digits after it.
@@ -206,6 +221,42 @@ export function imageUrls(base) {
 }
 
 /**
+ * One card shape, whatever answered.
+ *
+ * Two sources describe a card differently — tcgdex hands back one extensionless
+ * base URL and calls the number `localId`, pokemontcg.io hands back two ready
+ * URLs and calls it `number` — and the matcher has no business knowing either.
+ * So each source is flattened to `{ id, localId, name, small, large }` here,
+ * once, and everything downstream reads that. A second place deriving a URL is
+ * how one of them eventually ends up pointing at nothing.
+ */
+export function tcgdexCards(cards) {
+  return (cards || []).map((c) => {
+    const { small, large } = imageUrls(c.image);
+    return { id: c.id, localId: c.localId, name: c.name, small, large };
+  });
+}
+
+/**
+ * pokemontcg.io. `images.small` is a ~40KB PNG and `images.large` the hi-res
+ * one; a card of theirs without an `images` object is a listing without art,
+ * which the matcher reports as a gap rather than a match with a null URL.
+ *
+ * PNG on both sides is incidentally what share.png needs — `drawableArt()`
+ * only knows how to turn tcgdex's low.webp into a high.png, and a URL that is
+ * already a PNG passes through it untouched.
+ */
+export function pokemontcgCards(cards) {
+  return (cards || []).map((c) => ({
+    id: c.id,
+    localId: c.number,
+    name: c.name,
+    small: (c.images && c.images.small) || null,
+    large: (c.images && c.images.large) || (c.images && c.images.small) || null
+  }));
+}
+
+/**
  * Index a set family's cards by comparable number. Parent wins collisions.
  */
 export function indexByNumber(family, cardsBySetId) {
@@ -252,7 +303,6 @@ export function matchCard(ours, byNumber) {
   if (!nameAgrees(ours.name, hit.name)) {
     return { outcome: "name-clash", theirName: hit.name, theirId: hit.id };
   }
-  const { small, large } = imageUrls(hit.image);
-  if (!small) return { outcome: "no-art", theirId: hit.id, theirName: hit.name };
-  return { outcome: "matched", theirId: hit.id, theirName: hit.name, small, large };
+  if (!hit.small) return { outcome: "no-art", theirId: hit.id, theirName: hit.name };
+  return { outcome: "matched", theirId: hit.id, theirName: hit.name, small: hit.small, large: hit.large };
 }
