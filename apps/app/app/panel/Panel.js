@@ -167,7 +167,7 @@ function buildQueryForItem(item, settings, includeCondition, useFullTitle) {
  * KEPT so the deep dive still shows what was found and why it wasn't enough;
  * only the figure is withheld, and the row says so rather than going quiet.
  */
-function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic, disagrees = false) {
+function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic, disagrees = false, activeDisagreed = false) {
   const totals = (rec.included || []).map((c) => c.totalPence).filter((t) => t > 0);
   const range = totals.length
     ? ` (${CompFinderPricing.toPoundsStr(Math.min(...totals))}-${CompFinderPricing.toPoundsStr(Math.max(...totals))})`
@@ -177,11 +177,19 @@ function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic, disagrees 
     : soldCount === 0
       ? `No sold comps matched this card out of ${fetched} fetched`
       : `Only ${soldCount} sold comp(s) matched this card out of ${fetched} fetched — too few to price from`;
+  // Name the reason the live market couldn't stand in, rather than assuming it
+  // was the count. A run held Slugma No. 218 saying "only 8 active listing(s)
+  // matched, which is too few" when the minimum is three — it had plenty, they
+  // just disagreed with each other as badly as the sold comps did. A note that
+  // gives the wrong reason is worse than a short one: it sends you to look for
+  // a problem that isn't there.
   const active = activeCount == null
     ? ""
     : activeCount === 0
       ? " No active listings matched either."
-      : ` Only ${activeCount} active listing(s) matched, which is too few to stand in for it.`;
+      : activeDisagreed
+        ? ` The ${activeCount} active listing(s) disagree just as widely, so the live market can't settle it either.`
+        : ` Only ${activeCount} active listing(s) matched, which is too few to stand in for it.`;
   return {
     ...rec,
     rawPence: null,
@@ -1006,7 +1014,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             }`;
             rec = activeRec;
           } else {
-            rec = heldRec(rec, soldCount, soldComps.length, activeRec.included.length, apiDiagnostic, disagrees);
+            rec = heldRec(
+              rec, soldCount, soldComps.length, activeRec.included.length, apiDiagnostic, disagrees,
+              activeRec.included.length >= MIN_SOLD_COMPS_TO_PRICE
+            );
           }
         } catch (err) {
           if (sanityOnly) {
