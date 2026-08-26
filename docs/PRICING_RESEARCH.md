@@ -144,7 +144,47 @@ the database.
 
 Ranked by expected value, not by how clever they are.
 
-### 1. Condition is being ignored, on every card
+### 1. Condition is being ignored, and it is worth 2x — MEASURED
+
+Settled on 2026-08-26 against a downloaded run: 89 cards, 3,163 comps, which
+reproduces its own run 78/78.
+
+**eBay's `condition` field is useless for this.** Across 3,163 comps it carries
+only "Pre-Owned" (2,148), "Ungraded" (844) and "New (Other)" (134). NM, LP and
+MP are not in it — they are in the TITLE, where 851 of 953 used comps carry one.
+
+Parsed from titles, paired WITHIN each card so no grade is compared against a
+median it dominates:
+
+| pair | cards | median ratio |
+|---|---|---|
+| **NM / LP** | **29** | **2.06x** |
+| NM / MP | 4 | 1.10x |
+| LP / MP | 5 | 0.33x |
+
+**Near-mint sells for about twice lightly-played on these cards.** The control
+matters as much as the number: grouping a card's comps by grade separates them
+**2.06x**, where splitting the same comps into random halves separates them
+**1.20x**. The grade is explaining real variance, not noise.
+
+**MP and HP are NOT usable yet** — four and five cards, and the ratios
+contradict each other (LP/MP at 0.33x says MP sells for three times LP, which
+is nonsense). The MP pattern almost certainly over-matches: "Played" appears in
+titles like "Japanese Played Neo Destiny Old Back" as set-and-era wording
+rather than a grade. Any rule should act on NM-vs-rest and leave MP alone until
+there is a corpus that can separate them.
+
+So `poolConditionsBelowPence: 1500` — which pools NM, LP and MP together under
+£15, i.e. most of the stock — is blending things that differ by 2x. An MP card
+is being priced off a pool containing near-mint comps worth twice as much.
+
+**Proposed rule**, and deliberately not a multiplier: when the card's own grade
+is known from the CSV and enough comps carry the same grade, price from those
+and say so. Use the comps rather than assume a ratio, and fall back to the
+whole pool when there are too few — the same shape as the set guard, which is
+already the pattern for "trust a stronger signal when there is enough of it".
+
+### 1b. Condition, as originally written
 
 `poolConditionsBelowPence: 1500` pools NM, LP and MP together under £15 — which
 is most of your stock. An MP card and an NM card of the same number get the
