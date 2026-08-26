@@ -151,8 +151,14 @@ export function nameKey(n) {
 // no help, while a bare "star" would let VSTAR pass as V — two cards.
 const VARIANT_SUFFIX = /^(lvx|ex|gx|v|vmax|vstar|goldstar)$/;
 
-/** Levenshtein, bounded — we only ever care whether it exceeds 1. */
-function withinOneEdit(a, b) {
+/**
+ * Levenshtein, bounded — we only ever care whether it exceeds 1.
+ *
+ * Exported for scripts/lib/identify-grade.mjs, which uses it to separate a
+ * photo read that got the Pokémon wrong from one that fat-fingered a letter:
+ * the second is recoverable by the catalogue's fuzzy resolve, the first isn't.
+ */
+export function withinOneEdit(a, b) {
   if (Math.abs(a.length - b.length) > 1) return false;
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   let i = 0;

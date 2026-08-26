@@ -41,6 +41,7 @@ supabase/        migrations, shared by both
 docs/            research reports; MARKETING.md is the current acquisition plan
                  HOW_PRICING_WORKS.md is the app's pricing in plain English
                  PRICING_RESEARCH.md is where to strengthen it next
+                 CARD_IMAGE_RECOGNITION.md is the scan reader, measured first
 ```
 
 Run everything from the repo root: `npm run dev` / `npm run build` (the app),
@@ -48,16 +49,23 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs sixteen table tests, no framework, non-zero exit on failure:
+`npm run check` runs nineteen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
+- `scripts/check-matching.mjs` — the rules the business app adds on top of the
+  shared engine, and a tripwire against any of them sliding into `packages/core`.
+- `scripts/check-pace.mjs` — the batch run's rate gate and worker pool.
 - `scripts/check-resolve.mjs` — what the resolver parses and how it ranks.
 - `scripts/check-public-price.mjs` — a grep: no charm ladder on the public side.
 - `scripts/check-turnstile.mjs` — pass forgery, client binding, expiry, off-switch.
 - `scripts/check-liquidity.mjs` — how a capped result set is read, and a grep
   against anyone guessing it from a comp count again.
 - `scripts/check-images.mjs` — which picture goes with which card.
+- `scripts/check-identify.mjs` — how a photo read is scored, and a grep keeping
+  the vision prompt in `apps/app/lib/identify.js` alone: the route can't be
+  imported by a script, so a second copy of the prompt is how the thing we
+  measure stops being the thing we ship.
 - `scripts/check-windows.mjs` — the sold window: one list, read off the URL.
 - `scripts/check-listings.mjs` — which live listings may be shown, and which may
   be the hero. Built around the £44.75 Umbreon that shipped.

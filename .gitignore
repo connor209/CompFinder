@@ -3,3 +3,9 @@ node_modules/
 .env.local
 *.log
 .vercel/
+
+# The photo corpus for scripts/audit-identify.mjs: ours, large, and card photos
+# taken off somebody's stack don't belong in a public repo. The shape is
+# documented by the committed corpus.example.json.
+scripts/fixtures/identify/photos/
+scripts/fixtures/identify/corpus.json
