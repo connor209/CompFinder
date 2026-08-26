@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens, applyNumberGuards, dropForeignPostage, needsActiveCheck, poolDisagrees, settingsForText, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
+import { APP_SETTINGS, appNameTokens, applyConditionPreference, applyNumberGuards, conditionPreferenceHolds, dropForeignPostage, needsActiveCheck, poolDisagrees, settingsForText, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
 import { createGate, runPool, SOLDCOMPS_GAP_MS, BROWSE_GAP_MS, BATCH_CONCURRENCY } from "@/lib/pace";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
@@ -955,6 +955,32 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       const { comps: ukPostageComps, changed: postageDropped } = dropForeignPostage(applyNumberGuards(soldComps, cardNumber));
 
       let rec = CompFinderPricing.recommend(ukPostageComps, cardSettings, nameTokens, "sold", cardNumber, set);
+
+      // Condition, over the comps that survived identity — never over the raw
+      // pool. Near-mint sells for about twice lightly-played (measured across
+      // 29 cards), and pooling the two is the largest per-card error left. The
+      // ordering is load-bearing: applied earlier this removes wrong cards
+      // that happen to say "NM", which costs splitSetMismatch its majority and
+      // lets £20 wrong cards into the price. See applyConditionPreference.
+      const cardCondition = (csvItem && csvItem.condition) || inferConditionFromTitle(title);
+      const pref = applyConditionPreference(rec.included, cardCondition);
+      if (pref.dropped.length) {
+        const byGrade = CompFinderPricing.recommend(
+          pref.comps.map(({ totalPence, exclusionReason, ...c }) => c),
+          cardSettings, nameTokens, "sold", cardNumber, set
+        );
+        if (conditionPreferenceHolds(byGrade)) {
+          // Nothing is dropped quietly: the set-aside comps stay in the deep
+          // dive with their own reason, exactly as every other rule's are.
+          byGrade.excluded = [
+            ...byGrade.excluded,
+            ...pref.dropped.map((c) => ({ ...c, exclusionReason: "conditionMismatch" }))
+          ];
+          byGrade.note = `${byGrade.note} (Note: ${pref.reason}.)`;
+          rec = byGrade;
+        }
+      }
+
       if (apiDiagnostic) rec.note = apiDiagnostic;
       if (postageDropped > 0) {
         rec.note = `${rec.note ? rec.note + " " : ""}(Note: postage was dropped from ${postageDropped} comp(s) charging more than any UK seller charges to post a single card — the sale still counts, their international shipping doesn't.)`;

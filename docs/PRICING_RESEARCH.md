@@ -178,11 +178,27 @@ So `poolConditionsBelowPence: 1500` — which pools NM, LP and MP together under
 £15, i.e. most of the stock — is blending things that differ by 2x. An MP card
 is being priced off a pool containing near-mint comps worth twice as much.
 
-**Proposed rule**, and deliberately not a multiplier: when the card's own grade
+**Shipped 2026-08-26**, and deliberately not a multiplier: when the card's own grade
 is known from the CSV and enough comps carry the same grade, price from those
 and say so. Use the comps rather than assume a ratio, and fall back to the
 whole pool when there are too few — the same shape as the set guard, which is
 already the pattern for "trust a stronger signal when there is enough of it".
+
+Measured over the corpus before shipping: it acts on 34 of 89 cards, moves 6
+prices, and **every one of them moves down** — which is what a batch of played
+stock priced against near-mint comps should do. Nothing reverted for going too
+thin. Two faults the corpus caught first, both of which would have shipped
+silently:
+
+- **Ordering.** Applied to the raw pool it removed wrong cards that happen to
+  say "NM" — a Pikachu, a Pichu, a Slowking — which cost `splitSetMismatch` its
+  majority, stood the set guard down, and let £20 wrong cards into Electabuzz
+  No. 125 at £9.99 against £3.49. Condition only means anything once identity
+  is settled, so it runs over `rec.included`, never the pool.
+- **The guard was on the wrong number.** Guarding the pool going in ignores
+  every rule that cuts it afterwards: Ledian fell to two comps and Zubat to
+  one, with Zubat's price rising. The preference is now applied optimistically
+  and kept only if the priced result still stands on enough comps.
 
 ### 1b. Condition, as originally written
 
@@ -238,7 +254,7 @@ be judged against what actually happened; 4–8 are still proposals.
 | 2 ✅ | **24h cache** on comps | small — mirrors Last Comp | four runs cost one; tuning becomes free |
 | 3 ✅ | **3-way concurrency** + a gate | small | 5.3 min → 1.7 min |
 | 4 | **Confidence gate + review queue** | medium | 80% of rows stop needing you |
-| 5 | **Condition multipliers** | medium, needs measuring | the largest remaining per-card error |
+| 5 ✅ | **Condition preference** | medium, measured | the largest remaining per-card error |
 | 6 | **Your own sales as comps** | medium | best data you own, currently unused |
 | 7 | Cardmarket cross-check | medium | second source, catches the Golbat class |
 | 8 | Log-space estimator | small code, large blast radius | do last, and only against a corpus |

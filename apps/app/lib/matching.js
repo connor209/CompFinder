@@ -218,6 +218,124 @@ export function tooThinToPrice(rec) {
 }
 
 /**
+ * Does this title claim near-mint?
+ *
+ * Measured 2026-08-26 over a downloaded run of 89 cards and 3,163 comps:
+ * near-mint sells for 2.06x lightly-played, paired within each card across 29
+ * of them. The control is what makes that a finding rather than a number —
+ * grouping a card's comps by grade separates them 2.06x while splitting the
+ * SAME comps into random halves separates them 1.20x, so the grade is
+ * explaining real variance.
+ *
+ * eBay's own condition field cannot help: across those 3,163 comps it says
+ * only "Pre-Owned", "Ungraded" or "New (Other)". The grade is in the title,
+ * where 851 of 953 used comps carry one.
+ *
+ * NEAR-MINT OR NOT is the only split taken, and the reason is in the same
+ * measurement. MP and HP had four and five cards and contradicted each other —
+ * LP/MP came out at 0.33x, claiming MP sells for three times LP — because the
+ * MP pattern over-matches: "Played" appears in titles like "Japanese Played
+ * Neo Destiny Old Back" as era wording rather than as a grade. Splitting on it
+ * would be acting on a pattern the data says is broken.
+ *
+ * A title claiming both ("NM / LP", "Near Mint to Lightly Played") is NOT
+ * near-mint. A seller hedging across two grades is describing the worse one.
+ */
+const NEAR_MINT = /\b(nm|near\s*mint|mint|gem\s*mint|pack\s*fresh)\b/i;
+const PLAYED = /\b(lp|mp|hp|lightly\s*played|moderately\s*played|heavily\s*played|played|poor|damaged|dmg|creased|whitening|exc(ellent)?|good)\b/i;
+
+export function claimsNearMint(title) {
+  const t = String(title || "");
+  return NEAR_MINT.test(t) && !PLAYED.test(t);
+}
+
+/** Whether a card's own CardUploader grade is near-mint. "Unknown" is not. */
+export function cardIsNearMint(condition) {
+  return String(condition || "").trim().toUpperCase() === "NM";
+}
+
+/**
+ * Enough same-grade comps to price from before the preference acts.
+ *
+ * Four, matching setMismatchMinKept, for its reasoning rather than by
+ * coincidence: a stronger signal is worth trusting once there is enough of it,
+ * and below that it stays a soft warning instead of acting on a tiny sample.
+ */
+export const CONDITION_MIN_KEPT = 4;
+
+/**
+ * Prefer comps that match the card's own grade.
+ *
+ * poolConditionsBelowPence pools NM, LP and MP together under £15, which is
+ * most of a bulk inventory — so a played card is priced off a pool containing
+ * near-mint comps worth twice as much. That is the largest per-card error left
+ * after the 2026-08-25 work, and unlike the rest of it, it is measured.
+ *
+ * Deliberately NOT a multiplier. The comps already contain the answer for this
+ * card in this week's market; a 2.06x constant would be that answer frozen at
+ * one date across every card, and would need re-measuring to stay true. Using
+ * the comps means the rule improves as the data does.
+ *
+ * An UNGRADED title is kept either way. It cannot be ruled out, and the honest
+ * majority is not worth discarding to catch the ambiguous few — the same
+ * principle dropWrongNumerator applies to a title with no collector number.
+ *
+ * Stands down entirely below CONDITION_MIN_KEPT, so a card whose grade is rare
+ * in its pool keeps the pool it had rather than being priced off two comps.
+ *
+ * ⚠ FEED THIS THE COMPS A PRICE WAS BUILT FROM — rec.included — NEVER the raw
+ * pool. Condition asks "which of THIS card's sales", which only means anything
+ * once identity is settled. Applied to the raw pool it corrupts the identity
+ * votes that come after it, and the corpus caught exactly that: Electabuzz No.
+ * 125 went from £3.49 to £9.99, because most of the NM-labelled comps it
+ * removed were a Pikachu, a Pichu, a Slowking, a Meganium and a Feraligatr —
+ * wrong cards that splitSetMismatch had been excluding. Take them out early
+ * and the set guard loses its majority, stands down, and lets £20 wrong cards
+ * into the price it was there to keep out.
+ *
+ * Re-pricing from an already-priced set is safe: recurse-batch.mjs's R2 shows
+ * the pipeline reaches its fixed point in one pass, so a second call over the
+ * survivors settles rather than drifting.
+ */
+export function applyConditionPreference(comps, cardCondition) {
+  const list = comps || [];
+  const known = /^(NM|LP|MP|HP|DMG)$/i.test(String(cardCondition || "").trim());
+  if (!known || list.length < CONDITION_MIN_KEPT) return { comps: list, dropped: [], reason: null };
+
+  const wantNearMint = cardIsNearMint(cardCondition);
+  const mismatched = (c) => (wantNearMint ? PLAYED.test(String(c.title || "")) && !claimsNearMint(c.title) : claimsNearMint(c.title));
+
+  const kept = list.filter((c) => !mismatched(c));
+  const dropped = list.filter(mismatched);
+  if (!dropped.length || kept.length < CONDITION_MIN_KEPT) return { comps: list, dropped: [], reason: null };
+  return {
+    comps: kept,
+    dropped,
+    reason: wantNearMint
+      ? `${dropped.length} played comp(s) set aside — this card is near-mint, and near-mint sells for about twice lightly-played`
+      : `${dropped.length} near-mint comp(s) set aside — this card is ${String(cardCondition).toUpperCase()}, and near-mint sells for about twice lightly-played`
+  };
+}
+
+/**
+ * Was the condition preference worth what it cost?
+ *
+ * applyConditionPreference guards the pool it hands over, but every rule after
+ * it cuts that pool further — so a card can pass the guard with four comps and
+ * still be priced off one. Measured on the 2026-08-26 corpus before this
+ * existed: Ledian went to two comps and Zubat to one, and Zubat's price ROSE
+ * on a played card, which is the opposite of what the rule is for.
+ *
+ * So the preference is applied optimistically and kept only if the priced
+ * result still stands on enough comps. Trading a broad pool for a thin one is
+ * how this week's worst prices happened, and a rule that improves the average
+ * card by making a few unpriceable is not an improvement.
+ */
+export function conditionPreferenceHolds(rec) {
+  return !!rec && (rec.included || []).length >= MIN_SOLD_COMPS_TO_PRICE;
+}
+
+/**
  * Do the comps disagree about what product this even is?
  *
  * Measured on the 2026-08-25 re-run, once the matching and postage faults were
@@ -305,5 +423,6 @@ export default {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
   poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE,
-  settingsForText, applyNumberGuards, FOREIGN_LANGUAGE
+  settingsForText, applyNumberGuards, FOREIGN_LANGUAGE,
+  applyConditionPreference, conditionPreferenceHolds, claimsNearMint, cardIsNearMint, CONDITION_MIN_KEPT
 };

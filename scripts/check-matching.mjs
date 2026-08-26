@@ -22,7 +22,8 @@ import {
   APP_SETTINGS, appNameTokens, stripNumberingPrefix,
   dropForeignPostage, tooThinToPrice, MIN_SOLD_COMPS_TO_PRICE,
   poolDisagrees, needsActiveCheck, soldContradictsAsking, SANITY_CHECK_ABOVE_PENCE,
-  settingsForText, applyNumberGuards, FOREIGN_LANGUAGE
+  settingsForText, applyNumberGuards, FOREIGN_LANGUAGE,
+  applyConditionPreference, conditionPreferenceHolds, claimsNearMint, CONDITION_MIN_KEPT
 } from "../apps/app/lib/matching.js";
 // settings.js exports it on the default only, not as a named export.
 import publicSettings from "../apps/public/lib/settings.js";
@@ -303,5 +304,47 @@ check("an empty pool is safe", applyNumberGuards([], "020/189").length, 0);
 check("it will not strip a pool down to nothing",
   applyNumberGuards([titled("Charizard 020/189"), titled("Charizard 074/189"), titled("Charizard 099/189")], "020/189").length, 3);
 
+// ── 10. Condition: near-mint sells for about twice lightly-played ───────────
+// Measured 2026-08-26 over 89 cards and 3,163 comps: NM/LP is 2.06x paired
+// within 29 cards, against 1.20x for splitting the same comps at random.
+check("a plain NM title is near-mint", claimsNearMint("Xatu No.178 NM"), true);
+check("so is 'Near Mint'", claimsNearMint("Xatu No.178 Near Mint"), true);
+// FALSE POSITIVES. A seller hedging across two grades is describing the worse
+// one, and era wording is not a grade — "Played" turns up in "Japanese Played
+// Neo Destiny Old Back", which is what made the MP measurement unusable.
+check("a hedged 'NM / LP' is not near-mint", claimsNearMint("Xatu No.178 NM / LP"), false);
+check("an ungraded title claims nothing", claimsNearMint("Xatu No.178 Neo Genesis"), false);
+check("era wording is not a grade", claimsNearMint("Japanese Played Neo Destiny Old Back"), false);
+
+const graded = (...ts) => ts.map((t) => ({ title: t }));
+const POOL = graded("a NM", "b NM", "c LP", "d LP", "e", "f");
+check("a played card sets the near-mint comps aside",
+  applyConditionPreference(POOL, "MP").dropped.map((c) => c.title), ["a NM", "b NM"]);
+check("a near-mint card sets the played ones aside",
+  applyConditionPreference(POOL, "NM").dropped.map((c) => c.title), ["c LP", "d LP"]);
+check("...and an ungraded comp is kept either way — it can't be ruled out",
+  [applyConditionPreference(POOL, "MP").comps.some((c) => c.title === "e"),
+   applyConditionPreference(POOL, "NM").comps.some((c) => c.title === "e")], [true, true]);
+
+// FALSE POSITIVES — every way this must stand down rather than thin a pool.
+check("an unknown grade does nothing", applyConditionPreference(POOL, "Unknown").dropped.length, 0);
+check("no grade at all does nothing", applyConditionPreference(POOL, null).dropped.length, 0);
+check("a pool below the minimum does nothing",
+  applyConditionPreference(graded("a NM", "b LP", "c"), "LP").dropped.length, 0);
+check("nothing to set aside does nothing",
+  applyConditionPreference(graded("a LP", "b LP", "c LP", "d LP"), "LP").dropped.length, 0);
+check("it will not cut below the minimum it would leave",
+  applyConditionPreference(graded("a NM", "b NM", "c NM", "d LP", "e LP"), "LP").dropped.length, 0);
+check("the minimum is four, as the set guard's is", CONDITION_MIN_KEPT, 4);
+
+// THE GUARD THAT MATTERS. The pool going in is not the comps that come out —
+// every rule after this cuts it further — so a preference is kept only if the
+// priced result still stands on enough. Before this existed the corpus showed
+// Ledian falling to two comps and Zubat to one, with Zubat's price RISING on a
+// played card.
+check("a result that went too thin is rejected", conditionPreferenceHolds({ included: [1, 2] }), false);
+check("...and one that held is kept", conditionPreferenceHolds({ included: [1, 2, 3] }), true);
+check("a missing result is rejected", conditionPreferenceHolds(null), false);
+
 if (failures) { console.error(`\nmatching: ${failures} case(s) failed.`); process.exit(1); }
-console.log("matching: prefix, set-guard, foreign-postage, thin-pool, disagreement, sanity, query-scoping, language and number-guard cases pass.");
+console.log("matching: prefix, set-guard, foreign-postage, thin-pool, disagreement, sanity, query-scoping, language, number-guard and condition cases pass.");
