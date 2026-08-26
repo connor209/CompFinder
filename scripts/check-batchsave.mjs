@@ -160,10 +160,28 @@ if ("exclusionReason" in back.results[0].rec.included[0]) {
   fail("a comp that was USED came back carrying an exclusionReason");
 }
 
-// The fields nothing renders are dropped on purpose: a run is around a
-// megabyte of comps as it is.
-const slim = slimComp(comp());
-eq("a stored comp carries only what is shown", Object.keys(slim).sort(), ["_source", "itemLocation", "itemPricePence", "postagePence", "title", "totalPence"]);
+// A stored comp carries what the screen RENDERS plus what the RULES READ, and
+// nothing else. Those are two different sets, and conflating them cost a
+// corpus: this trimmed to the rendered set, so a downloaded run could not be
+// re-priced to the figure it had printed — measured 2026-08-26, one card of 85
+// diverged because splitByCatalogSignal had no epid left to judge. Condition
+// is here for the same reason in advance: a condition-aware price has to be
+// worked out FROM a corpus, and it cannot be if the corpus never carried it.
+//
+// The rest of a SoldComps item is still dropped. A run is around a megabyte of
+// comps as it is, and the size argument was always about that bulk rather than
+// about four short fields.
+const slim = slimComp({ ...comp(), condition: "Used", epid: "2301", categoryId: "183454", postageDropped: 984 });
+eq("a stored comp carries what is shown AND what the rules read",
+  Object.keys(slim).sort(),
+  ["_source", "categoryId", "condition", "epid", "itemLocation", "itemPricePence", "postageDropped", "postagePence", "title", "totalPence"]);
+
+// Absent rather than null when there is nothing to say — a comp with no
+// catalogue match must not grow four empty keys across several thousand rows.
+const { condition, epid, categoryId, postageDropped, ...noExtras } = comp();
+const bare = slimComp(noExtras);
+eq("nothing is invented for a comp that carries none of it",
+  Object.keys(bare).sort(), ["_source", "itemLocation", "itemPricePence", "postagePence", "title", "totalPence"]);
 
 // --- 3. asking prices land back on the right card --------------------------
 eq("asking prices restored for the card they were fetched for", Object.keys(back.activeByIndex), ["2"]);
