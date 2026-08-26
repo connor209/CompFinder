@@ -99,7 +99,13 @@ const RULES = LEGACY ? SHIPPED : APP;
 /** Exactly the three calls Panel.js's runBatchInner makes for one card. */
 function priceLikeTheApp(card, comps, rules = RULES) {
   const query = card.query ?? simplifyTitle(card.title, rules.settings.stripWords);
-  const nameTokens = rules.tokens(query);
+  // A downloaded run carries the tokens it was priced with, and they are NOT
+  // re-derivable from the query: buildQueryFromItem builds tokens from the card
+  // NAME and NUMBER while the query also carries the set and the language.
+  // Re-deriving them here quietly produced six tokens where the run used two,
+  // excluded almost everything, and reported that the corpus could not
+  // reproduce its own run — which was this function's fault, not the corpus's.
+  const nameTokens = card.nameTokens && card.nameTokens.length ? card.nameTokens : rules.tokens(query);
   const priced = rules.postage(comps);
   return { query, nameTokens, rec: recommend(priced, rules.settings, nameTokens, "sold", card.cardNumber || null, card.set || null) };
 }
@@ -304,6 +310,33 @@ if (CORPUS) {
     const held = now.included.length < MIN_SOLD_COMPS_TO_PRICE;
     rows.push({ card, was, now, held, postageDropped: dropForeignPostage(comps).changed });
   }
+  // R0 for a corpus. Every number below is only worth reading if replaying the
+  // stored comps under the app's CURRENT rules reproduces the prices the run
+  // actually printed. Two separate faults have already produced confident,
+  // plausible, wrong numbers here — a harness deriving the wrong tokens, and a
+  // stored comp missing the fields a rule reads — and neither announced itself.
+  const repro = { exact: 0, off: 0, held: 0, examples: [] };
+  for (const r of rows) {
+    const shipped = r.card.shipped;
+    if (!shipped || shipped.finalPence == null) { repro.held++; continue; }
+    if (r.now.finalPence === shipped.finalPence) repro.exact++;
+    else {
+      repro.off++;
+      if (repro.examples.length < 6) repro.examples.push(`${r.card.query}: run ${gbp(shipped.finalPence)} from ${shipped.used}, replay ${gbp(r.now.finalPence)} from ${r.now.included.length}`);
+    }
+  }
+  const total = repro.exact + repro.off;
+  const rate = total ? repro.exact / total : 1;
+  console.log(`  reproduces the run it came from: ${repro.exact}/${total}` + (repro.held ? ` (${repro.held} held, no price to match)` : ""));
+  if (rate < 0.95) {
+    console.log(`\n  ⚠ THIS CORPUS DOES NOT REPRODUCE ITS RUN — the figures below are not`);
+    console.log(`    about the rules, they are about whatever is missing or wrong here.`);
+    for (const e of repro.examples) console.log(`      ${e}`);
+    process.exitCode = 1;
+  }
+  console.log("");
+  report.reproduction = repro;
+
   const med = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : null; };
   const wasP = rows.filter((r) => r.was.finalPence != null).map((r) => r.was.finalPence);
   const nowP = rows.filter((r) => !r.held && r.now.finalPence != null).map((r) => r.now.finalPence);

@@ -111,6 +111,22 @@ export function slimComp(c) {
     itemLocation: storableText(c.itemLocation)
   };
   if (c.exclusionReason) out.exclusionReason = c.exclusionReason;
+  // Not rendered, but READ BY THE RULES — so a saved run that drops them can no
+  // longer be re-priced to the figure it printed. Measured on the 2026-08-26
+  // corpus: without epid/categoryId one card of 85 replayed differently,
+  // because splitByCatalogSignal had nothing left to judge. Condition is the
+  // same kind of debt in advance: it is what a condition-aware price would be
+  // built from, and a corpus without it cannot be used to work one out.
+  //
+  // Three short fields against a comp that already carries a title and a URL —
+  // the size argument above was about the bulk of a SoldComps item, not this.
+  if (c.condition) out.condition = c.condition;
+  if (c.epid) out.epid = c.epid;
+  if (c.categoryId) out.categoryId = c.categoryId;
+  // What the postage WAS before dropForeignPostage zeroed it. Without it the
+  // postage rule is the one rule a saved run can never be used to re-tune,
+  // since the evidence it acted on is gone.
+  if (c.postageDropped != null) out.postageDropped = c.postageDropped;
   const url = storableText(c._source?.url);
   const endedAt = c._source?.endedAt ?? null;
   if (url || endedAt) out._source = { url, endedAt };
