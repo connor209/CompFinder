@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-one table tests, no framework, non-zero exit on failure:
+`npm run check` runs twenty-two table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -90,6 +90,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-labels.mjs` — the printer's file: the two columns in the
   printer's order, names cut to real label widths, and a workbook built for
   real and read back out of its own bytes.
+- `scripts/check-instock.mjs` — whether a card is still ours to sell: that a
+  listing at quantity zero is a card that has gone, that a missing quantity is
+  not a zero, and a grep over the two screens that ask.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -715,6 +718,18 @@ stranger their card is worth.
   fives would give away £2.49 nobody agreed to. "not listed" means we don't
   know — checking a card out by ENDING its listing rather than zeroing the
   quantity drops the row from `ebay_listings` on the next sync.
+- **A sold card is still a row in `ebay_listings`, so "★ Recommend show stock"
+  has to check the quantity.** eBay's out-of-stock control leaves a sold
+  fixed-price listing in the ActiveList with the quantity zeroed — same item
+  id, same price, still "active" to the API. Ranking live stack cards by
+  listing price therefore put cards that had already sold at the TOP of the
+  shortlist, since the expensive ones are the ones that sell. `stockcheck.js`
+  owns the one definition (`isListingAvailable`), a missing quantity is
+  UNKNOWN rather than zero, and the count left out is on screen with what to
+  do about it. Stacks → **Reconcile** had the same blind spot for the same
+  reason and now calls those rows "out of stock" — which, for anything that
+  sold more than 90 days ago, is the only evidence there is, since
+  `ebay_sales` doesn't reach back that far.
 - **Any sticker can be set by hand, and a hand-set price beats a hold.** The
   gate below is a default, not a verdict — someone holding the card knows more
   than the comps do. Typing a price on a held row is what makes it printable,

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
+import { availableSkus, soldOutSkus } from "@/lib/stockcheck.js";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -138,31 +139,53 @@ export default function Stacks() {
     await loadCards(selId);
   }
 
-  // Reconciliation: cards still in a stack but no longer in active listings
-  // (sold / ended). "sold" = confirmed in sales history; "not listed" = gone
-  // from active listings for another reason. Lets you bulk-pull to true up.
+  // Reconciliation: cards still in a stack that we can no longer sell. Three
+  // reasons, and the middle one is the one this screen used to miss entirely:
+  //
+  //   "sold"        confirmed in sales history.
+  //   "out of stock" still in ebay_listings, but at quantity 0. eBay's
+  //                 out-of-stock control leaves a SOLD fixed-price listing in
+  //                 the ActiveList with the quantity zeroed, so a card that
+  //                 sold months ago still had a row here and matching on "is
+  //                 the SKU listed" said it was fine. Sales history only
+  //                 reaches back 90 days, so for anything older this is the
+  //                 only evidence there is.
+  //   "not listed"  gone from active listings for another reason (ended,
+  //                 delisted).
+  //
+  // Lets you bulk-pull to true up.
   async function runReconcile() {
     setShowRecon(true);
     setReconLoading(true);
     const sb = supabase();
-    const active = await pagedSelect(() => sb.from("ebay_listings").select("sku").not("sku", "is", null));
-    const activeSet = new Set(active.map((a) => String(a.sku).toLowerCase()));
+    const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,quantity").not("sku", "is", null));
+    const activeSet = availableSkus(listings);
+    const outOfStock = soldOutSkus(listings);
     const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date").not("sku", "is", null));
     const saleMap = new Map();
     sales.forEach((s) => { const k = String(s.sku).toLowerCase(); if (!saleMap.has(k)) saleMap.set(k, s.sold_date); });
     const cards = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));
     const nameMap = new Map(stacks.map((s) => [s.id, s.name]));
+    // Most-certain first, so the pre-ticked rows are the ones at the top.
+    const rank = { sold: 0, outofstock: 1, notlisted: 2 };
     const cand = cards
       // Checked-out cards were delisted on purpose — don't flag them here.
+      // That is also what keeps the quantity rule safe: checking a card out
+      // sets its listing to quantity 0 too, and those rows never reach here.
       .filter((c) => !c.checked_out_at)
       .filter((c) => c.sku && !activeSet.has(String(c.sku).toLowerCase()))
       .map((c) => {
-        const sold = saleMap.get(String(c.sku).toLowerCase());
-        return { id: c.id, sku: c.sku, title: c.title, stack: nameMap.get(c.stack_id) || "", soldDate: sold || null, reason: sold ? "sold" : "notlisted" };
+        const k = String(c.sku).toLowerCase();
+        const sold = saleMap.get(k);
+        const reason = sold ? "sold" : outOfStock.has(k) ? "outofstock" : "notlisted";
+        return { id: c.id, sku: c.sku, title: c.title, stack: nameMap.get(c.stack_id) || "", soldDate: sold || null, reason };
       })
-      .sort((a, b) => (a.reason === b.reason ? (a.stack || "").localeCompare(b.stack || "") : a.reason === "sold" ? -1 : 1));
+      .sort((a, b) => (a.reason === b.reason ? (a.stack || "").localeCompare(b.stack || "") : rank[a.reason] - rank[b.reason]));
     setReconRows(cand);
-    setReconSel(new Set(cand.filter((c) => c.reason === "sold").map((c) => c.id)));
+    // Out-of-stock is pre-ticked alongside sold: a live card is never at
+    // quantity 0 unless it is away at a show, and those were filtered above.
+    // Nothing is committed until "Pull selected", and a pull can be undone.
+    setReconSel(new Set(cand.filter((c) => c.reason !== "notlisted").map((c) => c.id)));
     setReconLoading(false);
   }
 
@@ -413,8 +436,10 @@ export default function Stacks() {
           ) : (
             <>
               <p className="hint hint-small" style={{ marginTop: 0 }}>
-                These are in a stack but no longer in your active listings. <b>sold</b> = matched in your sales history;
-                <b> not listed</b> = gone from active listings (sold, ended or delisted). Sold ones are pre-ticked.
+                These are in a stack but no longer sellable. <b>sold</b> = matched in your sales history;
+                <b> out of stock</b> = still listed, but at quantity 0, which is what eBay leaves behind when a
+                card sells; <b>not listed</b> = gone from active listings (ended or delisted). The first two are
+                pre-ticked — pulling can be undone.
               </p>
               <div className="stack-list">
                 {reconRows.map((r) => (
@@ -423,8 +448,14 @@ export default function Stacks() {
                     <span className="stack-sku">{r.sku}</span>
                     <span className="stack-title">{r.title || <em>—</em>}</span>
                     <span className="badge2">{r.stack}</span>
-                    <span className="hint-small" style={{ color: r.reason === "sold" ? "var(--conf-high)" : "var(--ink-faint)", flex: "none" }}>
-                      {r.reason === "sold" ? `sold ${r.soldDate ? new Date(r.soldDate).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : ""}`.trim() : "not listed"}
+                    <span
+                      className="hint-small"
+                      style={{ color: r.reason === "sold" ? "var(--conf-high)" : r.reason === "outofstock" ? "var(--warn-ink)" : "var(--ink-faint)", flex: "none" }}
+                      title={r.reason === "outofstock" ? "The listing is still there, but at quantity 0 — eBay's out-of-stock control leaves a sold listing looking active." : undefined}
+                    >
+                      {r.reason === "sold"
+                        ? `sold ${r.soldDate ? new Date(r.soldDate).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : ""}`.trim()
+                        : r.reason === "outofstock" ? "out of stock" : "not listed"}
                     </span>
                   </label>
                 ))}

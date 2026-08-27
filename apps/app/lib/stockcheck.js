@@ -157,3 +157,58 @@ export function priceGap(recommendedPence, listedPence) {
   const delta = recommendedPence - listedPence;
   return { delta, pct: (delta / listedPence) * 100, big: Math.abs(delta) >= 300 && Math.abs(delta / listedPence) >= 0.2 };
 }
+
+/**
+ * Is a listing actually buyable, or a shell of one that has already sold?
+ *
+ * eBay's out-of-stock control keeps a sold-out fixed-price listing in the
+ * seller's ActiveList with `QuantityAvailable` at 0 — same item id, same
+ * price, still "active" as far as the API is concerned, and invisible to
+ * buyers. That is how a card that sold months ago is still a row in
+ * `ebay_listings`, and it is why **"the SKU is in ebay_listings" was never the
+ * same question as "we still have the card"**. Everything that reads a card's
+ * listing to decide whether we still own it has to ask this instead.
+ *
+ * **Unknown is not sold out.** `normalizeItem()` in lib/ebay.js stores null
+ * when eBay sends neither QuantityAvailable nor Quantity, and reading a
+ * missing field as zero would empty a seller's whole show shortlist on the
+ * strength of a field eBay didn't send. Only an explicit number at or below
+ * zero counts as gone.
+ */
+export function isListingAvailable(listing) {
+  const q = listing?.quantity;
+  // `Number("")` is 0, which would read an empty column as sold out. It isn't
+  // one — it is the same silence as a null.
+  if (q == null || q === "") return true;
+  const n = Number(q);
+  return Number.isFinite(n) ? n > 0 : true;
+}
+
+/** The lowercased SKUs we can still actually sell, out of a set of listings. */
+export function availableSkus(listings) {
+  const set = new Set();
+  for (const l of listings || []) {
+    if (!l?.sku || !isListingAvailable(l)) continue;
+    set.add(String(l.sku).toLowerCase());
+  }
+  return set;
+}
+
+/**
+ * The lowercased SKUs that are still listed but sold out — the ones a card
+ * count based on `ebay_listings` alone gets wrong.
+ *
+ * A SKU with a second, in-stock listing is NOT here: two listings under one
+ * SKU means we have one to sell, and reporting the card as gone on the
+ * strength of the dead one would send a real card home from the show.
+ */
+export function soldOutSkus(listings) {
+  const live = availableSkus(listings);
+  const set = new Set();
+  for (const l of listings || []) {
+    if (!l?.sku || isListingAvailable(l)) continue;
+    const k = String(l.sku).toLowerCase();
+    if (!live.has(k)) set.add(k);
+  }
+  return set;
+}
