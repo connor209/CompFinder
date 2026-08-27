@@ -123,18 +123,88 @@ export function poolLabel(checkouts) {
 }
 
 /**
+ * How much of a card's name fits on a label, by label size. A Niimbot label is
+ * physically small, and the printer does not wrap — an over-long name is
+ * silently cut off at the edge, or shrunk to something nobody can read across
+ * a table. So the cut happens HERE, where it can be seen on screen before a
+ * hundred labels come off the roll.
+ */
+export const NAME_LENGTHS = { short: 20, medium: 30, long: 44 };
+export const DEFAULT_NAME_MAX = NAME_LENGTHS.medium;
+
+/** Cut to `max`, on a word where possible, marked with an ellipsis. */
+export function fit(text, max) {
+  const s = String(text || "").trim();
+  if (s.length <= max) return s;
+  const hard = s.slice(0, Math.max(0, max - 1));
+  // Prefer the last word boundary, but not if that throws most of it away —
+  // one very long word should still be cut mid-word rather than vanish.
+  const space = hard.lastIndexOf(" ");
+  const body = space > max * 0.6 ? hard.slice(0, space) : hard;
+  return body.trimEnd() + "…";
+}
+
+/** Words that are never part of a card's name and only cost label width. */
+const NOISE = /\b(pok[eé]mon|tcg|ccg|trading\s+card\s+game|genuine|official)\b/gi;
+
+/**
+ * The card's name as it should read on a label.
+ *
+ * The input is an eBay listing title, which is written for search engines
+ * rather than for a 12mm sticker: "Pokemon TCG Umbreon VMAX 215/203 Evolving
+ * Skies Alt Art Ultra Rare NM". Three passes cut it down, in this order
+ * because each makes the next cheaper:
+ *
+ * 1. Bracketed asides go — they are always qualifiers, never the name.
+ * 2. **Everything after the collector number goes.** This is the big one: a
+ *    TCG title puts the name first and the set, rarity and condition after the
+ *    number, so the number is a natural end marker. It also keeps the number
+ *    itself, which is what lets you match a loose sticker back to a card.
+ * 3. Noise words that are never part of a name.
+ *
+ * Only then does it truncate, so the ellipsis is a last resort rather than the
+ * first thing that happens to a long title.
+ */
+export function labelName(title, max = DEFAULT_NAME_MAX) {
+  let s = String(title || "").trim();
+  if (!s) return "";
+  s = s.replace(/[[(][^\])]*[\])]/g, " ");
+  const num = s.match(/\b[A-Z]{0,3}\d{1,4}\s*\/\s*[A-Z]{0,3}\d{1,4}\b/i);
+  if (num) s = s.slice(0, num.index + num[0].length);
+  s = s.replace(NOISE, " ").replace(/\s+/g, " ").trim();
+  // A title that was nothing but noise leaves the original standing: a label
+  // with the wrong name is bad, one with no name at all is useless.
+  if (!s) s = String(title).replace(/\s+/g, " ").trim();
+  if (s.length <= max) return s;
+
+  // Too long, and there is a number: cut the NAME and keep the number, rather
+  // than truncating the whole string and losing it. The number is what makes a
+  // stray label matchable back to a card — the customer is looking at the card
+  // itself, so the name on the sticker is mostly there for us. "Iron Hands…
+  // 070/162" beats "Iron Hands ex…" for the one job the text has to do.
+  if (num) {
+    const tail = num[0];
+    const head = s.slice(0, s.length - tail.length).trim();
+    const room = max - tail.length - 1;
+    if (room >= 4) return `${fit(head, room)} ${tail}`;
+  }
+  return fit(s, max);
+}
+
+/**
  * A priced run turned into sticker rows: one per card, in run order, each
  * carrying its own held-ness. This is the shape the Show Desk write-back
  * consumes and the shape the label export will render — defined once, here,
  * so the number printed on a label and the number stored against the card
  * cannot come from two different roundings.
  */
-export function stickerRows(results) {
+export function stickerRows(results, { nameMax = DEFAULT_NAME_MAX } = {}) {
   return (results || []).map((r) => {
     const s = stickerFor(r.rec);
     return {
       sku: r.sku || "",
       title: r.title || "",
+      label: labelName(r.title, nameMax),
       recommendedPence: r.rec?.finalPence ?? null,
       confidence: r.rec?.confidence ?? null,
       stickerPence: s.pence,

@@ -18,7 +18,8 @@ import {
   FILTER_KEYS,
   RETENTION_DAYS
 } from "@/lib/batch-store.js";
-import { buildPool, poolLabel, stickerRows, stickerSummary } from "@/lib/showstock.js";
+import { buildPool, poolLabel, stickerRows, stickerSummary, NAME_LENGTHS, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
+import { labelFile } from "@/lib/labelexport.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
@@ -45,6 +46,8 @@ const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 // Supabase (migration 023); this is only what covers the gap between finishing
 // a run and it being saved, and the case where saving isn't available at all.
 const LIVE_BATCH_KEY = "cf-batch-live";
+// How wide the labels being printed on are, in characters of card name.
+const LABEL_NAME_KEY = "cf-label-name-max";
 
 // Section <-> URL slug mapping so each stream has its own /panel/<slug>.
 const STREAM_SLUG = {
@@ -323,6 +326,21 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const browseGate = useRef(createGate(BROWSE_GAP_MS));
   const [stickerNotice, setStickerNotice] = useState("");
   const [applyingStickers, setApplyingStickers] = useState(false);
+  // How much of a card's name fits the label being printed on. A preference
+  // about physical stationery, so it is remembered rather than re-chosen every
+  // run — and the list on screen shows the cut text, so a bad choice is
+  // visible before a hundred labels come off the roll.
+  const [nameMax, setNameMax] = useState(DEFAULT_NAME_MAX);
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(LABEL_NAME_KEY));
+      if (saved > 0) setNameMax(saved);
+    } catch { /* private mode — the default is fine */ }
+  }, []);
+  function saveNameMax(n) {
+    setNameMax(n);
+    try { localStorage.setItem(LABEL_NAME_KEY, String(n)); } catch { /* best-effort */ }
+  }
 
   // The saved run the results on screen came from — set both when one is
   // re-opened and when a fresh run has just been saved, so the screen can say
@@ -1410,33 +1428,24 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   }
 
   /**
-   * The sticker rows as a CSV. Interim, until the Nimbot label template lands
-   * — the columns below are ours, not the printer's, so this is something you
-   * can map by hand in the label app rather than the drop-in import that
-   * replaces it.
+   * The label file, as the Nimbot printer's app imports it: two columns,
+   * `Price` then `Name`, one row per card, and it generates a label per row.
    *
-   * Two things it already gets right, because both are unrecoverable once a
-   * label is printed: a BOM, so £ survives being opened in Excel, and a card
-   * number that Excel cannot mistake for a date — see repairExcelDateMangling
-   * in lib/carduploader.js for the bare "4/99" -> "Apr-99" case this avoids by
-   * never shipping a number in a cell of its own.
+   * A real .xlsx rather than a CSV, so the file goes from here to the printer
+   * without Excel ever opening it — which is also what keeps a card number
+   * like "4/99" from being silently rewritten as "Apr-99" on the way (see
+   * repairExcelDateMangling in lib/carduploader.js).
    */
-  function downloadStickerCsv() {
-    const rows = stickerRows(results).filter((r) => !r.held);
-    if (rows.length === 0) return;
-    const esc = (v) => {
-      const t = v == null ? "" : String(v);
-      return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
-    };
-    const lines = [["SKU", "Card", "Price"].join(",")];
-    for (const r of rows) {
-      lines.push([esc(r.sku), esc(r.title), `£${(r.stickerPence / 100).toFixed(2)}`].join(","));
-    }
-    const blob = new Blob(["\ufeff" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  function downloadLabelFile() {
+    const bytes = labelFile(results, { nameMax });
+    if (bytes.length === 0) return;
+    const blob = new Blob([bytes], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `stickers-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `labels-${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -1481,7 +1490,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // table shows, through the one function that owns the rounding — the number
   // on screen, the number written to the show desk and the number in the CSV
   // are the same number by construction, not by three callers agreeing.
-  const stickers = poolRun ? stickerRows(results) : [];
+  const stickers = poolRun ? stickerRows(results, { nameMax }) : [];
   const stickerCounts = stickerSummary(stickers);
 
   /** Hand back the uploaded CardUploader CSV with our prices in it. */
@@ -1799,7 +1808,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             {stickers.map((r, i) => (
               <div className="ps-row" key={i}>
                 <span className="stack-sku">{r.sku || "—"}</span>
-                <span className="stack-title">{r.title}</span>
+                <span className="stack-title" title={r.title}>{r.label || <em>—</em>}</span>
                 {r.held ? (
                   <span className="hint-small" style={{ color: "var(--warn-ink)", flex: "none" }}>
                     held — {r.reason}
@@ -1815,6 +1824,24 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               </div>
             ))}
           </div>
+          <div className="results-toolbar" style={{ marginTop: 10 }}>
+            <span className="hint-small">Name on the label</span>
+            <div className="view-toggle" role="group" aria-label="How much of the card name fits the label">
+              {Object.entries(NAME_LENGTHS).map(([key, len]) => (
+                <button
+                  key={key}
+                  aria-pressed={nameMax === len}
+                  onClick={() => saveNameMax(len)}
+                  title={`Cut card names to ${len} characters`}
+                >
+                  {key === "short" ? "Short" : key === "medium" ? "Medium" : "Long"}
+                </button>
+              ))}
+            </div>
+            <span className="hint-small" style={{ color: "var(--ink-faint)" }}>
+              {stickers.filter((r) => !r.held && r.label.endsWith("…")).length} name(s) cut to fit
+            </span>
+          </div>
           <div className="row" style={{ marginTop: 10 }}>
             <button
               className="btn btn-primary"
@@ -1823,8 +1850,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             >
               {applyingStickers ? "Saving…" : `Save ${stickerCounts.priced} sticker price${stickerCounts.priced === 1 ? "" : "s"} to the show desk`}
             </button>
-            <button className="btn btn-ghost" disabled={stickerCounts.priced === 0} onClick={downloadStickerCsv}>
-              ⬇ Sticker CSV (interim)
+            <button
+              className="btn btn-ghost"
+              disabled={stickerCounts.priced === 0}
+              onClick={downloadLabelFile}
+              title="Price and Name, as the Nimbot app imports it — one label per row"
+            >
+              ⬇ Label file (.xlsx)
             </button>
           </div>
           {stickerNotice ? <p className="hint hint-small sb-notice">{stickerNotice}</p> : null}

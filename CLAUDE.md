@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs sixteen table tests, no framework, non-zero exit on failure:
+`npm run check` runs seventeen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -80,6 +80,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-showstock.mjs` — the show pool and the price that reaches a
   label: the cash ladder as a table, which prices are held back, and that a
   column added by a hand-applied migration degrades instead of breaking.
+- `scripts/check-labels.mjs` — the printer's file: the two columns in the
+  printer's order, names cut to real label widths, and a workbook built for
+  real and read back out of its own bytes.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -649,12 +652,40 @@ stranger their card is worth.
   rejects a whole statement that names a missing column — a required one would
   take out the saved-runs list and every save with it, show-related or not.
 
-**The Nimbot label CSV is not built yet.** The Sticker CSV button is interim,
-with our own columns, until the printer's template lands. It already carries a
-BOM so £ survives Excel, and never ships a bare card number in a cell of its
-own — see `repairExcelDateMangling` in `lib/carduploader.js` for the "4/99" ->
-"Apr-99" case that avoids. The writer belongs in `apps/app/lib/labelexport.js`,
-reading `stickerRows()` rather than rounding again.
+## The label file, and why it is a real .xlsx
+
+`apps/app/lib/labelexport.js` writes what the Nimbot app imports: **two
+columns, `Price` then `Name`**, one row per card, and it generates a label per
+row. The format is the printer's, not ours — `check-labels.mjs` pins the names
+and the ORDER as literals, because getting them the wrong way round doesn't
+fail loudly, it prints a hundred labels with the price where the name goes.
+
+**A workbook, not a CSV, so Excel never opens the file.** That is also what
+keeps a card number like `4/99` from being silently rewritten to `Apr-99` on
+the way through — see `repairExcelDateMangling` in `lib/carduploader.js`. There
+is no dependency: a workbook is a ZIP of five small XML parts, stored
+uncompressed needs no deflate, and SheetJS is deprecated on npm while exceljs
+is a megabyte in a client bundle. Entries are stored and timestamps pinned to
+1980, so the same rows always produce the same bytes and the check can read the
+sheet XML straight out of them.
+
+**Prices are text cells, and always whole pounds.** The cash ladder only lands
+on multiples of 100, so "£3" rather than "£3.00" — three characters saved on a
+small label, and it reads as cash rather than a listing price. A numeric cell
+would need a currency format and would print a bare "3".
+
+**A long name loses its NAME before it loses its NUMBER.** `labelName()` drops
+bracketed asides, cuts everything after the collector number (a TCG title puts
+the set, rarity and condition after it), then strips noise words — and only
+truncates as a last resort. When it must truncate a title that has a number, it
+keeps the number and cuts the name: `Iron Hands… 070/162`, not `Iron Hands ex…`.
+The customer is looking at the card itself, so the text on the sticker is mostly
+there for us, and the number is what matches a stray label back to a card.
+
+The width is a **preference about stationery**, remembered in `localStorage` —
+Short 20, Medium 30, Long 44 characters — and the sticker panel lists the cut
+text with a count of how many were shortened, so a wrong choice is visible
+before a hundred labels come off the roll.
 
 ## Merging to main deploys — batch it
 
