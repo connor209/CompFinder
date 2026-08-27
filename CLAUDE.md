@@ -636,6 +636,14 @@ stranger their card is worth.
   resolution loss at the bottom is real: below about £2 everything collapses to
   £1, which is right for a show table and wrong for bulk — that wants a "3 for
   £5" tub, not a label each.
+- **What we already ask on eBay is on screen, one click from being the
+  sticker.** Read through `checkRow()`, the same lookup the results table uses,
+  so there is no second SKU match to drift. A listed price adopted this way
+  rounds to the POUND (`toPoundPence`), never down the cash ladder: the ladder
+  is for figures we derived, and £22.49 becoming £20 because the rungs step in
+  fives would give away £2.49 nobody agreed to. "not listed" means we don't
+  know — checking a card out by ENDING its listing rather than zeroing the
+  quantity drops the row from `ebay_listings` on the next sync.
 - **Any sticker can be set by hand, and a hand-set price beats a hold.** The
   gate below is a default, not a verdict — someone holding the card knows more
   than the comps do. Typing a price on a held row is what makes it printable,

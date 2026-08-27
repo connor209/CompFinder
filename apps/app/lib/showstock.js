@@ -123,6 +123,24 @@ export function poolLabel(checkouts) {
 }
 
 /**
+ * A price a HUMAN chose, as the label will print it: nearest whole pound.
+ *
+ * Deliberately not the cash ladder. The ladder is for a figure we derived and
+ * are free to tidy; this is a number someone already decided on — the price we
+ * list the card at on eBay, or one typed into the box. Running £22.49 through
+ * the ladder would put £20 on the sticker, because the rungs step in fives
+ * above £20, and giving away £2.49 nobody agreed to is not rounding.
+ *
+ * The pound is the only change the label itself forces, since labelPrice()
+ * prints whole pounds.
+ */
+export function toPoundPence(pence) {
+  const n = Number(pence);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.max(STICKER_MIN_PENCE, Math.round(n / 100) * 100);
+}
+
+/**
  * How much of a card's name fits on a label, by label size. A Niimbot label is
  * physically small, and the printer does not wrap — an over-long name is
  * silently cut off at the edge, or shrunk to something nobody can read across

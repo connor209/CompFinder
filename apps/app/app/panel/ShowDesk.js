@@ -523,6 +523,19 @@ export default function ShowDesk() {
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 Your live stock ranked by listing price. Untick anything staying home, then check the rest out in one go.
               </p>
+              <div className="sd-bulkbar">
+                <label className="sd-toggle">
+                  <input
+                    type="checkbox"
+                    checked={recSel.size === recs.length && recs.length > 0}
+                    // Indeterminate is the honest state for a part-selection: without it
+                    // the box reads as "none selected" while forty cards are ticked.
+                    ref={(el) => { if (el) el.indeterminate = recSel.size > 0 && recSel.size < recs.length; }}
+                    onChange={(e) => setRecSel(e.target.checked ? new Set(recs.map((r) => r.card.id)) : new Set())}
+                  />
+                  {recSel.size === recs.length ? "All" : `${recSel.size} of ${recs.length}`}
+                </label>
+              </div>
               <div className="stack-list">
                 {recs.map(({ card, pricePence }) => (
                   <label className="ps-row" key={card.id}>
@@ -578,6 +591,7 @@ export default function ShowDesk() {
                 <input
                   type="checkbox"
                   checked={sel.size === open.length && open.length > 0}
+                  ref={(el) => { if (el) el.indeterminate = sel.size > 0 && sel.size < open.length; }}
                   onChange={(e) => setSel(e.target.checked ? new Set(open.map((o) => o.id)) : new Set())}
                 />
                 {sel.size > 0 ? `${sel.size} selected` : "All"}

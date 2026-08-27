@@ -18,7 +18,7 @@ import {
   FILTER_KEYS,
   RETENTION_DAYS
 } from "@/lib/batch-store.js";
-import { buildPool, poolLabel, stickerRows, stickerSummary, NAME_LENGTHS, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
+import { buildPool, poolLabel, stickerRows, stickerSummary, toPoundPence, NAME_LENGTHS, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
 import { labelFile } from "@/lib/labelexport.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import QuickSearch from "./QuickSearch";
@@ -1429,6 +1429,34 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   }
 
   /**
+   * Take the price we are already asking on eBay as the sticker, rounded to
+   * the pound.
+   *
+   * Rounded to the POUND, not run through the cash ladder. The ladder is for a
+   * figure we derived; this is a number a human already chose, and pushing
+   * £22.49 down to £20 because the ladder steps in fives above £20 would be
+   * quietly giving away £2.49 they never agreed to. Nearest pound is the only
+   * change the label itself forces.
+   */
+  function useListed(index, listedPence) {
+    const pence = toPoundPence(listedPence);
+    if (pence == null) return;
+    setOverrides((prev) => ({ ...prev, [index]: pence }));
+  }
+
+  /** The same for every card that has a listing price. */
+  function useAllListed(rows) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      rows.forEach((r, i) => {
+        const pence = toPoundPence(r.listedPence);
+        if (pence != null) next[i] = pence;
+      });
+      return next;
+    });
+  }
+
+  /**
    * Write the run's sticker prices back onto the open checkouts they came
    * from, so the Show Desk can price a card at the table and the label export
    * has one number to print.
@@ -1557,8 +1585,21 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // table shows, through the one function that owns the rounding — the number
   // on screen, the number written to the show desk and the number in the CSV
   // are the same number by construction, not by three callers agreeing.
-  const stickers = poolRun ? stickerRows(results, { nameMax, overrides }) : [];
+  // What we are already asking for the same card on eBay, read through the
+  // same lookup the results table uses rather than a second SKU match of our
+  // own. It is the price we decided on last time we thought about this card,
+  // so it is often the fastest answer — hence the "use" button next to it.
+  //
+  // It can be absent for a good reason: checking a card out hides its listing,
+  // and where that was done by ENDING the listing rather than setting quantity
+  // to zero, the row leaves ebay_listings on the next sync. A missing figure
+  // means "we don't know", never "it was free".
+  const stickers = (poolRun ? stickerRows(results, { nameMax, overrides }) : []).map((r, i) => ({
+    ...r,
+    listedPence: knownFor(results[i])?.stock?.match?.pricePence ?? null
+  }));
   const stickerCounts = stickerSummary(stickers);
+  const listedCount = stickers.filter((r) => r.listedPence != null).length;
 
   /** Hand back the uploaded CardUploader CSV with our prices in it. */
   function exportEbayCsv() {
@@ -1877,8 +1918,22 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 <span className="stack-sku">{r.sku || "—"}</span>
                 <span className="stack-title" title={r.title}>{r.label || <em>—</em>}</span>
                 <span className="hint-small" style={{ color: "var(--ink-faint)", flex: "none" }}>
-                  {r.recommendedPence != null ? `eBay £${(r.recommendedPence / 100).toFixed(2)}` : "no price"}
+                  {r.recommendedPence != null ? `comps £${(r.recommendedPence / 100).toFixed(2)}` : "no comps"}
                 </span>
+                {r.listedPence != null ? (
+                  <button
+                    className="stack-pull"
+                    onClick={() => useListed(i, r.listedPence)}
+                    title={`We list this at £${(r.listedPence / 100).toFixed(2)} on eBay — click to use it as the sticker`}
+                    style={{ flex: "none" }}
+                  >
+                    listed £{(r.listedPence / 100).toFixed(2)}
+                  </button>
+                ) : (
+                  <span className="hint-small" style={{ color: "var(--ink-faint)", flex: "none" }} title="No live listing matched this card — it may have been ended rather than hidden when it was checked out.">
+                    not listed
+                  </span>
+                )}
                 {r.held ? (
                   <span className="hint-small" style={{ color: "var(--warn-ink)", flex: "none" }} title={r.reason}>
                     held — {r.reason}
@@ -1930,6 +1985,15 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             <span className="hint-small" style={{ color: "var(--ink-faint)" }}>
               {stickers.filter((r) => !r.held && r.label.endsWith("…")).length} name(s) cut to fit
             </span>
+            {listedCount > 0 ? (
+              <button
+                className="btn btn-ghost"
+                onClick={() => useAllListed(stickers)}
+                title="Set every sticker to what we already ask for that card on eBay, rounded to the pound"
+              >
+                Use our eBay prices ({listedCount})
+              </button>
+            ) : null}
           </div>
           <div className="row" style={{ marginTop: 10 }}>
             <button
