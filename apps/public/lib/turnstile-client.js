@@ -55,6 +55,26 @@ let widgetId = null;
 let root = null;
 let slot = null;
 let passPromise = null;
+/**
+ * Why the last challenge didn't finish, in a few words a person can read back
+ * to us.
+ *
+ * There is no analytics on this site and there never will be, so a check that
+ * fails on someone else's phone is a thing we otherwise learn nothing about —
+ * and it failed on a real phone for two months while every guess about the
+ * cause was equally plausible. Cloudflare's own error codes distinguish them
+ * outright: a blocked script is not a rejected hostname is not a browser whose
+ * frame gets no storage. This is one short string, kept in memory, shown as
+ * small print under a failed search. Nothing is sent anywhere.
+ */
+let lastFailure = null;
+export const lastChallengeFailure = () => lastFailure;
+
+/** Record and describe a failure in one move, so the two can't drift. */
+function failed(stage, detail) {
+  lastFailure = detail ? `${stage} ${detail}` : stage;
+  return new Error(lastFailure);
+}
 // The widget's callbacks are registered once at render and reused for every
 // execute after it, so they can't close over one attempt's resolve/reject.
 // This is the current attempt, whichever that is.
@@ -81,11 +101,11 @@ function loadScript() {
       el.async = true;
       el.defer = true;
       el.onload = () => resolve();
-      el.onerror = () => reject(new Error("Couldn't load the human check."));
+      el.onerror = () => reject(failed("script-blocked"));
       document.head.appendChild(el);
     }),
     SCRIPT_TIMEOUT_MS,
-    "The human check didn't load."
+    "script-timeout"
   );
   // Let a later search try again: a blocked, slow or flaky first load
   // shouldn't permanently convince the page that pricing is impossible.
@@ -101,7 +121,7 @@ function loadScript() {
 async function ready(timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (!window.turnstile) {
-    if (Date.now() > deadline) throw new Error("The human check didn't start.");
+    if (Date.now() > deadline) throw failed("script-loaded-but-idle");
     await new Promise((r) => setTimeout(r, 50));
   }
 }
@@ -173,6 +193,7 @@ function setInteractive(on) {
  *   ensurePass below for why that distinction is the whole of it.
  */
 function solve({ interactive }) {
+  let sawInteractive = false;
   return withTimeout(
     new Promise((resolve, reject) => {
       pending = { resolve, reject };
@@ -187,12 +208,20 @@ function solve({ interactive }) {
           // Cloudflare wants a tap. Where we're not allowed to ask for one,
           // that is the end of this attempt rather than a modal thrown over a
           // page the visitor is already reading.
-          if (!interactive) return pending && pending.reject(new Error("The human check wanted a tap."));
+          if (!interactive) return pending && pending.reject(failed("needs-a-tap"));
+          sawInteractive = true;
           setInteractive(true);
         },
         "after-interactive-callback": () => setInteractive(false),
-        "error-callback": () => pending && pending.reject(new Error("The human check failed.")),
-        "timeout-callback": () => pending && pending.reject(new Error("The human check timed out."))
+        // The code is Cloudflare telling us which failure this is, and it is
+        // the one fact worth keeping: 110200 is a hostname this widget isn't
+        // configured for, 300xxx/600xxx are the browser's own refusal. Kept
+        // with whether a tap was ever asked for, since "we showed a panel and
+        // it still failed" and "no panel ever appeared" are different bugs.
+        "error-callback": (code) =>
+          pending && pending.reject(failed(`rejected ${code || "?"}`, sawInteractive ? "after-tap" : "no-tap")),
+        "timeout-callback": () =>
+          pending && pending.reject(failed("expired", sawInteractive ? "after-tap" : "no-tap"))
       };
       try {
         if (widgetId === null) widgetId = window.turnstile.render(mount(), opts);
@@ -201,16 +230,30 @@ function solve({ interactive }) {
         else window.turnstile.reset(widgetId);
         window.turnstile.execute(widgetId, {});
       } catch (err) {
-        reject(err);
+        reject(failed("widget-threw", err && err.message));
       }
     }),
     SOLVE_TIMEOUT_MS,
-    "The human check didn't finish."
+    "no-answer"
   ).finally(() => {
     pending = null;
     // Whatever happened, the panel is not the visitor's problem any more.
     setInteractive(false);
   });
+}
+
+/**
+ * Throw away the widget, so the next attempt builds a new one.
+ *
+ * turnstile.reset() is for a widget that worked and needs a second token. One
+ * that errored — no storage in its frame, a hostname it won't answer for — can
+ * stay in that state, and reusing it makes every later Try again fail the same
+ * way for a reason that may no longer apply.
+ */
+function discardWidget() {
+  if (widgetId === null) return;
+  try { window.turnstile.remove(widgetId); } catch { /* already gone */ }
+  widgetId = null;
 }
 
 /**
@@ -242,6 +285,7 @@ export function ensurePass({ interactive = true } = {}) {
 
   passPromise = (async () => {
     try {
+      lastFailure = null;
       await loadScript();
       await ready();
       const token = await solve({ interactive });
@@ -250,9 +294,16 @@ export function ensurePass({ interactive = true } = {}) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token })
       }).then((r) => r.json());
-      return Boolean(res && res.ok);
+      // Solved, and the server still wouldn't take it. That is a different
+      // fault from anything above — the token is real and something about the
+      // exchange isn't — so it gets a name of its own.
+      if (!res || !res.ok) throw failed("token-refused");
+      return true;
     } catch (err) {
       console.warn("human check failed:", err.message);
+      // A widget that has errored can stay unhappy, and Try again deserves a
+      // genuinely fresh one rather than a reset of the broken one.
+      discardWidget();
       return false;
     }
   })();

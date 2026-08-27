@@ -14,7 +14,7 @@ import { variantsPresent } from "./variants.js";
 import { caveatsFor } from "./caveats.js";
 import { safeListings } from "./listings.js";
 import { foreignCount } from "./settings.js";
-import { challengeAvailable, ensurePass } from "./turnstile-client.js";
+import { challengeAvailable, ensurePass, lastChallengeFailure } from "./turnstile-client.js";
 import { DEFAULT_SOLD_WINDOW, deriveWindow } from "./windows.js";
 // Defined in card-query.js, not here: the sitemap, the card page and the
 // warmer all build this same string on the server, and this file is "use
@@ -61,6 +61,10 @@ function challengeError() {
     "We couldn't finish the quick check that you're a person. That's usually a blocked script or a shaky connection rather than anything about this card."
   );
   err.needsChallenge = true;
+  // Carried out to the screen as small print. There is no analytics here, so
+  // the only route from "it fails on someone's phone" to knowing why is the
+  // person reading it back — and the reasons look nothing alike once named.
+  err.diagnostic = lastChallengeFailure();
   return err;
 }
 
@@ -230,7 +234,13 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
         livePromise.catch(() => {});
         // needsChallenge travels with the error so the screen can offer another
         // go at the check rather than treating it as a verdict about the card.
-        if (alive) setState({ status: "error", query, error: err.message, needsChallenge: !!err.needsChallenge });
+        if (alive) setState({
+          status: "error",
+          query,
+          error: err.message,
+          needsChallenge: !!err.needsChallenge,
+          diagnostic: err.diagnostic || null
+        });
         return;
       }
       if (!alive) return;

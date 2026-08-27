@@ -66,6 +66,12 @@ export default function CardScreen({ query, days, initial = null, set = null, si
             <button type="button" className="link" onClick={state.retry}>Try again →</button>
             <a className="link" href="/">← Try another card</a>
           </p>
+          {/* Small print, and it earns its place: this site has no analytics
+              by promise, so a check that fails on a stranger's phone is
+              otherwise invisible to us. The codes tell the causes apart. */}
+          {state.diagnostic && (
+            <p className="micro" style={{ marginTop: 18 }}>Check reported: {state.diagnostic}</p>
+          )}
         </div>
       </main>
     );
