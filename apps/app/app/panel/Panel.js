@@ -20,7 +20,8 @@ import {
   RETENTION_DAYS
 } from "@/lib/batch-store.js";
 import { effectivePence, isOverridden, overrideNote, withOverride } from "@/lib/price-override.js";
-import { buildPool, poolLabel, stickerRows, stickerSummary } from "@/lib/showstock.js";
+import { buildPool, poolLabel, stickerRows, stickerSummary, NAME_LENGTHS, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
+import { labelFile } from "@/lib/labelexport.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
@@ -48,6 +49,8 @@ const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 // Supabase (migration 023); this is only what covers the gap between finishing
 // a run and it being saved, and the case where saving isn't available at all.
 const LIVE_BATCH_KEY = "cf-batch-live";
+// How wide the labels being printed on are, in characters of card name.
+const LABEL_NAME_KEY = "cf-label-name-max";
 
 // Section <-> URL slug mapping so each stream has its own /panel/<slug>.
 const STREAM_SLUG = {
@@ -326,6 +329,26 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const browseGate = useRef(createGate(BROWSE_GAP_MS));
   const [stickerNotice, setStickerNotice] = useState("");
   const [applyingStickers, setApplyingStickers] = useState(false);
+  // How much of a card's name fits the label being printed on. A preference
+  // about physical stationery, so it is remembered rather than re-chosen every
+  // run — and the list on screen shows the cut text, so a bad choice is
+  // visible before a hundred labels come off the roll.
+  // Sticker prices set by hand, keyed by the card's position in the run. That
+  // key rather than the SKU because the sticker list renders in run order and
+  // never filters or re-sorts — and a saved run restores by position too, so
+  // an edit lands back on the card it was typed for.
+  const [overrides, setOverrides] = useState({});
+  const [nameMax, setNameMax] = useState(DEFAULT_NAME_MAX);
+  useEffect(() => {
+    try {
+      const saved = Number(localStorage.getItem(LABEL_NAME_KEY));
+      if (saved > 0) setNameMax(saved);
+    } catch { /* private mode — the default is fine */ }
+  }, []);
+  function saveNameMax(n) {
+    setNameMax(n);
+    try { localStorage.setItem(LABEL_NAME_KEY, String(n)); } catch { /* best-effort */ }
+  }
 
   // The saved run the results on screen came from — set both when one is
   // re-opened and when a fresh run has just been saved, so the screen can say
@@ -399,6 +422,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // at the table days later is how a lost label gets reprinted.
       setPoolRun(loaded.batch.pool_name || null);
       poolRunRef.current = loaded.batch.pool_name || null;
+      setOverrides(loaded.batch.pool_name ? await savedStickers(loaded.results) : {});
       setStatus(
         `Re-opened ${loaded.batch.label} — priced ${new Date(loaded.batch.created_at).toLocaleString()}, and showing exactly what it was priced from.`
       );
@@ -428,7 +452,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const liveRef = useRef(null);
   const skipLiveWrite = useRef(false);
   useEffect(() => {
-    liveRef.current = { results, activeByIndex, csvRaw, csvSummary, status, statusIsError, openBatch, batchNotice, batchNoticeIsError, poolRun };
+    liveRef.current = { results, activeByIndex, csvRaw, csvSummary, status, statusIsError, openBatch, batchNotice, batchNoticeIsError, poolRun, overrides };
   });
   const writeLive = useCallback(() => {
     const live = liveRef.current;
@@ -445,7 +469,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           openBatch: live.openBatch,
           batchNotice: live.batchNotice,
           batchNoticeIsError: live.batchNoticeIsError,
-          poolRun: live.poolRun
+          poolRun: live.poolRun,
+          overrides: live.overrides
         })
       );
     } catch {
@@ -506,6 +531,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       setPoolRun(payload.poolRun);
       poolRunRef.current = payload.poolRun;
     }
+    if (payload.overrides) setOverrides(payload.overrides);
   }, [stream, initialBatchId, initialPool, openSavedBatch]);
 
   // Load the show pool: every card still checked out. The Show Desk owns this
@@ -566,6 +592,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     setPoolRun(null);
     poolRunRef.current = null;
     setStickerNotice("");
+    setOverrides({});
     router.push("/panel/batch", { scroll: false });
   }, [router]);
 
@@ -815,6 +842,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     // of this same call, and would otherwise read the previous render's value.
     poolRunRef.current = poolName;
     setPoolRun(poolName);
+    setOverrides({});
     try {
       await runBatchInner(items);
     } finally {
@@ -1426,6 +1454,63 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   }
 
   /**
+   * The sticker prices already written against this run's cards, as overrides.
+   *
+   * Re-opening a saved run at the show is how a lost label gets reprinted, and
+   * a reprint has to say what the first print said — so the saved price wins
+   * over a fresh suggestion, hand-set or not. Without this, re-opening a run
+   * you had priced by hand would quietly put the engine's numbers back and
+   * print a second, different label for the same card.
+   *
+   * Matched on SKU rather than row order, for the same reason applyStickers is.
+   * Failure is quiet and total: no saved prices simply means the suggestions
+   * stand, which is exactly what happened before any of this existed.
+   */
+  async function savedStickers(rows) {
+    try {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("stock_checkouts")
+        .select("sku,sticker_pence")
+        .is("resolved_at", null)
+        .not("sticker_pence", "is", null);
+      if (error) throw error;
+      const bySku = new Map();
+      for (const c of data || []) if (c.sku) bySku.set(String(c.sku).toLowerCase(), c.sticker_pence);
+      const found = {};
+      (rows || []).forEach((r, i) => {
+        const p = r.sku ? bySku.get(String(r.sku).toLowerCase()) : null;
+        if (p != null) found[i] = p;
+      });
+      return found;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Set one card's sticker price by hand, in whole pounds.
+   *
+   * Whole pounds because that is what the label prints — labelPrice() rounds
+   * to the pound, so accepting £7.50 here would quietly put £8 on the sticker
+   * and there would be no way to tell from the screen. It is a cash price
+   * across a table; the pence were never going to be handed over.
+   *
+   * An empty box clears the override rather than setting zero, which is what
+   * puts a card back on the suggestion — or back to held, if that is where it
+   * started.
+   */
+  function setSticker(index, pounds) {
+    setOverrides((prev) => {
+      const next = { ...prev };
+      const n = Number(String(pounds).replace(/[^0-9.]/g, ""));
+      if (!String(pounds).trim() || !Number.isFinite(n) || n <= 0) delete next[index];
+      else next[index] = Math.round(n) * 100;
+      return next;
+    });
+  }
+
+  /**
    * Write the run's sticker prices back onto the open checkouts they came
    * from, so the Show Desk can price a card at the table and the label export
    * has one number to print.
@@ -1441,7 +1526,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
    * customer standing in front of you.
    */
   async function applyStickers() {
-    const rows = stickerRows(results).filter((r) => !r.held && r.sku);
+    const rows = stickerRows(results, { nameMax, overrides }).filter((r) => !r.held && r.sku);
     if (rows.length === 0) return;
     setApplyingStickers(true);
     setStickerNotice("Saving sticker prices to the show desk…");
@@ -1492,33 +1577,24 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   }
 
   /**
-   * The sticker rows as a CSV. Interim, until the Nimbot label template lands
-   * — the columns below are ours, not the printer's, so this is something you
-   * can map by hand in the label app rather than the drop-in import that
-   * replaces it.
+   * The label file, as the Nimbot printer's app imports it: two columns,
+   * `Price` then `Name`, one row per card, and it generates a label per row.
    *
-   * Two things it already gets right, because both are unrecoverable once a
-   * label is printed: a BOM, so £ survives being opened in Excel, and a card
-   * number that Excel cannot mistake for a date — see repairExcelDateMangling
-   * in lib/carduploader.js for the bare "4/99" -> "Apr-99" case this avoids by
-   * never shipping a number in a cell of its own.
+   * A real .xlsx rather than a CSV, so the file goes from here to the printer
+   * without Excel ever opening it — which is also what keeps a card number
+   * like "4/99" from being silently rewritten as "Apr-99" on the way (see
+   * repairExcelDateMangling in lib/carduploader.js).
    */
-  function downloadStickerCsv() {
-    const rows = stickerRows(results).filter((r) => !r.held);
-    if (rows.length === 0) return;
-    const esc = (v) => {
-      const t = v == null ? "" : String(v);
-      return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
-    };
-    const lines = [["SKU", "Card", "Price"].join(",")];
-    for (const r of rows) {
-      lines.push([esc(r.sku), esc(r.title), `£${(r.stickerPence / 100).toFixed(2)}`].join(","));
-    }
-    const blob = new Blob(["\ufeff" + lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
+  function downloadLabelFile() {
+    const bytes = labelFile(results, { nameMax, overrides });
+    if (bytes.length === 0) return;
+    const blob = new Blob([bytes], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `stickers-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `labels-${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -1563,7 +1639,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // table shows, through the one function that owns the rounding — the number
   // on screen, the number written to the show desk and the number in the CSV
   // are the same number by construction, not by three callers agreeing.
-  const stickers = poolRun ? stickerRows(results) : [];
+  const stickers = poolRun ? stickerRows(results, { nameMax, overrides }) : [];
   const stickerCounts = stickerSummary(stickers);
 
   /** Hand back the uploaded CardUploader CSV with our prices in it. */
@@ -1876,28 +1952,78 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             Cash-rounded from the recommended price — £1 steps to £20, £5 to £100, £10 above — because
             nobody hands 50p pieces across a table. A thin price is held back rather than printed: a
             sticker has no room for the caveat the screen would show next to it.{" "}
-            <b>A price you set yourself is never held</b> — that is what the hold is asking for — so a
-            card the app wouldn&apos;t price gets a sticker the moment you name one. It still rounds
-            to the ladder: what you type is an eBay price, and a sticker is cash.
+            <b>A price you set yourself is never held</b>, either way round — that is what the hold is
+            asking for. Override the price on the results above and it rounds to the ladder like any
+            other, because what you type there is an eBay price; type in the box here and it goes on
+            the label exactly as typed, because here you are writing the label.
           </p>
           <div className="stack-list">
             {stickers.map((r, i) => (
               <div className="ps-row" key={i}>
                 <span className="stack-sku">{r.sku || "—"}</span>
-                <span className="stack-title">{r.title}</span>
-                <span className="ps-src">
-                  <span className="hint-small">eBay</span>
-                  <PriceOverride rec={results[i]?.rec} onSet={(pence) => setOverrideFor(i, pence)} compact />
+                <span className="stack-title" title={r.title}>{r.label || <em>—</em>}</span>
+                {/* The price this sticker was rounded FROM — yours where you
+                    set one on the result above, which is why it can differ
+                    from what the run worked out. The sticker box to the right
+                    is a different decision again: that one is the label. */}
+                <span
+                  className="hint-small"
+                  style={{ color: r.pricedByHand ? "var(--accent-2)" : "var(--ink-faint)", flex: "none" }}
+                  title={r.overriddenFromPence != null ? `You priced this card by hand — the app had £${(r.overriddenFromPence / 100).toFixed(2)}` : undefined}
+                >
+                  {r.recommendedPence != null ? `eBay £${(r.recommendedPence / 100).toFixed(2)}` : "no price"}
                 </span>
                 {r.held ? (
-                  <span className="hint-small" style={{ color: "var(--warn-ink)", flex: "none" }}>
+                  <span className="hint-small" style={{ color: "var(--warn-ink)", flex: "none" }} title={r.reason}>
                     held — {r.reason}
                   </span>
-                ) : (
-                  <span className="sd-price">£{(r.stickerPence / 100).toFixed(2)}</span>
-                )}
+                ) : r.edited ? (
+                  <span className="hint-small" style={{ color: "var(--accent-2)", flex: "none" }}>
+                    set by hand
+                  </span>
+                ) : null}
+                <label className="sd-sticker-edit" title="What goes on the label. Whole pounds — it is cash across a table.">
+                  £
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    inputMode="numeric"
+                    value={r.stickerPence != null ? Math.round(r.stickerPence / 100) : ""}
+                    placeholder={r.suggestedPence != null ? String(Math.round(r.suggestedPence / 100)) : "—"}
+                    onChange={(e) => setSticker(i, e.target.value)}
+                    aria-label={`Sticker price for ${r.label || r.sku || "this card"}`}
+                  />
+                </label>
+                {overrides[i] != null ? (
+                  <button
+                    className="stack-pull"
+                    onClick={() => setSticker(i, "")}
+                    title={r.suggestedPence != null ? `Back to the suggested £${Math.round(r.suggestedPence / 100)}` : "Back to held"}
+                  >
+                    ↺
+                  </button>
+                ) : null}
               </div>
             ))}
+          </div>
+          <div className="results-toolbar" style={{ marginTop: 10 }}>
+            <span className="hint-small">Name on the label</span>
+            <div className="view-toggle" role="group" aria-label="How much of the card name fits the label">
+              {Object.entries(NAME_LENGTHS).map(([key, len]) => (
+                <button
+                  key={key}
+                  aria-pressed={nameMax === len}
+                  onClick={() => saveNameMax(len)}
+                  title={`Cut card names to ${len} characters`}
+                >
+                  {key === "short" ? "Short" : key === "medium" ? "Medium" : "Long"}
+                </button>
+              ))}
+            </div>
+            <span className="hint-small" style={{ color: "var(--ink-faint)" }}>
+              {stickers.filter((r) => !r.held && r.label.endsWith("…")).length} name(s) cut to fit
+            </span>
           </div>
           <div className="row" style={{ marginTop: 10 }}>
             <button
@@ -1907,8 +2033,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             >
               {applyingStickers ? "Saving…" : `Save ${stickerCounts.priced} sticker price${stickerCounts.priced === 1 ? "" : "s"} to the show desk`}
             </button>
-            <button className="btn btn-ghost" disabled={stickerCounts.priced === 0} onClick={downloadStickerCsv}>
-              ⬇ Sticker CSV (interim)
+            <button
+              className="btn btn-ghost"
+              disabled={stickerCounts.priced === 0}
+              onClick={downloadLabelFile}
+              title="Price and Name, as the Nimbot app imports it — one label per row"
+            >
+              ⬇ Label file (.xlsx)
             </button>
           </div>
           {stickerNotice ? <p className="hint hint-small sb-notice">{stickerNotice}</p> : null}

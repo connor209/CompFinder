@@ -27,21 +27,22 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCANNED = ["apps/public/app", "apps/public/lib", "scripts"];
 const SKIP_DIRS = new Set([".next", "node_modules"]);
 
-// Seven files are exempt wholesale. This one has to name the field in code to
-// look for it. The others assert BUSINESS-app behaviour, where a
+// Eight files are exempt wholesale. This one has to name the field in code to
+// look for it. The other seven assert BUSINESS-app behaviour, where a
 // recommended listing price is the right answer and the whole point of the
-// screen, and none of them reads anything under apps/public: check-batchsave.mjs
-// covers the round trip of a saved batch run, check-showstock.mjs covers the
-// show-table sticker, which is derived from finalPence precisely because it is
-// a price to SELL at rather than a valuation, recurse-batch.mjs re-runs the
+// screen, and none of them reads anything under apps/public:
+// check-batchsave.mjs covers the round trip of a saved batch run;
+// check-showstock.mjs and check-labels.mjs cover the show-table sticker and
+// the label it prints on, both derived from finalPence precisely because that
+// is a price to SELL at rather than a valuation; recurse-batch.mjs re-runs the
 // Batch screen's own pipeline, where the figure under test is the one the
-// screen prints, dump-batch.mjs copies a saved business-app run out of
-// the database verbatim, and check-matching.mjs asserts the Batch screen's own
-// rules, one of which reads the ladder price by design, and check-override.mjs
-// asserts that a price typed on the Batch screen beats the ladder price
-// everywhere it travels, which it cannot do without naming both.
-// Everywhere else may DISCUSS finalPence in a comment — the
-// explanation of why we don't use it is worth keeping — but must not read it.
+// screen prints; dump-batch.mjs copies a saved business-app run out of the
+// database verbatim; check-matching.mjs asserts the Batch screen's own rules,
+// one of which reads the ladder price by design; and check-override.mjs asserts
+// that a price typed on a result beats the ladder price everywhere it travels,
+// which it cannot do without naming both. Everywhere else may
+// DISCUSS finalPence in a comment — the explanation of why we don't use it is
+// worth keeping — but must not read it.
 const EXEMPT = new Set([
   "scripts/check-public-price.mjs",
   "scripts/check-batchsave.mjs",
@@ -49,7 +50,8 @@ const EXEMPT = new Set([
   "scripts/recurse-batch.mjs",
   "scripts/dump-batch.mjs",
   "scripts/check-matching.mjs",
-  "scripts/check-override.mjs"
+  "scripts/check-override.mjs",
+  "scripts/check-labels.mjs"
 ]);
 
 /** Strips line comments and whole-line block-comment bodies. */

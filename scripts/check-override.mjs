@@ -165,8 +165,23 @@ eq("the sticker row is rounded from the price actually gone with",
   stickers[1].recommendedPence, 1500);
 eq("and still says what it replaced", stickers[1].overriddenFromPence, 1249);
 eq("a row nobody touched reports no replacement", stickers[0].overriddenFromPence, null);
-eq("an overridden row is marked as yours", stickers.map((r) => r.overridden), [false, true, false]);
+eq("an overridden row is marked as yours", stickers.map((r) => r.pricedByHand), [false, true, false]);
 eq("a hand-priced card comes off the held pile", stickerSummary(stickers), { priced: 2, held: 1 });
+
+// TWO hand-set prices can land on one card, and they are different decisions:
+// a price typed on the RESULT is an eBay price the ladder turns into cash; a
+// price typed on the STICKER is the label. The label wins, and the row still
+// reports the eBay price it was suggested from — a sticker panel that hid one
+// of the two would make a card look mispriced when it isn't.
+const both = stickerRows(
+  [{ sku: "AB11", title: "Umbreon VMAX 215/203", rec: withOverride(rec(), 4000) }],
+  { overrides: { 0: 3000 } }
+);
+eq("the sticker typed on the label wins over the one typed on the result",
+  { sticker: both[0].stickerPence, suggested: both[0].suggestedPence, ebay: both[0].recommendedPence },
+  { sticker: 3000, suggested: 4000, ebay: 4000 });
+eq("and both are still visible as hand-set",
+  { onTheResult: both[0].pricedByHand, onTheLabel: both[0].edited }, { onTheResult: true, onTheLabel: true });
 
 // --- 4. what leaves the building -------------------------------------------
 eq("the eBay upload file carries your price, not the one you rejected",

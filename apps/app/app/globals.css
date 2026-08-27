@@ -808,6 +808,20 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-count { width:64px; border:1px solid var(--line-strong); border-radius:10px; padding:7px 8px; background:var(--surface); color:var(--ink); font-size:13px; }
 .sd-count:focus { outline:none; border-color:var(--accent); }
 .sd-price { font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--conf-high); flex:none; margin-left:auto; }
+/* The sticker price, editable in place. Pushed to the right like .sd-price so
+   a column of prices still reads as a column, and deliberately mono + bold:
+   this is the number that ends up stuck to the card. */
+.sd-sticker-edit { display:inline-flex; align-items:center; gap:2px; flex:none; margin-left:auto;
+  font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--conf-high); }
+.sd-sticker-edit input { width:5.5ch; padding:2px 4px; text-align:right;
+  font-family:inherit; font-size:inherit; font-weight:inherit; color:inherit;
+  background:var(--field-bg,transparent); border:1px solid var(--line); border-radius:4px; }
+.sd-sticker-edit input:focus { outline:none; border-color:var(--accent-2); }
+/* Chrome/Safari spinners steal width in a 5-character box and are no use on a
+   phone at a show; the value is typed, not nudged. */
+.sd-sticker-edit input::-webkit-outer-spin-button,
+.sd-sticker-edit input::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
+.sd-sticker-edit input[type=number] { -moz-appearance:textfield; appearance:textfield; }
 .sd-feedback { margin-top:10px; border-top:1px solid var(--line); padding-top:8px; max-height:180px; overflow-y:auto; }
 .sd-bulkbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px solid var(--line); margin-bottom:4px; }
 .sd-bulkbar .ps-actions { flex-wrap:wrap; }
@@ -1529,9 +1543,6 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .po-hint { flex-basis:100%; color:var(--ink-faint); font-size:11.5px; }
 .po-compact .po-value { font-size:13px; }
 .po-compact .po-flag { font-size:9.5px; padding:1px 6px; }
-.ps-src { display:inline-flex; align-items:center; gap:6px; flex:none; margin-left:auto; }
-.ps-src .hint-small { color:var(--ink-faint); }
-.ps-row .sd-price { margin-left:0; }
 .rc-note-mine { color:var(--accent-2); font-weight:600; }
 /* A deep-dive headline showing a price you set rather than one worked out. */
 .dd-price-mine { color:var(--accent-2); }

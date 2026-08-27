@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs seventeen table tests, no framework, non-zero exit on failure:
+`npm run check` runs eighteen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -84,6 +84,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   the recommendation is never edited, that the sticker gate lets yours through,
   and a grep over every path that spends money for a direct read of
   `finalPence`.
+- `scripts/check-labels.mjs` — the printer's file: the two columns in the
+  printer's order, names cut to real label widths, and a workbook built for
+  real and read back out of its own bytes.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -701,17 +704,28 @@ stranger their card is worth.
   resolution loss at the bottom is real: below about £2 everything collapses to
   £1, which is right for a show table and wrong for bulk — that wants a "3 for
   £5" tub, not a label each.
+- **Any sticker can be set by hand, and a hand-set price beats a hold.** The
+  gate below is a default, not a verdict — someone holding the card knows more
+  than the comps do. Typing a price on a held row is what makes it printable,
+  which matters because the alternative is carrying that card to the table with
+  no sticker on it. Whole pounds only: `labelPrice()` rounds to the pound, so
+  accepting £7.50 would quietly print £8. Overrides are keyed by position in
+  the run, flow to both the label file and the write-back, and a saved run
+  re-opened at the show rehydrates the prices it wrote — a reprint has to say
+  what the first print said.
 - **A thin price is HELD, not printed.** Low or no confidence, or a price built
   from active listings, gets no sticker. Everywhere else a bad price is
   absorbed or editable; this one is stuck to a card and carried to a table,
   where the only correction is peeling it off in front of a customer. Nothing
   is held quietly — the count and the reason are both on screen.
 - **A sticker can also be typed at the desk.** ✎ £ on a Show Desk row sets or
-  clears `sticker_pence` directly — for the card the run held back, the card
-  added to the box after the run, or a price you have changed your mind about
-  with the table in front of you. None of those is worth re-pricing 43 cards
-  for. Unlike a Batch override it is not put through the ladder: see the
-  override section above.
+  clears `sticker_pence` directly — for the card added to the box after the
+  run, or a price you have changed your mind about with the table in front of
+  you. Neither is worth re-pricing 43 cards for. Same rule as the box in the
+  sticker panel, deliberately: whole pounds, refused rather than rounded, and
+  not put through the ladder, because a sticker typed anywhere is the label
+  rather than an eBay price. A price overridden on a RESULT is the other thing
+  and is laddered like any other — see the override section above.
 - **Stickers are written back on a click, not silently**, onto the checkout
   they came from, matched by SKU rather than row order — the results list gets
   filtered and re-sorted, and a sticker on the wrong card is a card sold for
@@ -723,12 +737,40 @@ stranger their card is worth.
   rejects a whole statement that names a missing column — a required one would
   take out the saved-runs list and every save with it, show-related or not.
 
-**The Nimbot label CSV is not built yet.** The Sticker CSV button is interim,
-with our own columns, until the printer's template lands. It already carries a
-BOM so £ survives Excel, and never ships a bare card number in a cell of its
-own — see `repairExcelDateMangling` in `lib/carduploader.js` for the "4/99" ->
-"Apr-99" case that avoids. The writer belongs in `apps/app/lib/labelexport.js`,
-reading `stickerRows()` rather than rounding again.
+## The label file, and why it is a real .xlsx
+
+`apps/app/lib/labelexport.js` writes what the Nimbot app imports: **two
+columns, `Price` then `Name`**, one row per card, and it generates a label per
+row. The format is the printer's, not ours — `check-labels.mjs` pins the names
+and the ORDER as literals, because getting them the wrong way round doesn't
+fail loudly, it prints a hundred labels with the price where the name goes.
+
+**A workbook, not a CSV, so Excel never opens the file.** That is also what
+keeps a card number like `4/99` from being silently rewritten to `Apr-99` on
+the way through — see `repairExcelDateMangling` in `lib/carduploader.js`. There
+is no dependency: a workbook is a ZIP of five small XML parts, stored
+uncompressed needs no deflate, and SheetJS is deprecated on npm while exceljs
+is a megabyte in a client bundle. Entries are stored and timestamps pinned to
+1980, so the same rows always produce the same bytes and the check can read the
+sheet XML straight out of them.
+
+**Prices are text cells, and always whole pounds.** The cash ladder only lands
+on multiples of 100, so "£3" rather than "£3.00" — three characters saved on a
+small label, and it reads as cash rather than a listing price. A numeric cell
+would need a currency format and would print a bare "3".
+
+**A long name loses its NAME before it loses its NUMBER.** `labelName()` drops
+bracketed asides, cuts everything after the collector number (a TCG title puts
+the set, rarity and condition after it), then strips noise words — and only
+truncates as a last resort. When it must truncate a title that has a number, it
+keeps the number and cuts the name: `Iron Hands… 070/162`, not `Iron Hands ex…`.
+The customer is looking at the card itself, so the text on the sticker is mostly
+there for us, and the number is what matches a stray label back to a card.
+
+The width is a **preference about stationery**, remembered in `localStorage` —
+Short 20, Medium 30, Long 44 characters — and the sticker panel lists the cut
+text with a count of how many were shortened, so a wrong choice is visible
+before a hundred labels come off the roll.
 
 ## Merging to main deploys — batch it
 

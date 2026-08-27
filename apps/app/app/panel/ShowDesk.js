@@ -382,10 +382,16 @@ export default function ShowDesk() {
    * simply a price you have changed your mind about with the table in front of
    * you — none of those are worth re-pricing 43 cards for.
    *
-   * What you type here is NOT put through the cash ladder. On the Batch screen
-   * you override an eBay price and the ladder turns it into cash; here you are
-   * writing on the label itself, and rounding a number somebody typed onto a
-   * sticker would be the app arguing with the person holding the pen.
+   * What you type here is NOT put through the cash ladder. Overriding a price
+   * on the Batch results is overriding an EBAY price, and the ladder turns
+   * that into cash; here you are writing the label itself, the same as the
+   * sticker box on the Batch screen's label panel.
+   *
+   * Whole pounds, for the same reason that box is: `labelPrice()` prints to
+   * the pound, so a £7.50 sticker would come off the roll as £8 with nothing
+   * on screen saying so — and a saved run re-opened at the show rehydrates
+   * these very numbers into it. Refused rather than rounded, because the point
+   * is that the number on the label is the number somebody chose.
    */
   async function setSticker(co) {
     const current = co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : "";
@@ -397,6 +403,10 @@ export default function ShowDesk() {
     const { pence, error } = parseOverridePence(raw);
     if (error) {
       setMsg(error);
+      return;
+    }
+    if (pence != null && pence % 100 !== 0) {
+      setMsg(`Stickers are whole pounds — the label would print ${poundsStr(Math.round(pence / 100) * 100)} for ${poundsStr(pence)} and nothing on screen would say so.`);
       return;
     }
     setBusy(true);
