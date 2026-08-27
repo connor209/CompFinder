@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
+import { compareStackNames } from "@/lib/stackpos.js";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -19,18 +20,11 @@ function numKey(s) {
 
 /**
  * Order stack labels like spreadsheet columns rather than a dictionary:
- * A, B, C … Z, then AA, AB … (shorter labels first, then alpha), so a pile
- * "AE" sorts after "Z" instead of jumping in right after "A". Falls back to a
- * plain locale compare for anything that isn't a simple letter label.
+ * A, B, C … Z, then AA, AB … so a pile "AE" sorts after "Z" instead of jumping
+ * in right after "A". Shared with the Show Desk, which walks the same shelves
+ * in the same order — see lib/stackpos.js.
  */
-function pileCompare(a, b) {
-  const na = String(a || "").trim();
-  const nb = String(b || "").trim();
-  const letterA = /^[A-Za-z]+$/.test(na);
-  const letterB = /^[A-Za-z]+$/.test(nb);
-  if (letterA && letterB && na.length !== nb.length) return na.length - nb.length;
-  return na.localeCompare(nb, undefined, { numeric: true, sensitivity: "base" });
-}
+const pileCompare = compareStackNames;
 
 /**
  * Pull sheet — the daily picking workflow. Lists unshipped eBay orders matched

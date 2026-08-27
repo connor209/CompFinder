@@ -761,6 +761,13 @@ on a fresh stack the SKU and the position agree **exactly** — which makes it
 very natural to read the SKU as the position. They part company permanently the
 first time anything is pulled, because a SKU is a name and never moves.
 
+The Recommend list reads in two orders, and the distinction is the point: **by
+value** is how you choose what to take, **pull order** (stack by stack, front to
+back) is how you physically pick it up. The toggle sorts what was already
+chosen and never feeds back into the choosing — sorting before the top-N slice
+would quietly turn "the twenty most valuable" into "the twenty nearest the
+front of stack A", which looks identical on screen.
+
 The rule had been written out three times — the finder and the stack list in
 `Stacks.js`, the pick order in `PullSheet.js` — before the Show Desk needed a
 fourth. That is why it now lives in one file with a grep behind it: two screens

@@ -67,6 +67,40 @@ export function stackDepths(cards) {
 }
 
 /**
+ * Stack labels in shelf order: A, B, C … Z, then AA, AB — shorter labels
+ * first, then alphabetically.
+ *
+ * A plain string sort puts "AE" straight after "A" and before "B", which is
+ * not how the boxes are stacked or how anybody reads them. Anything that isn't
+ * a simple letter label falls through to a natural compare, so "Box 2" sorts
+ * before "Box 10".
+ */
+export function compareStackNames(a, b) {
+  const na = String(a || "").trim();
+  const nb = String(b || "").trim();
+  const letterA = /^[A-Za-z]+$/.test(na);
+  const letterB = /^[A-Za-z]+$/.test(nb);
+  if (letterA && letterB && na.length !== nb.length) return na.length - nb.length;
+  return na.localeCompare(nb, undefined, { numeric: true, sensitivity: "base" });
+}
+
+/**
+ * Walking order: stack by stack, front to back within each.
+ *
+ * This is the order you physically pick in — one pass along the shelf, one
+ * pass down each box — as opposed to the order you CHOOSE in, which is by
+ * value. Takes `{ stackName, rank }`.
+ *
+ * A card with no rank sorts last rather than first: an unknown position is
+ * something to go and look for once the certain ones are in hand.
+ */
+export function comparePullOrder(a, b) {
+  const byStack = compareStackNames(a?.stackName, b?.stackName);
+  if (byStack !== 0) return byStack;
+  return (a?.rank ?? Number.MAX_SAFE_INTEGER) - (b?.rank ?? Number.MAX_SAFE_INTEGER);
+}
+
+/**
  * "A · 12 of 40" — where to walk and how far to count.
  *
  * The depth is worth the extra characters: "12" alone tells you nothing about

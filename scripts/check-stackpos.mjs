@@ -18,7 +18,7 @@
  * time anything is pulled.
  */
 import { readFileSync } from "node:fs";
-import { liveRanks, stackDepths, positionLabel } from "../apps/app/lib/stackpos.js";
+import { liveRanks, stackDepths, positionLabel, compareStackNames, comparePullOrder } from "../apps/app/lib/stackpos.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -98,6 +98,31 @@ eq("depth is optional", positionLabel("A", 12), "A · 12");
 eq("a card with no position still says which stack", positionLabel("A", null, 40), "A");
 eq("a nameless stack does not render 'undefined'", positionLabel(null, 3, 9), "— · 3 of 9");
 
+// --- 6b. the two orders a list gets read in ---------------------------------
+// Choosing what to take is a value question; picking it up is a walking
+// question. The Show Desk offers both, and only the second one is arithmetic.
+const NAMES = ["B", "A", "Z", "AA", "AE", "C"];
+eq("stacks read like spreadsheet columns, not a dictionary",
+  [...NAMES].sort(compareStackNames), ["A", "B", "C", "Z", "AA", "AE"]);
+eq("...so AE lands after Z, not straight after A",
+  [...NAMES].sort(compareStackNames).indexOf("AE") > [...NAMES].sort(compareStackNames).indexOf("Z"), true);
+eq("non-letter labels compare naturally", ["Box 10", "Box 2"].sort(compareStackNames), ["Box 2", "Box 10"]);
+eq("case does not split a stack", ["b", "A"].sort(compareStackNames), ["A", "b"]);
+
+const PICKS = [
+  { stackName: "B", rank: 2 },
+  { stackName: "A", rank: 9 },
+  { stackName: "B", rank: 1 },
+  { stackName: "A", rank: 3 },
+  { stackName: "AA", rank: 1 }
+];
+eq("one pass along the shelf, one pass down each box",
+  [...PICKS].sort(comparePullOrder).map((p) => `${p.stackName}${p.rank}`),
+  ["A3", "A9", "B1", "B2", "AA1"]);
+eq("a card whose position is unknown is looked for last, not first",
+  [...[{ stackName: "A", rank: null }, { stackName: "A", rank: 4 }]]
+    .sort(comparePullOrder).map((p) => p.rank), [4, null]);
+
 // --- 7. one definition -----------------------------------------------------
 // Three copies existed before this file. The greps below are what stop a
 // fourth appearing the next time a screen needs to say where a card is.
@@ -114,6 +139,9 @@ for (const screen of ["apps/app/app/panel/ShowDesk.js", "apps/app/app/panel/Stac
   if (/positions\s*\.filter\(\s*\(?p\)?\s*=>\s*p\s*<=/.test(read(screen))) {
     fail(`${screen} still counts positions by hand — that is the copy this file replaced`);
   }
+}
+if (!read("apps/app/app/panel/PullSheet.js").includes("compareStackNames")) {
+  fail("PullSheet.js has its own stack ordering again — the pull sheet and the Show Desk must walk the shelf the same way");
 }
 if (/^\s*import\s+.*from\s+["']@\//m.test(read("apps/app/lib/stackpos.js"))) {
   fail("stackpos.js has picked up an app-aliased import — it has to stay loadable under bare node");

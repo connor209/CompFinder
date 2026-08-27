@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
-import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
+import { liveRanks, stackDepths, positionLabel, comparePullOrder } from "@/lib/stackpos.js";
 import {
   checkoutStackCard, unhideListing, nextStackName, planReallocation,
   DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode
@@ -21,6 +21,10 @@ import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
  */
 
 const EVENT_KEY = "cf-show-event";
+// Which order the recommendation list is READ in. A habit rather than a
+// setting — you either choose cards at a desk or walk the shelves — so it is
+// remembered rather than re-picked every time.
+const REC_SORT_KEY = "cf-show-recsort";
 
 const pounds = (pence) => `£${((pence || 0) / 100).toFixed(2)}`;
 
@@ -60,6 +64,7 @@ export default function ShowDesk() {
   const [recsLoading, setRecsLoading] = useState(false);
   const [recSel, setRecSel] = useState(new Set());
   const [recCount, setRecCount] = useState(20);
+  const [recSort, setRecSort] = useState("value"); // value | pull
   const [usedByStack, setUsedByStack] = useState(new Map());
   const [capacity, setCapacity] = useState(DEFAULT_STACK_CAPACITY);
   const [plan, setPlan] = useState(null); // proposed reallocation, awaiting confirm
@@ -71,12 +76,18 @@ export default function ShowDesk() {
   useEffect(() => {
     try {
       setEvent(localStorage.getItem(EVENT_KEY) || "");
+      const sort = localStorage.getItem(REC_SORT_KEY);
+      if (sort === "pull" || sort === "value") setRecSort(sort);
     } catch { /* storage unavailable */ }
     setHideModeState(getHideMode());
   }, []);
   function saveEvent(v) {
     setEvent(v);
     try { localStorage.setItem(EVENT_KEY, v); } catch { /* best-effort */ }
+  }
+  function saveRecSort(v) {
+    setRecSort(v);
+    try { localStorage.setItem(REC_SORT_KEY, v); } catch { /* best-effort */ }
   }
   function saveHideMode(v) {
     setHideModeState(v);
@@ -128,6 +139,20 @@ export default function ShowDesk() {
   useEffect(() => { load(); }, []);
 
   const stackName = useMemo(() => new Map(stacks.map((s) => [s.id, s.name])), [stacks]);
+
+  /**
+   * The recommendations in the order they are read.
+   *
+   * Note this sorts what buildRecs already CHOSE, and never feeds back into
+   * the choosing: "top 20 by value" has to stay the twenty most valuable
+   * cards. Sorting before the slice would quietly turn it into "the twenty
+   * nearest the front of stack A", which is a different list entirely and
+   * would look identical on screen.
+   */
+  const recsShown = useMemo(() => {
+    if (!recs) return recs;
+    return recSort === "pull" ? [...recs].sort(comparePullOrder) : recs;
+  }, [recs, recSort]);
 
   // ---- Checkout ------------------------------------------------------------
 
@@ -216,7 +241,8 @@ export default function ShowDesk() {
         card: c,
         pricePence: priceBySku.get(String(c.sku).toLowerCase()),
         rank: ranks.get(c.id) ?? null,
-        depth: depths.get(c.stack_id) ?? null
+        depth: depths.get(c.stack_id) ?? null,
+        stackName: stackName.get(c.stack_id) || ""
       }))
       .sort((a, b) => b.pricePence - a.pricePence)
       .slice(0, Math.max(1, Math.min(200, Number(recCount) || 20)));
@@ -226,7 +252,10 @@ export default function ShowDesk() {
   }
 
   async function checkoutRecs() {
-    const chosen = (recs || []).filter((r) => recSel.has(r.card.id)).map((r) => r.card);
+    // In the order on screen, so the "checking out 3 of 12…" feedback follows
+    // the list you are reading — in pull order that is also the order you are
+    // walking the shelf in, one box at a time.
+    const chosen = (recsShown || []).filter((r) => recSel.has(r.card.id)).map((r) => r.card);
     if (chosen.length === 0) return;
     setBusy(true);
     setMsg("");
@@ -608,8 +637,22 @@ export default function ShowDesk() {
                 The number on the left is the <b>live position</b> — count that many from the top of the
                 stack. It is not the SKU: a SKU is a name and never moves, while positions close up
                 behind every card pulled or taken to a show.
+                {recSort === "pull" ? (
+                  <> Listed in <b>pull order</b>: one pass along the shelf, one pass down each box. The
+                  cards are still the {recs.length} most valuable — only the reading order changed.</>
+                ) : null}
               </p>
               <div className="sd-bulkbar">
+                <div className="view-toggle" role="group" aria-label="Order to read the list in">
+                  <button aria-pressed={recSort === "value"} onClick={() => saveRecSort("value")}
+                    title="Most valuable first — the order you decide what to take in">
+                    £ By value
+                  </button>
+                  <button aria-pressed={recSort === "pull"} onClick={() => saveRecSort("pull")}
+                    title="Stack by stack, front to back — the order you physically pick in">
+                    ↓ Pull order
+                  </button>
+                </div>
                 <label className="sd-toggle">
                   <input
                     type="checkbox"
@@ -623,7 +666,7 @@ export default function ShowDesk() {
                 </label>
               </div>
               <div className="stack-list">
-                {recs.map(({ card, pricePence, rank, depth }) => (
+                {recsShown.map(({ card, pricePence, rank, depth }) => (
                   <label className="ps-row" key={card.id}>
                     <input
                       type="checkbox"
