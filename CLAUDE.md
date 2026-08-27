@@ -929,6 +929,29 @@ moment strangers can reach it.
       a tap is needed; that is when the panel goes to the middle of the screen
       with a line of copy on it.
 
+      **The widget's own hostname list is the thing that was actually
+      broken, and it failed silently for two months.** Diagnosed 2026-08-28:
+      the check reported `110200` — Turnstile for "domain not allowed" —
+      before a human was ever asked anything. Cloudflare refuses the challenge
+      outright unless the host the widget renders on is in the widget's
+      **Hostname Management** list, and Vercel serves **www.lastcomp.co.uk**
+      (the apex 308s). Every uncached search on every device had been failing
+      since the keys went live on 2026-08-23; it looked like a mobile bug only
+      because the 455 published cards are warm, hit the cache, and are never
+      challenged. So the site answered for everything we publish and for
+      nothing else — the exact shape of a fault nobody reports.
+
+      **A client-reported error code must never unlock the server.** It is
+      tempting to let `110200` fail open, since a challenge that cannot
+      succeed is a wall rather than a guard. Don't: the code comes from the
+      page, so anything can claim it, and /api/price would be spending money
+      on whoever asked. A misconfigured widget is fixed in the dashboard.
+
+      **Add every host the widget can render on**, including the vercel.app
+      preview domain if previews are meant to price anything — a preview on a
+      host Turnstile doesn't know fails exactly this way, and looks like a
+      broken build.
+
       **Nothing in `turnstile-client.js` may wait forever, and a failed search
       gets a Try again.** Every await there is bounded, because the state to
       degrade into is a page that says what went wrong and offers another go —
