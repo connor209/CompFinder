@@ -176,6 +176,14 @@ URL** — affiliate links in communities get you banned — and disclose.
 
 It does not scale. It is not supposed to.
 
+**When the "what's it worth?" posts turn out to be thin on the ground, that is
+not the absence of demand** — the question moved into stickied megathreads,
+Discord `#price-check` channels and video comments, and a large part of it is
+asked by loft-clear-out sellers who were never in a TCG group in the first
+place. `docs/MARKETING_CHANNELS.md` is the follow-up report on where it went,
+why seller communities outrank collector ones for us, and the channels that
+don't involve posting at all.
+
 ### 6. The position: "it tells you when it isn't sure"
 
 CardMetric, PACKRAT, PokePrices and PriceCharting all show a number. The
