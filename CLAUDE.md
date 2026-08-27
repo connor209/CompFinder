@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs seventeen table tests, no framework, non-zero exit on failure:
+`npm run check` runs eighteen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -80,6 +80,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-showstock.mjs` — the show pool and the price that reaches a
   label: the cash ladder as a table, which prices are held back, and that a
   column added by a hand-applied migration degrades instead of breaking.
+- `scripts/check-stackpos.mjs` — where a card physically is: that pulled and
+  checked-out cards close the numbering up behind them, and a grep against a
+  fourth copy of the rule.
 - `scripts/check-labels.mjs` — the printer's file: the two columns in the
   printer's order, names cut to real label widths, and a workbook built for
   real and read back out of its own bytes.
@@ -668,6 +671,25 @@ stranger their card is worth.
   here are applied by hand, so the code always ships first, and Postgres
   rejects a whole statement that names a missing column — a required one would
   take out the saved-runs list and every save with it, show-related or not.
+
+## A SKU is a name; a position is an address
+
+`apps/app/lib/stackpos.js` owns the one rule for where a card physically is.
+`stack_cards.position` is a stable SORT KEY, not the number you count to — the
+displayed position is the **live rank** among cards actually present, and both
+pulled and checked-out cards close the numbering up behind them.
+
+The confusion is built in and worth understanding rather than papering over.
+Stacks were seeded from eBay SKUs where `A50` meant "Stack A, position 50", so
+on a fresh stack the SKU and the position agree **exactly** — which makes it
+very natural to read the SKU as the position. They part company permanently the
+first time anything is pulled, because a SKU is a name and never moves.
+
+The rule had been written out three times — the finder and the stack list in
+`Stacks.js`, the pick order in `PullSheet.js` — before the Show Desk needed a
+fourth. That is why it now lives in one file with a grep behind it: two screens
+each showing a confident number that differ by one is invisible on screen and
+sends you to the wrong card.
 
 ## The label file, and why it is a real .xlsx
 

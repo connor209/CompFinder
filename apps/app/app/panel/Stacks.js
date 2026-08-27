@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
+import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 
 /**
@@ -307,18 +308,21 @@ export default function Stacks() {
       setFinderMsg({ ok: false, text: `No unpulled card matches SKU “${find}”.` });
       return;
     }
-    // Live rank = how many present cards in the same stack sit at/before it.
+    // Live rank, through the one function that defines it — the Show Desk
+    // sends you to the same shelf off the same rule, and two answers to "which
+    // card is number 12" is a card picked up in error.
     const stackIds = [...new Set(hits.map((h) => h.stack_id))];
-    const positionsByStack = new Map();
+    let siblings = [];
     for (const sid of stackIds) {
       const { data: all } = await sb.from("stack_cards").select("*").eq("stack_id", sid).is("pulled_at", null);
-      positionsByStack.set(sid, (all || []).filter((a) => !a.checked_out_at).map((a) => a.position).filter((v) => v != null).sort((a, b) => a - b));
+      siblings = siblings.concat(all || []);
     }
+    const ranks = liveRanks(siblings);
+    const depths = stackDepths(siblings);
     const byStack = new Map(stacks.map((s) => [s.id, s.name]));
     const lines = hits.slice(0, 5).map((h) => {
-      const positions = positionsByStack.get(h.stack_id) || [];
-      const rank = positions.filter((p) => p <= h.position).length;
-      return `${byStack.get(h.stack_id) || "Stack"} · position ${rank}${h.sku ? ` (${h.sku})` : ""}`;
+      const where = positionLabel(byStack.get(h.stack_id) || "Stack", ranks.get(h.id) ?? null, depths.get(h.stack_id) ?? null);
+      return `${where}${h.sku ? ` (${h.sku})` : ""}`;
     });
     setFinderMsg({ ok: true, text: lines.join(" · ") });
   }
