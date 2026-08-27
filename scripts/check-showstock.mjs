@@ -146,6 +146,31 @@ eq("a failed row is held, not skipped", { held: rows[2].held, sku: rows[2].sku }
 eq("the summary counts both sides", stickerSummary(rows), { priced: 1, held: 2 });
 eq("an empty run summarises as empty", stickerSummary([]), { priced: 0, held: 0 });
 
+// --- 4b. a price set by hand -----------------------------------------------
+// The gate above is a default, not a verdict. Someone holding the card knows
+// more than the comps do, and the most important case is exactly the one the
+// gate blocks: a held card is unsellable at a table until a human gives it a
+// number, so an override has to beat a hold, not just a suggestion.
+const OVER = stickerRows(RESULTS, { overrides: { 1: 500, 2: 300 } });
+eq("an override rescues a held card", { p: OVER[1].stickerPence, held: OVER[1].held }, { p: 500, held: false });
+eq("and a card that failed outright", { p: OVER[2].stickerPence, held: OVER[2].held }, { p: 300, held: false });
+eq("a rescued row loses its held reason", OVER[1].reason, null);
+eq("a rescued row is marked as hand-set", OVER[1].edited, true);
+eq("an untouched row is not", OVER[0].edited, false);
+eq("the summary counts a rescued card as priced", stickerSummary(OVER), { priced: 3, held: 0 });
+
+eq("an override replaces a suggestion too",
+  stickerRows(RESULTS, { overrides: { 0: 50000 } })[0].stickerPence, 50000);
+eq("the suggestion is still carried, so the screen can offer it back",
+  stickerRows(RESULTS, { overrides: { 0: 50000 } })[0].suggestedPence, 84000);
+eq("an override equal to the suggestion is not 'edited' — a reprint is not a change",
+  stickerRows(RESULTS, { overrides: { 0: 84000 } })[0].edited, false);
+
+for (const [bad, why] of [[0, "zero"], [null, "null"], [-100, "negative"], ["", "empty"], [NaN, "NaN"]]) {
+  eq(`${why} is not an override, it is no override`,
+    stickerRows(RESULTS, { overrides: { 1: bad } })[1].held, true);
+}
+
 // --- 5. one definition of the sticker --------------------------------------
 // The number shown on screen, the number written onto the checkout and the
 // number in the CSV all come through stickerRows(). A second call to the
