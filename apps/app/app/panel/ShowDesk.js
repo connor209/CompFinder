@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
+import { isListingAvailable, soldOutSkus } from "@/lib/stockcheck.js";
 import {
   checkoutStackCard, unhideListing, nextStackName, planReallocation,
   DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode
@@ -60,6 +61,7 @@ export default function ShowDesk() {
   const [recsLoading, setRecsLoading] = useState(false);
   const [recSel, setRecSel] = useState(new Set());
   const [recCount, setRecCount] = useState(20);
+  const [recSkipped, setRecSkipped] = useState(0); // in a stack, but sold out on eBay
   const [usedByStack, setUsedByStack] = useState(new Map());
   const [capacity, setCapacity] = useState(DEFAULT_STACK_CAPACITY);
   const [plan, setPlan] = useState(null); // proposed reallocation, awaiting confirm
@@ -193,14 +195,23 @@ export default function ShowDesk() {
   async function buildRecs() {
     setRecsLoading(true);
     setRecs(null);
+    setRecSkipped(0);
     setMsg("");
     const sb = supabase();
     const [cards, listings] = await Promise.all([
       pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null)),
-      pagedSelect(() => sb.from("ebay_listings").select("sku,price_value,price_currency").not("sku", "is", null))
+      pagedSelect(() => sb.from("ebay_listings").select("sku,price_value,price_currency,quantity").not("sku", "is", null))
     ]);
+    // A card that SOLD is still a row here. eBay's out-of-stock control leaves
+    // a sold fixed-price listing in the ActiveList at quantity 0, so "the SKU
+    // has a listing price" said yes to cards that left the building months
+    // ago — and they came out at the TOP of a list ranked by value, because
+    // the expensive cards are the ones that sell. isListingAvailable() in
+    // stockcheck.js is the one definition of the difference.
+    const gone = soldOutSkus(listings);
     const priceBySku = new Map();
     for (const l of listings) {
+      if (!isListingAvailable(l)) continue;
       const k = String(l.sku).toLowerCase();
       if (l.price_value != null && !priceBySku.has(k)) priceBySku.set(k, Math.round(Number(l.price_value) * 100));
     }
@@ -210,6 +221,12 @@ export default function ShowDesk() {
     // the shelf.
     const ranks = liveRanks(cards);
     const depths = stackDepths(cards);
+    // Counted before the shortlist is cut, and shown: a card silently dropped
+    // looks exactly like a card we never had, and this one needs reconciling
+    // rather than ignoring.
+    setRecSkipped(
+      cards.filter((c) => !c.checked_out_at && c.sku && gone.has(String(c.sku).toLowerCase())).length
+    );
     const ranked = cards
       .filter((c) => !c.checked_out_at && c.sku && priceBySku.has(String(c.sku).toLowerCase()))
       .map((c) => ({
@@ -597,6 +614,13 @@ export default function ShowDesk() {
             <span className="eyebrow">Recommended show stock — highest value first</span>
             <button className="btn btn-ghost" onClick={() => setRecs(null)}>Close</button>
           </div>
+          {recSkipped > 0 ? (
+            <p className="hint hint-small" style={{ marginTop: 0, color: "var(--warn-ink)" }}>
+              {recSkipped} card{recSkipped === 1 ? "" : "s"} left out: still in a stack, but the eBay listing is
+              out of stock (quantity 0) — which is what a card that has already <b>sold</b> looks like.
+              Run <b>Stacks → Reconcile</b> to pull them, or you&apos;ll be looking for cards that aren&apos;t there.
+            </p>
+          ) : null}
           {recs.length === 0 ? (
             <p className="dd-empty">No stack cards matched a live listing price. Sync your eBay listings, then try again.</p>
           ) : (
