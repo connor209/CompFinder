@@ -51,13 +51,21 @@ export default function CardScreen({ query, days, initial = null, set = null, si
 
   if (state.status === "choose") return <WhichOne query={query} candidates={state.candidates} fuzzy={state.fuzzy} />;
   if (state.status === "error") {
+    // A failed search is nearly always worth one more attempt — a shed request,
+    // a wobbly upstream, a human check that didn't complete — and until now the
+    // only way to make one was to leave the page. Worse on the human check,
+    // where the server's "one moment" landed under NO LUCK as if the card were
+    // the problem, so the heading says which of the two this is.
     return (
       <main>
         <Crumb label={query} />
         <div className="screen">
-          <h2 className="scr-h">No luck</h2>
+          <h2 className="scr-h">{state.needsChallenge ? "Still there?" : "No luck"}</h2>
           <p className="body" style={{ marginTop: 9 }}>{state.error}</p>
-          <p style={{ marginTop: 14 }}><a className="link" href="/">← Try another card</a></p>
+          <p style={{ marginTop: 14, display: "flex", gap: 16, alignItems: "baseline", flexWrap: "wrap" }}>
+            <button type="button" className="link" onClick={state.retry}>Try again →</button>
+            <a className="link" href="/">← Try another card</a>
+          </p>
         </div>
       </main>
     );

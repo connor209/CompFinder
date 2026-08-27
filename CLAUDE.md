@@ -903,6 +903,39 @@ moment strangers can reach it.
       `TURNSTILE_SECRET_KEY` and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` are set** —
       set both or neither, since the secret alone asks for a check the page
       can't solve.
+
+      **The check is the one guard a phone can fail on its own**, and it did,
+      for two months, on any card that missed the cache: the search stopped on
+      "No luck — just checking you're human", which is the server's
+      *interstitial* copy printed as a verdict. Three things had to change, and
+      all three are worth keeping in mind before touching this again.
+
+      **The pass binds to a NETWORK, not an address** (`clientNetwork()` in
+      `lib/turnstile.js` — IPv4 /24, IPv6 /64). A phone's egress address moves
+      while the visitor is waiting: carrier CGNAT rotation, or a dual-stack
+      handset answering one request over IPv4 and the next over IPv6. Bound to
+      the exact address, a pass earned a second earlier is not a pass any more.
+      A /24 keeps what the binding is for — a proxy fleet spans the internet,
+      not 256 neighbouring addresses. `::ffff:a.b.c.d` is unwrapped to its
+      IPv4 /24 rather than bucketed by /64, or every mapped address on the
+      internet would share one tag; `check-turnstile.mjs` pins that case.
+
+      **An interactive challenge must be impossible to miss.** Cloudflare
+      decides per visitor whether the check can be silent and asks a phone far
+      more often than a desktop. The widget used to be pinned bottom-right at
+      12px — a small box in the home indicator's lap, on a page still showing a
+      spinner — so nobody tapped it and `timeout-callback` killed the search
+      thirty seconds later. `before-interactive-callback` is Cloudflare saying
+      a tap is needed; that is when the panel goes to the middle of the screen
+      with a line of copy on it.
+
+      **Nothing in `turnstile-client.js` may wait forever, and a failed search
+      gets a Try again.** Every await there is bounded, because the state to
+      degrade into is a page that says what went wrong and offers another go —
+      not a spinner with no end. `price()` in `use-card.js` allows two
+      challenge rounds rather than one, since a second challenge in a row is
+      the normal outcome of drift rather than a failure, and it never lets the
+      server's "one moment" reach the screen as a final answer.
 - [x] **Privacy policy and affiliate disclosure.** Done 2026-08-24,
       `apps/public/app/privacy/page.js` with an `#affiliate` section, plus the
       disclosure inline in the home footer rather than only behind a link. The

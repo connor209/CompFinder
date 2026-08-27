@@ -25,6 +25,13 @@
  */
 export const CHANGELOG = [
   {
+    date: "2026-08-27",
+    changes: [
+      "Searching a card we hadn't priced before could stop dead on a phone, on a screen reading “No luck — just checking you're human”. That was us, not you, and it was two things. The quick human check is tied to the network you're on, and a phone moves between networks on its own while you're waiting — which made the site ask a second time and then give up. And when the check did want a tap, it put the box in the bottom corner of the screen where nobody saw it, on a page that still looked like it was loading.",
+      "The check now asks properly, in the middle of the screen, with a line saying what it wants. It survives a phone changing network mid-search. And when a search does fail, there's a Try again button on the page — before, the only way to have another go was to start over from the home page, which landed you back on the same wall."
+    ]
+  },
+  {
     date: "2026-08-26",
     changes: [
       "A lot of cards were showing no picture, and they weren't a random selection — they were the expensive ones. Trainer Gallery, Galarian Gallery and Shiny Vault cards, Shining Legends, Dragon Majesty, and the older e-Card sets had no art at all, because the index we get pictures from doesn't hold any for them. We now fall back to a second index for anything the first one is missing, which covers around 1,700 cards. The Gold Star cards from the Holon sets are back too — those were being refused because the two indexes spell the name differently.",

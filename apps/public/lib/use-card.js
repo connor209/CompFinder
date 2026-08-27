@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { buildCompTokens, dropWrongSetTotal, dropWrongNumerator } from "./tokens.js";
 import { UK, splitByMarket } from "./markets.js";
@@ -38,7 +38,39 @@ export { queryForCard };
  * fetch costs nothing upstream.
  */
 
-async function price(query, sold, windowDays, retried = false) {
+/**
+ * How many solved challenges one price request may spend before giving up.
+ *
+ * Two, not one, and the second is the mobile fix. A pass is bound to the
+ * network it was earned on, and a phone's egress address can move between
+ * solving the challenge and asking for the price — carrier CGNAT rotation, or
+ * a dual-stack handset answering one request over IPv4 and the next over IPv6.
+ * At one round that second challenge was terminal: the request threw with the
+ * server's "Just checking you're human — one moment" as its message, and the
+ * card page printed that under NO LUCK. Which is the one thing it isn't — the
+ * check hadn't failed, it had been asked twice.
+ *
+ * Bounded, because a pass that never sticks has something else wrong with it
+ * and a loop of challenges is a worse answer than saying so.
+ */
+const CHALLENGE_ROUNDS = 2;
+
+/** The pricing error that means "the human check is what stopped us". */
+function challengeError() {
+  const err = new Error(
+    "We couldn't finish the quick check that you're a person. That's usually a blocked script or a shaky connection rather than anything about this card."
+  );
+  err.needsChallenge = true;
+  return err;
+}
+
+/**
+ * @param opts.round        how many challenges this request has already spent.
+ * @param opts.interactive  may a challenge take over the screen? False for a
+ *   call whose result only enriches a page that is already answering.
+ */
+async function price(query, sold, windowDays, opts = {}) {
+  const { round = 0, interactive = true } = opts;
   const res = await fetch("/api/price", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -46,10 +78,16 @@ async function price(query, sold, windowDays, retried = false) {
   }).then((r) => r.json());
 
   if (!res.ok) {
-    // The bot check asks once and only on a cache miss; solving it and coming
-    // back is a normal path, not an error.
-    if (res.needsChallenge && !retried && challengeAvailable()) {
-      if (await ensurePass()) return price(query, sold, windowDays, true);
+    // The bot check asks only on a cache miss; solving it and coming back is a
+    // normal path, not an error.
+    if (res.needsChallenge && challengeAvailable()) {
+      if (round < CHALLENGE_ROUNDS && (await ensurePass({ interactive }))) {
+        return price(query, sold, windowDays, { round: round + 1, interactive });
+      }
+      // The server's copy is an interstitial — "one moment" — written for the
+      // instant before a challenge appears. It is not a thing to leave on
+      // screen as the final word, so it never reaches the page.
+      throw challengeError();
     }
     throw new Error(res.error || "Pricing request failed.");
   }
@@ -81,6 +119,13 @@ export function seeded(initial, query, windowDays) {
 
 export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null) {
   const [state, setState] = useState(() => seeded(initial, query, windowDays));
+  // Bumping this re-runs the effect below with everything else unchanged,
+  // which is the whole of "try again". A failed search used to have no route
+  // out but the home page, and on the failure that prompted this — the human
+  // check — going back and searching the same card again lands on the same
+  // wall.
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt((n) => n + 1), []);
 
   useEffect(() => {
     if (!query) return undefined;
@@ -95,7 +140,9 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
       const searchText = card.q || query;
       // The window is meaningless to live listings, and passing it would key
       // the same listings under two cache entries.
-      price(searchText, false, DEFAULT_SOLD_WINDOW)
+      // Silent or not at all: the sold answer is already on screen, and the
+      // listings behind "buy it today for" are not worth a checkbox.
+      price(searchText, false, DEFAULT_SOLD_WINDOW, { interactive: false })
         .catch(() => ({ comps: [] }))
         .then((listings) => {
           if (!alive) return;
@@ -181,7 +228,9 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
         // Swallow the live one too, or an unhandled rejection follows the
         // failure out.
         livePromise.catch(() => {});
-        if (alive) setState({ status: "error", query, error: err.message });
+        // needsChallenge travels with the error so the screen can offer another
+        // go at the check rather than treating it as a verdict about the card.
+        if (alive) setState({ status: "error", query, error: err.message, needsChallenge: !!err.needsChallenge });
         return;
       }
       if (!alive) return;
@@ -210,9 +259,9 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
     })();
 
     return () => { alive = false; };
-  }, [query, windowDays, initial]);
+  }, [query, windowDays, initial, attempt]);
 
-  return state;
+  return useMemo(() => ({ ...state, retry }), [state, retry]);
 }
 
 /**

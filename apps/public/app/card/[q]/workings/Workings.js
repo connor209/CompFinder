@@ -44,6 +44,12 @@ export default function Workings({ query, days }) {
               ? state.error
               : <><span className="spinner" /> &nbsp;Adding it up…</>}
           </p>
+          {/* Same failures as the answer screen, so the same way out of them. */}
+          {state.status === "error" && (
+            <p style={{ marginTop: 14 }}>
+              <button type="button" className="link" onClick={state.retry}>Try again →</button>
+            </p>
+          )}
         </div>
       </main>
     );
