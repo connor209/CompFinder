@@ -1521,3 +1521,29 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
   .lp-mock-main { padding-bottom:22px; }
   .lp-section { padding:48px 20px; }
 }
+
+/* ---------- A price you set yourself (PriceOverride) ----------
+   Used in the batch table, on the batch cards and on a Quick Search deep
+   dive. Deliberately loud when a price is yours: the accent ring and the
+   "yours" flag are what stop a hand-typed number reading as one the app
+   stands behind — see apps/app/lib/price-override.js. */
+.po { display:inline-flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.po-value { font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap; }
+.po-value.po-mine { color:var(--accent-2); }
+.po-flag { font-size:10.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--accent-ink); background:var(--accent); border-radius:var(--radius-pill); padding:2px 8px; white-space:nowrap; }
+.po-edit, .po-revert { background:none; border:1px solid var(--line-strong); border-radius:var(--radius-pill); color:var(--ink-soft); font:inherit; font-size:11.5px; font-weight:600; padding:2px 8px; cursor:pointer; line-height:1.5; }
+.po-edit:hover, .po-revert:hover { color:var(--ink); border-color:var(--ink-faint); }
+.po-input { display:inline-flex; align-items:center; gap:2px; border:1px solid var(--line-strong); border-radius:var(--radius-sm); background:var(--surface-2); padding:2px 8px; }
+.po-cur { color:var(--ink-faint); font-family:var(--font-mono); font-size:13px; }
+.po-input input { width:6.5em; border:none; outline:none; background:transparent; color:var(--ink); font-family:var(--font-mono); font-variant-numeric:tabular-nums; font-size:13.5px; font-weight:700; padding:4px 0; }
+.po-ok, .po-cancel { border:1px solid var(--line-strong); border-radius:var(--radius-sm); background:var(--surface-2); color:var(--ink-soft); cursor:pointer; font-size:12px; line-height:1; padding:6px 8px; }
+.po-ok { color:var(--good-ink); border-color:var(--good-ink); }
+.po-cancel:hover { color:var(--ink); }
+.po-error { flex-basis:100%; color:var(--bad-ink); font-size:11.5px; }
+.po-hint { flex-basis:100%; color:var(--ink-faint); font-size:11.5px; }
+.po-compact .po-value { font-size:13px; }
+.po-compact .po-flag { font-size:9.5px; padding:1px 6px; }
+.rc-note-mine { color:var(--accent-2); font-weight:600; }
+/* A deep-dive headline showing a price you set rather than one worked out. */
+.dd-price-mine { color:var(--accent-2); }
+.dd-sub-mine { color:var(--accent-2); font-weight:600; margin-top:8px; }

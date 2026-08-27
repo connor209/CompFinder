@@ -21,6 +21,7 @@
  * Framework-free and app-import-free on purpose, so scripts/check-showstock.mjs
  * can load it under bare node and assert the ladder and the gate.
  */
+import { effectivePence, isOverridden, overriddenFromPence } from "./price-override.js";
 
 /** No sticker goes out below this — you cannot take 40p across a table. */
 export const STICKER_MIN_PENCE = 100;
@@ -70,24 +71,35 @@ export function stickerPence(finalPence) {
  *    evidence that somebody wants that much, not that anybody paid it.
  * 3. Low or no confidence. See HELD_CONFIDENCE.
  *
- * Returns { pence, held, reason } — `reason` is prose, meant to be shown.
+ * **An override is not held, and that is the point of the gate rather than an
+ * exception to it.** Every hold above says the same thing: the EVIDENCE is too
+ * thin to print. A price you typed isn't built on that evidence at all — it is
+ * a decision by the person who will be standing at the table — so a card the
+ * app refused to price is exactly the card an override is for. It still goes
+ * through the ladder: what you typed is an eBay price, and a sticker is cash.
+ *
+ * Returns { pence, held, reason, overridden } — `reason` is prose, meant to
+ * be shown.
  */
 export function stickerFor(rec) {
-  if (!rec || rec.finalPence == null) {
-    return { pence: null, held: true, reason: "no price found" };
+  const pence = effectivePence(rec);
+  const overridden = isOverridden(rec);
+  if (pence == null) {
+    return { pence: null, held: true, reason: "no price found", overridden: false };
   }
-  if (rec.dataSource === "active") {
-    return { pence: null, held: true, reason: "priced from asking prices, not sales" };
+  if (!overridden && rec.dataSource === "active") {
+    return { pence: null, held: true, reason: "priced from asking prices, not sales", overridden: false };
   }
-  if (HELD_CONFIDENCE.includes(rec.confidence)) {
+  if (!overridden && HELD_CONFIDENCE.includes(rec.confidence)) {
     const comps = (rec.included || []).length;
     return {
       pence: null,
       held: true,
-      reason: `${String(rec.confidence).toLowerCase()} confidence — ${comps} comp${comps === 1 ? "" : "s"}`
+      reason: `${String(rec.confidence).toLowerCase()} confidence — ${comps} comp${comps === 1 ? "" : "s"}`,
+      overridden: false
     };
   }
-  return { pence: stickerPence(rec.finalPence), held: false, reason: null };
+  return { pence: stickerPence(pence), held: false, reason: null, overridden };
 }
 
 /**
@@ -194,35 +206,60 @@ export function labelName(title, max = DEFAULT_NAME_MAX) {
 /**
  * A priced run turned into sticker rows: one per card, in run order, each
  * carrying its own held-ness. This is the shape the Show Desk write-back
- * consumes and the shape the label export will render — defined once, here,
- * so the number printed on a label and the number stored against the card
- * cannot come from two different roundings.
+ * consumes and the shape the label export renders — defined once, here, so the
+ * number printed on a label and the number stored against the card cannot come
+ * from two different roundings.
+ *
+ * `overrides` is keyed by POSITION in the run, which is the same key a saved
+ * run restores under and the order this list renders in — see the note in
+ * Panel.js. Read the block inside for how it differs from a price typed on the
+ * result itself.
  */
 export function stickerRows(results, { nameMax = DEFAULT_NAME_MAX, overrides = {} } = {}) {
   return (results || []).map((r, i) => {
     const s = stickerFor(r.rec);
     const suggested = s.pence;
+    // TWO hand-set prices meet here and they are NOT the same thing, so neither
+    // is named just "override":
+    //
+    //   s.overridden   a price typed on the RESULT — an eBay price, which the
+    //                  ladder turns into cash and which also lists, exports and
+    //                  goes into the price history (see price-override.js).
+    //   overrides[i]   a price typed on the STICKER, in whole pounds, which
+    //                  travels no further than the label and the show desk.
+    //
+    // The sticker one wins where both are set: it is the later, more specific
+    // decision, and it is the number somebody typed while looking at the label.
+    //
     // A price set by hand WINS, and it wins over a hold as much as over a
     // suggestion. Holding a thin price back is the right default — the engine
     // has nothing to stand on — but it was never meant to mean the card can't
     // be sold. Someone who has the card in their hand knows more than the comps
     // do, and typing a number is them saying so.
     const set = overrides?.[i];
-    const overridden = set != null && Number.isFinite(Number(set)) && Number(set) > 0;
+    const stickerSet = set != null && Number.isFinite(Number(set)) && Number(set) > 0;
     return {
       sku: r.sku || "",
       title: r.title || "",
       label: labelName(r.title, nameMax),
-      recommendedPence: r.rec?.finalPence ?? null,
+      // The price the sticker was rounded FROM — yours where you set one on the
+      // result, so the "eBay £x" the screen prints beside the sticker is the
+      // price the card would actually be listed at, not one it was talked out
+      // of.
+      recommendedPence: effectivePence(r.rec),
+      // What the app had said, kept only where it was overridden: a row that
+      // can't say what a price replaced can't be checked against its run.
+      overriddenFromPence: overriddenFromPence(r.rec),
+      pricedByHand: s.overridden,
       confidence: r.rec?.confidence ?? null,
       suggestedPence: suggested,
-      stickerPence: overridden ? Math.round(Number(set)) : suggested,
-      held: overridden ? false : s.held,
+      stickerPence: stickerSet ? Math.round(Number(set)) : suggested,
+      held: stickerSet ? false : s.held,
       // Only "edited" when it actually differs from what we suggested: a saved
       // run re-opened at the show rehydrates every price it wrote, and marking
       // all of them as hand-set would say something untrue about most.
-      edited: overridden && suggested !== Math.round(Number(set)),
-      reason: overridden ? null : s.reason
+      edited: stickerSet && suggested !== Math.round(Number(set)),
+      reason: stickerSet ? null : s.reason
     };
   });
 }

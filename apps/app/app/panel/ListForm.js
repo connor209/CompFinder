@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { createClient } from "@/lib/supabase/client";
 import { resizeImage } from "@/lib/resizeImage";
@@ -49,6 +49,23 @@ export default function ListForm({ card, suggestedPence, language, imageUrl, onC
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+
+  /**
+   * The price can change under an open form — that is what the override
+   * control on the deep dive behind it does. Left alone, the box would still
+   * hold the number you just rejected, and the listing would go up at it.
+   *
+   * Only while the box still holds what WE put there: a price typed into this
+   * form is a decision about this listing, and an override arriving afterwards
+   * has no business overwriting it.
+   */
+  const seededPence = useRef(suggestedPence);
+  useEffect(() => {
+    if (suggestedPence == null || suggestedPence === seededPence.current) return;
+    const seeded = seededPence.current != null ? (seededPence.current / 100).toFixed(2) : "";
+    seededPence.current = suggestedPence;
+    setPrice((cur) => (cur === seeded ? (suggestedPence / 100).toFixed(2) : cur));
+  }, [suggestedPence]);
 
   async function uploadPhoto(file) {
     if (!file) return;

@@ -18,6 +18,7 @@
  * keeps the file free of app imports so `scripts/check-batchsave.mjs` can load
  * it under bare node and assert the round trip.
  */
+import { effectivePence } from "./price-override.js";
 
 /**
  * How long a saved run is kept. A run is a working document — you price a
@@ -139,6 +140,11 @@ export function slimRec(rec) {
   return {
     rawPence: rec.rawPence ?? null,
     finalPence: rec.finalPence ?? null,
+    // A price you typed. Stored beside the recommendation rather than in place
+    // of it, so re-opening a run shows both — and so a run downloaded as a
+    // corpus can still be re-priced against what the ENGINE said, which is the
+    // only measurement of whether a rule change helped. See price-override.js.
+    overridePence: rec.overridePence ?? null,
     confidence: rec.confidence ?? null,
     dataSource: rec.dataSource ?? null,
     note: storableText(rec.note),
@@ -275,7 +281,9 @@ export async function saveBatch(supabase, userId, { results, activeByIndex = {},
     pool_name: poolName,
     filters,
     item_count: rows.length,
-    priced_count: rows.filter((r) => r.rec && r.rec.finalPence != null).length,
+    // What the run priced, counting a card you priced by hand — the saved-runs
+    // list is a record of decisions, and a card with your number on it is one.
+    priced_count: rows.filter((r) => effectivePence(r.rec) != null).length,
     status,
     expires_at: expiresAtIso()
   };
@@ -392,6 +400,29 @@ export async function updateItemActive(supabase, batchId, position, rec) {
   const { error } = await supabase
     .from("price_batch_items")
     .update({ active_rec: slimRec(rec) })
+    .eq("batch_id", batchId)
+    .eq("position", position);
+  if (error) throw error;
+}
+
+/**
+ * Write one row's recommendation back — the path an override takes into an
+ * already-saved run.
+ *
+ * The same reasoning as updateItemActive, and it matters more: a run is
+ * re-opened days later precisely to list off it, so a price corrected then is
+ * a price the record has to carry. It rewrites the whole `rec` because the
+ * override lives inside that jsonb column (no migration, and the shape is
+ * owned by slimRec either way); the rec handed in is the one on screen, which
+ * for a re-opened run is the one that came out of this table, comps and all.
+ *
+ * A failure is worth showing rather than swallowing — the whole promise of a
+ * saved run is that it comes back as you left it.
+ */
+export async function updateItemRec(supabase, batchId, position, rec) {
+  const { error } = await supabase
+    .from("price_batch_items")
+    .update({ rec: slimRec(rec) })
     .eq("batch_id", batchId)
     .eq("position", position);
   if (error) throw error;

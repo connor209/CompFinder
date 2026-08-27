@@ -15,9 +15,11 @@ import {
   batchRows,
   restoreResults,
   updateItemActive,
+  updateItemRec,
   FILTER_KEYS,
   RETENTION_DAYS
 } from "@/lib/batch-store.js";
+import { effectivePence, isOverridden, overrideNote, withOverride } from "@/lib/price-override.js";
 import { buildPool, poolLabel, stickerRows, stickerSummary, NAME_LENGTHS, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
 import { labelFile } from "@/lib/labelexport.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
@@ -36,6 +38,7 @@ import Browse from "./Browse";
 import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
 import SavedBatches from "./SavedBatches";
+import PriceOverride from "./PriceOverride";
 import MarketLinks from "./MarketLinks";
 import { Icon } from "./icons";
 import ThemeSeg from "./ThemeSeg";
@@ -355,6 +358,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const [batchNotice, setBatchNotice] = useState("");
   const [batchNoticeIsError, setBatchNoticeIsError] = useState(false);
   const [savingBatch, setSavingBatch] = useState(false);
+  // Bumped every time a price is set by hand. Only there to drive the
+  // sessionStorage write below — an override is the one change to a run that
+  // doesn't happen at the end of one.
+  const [overrideNonce, setOverrideNonce] = useState(0);
   const [batchesNonce, setBatchesNonce] = useState(0);
 
   const settings = APP_SETTINGS;
@@ -476,6 +483,12 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   useEffect(() => {
     if (!running && results.length > 0) writeLive();
   }, [running, results.length, writeLive]);
+  // A price you typed is worth the same megabyte the run was: losing it to a
+  // deep dive is exactly the failure the live copy exists to prevent, and it
+  // would be worse here, because nothing on screen would say it had gone.
+  useEffect(() => {
+    if (overrideNonce > 0) writeLive();
+  }, [overrideNonce, writeLive]);
 
   // On mount: an id in the URL wins (that is someone deliberately re-opening a
   // run), otherwise restore whatever this tab was last looking at. Only on the
@@ -1191,26 +1204,81 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       } = await supabase.auth.getUser();
       if (!user) return;
 
-      const records = priced.map((r) => ({
-        user_id: user.id,
-        title: r.title,
-        sku: r.sku || null,
-        query: r.query,
-        ebay_site: ebaySite,
-        data_source: r.rec.dataSource,
-        confidence: r.rec.confidence,
-        recommended_pence: r.rec.finalPence ?? null,
-        current_pence:
-          r.csvItem && r.csvItem.startPrice ? Math.round(parseFloat(r.csvItem.startPrice) * 100) : null,
-        comps_used: r.rec.included.length,
-        comps_excluded: r.rec.excluded.length,
-        note: r.rec.note || null
-      }));
+      const records = priced.map((r) => historyRecord({ userId: user.id, row: r, rec: r.rec, ebaySite }));
 
       const { error } = await supabase.from("price_checks").insert(records);
       if (error) console.warn("Could not save price history:", error.message);
     } catch (err) {
       console.warn("Could not save price history:", err.message);
+    }
+  }
+
+  /**
+   * A price you set by hand, into the same history the run wrote to.
+   *
+   * A NEW row rather than a correction of the one this run inserted, and that
+   * is not laziness: `price_checks` grants select, insert and delete and no
+   * UPDATE policy (supabase/schema.sql), so an update would quietly change
+   * nothing at all — the worst possible outcome for a record. A new row is
+   * also the truer account. Pricing the card was one decision at one time;
+   * overriding it is another, later, and buildHistoryIndex() in stockcheck.js
+   * reads the most recent per card, so "last priced" becomes your number the
+   * moment you set it.
+   */
+  async function recordPriceDecision(row, rec) {
+    try {
+      const supabase = createClient();
+      const {
+        data: { user }
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const { error } = await supabase
+        .from("price_checks")
+        .insert(historyRecord({ userId: user.id, row, rec, ebaySite }));
+      if (error) console.warn("Could not save the price you set:", error.message);
+    } catch (err) {
+      console.warn("Could not save the price you set:", err.message);
+    }
+  }
+
+  /**
+   * Put your price on one row of the run — or take it back off.
+   *
+   * Three copies of a run exist and all three have to hear about this, because
+   * the one you list from is whichever you happen to reach for next:
+   *
+   *   - React state, which is what every export and the sticker panel read;
+   *   - the sessionStorage copy, which is what survives a deep dive;
+   *   - the saved run in Supabase, which is what survives the tab.
+   *
+   * The saved run is patched row by row (`updateItemRec`) rather than re-saved
+   * whole: saving creates a NEW run, and an afternoon of corrections would
+   * leave a saved-runs list of near-identical megabyte copies with no way to
+   * tell which one you were listing from.
+   */
+  async function setOverrideFor(index, pence) {
+    const row = results[index];
+    if (!row) return;
+    const nextRec = withOverride(row.rec, pence);
+    // Typing the same number back in, or confirming an empty box on a row that
+    // never had an override, changes nothing — and withOverride hands back the
+    // very same rec to say so. Recording a decision that wasn't one would put
+    // a duplicate row in your price history every time you tabbed through.
+    if (nextRec === row.rec) return;
+    const nextRow = { ...row, rec: nextRec };
+    setResults((prev) => prev.map((r, i) => (i === index ? nextRow : r)));
+    setOverrideNonce((n) => n + 1);
+
+    recordPriceDecision(nextRow, nextRec);
+
+    if (!openBatch?.id) return;
+    try {
+      await updateItemRec(createClient(), openBatch.id, index, nextRec);
+    } catch (err) {
+      setBatchNoticeIsError(true);
+      setBatchNotice(
+        `Your price for "${row.title}" is on screen, but this saved run could NOT be updated with it: ${err.message}. Press Save this run to keep a copy that has it.`
+      );
     }
   }
 
@@ -1285,9 +1353,12 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   }
 
   function exportCsv() {
+    // "Overridden From" is APPENDED rather than slotted in next to the price:
+    // this file gets opened in a sheet that somebody has already built columns
+    // against, and a new column in the middle silently moves every one of them.
     const header =
       "SKU,Title,Simplified Query,Comps Used,Comps Excluded,Data Source,Confidence," +
-      "Already Listed,Listed Price,Last Priced,Current Price,Recommended Price,Note\n";
+      "Already Listed,Listed Price,Last Priced,Current Price,Recommended Price,Note,Overridden From\n";
     const rows = results.map((r) => {
       const currentPrice = r.csvItem && r.csvItem.startPrice ? r.csvItem.startPrice : "";
       const k = knownFor(r);
@@ -1297,10 +1368,17 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       const lastCell = k?.history ? (k.history.match.pricePence / 100).toFixed(2) : "";
       const quote = (cells) => cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
       if (!r.rec) {
-        return quote([r.sku || "", r.title, r.query, "", "", "", "Skipped", stockCell, listedCell, lastCell, currentPrice, "", r.failed]);
+        return quote([r.sku || "", r.title, r.query, "", "", "", "Skipped", stockCell, listedCell, lastCell, currentPrice, "", r.failed, ""]);
       }
-      const price = r.rec.finalPence != null ? (r.rec.finalPence / 100).toFixed(2) : "";
-      return quote([r.sku || "", r.title, r.query, r.rec.included.length, r.rec.excluded.length, r.rec.dataSource, r.rec.confidence, stockCell, listedCell, lastCell, currentPrice, price, r.rec.note]);
+      // The price column is what you'd list at, so it is YOURS where you set
+      // one. What the app had said moves to the last column rather than being
+      // dropped — a sheet that can't show what a price replaced can't be
+      // checked against the run it came from.
+      const pence = effectivePence(r.rec);
+      const price = pence != null ? (pence / 100).toFixed(2) : "";
+      const wasPrice = isOverridden(r.rec) && r.rec.finalPence != null ? (r.rec.finalPence / 100).toFixed(2) : "";
+      const noteCell = [overrideNote(r.rec), r.rec.note].filter(Boolean).join(" ");
+      return quote([r.sku || "", r.title, r.query, r.rec.included.length, r.rec.excluded.length, r.rec.dataSource, r.rec.confidence, stockCell, listedCell, lastCell, currentPrice, price, noteCell, wasPrice]);
     });
     const blob = new Blob([header + rows.join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -1348,6 +1426,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         shipped: r.rec
           ? {
               rawPence: r.rec.rawPence ?? null, finalPence: r.rec.finalPence ?? null,
+              // Beside finalPence, never instead of it: recurse-batch.mjs
+              // re-prices this corpus and compares against what the ENGINE
+              // said, which a hand-typed number overwriting it would poison.
+              overridePence: r.rec.overridePence ?? null,
               confidence: r.rec.confidence ?? null, dataSource: r.rec.dataSource ?? null,
               priceHeld: !!r.rec.priceHeld, note: r.rec.note || "",
               used: (r.rec.included || []).length, excluded: (r.rec.excluded || []).length
@@ -1869,14 +1951,26 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           <p className="hint">
             Cash-rounded from the recommended price — £1 steps to £20, £5 to £100, £10 above — because
             nobody hands 50p pieces across a table. A thin price is held back rather than printed: a
-            sticker has no room for the caveat the screen would show next to it.
+            sticker has no room for the caveat the screen would show next to it.{" "}
+            <b>A price you set yourself is never held</b>, either way round — that is what the hold is
+            asking for. Override the price on the results above and it rounds to the ladder like any
+            other, because what you type there is an eBay price; type in the box here and it goes on
+            the label exactly as typed, because here you are writing the label.
           </p>
           <div className="stack-list">
             {stickers.map((r, i) => (
               <div className="ps-row" key={i}>
                 <span className="stack-sku">{r.sku || "—"}</span>
                 <span className="stack-title" title={r.title}>{r.label || <em>—</em>}</span>
-                <span className="hint-small" style={{ color: "var(--ink-faint)", flex: "none" }}>
+                {/* The price this sticker was rounded FROM — yours where you
+                    set one on the result above, which is why it can differ
+                    from what the run worked out. The sticker box to the right
+                    is a different decision again: that one is the label. */}
+                <span
+                  className="hint-small"
+                  style={{ color: r.pricedByHand ? "var(--accent-2)" : "var(--ink-faint)", flex: "none" }}
+                  title={r.overriddenFromPence != null ? `You priced this card by hand — the app had £${(r.overriddenFromPence / 100).toFixed(2)}` : undefined}
+                >
                   {r.recommendedPence != null ? `eBay £${(r.recommendedPence / 100).toFixed(2)}` : "no price"}
                 </span>
                 {r.held ? (
@@ -1957,7 +2051,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           <span className="eyebrow">Results</span>
           <div style={{ display: "flex", gap: 8 }}>
             {(() => {
-              const pricedCount = results.filter((r) => r.rec && r.rec.finalPence != null).length;
+              const pricedCount = results.filter((r) => effectivePence(r.rec) != null).length;
               return (
                 <button className="btn btn-primary" disabled={pricedCount === 0} onClick={() => setShowBulkList(true)}>
                   🏷️ List on eBay{pricedCount ? ` (${pricedCount})` : ""}
@@ -1999,14 +2093,17 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         {showBulkList ? (
           <BulkListModal
             cards={results
-              .filter((r) => r.rec && r.rec.finalPence != null)
+              .filter((r) => effectivePence(r.rec) != null)
               .map((r) => ({
                 baseTitle: r.title,
                 name: (r.nameTokens && r.nameTokens.join(" ")) || r.title,
                 number: r.cardNumber || "",
                 set: r.set || "",
                 sku: r.sku || "",
-                pricePence: r.rec.finalPence
+                // What actually goes on the listing. A card priced by hand
+                // lists at your number, including one the app couldn't price
+                // at all — which is half the reason to type one.
+                pricePence: effectivePence(r.rec)
               }))}
             onClose={() => setShowBulkList(false)}
             onDone={() => {}}
@@ -2093,6 +2190,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 active={activeByIndex[origIndex]}
                 onCheckActive={() => fetchActiveFor(r, origIndex)}
                 onDeepDive={deepDiveCard}
+                onOverride={(pence) => setOverrideFor(origIndex, pence)}
               />
             ))}
           </div>
@@ -2114,6 +2212,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                     showCurrentPrice={showCurrentPrice}
                     active={activeByIndex[origIndex]}
                     onCheckActive={() => fetchActiveFor(r, origIndex)}
+                    onOverride={(pence) => setOverrideFor(origIndex, pence)}
                   />
                 ))}
               </tbody>
@@ -2184,6 +2283,37 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   );
 }
 
+/**
+ * One row of price history, from one priced card.
+ *
+ * Defined once because two things write it — the end of a run, and a price you
+ * set by hand afterwards — and a history whose rows disagree about what
+ * "recommended" means is a history nobody can read.
+ *
+ * `recommended_pence` is the EFFECTIVE price: the number actually gone with,
+ * because that is what the column is for and what stockcheck.js reads back as
+ * "last priced". The engine's figure is not lost — overrideNote() spells it
+ * out in `note`, which the History screen already shows.
+ */
+function historyRecord({ userId, row, rec, ebaySite }) {
+  const note = [overrideNote(rec), rec?.note || ""].filter(Boolean).join(" ");
+  return {
+    user_id: userId,
+    title: row.title,
+    sku: row.sku || null,
+    query: row.query,
+    ebay_site: ebaySite,
+    data_source: rec?.dataSource ?? null,
+    confidence: rec?.confidence ?? null,
+    recommended_pence: effectivePence(rec),
+    current_pence:
+      row.csvItem && row.csvItem.startPrice ? Math.round(parseFloat(row.csvItem.startPrice) * 100) : null,
+    comps_used: (rec?.included || []).length,
+    comps_excluded: (rec?.excluded || []).length,
+    note: note || null
+  };
+}
+
 function countReasons(rec) {
   const counts = {};
   for (const e of rec.excluded) counts[e.exclusionReason] = (counts[e.exclusionReason] || 0) + 1;
@@ -2200,7 +2330,7 @@ function KnownCell({ known, rec }) {
   const hist = known?.history;
   if (!stock && !hist) return <span className="hint-small">—</span>;
   const listed = stock?.match?.pricePence ?? null;
-  const gap = priceGap(rec?.finalPence ?? null, listed);
+  const gap = priceGap(effectivePence(rec), listed);
   return (
     <span className="kn">
       {stock ? (
@@ -2230,9 +2360,13 @@ function KnownCell({ known, rec }) {
   );
 }
 
-function ResultRow({ r, known, showCurrentPrice, active, onCheckActive }) {
+function ResultRow({ r, known, showCurrentPrice, active, onCheckActive, onOverride }) {
   const [open, setOpen] = useState(false);
   if (!r.rec) {
+    // A card the app couldn't price still gets a price box. It is the strongest
+    // case for one: the row is going in a box with a label on it either way,
+    // and the alternative to typing a number here is pricing it somewhere else
+    // and losing the run's record of what you decided.
     return (
       <tr>
         <td>{r.sku}</td>
@@ -2240,12 +2374,13 @@ function ResultRow({ r, known, showCurrentPrice, active, onCheckActive }) {
         <td>{r.query}</td><td>—</td>
         <td><span className="conf-badge conf-low">Skipped</span></td>
         <td><KnownCell known={known} rec={null} /></td>
-        <td>—</td><td>—</td><td>—</td><td>{r.failed}</td>
+        <td>—</td>
+        <td><PriceOverride rec={null} onSet={onOverride} compact /></td>
+        <td>—</td><td>{r.failed}</td>
       </tr>
     );
   }
   const rec = r.rec;
-  const priceStr = rec.finalPence != null ? CompFinderPricing.toPoundsStr(rec.finalPence) : "—";
   const reasonCounts = countReasons(rec);
   const reasonBreakdown = Object.entries(reasonCounts).map(([reason, n]) => `${n} ${reason}`).join(", ");
   const compsCell = `${rec.included.length} used / ${rec.excluded.length} excluded` + (reasonBreakdown ? ` (${reasonBreakdown})` : "");
@@ -2258,7 +2393,8 @@ function ResultRow({ r, known, showCurrentPrice, active, onCheckActive }) {
   if (showCurrentPrice && r.csvItem && r.csvItem.startPrice) {
     const currentPence = Math.round(parseFloat(r.csvItem.startPrice) * 100);
     currentCell = CompFinderPricing.toPoundsStr(currentPence);
-    if (rec.finalPence != null && Math.abs(rec.finalPence - currentPence) >= 300) rowClass = "compfinder-big-delta";
+    const pence = effectivePence(rec);
+    if (pence != null && Math.abs(pence - currentPence) >= 300) rowClass = "compfinder-big-delta";
   }
 
   const canExpand = rec.included.length + rec.excluded.length > 0 || !!(active && active.rec);
@@ -2286,9 +2422,10 @@ function ResultRow({ r, known, showCurrentPrice, active, onCheckActive }) {
           )}
         </td>
         <td><KnownCell known={known} rec={rec} /></td>
-        <td>{currentCell}</td><td>{priceStr}</td>
+        <td>{currentCell}</td>
+        <td><PriceOverride rec={rec} onSet={onOverride} compact /></td>
         <td><ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} /></td>
-        <td>{rec.note}</td>
+        <td>{[overrideNote(rec), rec.note].filter(Boolean).join(" ")}</td>
       </tr>
       {open && canExpand && (
         <tr className="comps-detail-row">
@@ -2299,7 +2436,7 @@ function ResultRow({ r, known, showCurrentPrice, active, onCheckActive }) {
   );
 }
 
-function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepDive }) {
+function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepDive, onOverride }) {
   const [open, setOpen] = useState(false);
 
   if (!r.rec) {
@@ -2311,12 +2448,20 @@ function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepD
         </div>
         {r.sku ? <div className="rc-sku">SKU {r.sku}</div> : null}
         {r.failed ? <div className="rc-note">{r.failed}</div> : null}
+        {/* See the note on the table's skipped row: a card with no price is
+            the card most likely to need one typed. */}
+        <div className="rc-prices">
+          <div className="rc-pcell">
+            <span className="k">Your price</span>
+            <span className="v"><PriceOverride rec={null} onSet={onOverride} /></span>
+          </div>
+        </div>
       </div>
     );
   }
 
   const rec = r.rec;
-  const priceStr = rec.finalPence != null ? CompFinderPricing.toPoundsStr(rec.finalPence) : "—";
+  const mine = isOverridden(rec);
   const reasonCounts = countReasons(rec);
   const reasonBreakdown = Object.entries(reasonCounts).map(([reason, n]) => `${n} ${reason}`).join(", ");
   const compsCell = `${rec.included.length} used / ${rec.excluded.length} excluded` + (reasonBreakdown ? ` (${reasonBreakdown})` : "");
@@ -2329,9 +2474,10 @@ function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepD
   let bigDelta = false;
   if (showCurrentPrice && r.csvItem && r.csvItem.startPrice) {
     currentPence = Math.round(parseFloat(r.csvItem.startPrice) * 100);
-    if (rec.finalPence != null && Math.abs(rec.finalPence - currentPence) >= 300) bigDelta = true;
+    if (effectivePence(rec) != null && Math.abs(effectivePence(rec) - currentPence) >= 300) bigDelta = true;
   }
-  const delta = currentPence != null && rec.finalPence != null ? rec.finalPence - currentPence : null;
+  const delta =
+    currentPence != null && effectivePence(rec) != null ? effectivePence(rec) - currentPence : null;
 
   return (
     <div className={`rc${bigDelta ? " rc-big-delta" : ""}`}>
@@ -2347,8 +2493,8 @@ function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepD
 
       <div className="rc-prices">
         <div className="rc-pcell">
-          <span className="k">Recommended</span>
-          <span className="v big">{priceStr}</span>
+          <span className="k">{mine ? "Your price" : "Recommended"}</span>
+          <span className="v big"><PriceOverride rec={rec} onSet={onOverride} /></span>
         </div>
         {currentPence != null ? (
           <div className="rc-pcell">
@@ -2365,6 +2511,7 @@ function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepD
         </div>
       </div>
 
+      {overrideNote(rec) ? <div className="rc-note rc-note-mine">{overrideNote(rec)}</div> : null}
       {rec.note ? <div className="rc-note">{rec.note}</div> : null}
 
       <div className="rc-foot">

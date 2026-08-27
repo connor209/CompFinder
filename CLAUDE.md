@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs seventeen table tests, no framework, non-zero exit on failure:
+`npm run check` runs eighteen table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -80,6 +80,10 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-showstock.mjs` — the show pool and the price that reaches a
   label: the cash ladder as a table, which prices are held back, and that a
   column added by a hand-applied migration degrades instead of breaking.
+- `scripts/check-override.mjs` — a price you typed: what counts as one, that
+  the recommendation is never edited, that the sticker gate lets yours through,
+  and a grep over every path that spends money for a direct read of
+  `finalPence`.
 - `scripts/check-labels.mjs` — the printer's file: the two columns in the
   printer's order, names cut to real label widths, and a workbook built for
   real and read back out of its own bytes.
@@ -616,6 +620,70 @@ Migration 023 has to be applied in Supabase. Until it is, the panel says so on
 the run it couldn't save, and the sessionStorage copy still carries the run
 across the panel — but not across a reload.
 
+## A price you set beats a price we worked out
+
+The engine answers from comps. Sometimes you know something it cannot — the
+card is signed, every comp is the reverse holo, a customer has already agreed a
+number, or SoldComps came back with nothing and the card still has to go in a
+box with a price on it. **Every price in the app is now editable**: on the
+Batch rows (table and cards alike), on a Quick Search deep dive, and on the
+Show Desk, where the sticker itself can be typed.
+
+`apps/app/lib/price-override.js` owns what the number means, and three rules
+hold it together:
+
+- **The recommendation is never edited.** `finalPence` stays exactly what the
+  engine produced and `overridePence` sits beside it. That is what makes an
+  override one click to undo, and it is what keeps a corpus honest —
+  `recurse-batch.mjs` re-prices a downloaded run and compares against
+  `finalPence`, so a hand-typed number overwriting it would poison the only
+  measurement we have of whether a rule change helped.
+- **Everything that spends money reads `effectivePence()`, never
+  `finalPence`.** The eBay upload CSV, the bulk lister, the sticker ladder, the
+  saved run and the price history all go through it. A caller that reads
+  `finalPence` is not a cosmetic bug — the screen shows your £40, the file
+  uploaded to eBay carries the app's £12.49, and nothing anywhere says they
+  disagree. `check-override.mjs` greps the money-out paths for exactly that.
+  The two places that legitimately keep the engine's figure are the ones making
+  a statement about the MARKET rather than about a price: "sellers asking above
+  recent sold", and the "under" badge on a cheap live listing.
+- **An override is loud.** Every screen marks it and says what it replaced,
+  every export carries both numbers, and the note (one sentence, one
+  definition) travels with it. A price nobody can tell was typed by hand is
+  indistinguishable from one the tool stands behind, and knowing which is which
+  is the whole proposition.
+
+Three more things worth knowing:
+
+- **A card the app could not price still takes one.** That is the strongest
+  case for typing a number, so `withOverride(null, pence)` builds a minimal rec
+  around it, marked `dataSource: "override"` and carrying no comps — because
+  there were none.
+- **An overridden row leaves the review queue.** The queue asks "do you agree
+  with this?", and a row carrying your own number has answered.
+- **A price you set is never held back from a sticker**, which is what the hold
+  is asking for rather than an exception to it. It still goes through the cash
+  ladder: what you type on the Batch screen is an eBay price. What you type on
+  the Show Desk is the label itself, so that one is NOT rounded — rounding a
+  number somebody typed onto a sticker is the app arguing with the person
+  holding the pen.
+
+**Three copies of a run all have to hear about it**, because the one you list
+from is whichever you reach for next: React state, the `cf-batch-live`
+sessionStorage copy, and the saved run in Supabase. The saved run is patched
+row by row (`updateItemRec`) rather than re-saved — saving creates a NEW run,
+and an afternoon of corrections would leave a saved-runs list of near-identical
+megabyte copies with no way to tell which one you were listing from.
+
+**Price history gets a NEW row, not a correction**, and that is forced as well
+as right: `price_checks` grants select, insert and delete and no UPDATE policy
+(`supabase/schema.sql`), so an update would quietly change nothing — the worst
+possible outcome for a record. It is also the truer account, since
+`buildHistoryIndex()` reads the most recent row per card and "last priced"
+should become your number the moment you set it. No migration: the engine's
+figure rides in the existing `note` column, which the History screen already
+shows.
+
 ## A show sticker is not a listing price
 
 The Show Desk checks stock out to a show (migration 016), and those open
@@ -650,6 +718,14 @@ stranger their card is worth.
   absorbed or editable; this one is stuck to a card and carried to a table,
   where the only correction is peeling it off in front of a customer. Nothing
   is held quietly — the count and the reason are both on screen.
+- **A sticker can also be typed at the desk.** ✎ £ on a Show Desk row sets or
+  clears `sticker_pence` directly — for the card added to the box after the
+  run, or a price you have changed your mind about with the table in front of
+  you. Neither is worth re-pricing 43 cards for. Same rule as the box in the
+  sticker panel, deliberately: whole pounds, refused rather than rounded, and
+  not put through the ladder, because a sticker typed anywhere is the label
+  rather than an eBay price. A price overridden on a RESULT is the other thing
+  and is laddered like any other — see the override section above.
 - **Stickers are written back on a click, not silently**, onto the checkout
   they came from, matched by SKU rather than row order — the results list gets
   filtered and re-sorted, and a sticker on the wrong card is a card sold for
