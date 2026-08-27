@@ -636,6 +636,15 @@ stranger their card is worth.
   resolution loss at the bottom is real: below about £2 everything collapses to
   £1, which is right for a show table and wrong for bulk — that wants a "3 for
   £5" tub, not a label each.
+- **Any sticker can be set by hand, and a hand-set price beats a hold.** The
+  gate below is a default, not a verdict — someone holding the card knows more
+  than the comps do. Typing a price on a held row is what makes it printable,
+  which matters because the alternative is carrying that card to the table with
+  no sticker on it. Whole pounds only: `labelPrice()` rounds to the pound, so
+  accepting £7.50 would quietly print £8. Overrides are keyed by position in
+  the run, flow to both the label file and the write-back, and a saved run
+  re-opened at the show rehydrates the prices it wrote — a reprint has to say
+  what the first print said.
 - **A thin price is HELD, not printed.** Low or no confidence, or a price built
   from active listings, gets no sticker. Everywhere else a bad price is
   absorbed or editable; this one is stuck to a card and carried to a table,

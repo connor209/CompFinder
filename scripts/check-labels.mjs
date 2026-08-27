@@ -129,6 +129,15 @@ ok("a held card has no blank label waiting to be priced at the table",
 eq("every row has exactly the printer's two keys",
   [...new Set(rows.flatMap((r) => Object.keys(r)))], ["Price", "Name"]);
 
+// A price set by hand reaches the label — including on a card the engine
+// held. That is the whole point of being able to type one: the alternative is
+// carrying the card to the table with no sticker on it.
+const HAND = labelRows(RESULTS, { overrides: { 1: 500, 3: 1500 } });
+eq("hand-set prices are on the labels", HAND.map((r) => r.Price),
+  ["£840", "£5", "£15", "£12"]);
+eq("and in run order, next to the right cards", HAND.map((r) => r.Name),
+  ["Umbreon VMAX 215/203", "Charizard V 154/185", "Mew ex 232/165", "Blastoise 2/102"]);
+
 // --- 5. XML the sheet can actually hold ------------------------------------
 eq("ampersands and angle brackets are escaped",
   xmlText("Charizard & <friends>"), "Charizard &amp; &lt;friends&gt;");
@@ -183,6 +192,16 @@ eq("a run with nothing priced writes no file", labelFile([]).length, 0);
 eq("the panel and the file agree on the cut name",
   stickerRows(RESULTS, { nameMax: 20 })[0].label,
   labelRows(RESULTS, { nameMax: 20 })[0].Name);
+
+// The same for a price typed by hand: what the panel shows and what the label
+// prints must be one number. Two would be invisible — both look like prices.
+const opts = { nameMax: 20, overrides: { 1: 500 } };
+eq("the panel and the file agree on a hand-set price",
+  `£${Math.round(stickerRows(RESULTS, opts)[1].stickerPence / 100)}`,
+  labelRows(RESULTS, opts).find((r) => r.Price === "£5").Price);
+eq("and the file carries every priced card the panel shows",
+  labelRows(RESULTS, opts).length,
+  stickerRows(RESULTS, opts).filter((r) => !r.held).length);
 
 const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
 if (!panel.includes("labelFile(")) {

@@ -198,18 +198,31 @@ export function labelName(title, max = DEFAULT_NAME_MAX) {
  * so the number printed on a label and the number stored against the card
  * cannot come from two different roundings.
  */
-export function stickerRows(results, { nameMax = DEFAULT_NAME_MAX } = {}) {
-  return (results || []).map((r) => {
+export function stickerRows(results, { nameMax = DEFAULT_NAME_MAX, overrides = {} } = {}) {
+  return (results || []).map((r, i) => {
     const s = stickerFor(r.rec);
+    const suggested = s.pence;
+    // A price set by hand WINS, and it wins over a hold as much as over a
+    // suggestion. Holding a thin price back is the right default — the engine
+    // has nothing to stand on — but it was never meant to mean the card can't
+    // be sold. Someone who has the card in their hand knows more than the comps
+    // do, and typing a number is them saying so.
+    const set = overrides?.[i];
+    const overridden = set != null && Number.isFinite(Number(set)) && Number(set) > 0;
     return {
       sku: r.sku || "",
       title: r.title || "",
       label: labelName(r.title, nameMax),
       recommendedPence: r.rec?.finalPence ?? null,
       confidence: r.rec?.confidence ?? null,
-      stickerPence: s.pence,
-      held: s.held,
-      reason: s.reason
+      suggestedPence: suggested,
+      stickerPence: overridden ? Math.round(Number(set)) : suggested,
+      held: overridden ? false : s.held,
+      // Only "edited" when it actually differs from what we suggested: a saved
+      // run re-opened at the show rehydrates every price it wrote, and marking
+      // all of them as hand-set would say something untrue about most.
+      edited: overridden && suggested !== Math.round(Number(set)),
+      reason: overridden ? null : s.reason
     };
   });
 }
