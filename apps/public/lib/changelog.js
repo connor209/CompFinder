@@ -27,8 +27,9 @@ export const CHANGELOG = [
   {
     date: "2026-08-27",
     changes: [
-      "Searching a card we hadn't priced before could stop dead on a phone, on a screen reading “No luck — just checking you're human”. That was us, not you, and it was two things. The quick human check is tied to the network you're on, and a phone moves between networks on its own while you're waiting — which made the site ask a second time and then give up. And when the check did want a tap, it put the box in the bottom corner of the screen where nobody saw it, on a page that still looked like it was loading.",
-      "The check now asks properly, in the middle of the screen, with a line saying what it wants. It survives a phone changing network mid-search. And when a search does fail, there's a Try again button on the page — before, the only way to have another go was to start over from the home page, which landed you back on the same wall."
+      "Before we price a card we haven't seen before, there's a quick check that you're a person. It could fail in ways that left you stuck: when it wanted a tap it put the box in the bottom corner of the screen, where on a phone nobody saw it, on a page that still looked like it was loading — and thirty seconds later the search gave up. It now asks in the middle of the screen with a line saying what it wants.",
+      "It also used to be tied to the exact connection you were on, so a phone moving between networks mid-search — which phones do by themselves — could be asked twice and then refused. That's fixed.",
+      "And when a search does fail, there's now a Try again on the page. Before, the only way to have another go was to start over from the home page, which landed you back on the same wall."
     ]
   },
   {

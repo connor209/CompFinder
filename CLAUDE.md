@@ -931,26 +931,45 @@ moment strangers can reach it.
 
       **The widget's own hostname list is the thing that was actually
       broken, and it failed silently for two months.** Diagnosed 2026-08-28:
-      the check reported `110200` — Turnstile for "domain not allowed" —
-      before a human was ever asked anything. Cloudflare refuses the challenge
-      outright unless the host the widget renders on is in the widget's
-      **Hostname Management** list, and Vercel serves **www.lastcomp.co.uk**
-      (the apex 308s). Every uncached search on every device had been failing
-      since the keys went live on 2026-08-23; it looked like a mobile bug only
-      because the 455 published cards are warm, hit the cache, and are never
-      challenged. So the site answered for everything we publish and for
-      nothing else — the exact shape of a fault nobody reports.
+      the check reported `110200` — Turnstile for "domain not allowed" — and
+      the cause was **a stale Home Screen icon**, not the widget. The sitekey
+      was right and the widget listed both `lastcomp.co.uk` and
+      `www.lastcomp.co.uk`. The phone was simply not on either of them: an
+      iOS icon added before the domain went live keeps the origin it was
+      installed from, so every page it opened came off an old Vercel
+      hostname Turnstile had never been told about. Safari on the same phone
+      worked. Deleting and re-adding the icon fixed it.
+
+      **`start_url` in `manifest.js` is "/" — relative — and that is what
+      makes this possible.** iOS resolves it against wherever the icon was
+      installed from and keeps that origin permanently. Making it absolute
+      does NOT fix it: a start_url outside the manifest's own origin is out of
+      scope and ignored, so it would be a no-op dressed as a fix. The real
+      remedies are a canonical-host redirect in middleware (gated to
+      production, or a preview deploy bounces to live) or re-adding the icon.
+      Neither is in place; the diagnostic below is.
+
+      **This cost two wrong diagnoses, and both were confident.** First the
+      mobile-network story — carrier drift, a corner-pinned widget — three
+      plausible causes fixed blind because the site has no analytics and there
+      was no route from "it fails on a phone" to why. Then, once `110200`
+      named a domain refusal, the assumption that the widget's hostname list
+      was short. Both were reasoned and neither was checked, because neither
+      could be from here. **The lesson is the ordering: instrument first, then
+      fix.** One line of small print carrying Cloudflare's own error code and
+      `location.hostname` settled in one retry what two rounds of inference
+      got wrong.
 
       **A client-reported error code must never unlock the server.** It is
       tempting to let `110200` fail open, since a challenge that cannot
       succeed is a wall rather than a guard. Don't: the code comes from the
       page, so anything can claim it, and /api/price would be spending money
-      on whoever asked. A misconfigured widget is fixed in the dashboard.
+      on whoever asked. A widget that genuinely is misconfigured is fixed in
+      the dashboard.
 
-      **Add every host the widget can render on**, including the vercel.app
-      preview domain if previews are meant to price anything — a preview on a
-      host Turnstile doesn't know fails exactly this way, and looks like a
-      broken build.
+      **Add every host the widget can render on**, including a vercel.app host
+      if previews are meant to price anything — a preview on a host Turnstile
+      doesn't know fails exactly this way, and looks like a broken build.
 
       **Nothing in `turnstile-client.js` may wait forever, and a failed search
       gets a Try again.** Every await there is bounded, because the state to
