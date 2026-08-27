@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
+import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import {
   checkoutStackCard, unhideListing, nextStackName, planReallocation,
   DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode
@@ -203,9 +204,20 @@ export default function ShowDesk() {
       const k = String(l.sku).toLowerCase();
       if (l.price_value != null && !priceBySku.has(k)) priceBySku.set(k, Math.round(Number(l.price_value) * 100));
     }
+    // Where each card physically is, right now. Computed over EVERY unpulled
+    // card, not just the recommended ones — a rank is a count within its whole
+    // stack, so narrowing the list first would number the shortlist instead of
+    // the shelf.
+    const ranks = liveRanks(cards);
+    const depths = stackDepths(cards);
     const ranked = cards
       .filter((c) => !c.checked_out_at && c.sku && priceBySku.has(String(c.sku).toLowerCase()))
-      .map((c) => ({ card: c, pricePence: priceBySku.get(String(c.sku).toLowerCase()) }))
+      .map((c) => ({
+        card: c,
+        pricePence: priceBySku.get(String(c.sku).toLowerCase()),
+        rank: ranks.get(c.id) ?? null,
+        depth: depths.get(c.stack_id) ?? null
+      }))
       .sort((a, b) => b.pricePence - a.pricePence)
       .slice(0, Math.max(1, Math.min(200, Number(recCount) || 20)));
     setRecs(ranked);
@@ -592,17 +604,42 @@ export default function ShowDesk() {
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 Your live stock ranked by listing price. Untick anything staying home, then check the rest out in one go.
               </p>
+              <p className="hint hint-small" style={{ marginTop: 0 }}>
+                The number on the left is the <b>live position</b> — count that many from the top of the
+                stack. It is not the SKU: a SKU is a name and never moves, while positions close up
+                behind every card pulled or taken to a show.
+              </p>
+              <div className="sd-bulkbar">
+                <label className="sd-toggle">
+                  <input
+                    type="checkbox"
+                    checked={recSel.size === recs.length && recs.length > 0}
+                    // Indeterminate is the honest state for a part-selection: without it
+                    // the box reads as "none selected" while forty cards are ticked.
+                    ref={(el) => { if (el) el.indeterminate = recSel.size > 0 && recSel.size < recs.length; }}
+                    onChange={(e) => setRecSel(e.target.checked ? new Set(recs.map((r) => r.card.id)) : new Set())}
+                  />
+                  {recSel.size === recs.length ? "All" : `${recSel.size} of ${recs.length}`}
+                </label>
+              </div>
               <div className="stack-list">
-                {recs.map(({ card, pricePence }) => (
+                {recs.map(({ card, pricePence, rank, depth }) => (
                   <label className="ps-row" key={card.id}>
                     <input
                       type="checkbox"
                       checked={recSel.has(card.id)}
                       onChange={() => setRecSel((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
                     />
-                    <span className="stack-sku">{card.sku}</span>
+                    <span className="stack-pos" title="Live position — count this many from the top of the stack">
+                      {rank ?? "?"}
+                    </span>
+                    <span className="stack-sku" title="The card's SKU. A name, not an address — it does not move when the stack re-flows.">
+                      {card.sku}
+                    </span>
                     <span className="stack-title">{card.title || <em>—</em>}</span>
-                    <span className="badge2">{stackName.get(card.stack_id) || "—"}</span>
+                    <span className="badge2" title="Where to walk, and how far to count">
+                      {positionLabel(stackName.get(card.stack_id), rank, depth)}
+                    </span>
                     <span className="sd-price">{pounds(pricePence)}</span>
                   </label>
                 ))}
@@ -647,6 +684,7 @@ export default function ShowDesk() {
                 <input
                   type="checkbox"
                   checked={sel.size === open.length && open.length > 0}
+                  ref={(el) => { if (el) el.indeterminate = sel.size > 0 && sel.size < open.length; }}
                   onChange={(e) => setSel(e.target.checked ? new Set(open.map((o) => o.id)) : new Set())}
                 />
                 {sel.size > 0 ? `${sel.size} selected` : "All"}

@@ -32,6 +32,7 @@ import {
   poolLabel,
   stickerRows,
   stickerSummary,
+  toPoundPence,
   STICKER_MIN_PENCE,
   HELD_CONFIDENCE
 } from "../apps/app/lib/showstock.js";
@@ -174,6 +175,21 @@ eq("an override equal to the suggestion is not 'edited' — a reprint is not a c
 for (const [bad, why] of [[0, "zero"], [null, "null"], [-100, "negative"], ["", "empty"], [NaN, "NaN"]]) {
   eq(`${why} is not an override, it is no override`,
     stickerRows(RESULTS, { overrides: { 1: bad } })[1].held, true);
+}
+
+// --- 4c. a price a human already chose --------------------------------------
+// The listed-price button and the typed box both land here. It rounds to the
+// POUND; the ladder is only for figures we derived. The contrast below is the
+// point of the function existing at all — run the same number through both and
+// they disagree by £2.49, which is real money off a real card.
+eq("a listed price rounds to the nearest pound", toPoundPence(2249), 2200);
+eq("...where the ladder would have stepped it down to £20", stickerPence(2249), 2000);
+eq("rounding up works the same way", toPoundPence(2251), 2300);
+eq("an exact pound is untouched", toPoundPence(1200), 1200);
+eq("a big one keeps every pound", toPoundPence(83748), 83700);
+eq("under the minimum still clamps to £1", toPoundPence(40), 100);
+for (const [bad, why] of [[0, "zero"], [null, "null"], [-500, "negative"], ["nope", "nonsense"], [undefined, "missing"]]) {
+  eq(`${why} is no price, not £0`, toPoundPence(bad), null);
 }
 
 // --- 5. one definition of the sticker --------------------------------------
