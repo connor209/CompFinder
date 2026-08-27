@@ -19,6 +19,10 @@
  * sold price) are the ones worth keeping: they are what fails loudly if the
  * gate is ever widened into "hold anything we're unsure about", which would
  * quietly leave a whole box of stock with no prices on show day.
+ *
+ * The one thing the gate deliberately does NOT hold is a price set by hand —
+ * that case lives in check-override.mjs, next to the rest of what an override
+ * does, rather than being split across both files.
  */
 import { readFileSync } from "node:fs";
 import {
@@ -87,9 +91,10 @@ const rec = (over = {}) => ({
   ...over
 });
 
-eq("a High-confidence sold price gets a sticker", stickerFor(rec()), { pence: 84000, held: false, reason: null });
+eq("a High-confidence sold price gets a sticker", stickerFor(rec()),
+  { pence: 84000, held: false, reason: null, overridden: false });
 eq("Medium is priced too — the gate is not 'anything we're unsure of'",
-  stickerFor(rec({ confidence: "Medium" })), { pence: 84000, held: false, reason: null });
+  stickerFor(rec({ confidence: "Medium" })), { pence: 84000, held: false, reason: null, overridden: false });
 
 const low = stickerFor(rec({ confidence: "Low", included: [1, 2] }));
 eq("Low confidence is held", { pence: low.pence, held: low.held }, { pence: null, held: true });

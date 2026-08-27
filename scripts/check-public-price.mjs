@@ -27,8 +27,8 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCANNED = ["apps/public/app", "apps/public/lib", "scripts"];
 const SKIP_DIRS = new Set([".next", "node_modules"]);
 
-// Six files are exempt wholesale. This one has to name the field in code to
-// look for it. The other three assert BUSINESS-app behaviour, where a
+// Seven files are exempt wholesale. This one has to name the field in code to
+// look for it. The others assert BUSINESS-app behaviour, where a
 // recommended listing price is the right answer and the whole point of the
 // screen, and none of them reads anything under apps/public: check-batchsave.mjs
 // covers the round trip of a saved batch run, check-showstock.mjs covers the
@@ -37,7 +37,10 @@ const SKIP_DIRS = new Set([".next", "node_modules"]);
 // Batch screen's own pipeline, where the figure under test is the one the
 // screen prints, dump-batch.mjs copies a saved business-app run out of
 // the database verbatim, and check-matching.mjs asserts the Batch screen's own
-// rules, one of which reads the ladder price by design. Everywhere else may DISCUSS finalPence in a comment — the
+// rules, one of which reads the ladder price by design, and check-override.mjs
+// asserts that a price typed on the Batch screen beats the ladder price
+// everywhere it travels, which it cannot do without naming both.
+// Everywhere else may DISCUSS finalPence in a comment — the
 // explanation of why we don't use it is worth keeping — but must not read it.
 const EXEMPT = new Set([
   "scripts/check-public-price.mjs",
@@ -45,7 +48,8 @@ const EXEMPT = new Set([
   "scripts/check-showstock.mjs",
   "scripts/recurse-batch.mjs",
   "scripts/dump-batch.mjs",
-  "scripts/check-matching.mjs"
+  "scripts/check-matching.mjs",
+  "scripts/check-override.mjs"
 ]);
 
 /** Strips line comments and whole-line block-comment bodies. */

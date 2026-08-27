@@ -8,8 +8,10 @@ import { cleanSearchName } from "@compfinder/core/cardname.js";
 import { ebaySearchUrl, cardmarketBestUrl } from "@compfinder/core/marketplace.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { createClient } from "@/lib/supabase/client";
+import { effectivePence, isOverridden, overrideNote, withOverride } from "@/lib/price-override.js";
 import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
+import PriceOverride from "./PriceOverride";
 
 const settings = APP_SETTINGS;
 
@@ -488,7 +490,10 @@ export default function QuickSearch({ seed }) {
       if (!soldRes || !soldRes.ok) throw new Error((soldRes && soldRes.error) || "Pricing request failed.");
       const comps = soldRes.comps || [];
       const rec = CompFinderPricing.recommend(dropForeignPostage(applyNumberGuards(comps, effNumber)).comps, settingsForText(query), nameTokens, "sold", effNumber, effSet);
-      setData({ card, rec, comps });
+      // `query` and `lang` are kept on the payload rather than read back out
+      // of the form: by the time you correct a price the boxes may have moved
+      // on, and a correction has to file itself under the card it was for.
+      setData({ card, rec, comps, query, lang });
       saveHistory(card, query, rec, lang);
     } catch (err) {
       setError(err.message || "Something went wrong pricing that card.");
@@ -515,15 +520,37 @@ export default function QuickSearch({ seed }) {
         ebay_site: "ebay.co.uk",
         data_source: rec.dataSource,
         confidence: rec.confidence,
-        recommended_pence: rec.finalPence ?? null,
+        // The price gone with, yours where you set one — the same rule the
+        // batch screen writes under, since stockcheck.js reads this column
+        // back as "what did we say last time".
+        recommended_pence: effectivePence(rec),
         current_pence: null,
         comps_used: rec.included.length,
         comps_excluded: rec.excluded.length,
-        note: rec.note || null
+        note: [overrideNote(rec), rec.note].filter(Boolean).join(" ") || null
       });
     } catch {
       /* history is best-effort */
     }
+  }
+
+  /**
+   * Your price for the card on screen.
+   *
+   * It writes a SECOND history row rather than correcting the one this search
+   * just wrote, for the reason spelled out in Panel.js: `price_checks` has no
+   * update policy, so an update would silently do nothing — and a correction
+   * is genuinely a later decision, which is what the History screen should
+   * show.
+   */
+  function setOverride(pence) {
+    if (!data) return;
+    const rec = withOverride(data.rec, pence);
+    // Confirming the box unchanged hands back the same rec, and is not a
+    // decision worth a second history row. See the same guard in Panel.js.
+    if (rec === data.rec) return;
+    setData((d) => (d ? { ...d, rec } : d));
+    saveHistory(data.card, data.query, rec, data.lang);
   }
 
   // ---- derived view data ----
@@ -764,9 +791,14 @@ export default function QuickSearch({ seed }) {
                 {view.card.series ? <span className="badge2">{view.card.series}</span> : null}
               </div>
               <div className="dd-headline">
-                <div className="dd-price"><span className="cur">£</span>{view.rec.finalPence != null ? (view.rec.finalPence / 100).toFixed(2) : "—"}</div>
+                <div className={`dd-price${isOverridden(view.rec) ? " dd-price-mine" : ""}`}>
+                  <span className="cur">£</span>
+                  {effectivePence(view.rec) != null ? (effectivePence(view.rec) / 100).toFixed(2) : "—"}
+                </div>
                 <span className={view.confClass}>{view.rec.confidence} confidence</span>
+                <PriceOverride rec={view.rec} onSet={setOverride} showValue={false} />
               </div>
+              {overrideNote(view.rec) ? <p className="dd-sub dd-sub-mine">{overrideNote(view.rec)}</p> : null}
               <p className="dd-sub">
                 {view.usedCount > 0
                   ? `Recency-weighted from ${view.usedCount} UK sold comp(s) over the last 90 days${view.med != null ? ` · median ${pounds(view.med)}` : ""}.`
@@ -794,7 +826,7 @@ export default function QuickSearch({ seed }) {
           {listing ? (
             <ListForm
               card={view.card}
-              suggestedPence={view.rec.finalPence}
+              suggestedPence={effectivePence(view.rec)}
               language={language}
               imageUrl={view.card.image || art}
               onClose={() => setListing(false)}

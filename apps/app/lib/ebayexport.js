@@ -13,6 +13,7 @@
  * wrong card at the wrong money.
  */
 import CardUploaderCsv from "./carduploader.js";
+import { effectivePence } from "./price-override.js";
 
 const PRICE_COL = "*StartPrice";
 const SKU_COL = "CustomLabel";
@@ -79,12 +80,18 @@ export function repriceCardUploaderCsv(csvText, priced) {
  * The prices from a finished batch, as SKU -> pence. Rows without a SKU or
  * without a recommendation are left out — an unpriced row must keep whatever
  * price it already had rather than going up at nothing.
+ *
+ * `effectivePence`, not `finalPence`: this file is what actually reprices the
+ * listings, so a row you overrode has to go up at YOUR number. Reading the
+ * recommendation here would list the card at the price you rejected, which is
+ * the one failure an override exists to prevent — check-override.mjs greps
+ * for it.
  */
 export function pricedSkuMap(results) {
   const map = new Map();
   for (const r of results || []) {
     if (!r?.sku) continue;
-    const pence = r?.rec?.finalPence;
+    const pence = effectivePence(r?.rec);
     if (pence == null || !(pence > 0)) continue;
     map.set(r.sku, pence);
   }

@@ -8,6 +8,7 @@ import {
   checkoutStackCard, unhideListing, nextStackName, planReallocation,
   DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode
 } from "@/lib/checkout";
+import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -371,6 +372,64 @@ export default function ShowDesk() {
     await load();
   }
 
+  /**
+   * Set — or clear — the sticker price on one card, here at the desk.
+   *
+   * The Batch screen's stickers are the normal way in: price the pool, and
+   * every card gets a cash-rounded number written back. This is the other
+   * half, and it is the half that happens on the day. A card the run held back
+   * (thin comps, no comps at all), a card added to the box after the run, or
+   * simply a price you have changed your mind about with the table in front of
+   * you — none of those are worth re-pricing 43 cards for.
+   *
+   * What you type here is NOT put through the cash ladder. On the Batch screen
+   * you override an eBay price and the ladder turns it into cash; here you are
+   * writing on the label itself, and rounding a number somebody typed onto a
+   * sticker would be the app arguing with the person holding the pen.
+   */
+  async function setSticker(co) {
+    const current = co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : "";
+    const raw = prompt(
+      `Sticker price for "${co.sku || co.title || "card"}" — £… (leave blank to take the sticker off)`,
+      current
+    );
+    if (raw === null) return;
+    const { pence, error } = parseOverridePence(raw);
+    if (error) {
+      setMsg(error);
+      return;
+    }
+    setBusy(true);
+    setMsg("");
+    try {
+      const { error: upErr } = await supabase()
+        .from("stock_checkouts")
+        .update({
+          sticker_pence: pence,
+          sticker_set_at: pence == null ? null : new Date().toISOString(),
+          // Not from a run, so nothing to point at. Cleared rather than left
+          // pointing at the run whose price this just replaced.
+          sticker_batch_id: null
+        })
+        .eq("id", co.id);
+      if (upErr) throw upErr;
+      setMsg(
+        pence == null
+          ? `Sticker taken off ${co.sku || co.title || "that card"}.`
+          : `${co.sku || co.title || "That card"} stickered at ${poundsStr(pence)}.`
+      );
+      await load();
+    } catch (err) {
+      setMsg(
+        /sticker_pence|does not exist|schema cache/i.test(err.message || "")
+          ? "Sticker prices can't be saved yet — migration 024 hasn't been applied in Supabase."
+          : `That sticker price couldn't be saved: ${err.message}`
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function markSold(co) {
     // Pre-filled with the sticker where there is one: the number on the card is
     // what was actually asked at the table, so typing it again is a chance to
@@ -658,12 +717,16 @@ export default function ShowDesk() {
                     {co.stack_name ? <span className="badge2" title="Stack it left">{co.stack_name}</span> : null}
                     {co.event ? <span className="badge2" title="Event">{co.event}</span> : null}
                     {co.sticker_pence != null ? (
-                      <span className="sd-price" title="Recommended sticker price — priced from the Batch screen">
+                      <span
+                        className="sd-price"
+                        title={co.sticker_batch_id ? "Sticker price from a Batch run — click ✎ to change it" : "Sticker price set here at the desk"}
+                      >
                         {pounds(co.sticker_pence)}
                       </span>
                     ) : null}
                     <span className="hint-small" style={{ color: chip.color, flex: "none" }} title={chip.title}>{chip.text}</span>
                     <span className="sd-rowacts">
+                      <button className="stack-pull" onClick={(e) => { e.preventDefault(); setSticker(co); }} disabled={busy} title={co.sticker_pence != null ? "Change this card's sticker price" : "Put a sticker price on this card"}>{co.sticker_pence != null ? "✎ £" : "🏷 £"}</button>
                       <button className="stack-pull" style={{ color: "var(--conf-high)", borderColor: "var(--line-strong)" }} onClick={(e) => { e.preventDefault(); markSold(co); }} disabled={busy}>£ Sold</button>
                       <button className="stack-pull" onClick={(e) => { e.preventDefault(); returnOne(co); }} disabled={busy}>↩ Return</button>
                     </span>

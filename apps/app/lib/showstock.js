@@ -21,6 +21,7 @@
  * Framework-free and app-import-free on purpose, so scripts/check-showstock.mjs
  * can load it under bare node and assert the ladder and the gate.
  */
+import { effectivePence, isOverridden, overriddenFromPence } from "./price-override.js";
 
 /** No sticker goes out below this — you cannot take 40p across a table. */
 export const STICKER_MIN_PENCE = 100;
@@ -70,24 +71,35 @@ export function stickerPence(finalPence) {
  *    evidence that somebody wants that much, not that anybody paid it.
  * 3. Low or no confidence. See HELD_CONFIDENCE.
  *
- * Returns { pence, held, reason } — `reason` is prose, meant to be shown.
+ * **An override is not held, and that is the point of the gate rather than an
+ * exception to it.** Every hold above says the same thing: the EVIDENCE is too
+ * thin to print. A price you typed isn't built on that evidence at all — it is
+ * a decision by the person who will be standing at the table — so a card the
+ * app refused to price is exactly the card an override is for. It still goes
+ * through the ladder: what you typed is an eBay price, and a sticker is cash.
+ *
+ * Returns { pence, held, reason, overridden } — `reason` is prose, meant to
+ * be shown.
  */
 export function stickerFor(rec) {
-  if (!rec || rec.finalPence == null) {
-    return { pence: null, held: true, reason: "no price found" };
+  const pence = effectivePence(rec);
+  const overridden = isOverridden(rec);
+  if (pence == null) {
+    return { pence: null, held: true, reason: "no price found", overridden: false };
   }
-  if (rec.dataSource === "active") {
-    return { pence: null, held: true, reason: "priced from asking prices, not sales" };
+  if (!overridden && rec.dataSource === "active") {
+    return { pence: null, held: true, reason: "priced from asking prices, not sales", overridden: false };
   }
-  if (HELD_CONFIDENCE.includes(rec.confidence)) {
+  if (!overridden && HELD_CONFIDENCE.includes(rec.confidence)) {
     const comps = (rec.included || []).length;
     return {
       pence: null,
       held: true,
-      reason: `${String(rec.confidence).toLowerCase()} confidence — ${comps} comp${comps === 1 ? "" : "s"}`
+      reason: `${String(rec.confidence).toLowerCase()} confidence — ${comps} comp${comps === 1 ? "" : "s"}`,
+      overridden: false
     };
   }
-  return { pence: stickerPence(rec.finalPence), held: false, reason: null };
+  return { pence: stickerPence(pence), held: false, reason: null, overridden };
 }
 
 /**
@@ -135,7 +147,14 @@ export function stickerRows(results) {
     return {
       sku: r.sku || "",
       title: r.title || "",
-      recommendedPence: r.rec?.finalPence ?? null,
+      // The price the sticker was rounded FROM — yours where you set one, so
+      // the "eBay £x" the screen prints beside the sticker is the price the
+      // card would actually be listed at, not one it was talked out of.
+      recommendedPence: effectivePence(r.rec),
+      // What the app had said, kept only when it was overridden: the row shows
+      // both, and a label CSV that can't say what it replaced can't be checked.
+      overriddenFromPence: overriddenFromPence(r.rec),
+      overridden: s.overridden,
       confidence: r.rec?.confidence ?? null,
       stickerPence: s.pence,
       held: s.held,

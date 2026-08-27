@@ -13,6 +13,7 @@
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { dropWrongNumerator, dropWrongSetTotal } from "@compfinder/core/cardnumber.js";
+import { isOverridden } from "./price-override.js";
 
 /**
  * "No.", "No", "#" — a numbering prefix, at the front of a card NUMBER.
@@ -462,6 +463,13 @@ export function needsActiveCheck(rec, settings = APP_SETTINGS) {
  */
 export function reviewVerdict(rec) {
   if (!rec) return { needsReview: true, reasons: ["no result for this card"], basis: null };
+  // A price you typed IS the look. The queue exists to ask "do you agree with
+  // this?", and a row carrying your own number has already been answered — a
+  // card left flagged after you priced it by hand makes the count meaningless,
+  // which is the one thing that would stop it being read.
+  if (isOverridden(rec)) {
+    return { needsReview: false, reasons: [], basis: null, overridden: true };
+  }
   const reasons = [];
 
   if (rec.finalPence == null) {
