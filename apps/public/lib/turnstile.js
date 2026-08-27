@@ -50,13 +50,97 @@ function signingKey() {
 }
 
 /**
+ * The NETWORK a pass was earned on, not the exact address it arrived from.
+ *
+ * A pass bound to one address is a pass a phone loses mid-search, and that is
+ * how the check turned into a dead end on mobile: a carrier moves a handset
+ * between CGNAT egress addresses, and a dual-stack phone can answer one
+ * request over IPv4 and the next over IPv6. Either way /api/price is asked by
+ * an address that never solved a challenge, so it asks for another one — a
+ * second challenge on a search that had already passed the first.
+ *
+ * A /24, or a /64 on IPv6, is "the same network" rather than "the same
+ * socket". It keeps what the binding is actually for: a fleet of residential
+ * proxies is spread across the internet, not across 256 neighbouring
+ * addresses, so one solved challenge still can't be handed round a fleet.
+ *
+ * Anything that doesn't parse as an address — "unknown" from a missing
+ * x-forwarded-for included — is used whole. A tag we can't narrow is still a
+ * tag, and guessing at the shape of one would be the way to make two
+ * different visitors share a pass.
+ */
+export function clientNetwork(ip) {
+  const raw = String(ip || "unknown").trim();
+  if (raw.includes(":")) {
+    // A zone id ("%eth0") is the receiving host's business, never the peer's.
+    const groups = expandIpv6(raw.split("%")[0]);
+    if (!groups) return raw;
+    // "::ffff:203.0.113.7" is an IPv4 address wearing an IPv6 spelling, and
+    // its top four groups are zero — so treating it as IPv6 would file every
+    // mapped address on the internet under one tag and let any of them present
+    // any other's pass. Unwrap it and bucket it as the IPv4 address it is.
+    if (groups.slice(0, 5).every((g) => g === "0") && groups[5] === "ffff") {
+      const [a, b] = [parseInt(groups[6], 16), parseInt(groups[7], 16)];
+      return `${a >> 8}.${a & 255}.${b >> 8}.0/24`;
+    }
+    return `${groups.slice(0, 4).join(":")}::/64`;
+  }
+  const octets = raw.split(".");
+  if (octets.length === 4 && octets.every((o) => /^\d{1,3}$/.test(o) && Number(o) < 256)) {
+    return `${octets[0]}.${octets[1]}.${octets[2]}.0/24`;
+  }
+  return raw;
+}
+
+/**
+ * The eight groups of an IPv6 address, "::" expanded and an IPv4-mapped tail
+ * folded back into the two groups it stands for.
+ *
+ * Written out rather than split on ":" because the compressed forms are the
+ * whole difficulty: "2a00:23c6::1" and "2a00:23c6:0:0:0:0:0:1" are one address
+ * and have to produce one tag, or the drift this function exists to absorb
+ * comes back as a re-challenge.
+ */
+function expandIpv6(addr) {
+  if (!addr || !/^[0-9a-fA-F:.]+$/.test(addr)) return null;
+  const halves = addr.split("::");
+  if (halves.length > 2) return null;
+
+  const split = (s) => (s ? s.split(":").filter(Boolean) : []);
+  let head = split(halves[0]);
+  let tail = halves.length === 2 ? split(halves[1]) : [];
+
+  // "::ffff:203.0.113.7" — the dotted tail is worth two groups, not one.
+  const from = tail.length ? tail : head;
+  const last = from[from.length - 1];
+  if (last && last.includes(".")) {
+    const o = last.split(".");
+    if (o.length !== 4 || !o.every((x) => /^\d{1,3}$/.test(x) && Number(x) < 256)) return null;
+    const pair = [
+      ((Number(o[0]) << 8) | Number(o[1])).toString(16),
+      ((Number(o[2]) << 8) | Number(o[3])).toString(16)
+    ];
+    if (tail.length) tail = tail.slice(0, -1).concat(pair);
+    else head = head.slice(0, -1).concat(pair);
+  }
+
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  if (fill < 0) return null;
+  const groups = head.concat(Array(fill).fill("0"), tail);
+  if (groups.length !== 8) return null;
+  if (!groups.every((g) => /^[0-9a-fA-F]{1,4}$/.test(g))) return null;
+  // Normalised, so "2A00" and "2a00:0000" can't tag as different networks.
+  return groups.map((g) => g.replace(/^0+(?=.)/, "").toLowerCase());
+}
+
+/**
  * Passes are bound to the client, so solving one challenge and handing the
  * cookie to a hundred workers doesn't buy a hundred exemptions. Hashed because
- * an IP in a cookie is personal data sitting in someone's browser for no
- * reason — the server only ever needs to compare, never to read.
+ * a network in a cookie is still personal data sitting in someone's browser
+ * for no reason — the server only ever needs to compare, never to read.
  */
 function clientTag(ip) {
-  return createHash("sha256").update(`${ip}|${SECRET}`).digest("hex").slice(0, 16);
+  return createHash("sha256").update(`${clientNetwork(ip)}|${SECRET}`).digest("hex").slice(0, 16);
 }
 
 function sign(payload) {

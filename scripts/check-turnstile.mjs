@@ -28,6 +28,59 @@ const IP = "203.0.113.7";
 const OTHER_IP = "198.51.100.9";
 const good = ts.issuePass(IP);
 
+/**
+ * What the pass is bound to.
+ *
+ * The tag is a NETWORK, not an address, and both halves of that need pinning.
+ * Too tight and a phone loses its pass mid-search — a carrier moves it between
+ * CGNAT addresses, a dual-stack handset answers one request over IPv4 and the
+ * next over IPv6 — which is exactly how a solved challenge turned into a dead
+ * end on mobile. Too loose and one solved challenge is a pass for strangers.
+ *
+ * [label, address the pass is presented from, expected]
+ */
+const BINDING = [
+  // The drift this exists to absorb: same /24, different address.
+  ["a neighbour on the same /24", "203.0.113.200", true],
+  ["the same address", "203.0.113.7", true],
+
+  // ...and the line it must not cross.
+  ["the next /24 along", "203.0.114.7", false],
+  ["a different network entirely", OTHER_IP, false],
+
+  // Junk in the address must never widen the bucket. Each of these has to fall
+  // through to "use it whole" rather than being parsed into something coarser.
+  ["a 999 octet", "203.0.113.999", false],
+  ["a truncated address", "203.0.113", false],
+  ["an empty address", "", false],
+  ["unknown", "unknown", false]
+];
+
+const V6 = "2a00:23c6:5c8a:e300:1c2b:9f4a:0011:7e21";
+const v6pass = ts.issuePass(V6);
+const BINDING_V6 = [
+  // Privacy extensions rotate the bottom half on a timer; the /64 is the one
+  // stable thing a handset has, which is why it is what gets bound.
+  ["a rotated interface id in the same /64", "2a00:23c6:5c8a:e300:99ff:2211:abcd:0001", true],
+  ["the same address compressed", "2a00:23c6:5c8a:e300:1c2b:9f4a:11:7e21", true],
+  ["the same address in capitals", "2A00:23C6:5C8A:E300:1C2B:9F4A:0011:7E21", true],
+  ["a zone id on the end", "2a00:23c6:5c8a:e300:1c2b:9f4a:0011:7e21%en0", true],
+  ["the next /64 along", "2a00:23c6:5c8a:e301:1c2b:9f4a:0011:7e21", false],
+  ["a different /48", "2a00:23c6:ffff:e300:1c2b:9f4a:0011:7e21", false],
+  ["an IPv4 pass presented as IPv6", IP, false]
+];
+
+// "::ffff:a.b.c.d" is an IPv4 address in IPv6 clothing, and its top four
+// groups are all zero. Bucketing it by /64 would file every mapped address
+// under one tag — a pass any of them could present to any other. It has to
+// come out as the IPv4 network it actually is.
+const MAPPED = [
+  ["a mapped form of the address that solved it", "::ffff:203.0.113.7", true],
+  ["a mapped neighbour on the same /24", "::ffff:203.0.113.200", true],
+  ["a mapped address on another network", "::ffff:198.51.100.9", false],
+  ["a mapped address from the next /24", "::ffff:203.0.114.7", false]
+];
+
 /** [label, value, ip, expected] */
 const CASES = [
   ["a fresh pass, same visitor", good, IP, true],
@@ -68,6 +121,21 @@ const CASES = [
 ];
 
 let failures = 0;
+for (const [label, ip, expected] of [...BINDING, ...MAPPED]) {
+  const got = ts.passIsValid(good, ip);
+  if (got !== expected) {
+    console.error(`  WRONG  binding: ${label} — expected ${expected}, got ${got}`);
+    failures++;
+  }
+}
+for (const [label, ip, expected] of BINDING_V6) {
+  const got = ts.passIsValid(v6pass, ip);
+  if (got !== expected) {
+    console.error(`  WRONG  binding (v6): ${label} — expected ${expected}, got ${got}`);
+    failures++;
+  }
+}
+
 for (const [label, value, ip, expected] of CASES) {
   let got;
   try {
@@ -137,4 +205,8 @@ if (failures) {
   console.error(`\nturnstile: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log(`turnstile: ${CASES.length + 8} pass cases hold (forgery, binding, expiry, off-switch).`);
+const bindingCases = BINDING.length + MAPPED.length + BINDING_V6.length;
+console.log(
+  `turnstile: ${CASES.length + bindingCases + 8} pass cases hold ` +
+  `(forgery, network binding v4/v6, expiry, off-switch).`
+);
