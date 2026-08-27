@@ -70,9 +70,22 @@ let passPromise = null;
 let lastFailure = null;
 export const lastChallengeFailure = () => lastFailure;
 
-/** Record and describe a failure in one move, so the two can't drift. */
+/**
+ * Record and describe a failure in one move, so the two can't drift.
+ *
+ * THE HOSTNAME IS PART OF THE REPORT, and it is the half that took longest to
+ * think of. Turnstile's 110200 means "this domain isn't allowed for this key",
+ * and the obvious readings — a missing entry in the widget's hostname list, a
+ * wrong key — are both checkable in the dashboard. What isn't checkable from
+ * there is which host the page is actually being served from. `start_url` in
+ * the manifest is relative, so a Home Screen icon runs on whatever origin it
+ * was installed from for the rest of its life; a phone can sit on a hostname
+ * the widget has never been told about while the dashboard looks perfect. It
+ * costs one word to say which, so it says which.
+ */
 function failed(stage, detail) {
-  lastFailure = detail ? `${stage} ${detail}` : stage;
+  const where = typeof location === "undefined" ? "" : ` on ${location.hostname}`;
+  lastFailure = `${detail ? `${stage} ${detail}` : stage}${where}`;
   return new Error(lastFailure);
 }
 // The widget's callbacks are registered once at render and reused for every
