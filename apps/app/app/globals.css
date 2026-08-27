@@ -836,6 +836,11 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-plan-count { font-weight:700; font-size:13.5px; color:var(--ink); flex:none; }
 .sd-rowacts { display:flex; gap:6px; flex:none; margin-left:auto; }
 .sd-scope .badge2 { white-space:nowrap; }
+/* Recommended show stock leads with the SKU, so the position sits BEHIND a
+   chip whose width varies with the SKU ("A5" vs "AB123"). Without a floor on
+   the chip the positions come out ragged, and a column of numbers you cannot
+   run your eye down is the one job that column has. */
+.sd-rec-row .stack-sku { min-width:58px; text-align:center; }
 @media (max-width: 720px) {
   .sd-scope .ps-row, .sd-scope .stack-row { flex-wrap:wrap; row-gap:6px; }
   .sd-scope .stack-title { flex:1 1 55%; }

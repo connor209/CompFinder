@@ -629,9 +629,9 @@ export default function ShowDesk() {
                 Your live stock ranked by listing price. Untick anything staying home, then check the rest out in one go.
               </p>
               <p className="hint hint-small" style={{ marginTop: 0 }}>
-                The number on the left is the <b>live position</b> — count that many from the top of the
-                stack. It is not the SKU: a SKU is a name and never moves, while positions close up
-                behind every card pulled or taken to a show.
+                The SKU comes first, then the <b>live position</b> — count that many from the top of the
+                stack. The two are not the same number: a SKU is a name and never moves, while positions
+                close up behind every card pulled or taken to a show.
               </p>
               <div className="sd-bulkbar">
                 <label className="sd-toggle">
@@ -648,17 +648,17 @@ export default function ShowDesk() {
               </div>
               <div className="stack-list">
                 {recs.map(({ card, pricePence, rank, depth }) => (
-                  <label className="ps-row" key={card.id}>
+                  <label className="ps-row sd-rec-row" key={card.id}>
                     <input
                       type="checkbox"
                       checked={recSel.has(card.id)}
                       onChange={() => setRecSel((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
                     />
-                    <span className="stack-pos" title="Live position — count this many from the top of the stack">
-                      {rank ?? "?"}
-                    </span>
                     <span className="stack-sku" title="The card's SKU. A name, not an address — it does not move when the stack re-flows.">
                       {card.sku}
+                    </span>
+                    <span className="stack-pos" title="Live position — count this many from the top of the stack">
+                      {rank ?? "?"}
                     </span>
                     <span className="stack-title">{card.title || <em>—</em>}</span>
                     <span className="badge2" title="Where to walk, and how far to count">
