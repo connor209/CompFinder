@@ -243,6 +243,34 @@ export function setsFromManifest() {
 }
 
 /**
+ * Whatever the cached read handed back, as the hub can actually render it.
+ *
+ * THIS EXISTS BECAUSE THE HUB SHIPPED BROKEN TWICE. loadAllSets returns
+ * { sets, complete }; the page was still treating the result as an array, so
+ * `.filter` threw on every request that reached a working database — a 500 on
+ * the page the front door links to, from a change the build compiles happily.
+ *
+ * An ARRAY is accepted too, and that is not defensive noise: Next's data cache
+ * outlives a deploy, so the first requests after a shape change are served the
+ * PREVIOUS shape from the previous version of the code. A normaliser that only
+ * understood the new shape would turn every deploy that touches this into a
+ * window of errors.
+ *
+ * Anything unusable falls to the manifest, which needs no database. The page
+ * has no branch that can throw; it renders rows or it renders rows.
+ */
+export function hubView(result) {
+  const sets = Array.isArray(result) ? result : (result && Array.isArray(result.sets) ? result.sets : null);
+  return {
+    sets: sets && sets.length ? sets : setsFromManifest(),
+    // Only a run that finished may claim it did. A missing flag is "we don't
+    // know", which reads the same as incomplete to a visitor and is honest.
+    complete: !!(result && result.complete),
+    priced: !!(sets && sets.length)
+  };
+}
+
+/**
  * Every published set with what it is worth, for the /sets hub.
  *
  * ONE catalogue read and one chunked cache read for all 455 cards, not 92
@@ -488,4 +516,4 @@ export async function loadSetCards(slug, { windowDays = DEFAULT_SOLD_WINDOW, max
   return { slug: set.slug, name: set.name, cards };
 }
 
-export default { publishedCards, findPublished, cardPageDirectives, NOT_FOR_INDEX, publishedSets, loadAllSets, setsFromManifest, findSet, siblingsOf, loadSetCards, loadCard, loadCachedSold, serverCard, pricedCards, MAX_SERVER_PRICE_AGE_DAYS };
+export default { publishedCards, findPublished, cardPageDirectives, NOT_FOR_INDEX, publishedSets, loadAllSets, setsFromManifest, hubView, findSet, siblingsOf, loadSetCards, loadCard, loadCachedSold, serverCard, pricedCards, MAX_SERVER_PRICE_AGE_DAYS };

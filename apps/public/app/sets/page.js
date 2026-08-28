@@ -1,5 +1,5 @@
 import { cachedAllSets } from "./cached-sets";
-import { setsFromManifest } from "@/lib/card-page";
+import { hubView } from "@/lib/card-page";
 import { Crumb, CardArt, gbp } from "../ui";
 import { totalGbp } from "@/lib/set-share";
 
@@ -59,10 +59,25 @@ export async function generateMetadata() {
 }
 
 export default async function SetsPage() {
-  // A failed read throws rather than rendering an empty hub: "we price nothing"
-  // is a worse answer than an error page, and this one is regenerated hourly
-  // so a transient fault corrects itself without a deploy.
-  const sets = await cachedAllSets();
+  // THIS PAGE MUST NOT 500, and it did — twice. It is linked from the front
+  // page, so a failure here removes the only route into 92 sets and hands the
+  // visitor an error with nowhere to go.
+  //
+  // Two guards, and neither is optional. The catch covers a database that is
+  // down or unreachable. hubView covers the answer coming back in a shape this
+  // page did not expect — which is not hypothetical: it is exactly what took
+  // the page down, and Next's data cache outlives a deploy, so the first
+  // requests after any change to that shape are served the OLD one.
+  let result = null;
+  try {
+    result = await cachedAllSets();
+  } catch (err) {
+    // Logged, because there is no analytics here: a silent fallback looks
+    // exactly like a warmer that has not run, and they need opposite fixes.
+    console.error("/sets: could not price the sets, falling back to the manifest", err);
+  }
+  const { sets, complete, priced: hasPrices } = hubView(result);
+
   const priced = sets.filter((s) => s.totalPence != null);
   const cards = sets.reduce((n, s) => n + s.cards, 0);
 
@@ -76,7 +91,7 @@ export default async function SetsPage() {
         </h1>
         <p className="body" style={{ margin: "0 0 4px", maxWidth: "46ch" }}>
           The chase cards from {sets.length} sets — {cards} of them — priced from real eBay UK sold
-          listings, {priced.length ? "dearest set first" : "with prices refreshing right now"}. Tap a
+          listings, {hasPrices ? "dearest set first" : "with prices refreshing right now"}. Tap a
           set for every card in it.
         </p>
 

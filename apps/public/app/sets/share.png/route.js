@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { setsShareFields } from "@/lib/set-share";
 import { cachedAllSets } from "../cached-sets";
+import { hubView } from "@/lib/card-page";
 
 /**
  * What a link to /sets unfurls as — the board of boards.
@@ -68,7 +69,7 @@ const C = {
 export async function GET() {
   let sets;
   try {
-    ({ sets } = await cachedAllSets());
+    sets = hubView(await cachedAllSets()).sets;
   } catch {
     return new Response("Not found", { status: 404 });
   }
