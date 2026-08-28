@@ -26,6 +26,23 @@ import { fit, shortDate } from "./share-card.js";
 const gbp = (pence) => (pence == null ? "—" : CompFinderPricing.toPoundsStr(pence));
 
 /**
+ * A SET's total, which is a different kind of figure from a card's price.
+ *
+ * Whole pounds, grouped: a set adds up to four and five figures, where
+ * toPoundsStr's "£52341.00" is both hard to read at a glance and falsely
+ * precise — the pence on a sum of forty-eight medians mean nothing. Card
+ * prices keep their pence, because there a penny is a real answer to a real
+ * question.
+ *
+ * Grouped by hand rather than toLocaleString: this runs in a few runtimes and
+ * a number-formatting difference between them would be a silent one.
+ */
+export function totalGbp(pence) {
+  if (pence == null) return "—";
+  return "£" + String(Math.round(pence / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
  * How many cards make the image.
  *
  * Five. At the size a platform actually unfurls this — a card in a chat
@@ -66,4 +83,40 @@ export function setShareFields({ set, cards = [], now = new Date() } = {}) {
   };
 }
 
-export default { setShareFields, TOP_ROWS };
+/**
+ * The same board, one level up: the dearest SETS rather than the dearest cards.
+ *
+ * /sets is the link worth posting — "most valuable Pokémon cards" is a far
+ * broader search than any one set — and it would have unfurled as a bare
+ * address for the same reason the set pages did.
+ *
+ * The figure on each row is the set's cards ADDED UP, and the label says so on
+ * the image itself. A total sitting next to a set name with no word between
+ * them is the kind of number that gets quoted back as the price of one card.
+ */
+export function setsShareFields({ sets = [], now = new Date() } = {}) {
+  const all = (Array.isArray(sets) ? sets : []).filter(Boolean);
+  const priced = all
+    .filter((s) => s.totalPence != null)
+    .sort((a, b) => b.totalPence - a.totalPence);
+
+  return {
+    name: "Pokémon set values",
+    eyebrow: "What each set is worth",
+    rows: priced.slice(0, TOP_ROWS).map((s, i) => ({
+      rank: i + 1,
+      name: fit(s.name || "", 26),
+      // Reads as "12 cards" under the set's name — the count is what makes the
+      // total mean something.
+      number: s.cards ? `${s.cards} cards` : "",
+      value: totalGbp(s.totalPence)
+    })),
+    // Counts the cards that HAVE a price, not every card in every set — the
+    // line says "priced" and has to mean it.
+    basis: `${all.length} sets · ${all.reduce((n, s) => n + (s.priced || 0), 0)} cards priced`,
+    stamp: `eBay UK sold prices · ${shortDate(now)}`,
+    domain: "lastcomp.co.uk"
+  };
+}
+
+export default { setShareFields, setsShareFields, totalGbp, TOP_ROWS };

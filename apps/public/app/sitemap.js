@@ -21,6 +21,9 @@ export default async function sitemap() {
 
   const staticPages = [
     { url: `${base}/`, lastModified: now, changeFrequency: "daily", priority: 1 },
+    // Above privacy and the changelog on purpose: this is the page that leads
+    // to every set page, which lead to every card page.
+    { url: `${base}/sets`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },
     { url: `${base}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
     { url: `${base}/changelog`, lastModified: now, changeFrequency: "monthly", priority: 0.3 }
   ];

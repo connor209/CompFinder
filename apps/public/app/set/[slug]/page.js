@@ -104,7 +104,11 @@ export default async function SetPage({ params }) {
           customs, damaged copies, and graded slabs, which trade as a different product. Click any card for the
           sales behind its number, including the ones we didn&rsquo;t count.
         </p>
-        <p className="body"><a className="link" href="/">Price a card that isn&rsquo;t listed here &rarr;</a></p>
+        <p className="body">
+          <a className="link" href="/sets">&larr; All sets</a>
+          {" · "}
+          <a className="link" href="/">Price a card that isn&rsquo;t listed here &rarr;</a>
+        </p>
       </div>
     </main>
   );

@@ -199,6 +199,20 @@ that is not currently warm stays indexable — the test is the MANIFEST, not the
 cache, so a Supabase blip can never noindex the site, and a cache gap on one
 of the 455 is not worth spending a slow-to-undo signal on.
 
+**`/sets` is the only way to browse.** Set pages carried the internal linking
+from the day they shipped, but it ran one way only: a card page linked up to
+its set, and nothing pointed down. No page listed the sets, the home page
+linked to none, and the routes in were a card page or the sitemap — so 92 sets
+and 455 cards were unreachable to anyone who didn't already know a card in one.
+The hub ranks sets by what their cards come to TOGETHER (`loadAllSets`, one
+catalogue read and one chunked cache read for all 455, cached for an hour in
+`app/sets/cached-sets.js` and shared with its share image). A set total is
+written by `totalGbp` — whole pounds, grouped — because pence on a sum of
+forty-eight medians are false precision and "£52341.00" can't be read at a
+glance; card prices keep theirs. **Rendered on demand, not prerendered**: an
+`export const revalidate` on a page with no dynamic segment makes Next build it
+at BUILD time, which made `npm run build:public` demand Supabase credentials.
+
 **Set pages are the internal linking, not just content.** `/set/<name>` lists
 every card in a set by value, and each card page links up to its set and across
 to six others. Before that, a card page's only outbound link was the home page:
@@ -534,6 +548,7 @@ root layout renders nothing.
 
 ```
 /                        search
+/sets                    every set, by what its cards come to together
 /changelog               what changed, and what was wrong
 /card/[q]                which one? when ambiguous, otherwise the answer
 /card/[q]?days=30        the same answer over a shorter sold window

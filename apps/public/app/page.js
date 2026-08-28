@@ -62,6 +62,13 @@ export default function Home() {
           ))}
         </div>
 
+        {/* The only way to BROWSE. Everything above this asks you to already
+            know which card you want; 455 cards across 92 sets were reachable
+            only by searching one of them first. */}
+        <p className="body" style={{ marginTop: 20 }}>
+          <a className="link" href="/sets">Or browse what each set is worth &rarr;</a>
+        </p>
+
         <p className="micro foot" style={{ marginTop: 28 }}>
           Prices from real eBay UK sold listings. Card images from{" "}
           <a className="link" href="https://tcgdex.dev" rel="noopener noreferrer nofollow" target="_blank">TCGdex</a>.
