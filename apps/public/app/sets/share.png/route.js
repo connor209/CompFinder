@@ -31,6 +31,10 @@ export const runtime = "nodejs";
 // Same reason as the page: a route handler with no dynamic segment is a
 // static candidate, and this one reads a database at request time.
 export const dynamic = "force-dynamic";
+// Headroom over loadAllSets' own 7s budget: the budget is what keeps a slow
+// read from reaching this limit, and this is what keeps the budget from being
+// the thing that decides the page.
+export const maxDuration = 30;
 
 // Force-traced by next.config.js, same as the card image and the launch image:
 // the bundler cannot infer a readFile path, and the route builds perfectly
@@ -64,7 +68,7 @@ const C = {
 export async function GET() {
   let sets;
   try {
-    sets = await cachedAllSets();
+    ({ sets } = await cachedAllSets());
   } catch {
     return new Response("Not found", { status: 404 });
   }

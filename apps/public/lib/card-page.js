@@ -222,6 +222,27 @@ export async function pricedCards({ windowDays = DEFAULT_SOLD_WINDOW, maxAgeDays
 
 
 /**
+ * Every published set with its card count and no prices, from the manifest
+ * alone — no database, so it cannot fail.
+ *
+ * The hub's floor. A page that 500s because a price lookup had a bad minute is
+ * a worse answer than the same page with the numbers missing: the list, the
+ * counts and every link still do their job, which is to make 92 sets
+ * reachable. Shaped exactly like loadAllSets' rows so the page renders one
+ * thing either way.
+ */
+export function setsFromManifest() {
+  const bySlug = new Map();
+  for (const entry of PUBLISHED) {
+    if (!bySlug.has(entry.slug)) {
+      bySlug.set(entry.slug, { slug: entry.slug, name: entry.set, cards: 0, priced: 0, totalPence: null, top: null });
+    }
+    bySlug.get(entry.slug).cards += 1;
+  }
+  return [...bySlug.values()].sort((a, b) => b.cards - a.cards || a.name.localeCompare(b.name));
+}
+
+/**
  * Every published set with what it is worth, for the /sets hub.
  *
  * ONE catalogue read and one chunked cache read for all 455 cards, not 92
@@ -231,25 +252,45 @@ export async function pricedCards({ windowDays = DEFAULT_SOLD_WINDOW, maxAgeDays
  *
  * It is still the heaviest read on the site — every card's comps come back so
  * they can be priced, because prices are not stored, only the comps they are
- * derived from. That is why the route revalidates on the hour rather than per
- * request: the underlying numbers only move when the warmer runs, which is
- * weekly, so one visitor an hour pays for it and everyone else is served the
- * page that visit produced. It costs NO SoldComps requests at any point.
+ * derived from. That is why it is cached for an hour rather than run per
+ * request: the numbers only move when the warmer runs, which is weekly. It
+ * costs NO SoldComps requests at any point.
  *
- * A set with nothing cached is still returned, with a null total. It is a set
- * we publish; the hub says so and says the price is coming, which is honest
- * and is what the warmer will fix on its next pass.
+ * TWO THINGS THE FIRST VERSION GOT WRONG, both only visible in production.
+ * It collected all 455 payloads into one Map before pricing any of them —
+ * megabytes resident at once, where loadSetCards holds at most 48 and
+ * pricedCards holds none, selecting only the key. And it had no time budget,
+ * so a slow read hit the function limit, which left the hourly cache unfilled
+ * so the next visitor paid the same cost and died the same way. Now each chunk
+ * is priced and dropped as it arrives, and running long stops the loop with
+ * `complete: false` rather than the whole page.
+ *
+ * Returns { sets, complete }. Every published set is in `sets` whether or not
+ * it got a price — straight from the manifest — so a cache failure costs the
+ * numbers and never the list.
  */
-export async function loadAllSets({ windowDays = DEFAULT_SOLD_WINDOW, maxAgeDays = MAX_SERVER_PRICE_AGE_DAYS } = {}) {
+export async function loadAllSets({ windowDays = DEFAULT_SOLD_WINDOW, maxAgeDays = MAX_SERVER_PRICE_AGE_DAYS, budgetMs = 7000 } = {}) {
   const supabase = createPublicClient();
+  // One read for the catalogue: 455 short ids in the URL, which is the same
+  // filter pricedCards has used for the sitemap since it shipped.
   const { data: rows, error } = await selectCatalog((columns) =>
     supabase.from("card_catalog").select(columns).in("cardmarket_id", PUBLISHED.map((e) => e.id))
   );
-  // A failed read is a fault, not an empty catalogue — returning [] would
-  // render a hub claiming we price nothing at all.
   if (error) throw new Error(`card_catalog read failed for the set index: ${error.message}`);
 
   const byId = new Map((rows || []).map((row) => [row.cardmarket_id, cardFromRow(row)]));
+
+  // Every set exists on the board whether or not it gets a price, straight
+  // from the manifest — so a slow or failed cache read costs the numbers and
+  // never the list.
+  const bySlug = new Map();
+  for (const entry of PUBLISHED) {
+    if (!bySlug.has(entry.slug)) {
+      bySlug.set(entry.slug, { slug: entry.slug, name: entry.set, cards: 0, priced: 0, totalPence: 0, top: null });
+    }
+    bySlug.get(entry.slug).cards += 1;
+  }
+
   const wanted = PUBLISHED
     .map((entry) => {
       const card = byId.get(entry.id);
@@ -257,51 +298,69 @@ export async function loadAllSets({ windowDays = DEFAULT_SOLD_WINDOW, maxAgeDays
     })
     .filter(Boolean);
 
-  const cached = new Map();
+  let complete = true;
   try {
     const service = createServiceClient();
     const notBefore = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
+    const started = Date.now();
+
     for (let i = 0; i < wanted.length; i += 40) {
-      const { data } = await service
+      // A TIME BUDGET, because this is the one read that touches all 455
+      // cards. A function that dies at its limit leaves the hourly cache
+      // unfilled, so the NEXT visitor pays the same cost and dies the same
+      // way — the page would be broken for everyone, forever. Stopping early
+      // with some sets unpriced caches a usable answer instead.
+      if (Date.now() - started > budgetMs) {
+        complete = false;
+        console.error(`loadAllSets: stopped after ${i} of ${wanted.length} cards, over the ${budgetMs}ms budget`);
+        break;
+      }
+
+      const slice = wanted.slice(i, i + 40);
+      const { data, error: cacheError } = await service
         .from("soldcomps_cache")
         .select("cache_key, payload")
-        .in("cache_key", wanted.slice(i, i + 40).map((w) => w.key))
+        .in("cache_key", slice.map((w) => w.key))
         .gte("fetched_at", notBefore);
-      for (const row of data || []) cached.set(row.cache_key, row);
-    }
-  } catch {
-    // No service key — the hub still lists every set and its card count, which
-    // is most of the page. Prices simply aren't in it.
-  }
+      if (cacheError) { complete = false; continue; }
 
-  const bySlug = new Map();
-  for (const { entry, card, key } of wanted) {
-    if (!bySlug.has(entry.slug)) {
-      bySlug.set(entry.slug, { slug: entry.slug, name: entry.set, cards: 0, priced: 0, totalPence: 0, top: null });
+      // PRICED HERE, PER CHUNK, and the payloads are dropped as we go. Holding
+      // all 455 at once is what took the first version of this page down: the
+      // comps behind one card are a few dozen listings with their titles, and
+      // 455 of those resident together is megabytes on a function that also
+      // has to render. Only the pence survive the loop.
+      const payloads = new Map((data || []).map((row) => [row.cache_key, row.payload]));
+      for (const { entry, card, key } of slice) {
+        const payload = payloads.get(key);
+        if (!payload) continue;
+        const priced = priceCard(
+          { name: card.name, number: card.number, set: card.set, q: queryForCard(card) },
+          payload.comps || []
+        );
+        if (priced?.pence == null) continue;
+        const set = bySlug.get(entry.slug);
+        set.priced += 1;
+        set.totalPence += priced.pence;
+        // The leader carries the set's art on the hub, so it is the dearest
+        // card rather than the first one that happened to have a price.
+        if (!set.top || priced.pence > set.top.pence) {
+          set.top = { name: card.name, number: card.number, image: card.image, pence: priced.pence, q: entry.q };
+        }
+      }
     }
-    const set = bySlug.get(entry.slug);
-    set.cards += 1;
-
-    const row = cached.get(key);
-    const priced = row
-      ? priceCard({ name: card.name, number: card.number, set: card.set, q: queryForCard(card) },
-                  row.payload?.comps || [])
-      : null;
-    if (priced?.pence == null) continue;
-    set.priced += 1;
-    set.totalPence += priced.pence;
-    // The leader carries the set's art on the hub, so it is the dearest card
-    // rather than the first one that happened to have a price.
-    if (!set.top || priced.pence > set.top.pence) {
-      set.top = { name: card.name, number: card.number, image: card.image, pence: priced.pence, q: entry.q };
-    }
+  } catch (err) {
+    // No service key, or the cache is unreachable. The hub still lists every
+    // set and its card count, which is most of the page.
+    complete = false;
+    console.error("loadAllSets: pricing unavailable, listing sets without prices", err);
   }
 
   // Dearest first. A set with nothing priced yet sorts last rather than
   // reading as a worthless one — same rule as the cards on a set page.
-  return [...bySlug.values()]
+  const sets = [...bySlug.values()]
     .map((s) => ({ ...s, totalPence: s.priced ? s.totalPence : null }))
     .sort((a, b) => (b.totalPence ?? -1) - (a.totalPence ?? -1));
+  return { sets, complete };
 }
 
 /**
@@ -429,4 +488,4 @@ export async function loadSetCards(slug, { windowDays = DEFAULT_SOLD_WINDOW, max
   return { slug: set.slug, name: set.name, cards };
 }
 
-export default { publishedCards, findPublished, cardPageDirectives, NOT_FOR_INDEX, publishedSets, loadAllSets, findSet, siblingsOf, loadSetCards, loadCard, loadCachedSold, serverCard, pricedCards, MAX_SERVER_PRICE_AGE_DAYS };
+export default { publishedCards, findPublished, cardPageDirectives, NOT_FOR_INDEX, publishedSets, loadAllSets, setsFromManifest, findSet, siblingsOf, loadSetCards, loadCard, loadCachedSold, serverCard, pricedCards, MAX_SERVER_PRICE_AGE_DAYS };

@@ -1,4 +1,5 @@
 import { cachedAllSets } from "./cached-sets";
+import { setsFromManifest } from "@/lib/card-page";
 import { Crumb, CardArt, gbp } from "../ui";
 import { totalGbp } from "@/lib/set-share";
 
@@ -30,6 +31,10 @@ import { totalGbp } from "@/lib/set-share";
  * to compile is a deploy that breaks when the database blinks.
  */
 export const dynamic = "force-dynamic";
+// Headroom over loadAllSets' own 7s budget: the budget is what keeps a slow
+// read from reaching this limit, and this is what keeps the budget from being
+// the thing that decides the page.
+export const maxDuration = 30;
 
 export async function generateMetadata() {
   return {
@@ -71,7 +76,8 @@ export default async function SetsPage() {
         </h1>
         <p className="body" style={{ margin: "0 0 4px", maxWidth: "46ch" }}>
           The chase cards from {sets.length} sets — {cards} of them — priced from real eBay UK sold
-          listings, dearest set first. Tap a set for every card in it.
+          listings, {priced.length ? "dearest set first" : "with prices refreshing right now"}. Tap a
+          set for every card in it.
         </p>
 
         <div className="setgrid">
@@ -103,7 +109,7 @@ export default async function SetsPage() {
           actually sold for on eBay UK — not a catalogue value, and not what a sealed box costs.
           Bundles, &ldquo;choose your card&rdquo; pick-lists, proxies, damaged copies and graded slabs are
           taken out before anything is counted. {priced.length < sets.length
-            ? `${sets.length - priced.length} ${sets.length - priced.length === 1 ? "set is" : "sets are"} waiting on their next refresh.`
+            ? `${sets.length - priced.length} ${sets.length - priced.length === 1 ? "set is" : "sets are"} waiting on their next refresh${complete ? "" : " — check back shortly"}.`
             : ""}
         </p>
         <p className="body"><a className="link" href="/">Price a single card &rarr;</a></p>
