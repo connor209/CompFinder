@@ -1,0 +1,13 @@
+{
+  "artboards": [
+    { "file": "Main.dc.html",      "x": 0,    "y": 0, "w": 794, "h": 1123, "title": "A — Dark",       "print": "fixed" },
+    { "file": "Paper.dc.html",     "x": 874,  "y": 0, "w": 794, "h": 1123, "title": "B — Paper",      "print": "fixed" },
+    { "file": "ScanFirst.dc.html", "x": 1748, "y": 0, "w": 794, "h": 1123, "title": "C — Scan first", "print": "fixed" }
+  ],
+  "annotations": [
+    { "id": "note-a", "x": 0,    "y": 1190, "w": 794, "text": "A — Dark: the brand as it already is.\n\nThe site's own palette, and the only one of the three that argues its case — an example answer, three claims, then the code. Best where people are already stopped at the table.\n\nTrade-off: an A4 of near-black drinks ink and prints streaky on a desktop printer. Get this one run off at a print shop." },
+    { "id": "note-b", "x": 874,  "y": 1190, "w": 794, "text": "B — Paper: the same argument, printable at home.\n\nOne flat teal block instead of a full-bleed dark ground. Reads best under bright hall lighting and still works photocopied in black and white.\n\nTrade-off: less arresting from a distance than A or C." },
+    { "id": "note-c", "x": 1748, "y": 1190, "w": 794, "text": "C — Scan first: for the aisle, not the table.\n\nOne instruction, one code, sized to be read and acted on from across a hall. At three metres there is nothing to read but the headline and the domain.\n\nTrade-off: it says almost nothing about what the site does — it needs A beside it, or you doing the explaining." }
+  ],
+  "launch": { "view": "canvas" }
+}
