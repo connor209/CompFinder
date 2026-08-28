@@ -2,7 +2,11 @@ import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { notFound } from "next/navigation";
 import { loadSetCards, publishedSets } from "@/lib/card-page";
-import { Crumb, CardArt, gbp } from "../../ui";
+import { Crumb, CardArt } from "../../ui";
+// gbp from lib/money, NOT from ui: ui.js is "use client", so calling one of
+// its exports on the server throws at request time. This page did exactly
+// that, and only once the cards had prices to format.
+import { gbp } from "@/lib/money";
 
 /**
  * Every card in one set, dearest first.

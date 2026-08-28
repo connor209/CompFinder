@@ -2,11 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import CompFinderPricing from "@compfinder/core/pricing.js";
+import { gbp } from "@/lib/money";
 import { STEP_MS, stepFor } from "@/lib/progress-steps";
 import { DEFAULT_SOLD_WINDOW } from "@/lib/windows";
 
-export const gbp = (pence) => (pence == null ? "—" : CompFinderPricing.toPoundsStr(pence));
+// Re-exported for the client screens that already import it from here. It is
+// DEFINED in lib/money.js because this module is "use client", which makes
+// every export a client reference — callable from a client component, and a
+// request-time throw from a server one. See that file.
+export { gbp };
 
 /**
  * The whole mark is the two-tone split across two lines. No symbol beside it.

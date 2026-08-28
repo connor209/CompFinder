@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-four table tests, no framework, non-zero exit on failure:
+`npm run check` runs twenty-five table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes,
@@ -78,6 +78,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-share.mjs` — the shareable PNGs, card and set: always dated,
   sold figures only, long names cut, the set board ranked and capped, and greps
   against either ever growing an asking price or reaching past the cache.
+- `scripts/check-clientboundary.mjs` — that nothing rendering on the server
+  CALLS a function out of a `"use client"` module. It builds clean and throws
+  at request time, and only once the data has a value to format.
 - `scripts/check-epn-tag.mjs` — what an affiliate link reports about itself:
   the sub-IDs, that the slot prefix still selects what it always did, that
   `epn.js` passes them through unrewritten, and a grep against hand-writing
@@ -198,6 +201,17 @@ not, for the same reason: it runs entirely on the client. A published card
 that is not currently warm stays indexable — the test is the MANIFEST, not the
 cache, so a Supabase blip can never noindex the site, and a cache gap on one
 of the 455 is not worth spending a slow-to-undo signal on.
+
+**A server component may render a client component; it may not CALL one.**
+`gbp` lived in `app/ui.js`, which is `"use client"`, and both `/set/<slug>`
+and `/sets` called it while rendering on the server. That throws at request
+time — "Attempted to call gbp() from the server" — while building perfectly
+clean, and it only reaches the call when a card HAS a price: a cold cache
+renders a dash and never invokes it. So the page breaks when the DATA
+arrives, not when the code ships, which is why a set page that had been live
+for days went down without anyone touching it. The formatter now lives in
+`lib/money.js`, ui.js re-exports it for the client screens, and
+`check-clientboundary.mjs` greps every server file under `app/`.
 
 **`/sets` is the only way to browse.** Set pages carried the internal linking
 from the day they shipped, but it ran one way only: a card page linked up to

@@ -1,6 +1,10 @@
 import { cachedAllSets } from "./cached-sets";
 import { hubView } from "@/lib/card-page";
-import { Crumb, CardArt, gbp } from "../ui";
+import { Crumb, CardArt } from "../ui";
+// gbp from lib/money, NOT from ui: ui.js is "use client", so calling one of
+// its exports on the server throws at request time. This page did exactly
+// that, and only once the cards had prices to format.
+import { gbp } from "@/lib/money";
 import { totalGbp } from "@/lib/set-share";
 
 /**
