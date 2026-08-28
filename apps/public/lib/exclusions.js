@@ -15,6 +15,10 @@ export const EXCLUSION_LABELS = {
   nameMismatch: "Different card",
   variantMismatch: "Reverse holo, not the plain print",
   graded: "Graded slabs (PSA, ACE, CGC)",
+  // The mirror image, for a search that named a grade: there the slabs are the
+  // evidence and the raw copies are the contamination.
+  rawCopy: "Raw copies — you searched for a graded card",
+  otherGrade: "A slab, but a different grade",
   multiCardLot: "Sold as part of a bundle or lot",
   bundle: "Sold as part of a bundle or lot",
   pickYourOwn: "“Choose your card” pick-list",

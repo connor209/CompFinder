@@ -51,7 +51,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 `npm run check` runs twenty-three table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
-- `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
+- `scripts/check-exclusions.mjs` — which comps the pricing engine excludes,
+  and — since the rule inverts when the card being priced is itself a slab —
+  which card we are holding.
 - `scripts/check-resolve.mjs` — what the resolver parses and how it ranks.
 - `scripts/check-public-price.mjs` — a grep: no charm ladder on the public side.
 - `scripts/check-turnstile.mjs` — pass forgery, client binding, expiry, off-switch.
@@ -78,7 +80,8 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   run: every comp, every exclusion reason, the asking prices on the right card,
   and a grep against a second definition of the saved shape.
 - `scripts/check-showstock.mjs` — the show pool and the price that reaches a
-  label: the cash ladder as a table, which prices are held back, and that a
+  label: the cash ladder as a table, which prices are held back, that a graded
+  card starts from our own eBay price while a raw one never does, and that a
   column added by a hand-applied migration degrades instead of breaking.
 - `scripts/check-override.mjs` — a price you typed: what counts as one, that
   the recommendation is never edited, that the sticker gate lets yours through,
@@ -208,6 +211,50 @@ budget: Starter is 2,000 requests a month shared with live visitors, 455 cards
 cost 455, so weekly-at-120 is one full cycle a month and leaves ~1,500 for
 people actually using the site. **Raise the limit when the plan changes, not
 before.**
+
+## A slab is not the card underneath it
+
+The engine excluded every graded comp, always, on the reasoning that a slab is
+a different object at a different price. Right — and it never asked whether the
+card *being priced* was one. So a PSA 10 was fetched with "PSA 10" in the
+query, came back with a page of the right card in the right slab, and dropped
+all of it. What survived was a proxy, a sleeve and a raw copy, and the card
+priced at the **£2.49 floor** — while the graded panel on the same screen
+showed the PSA 10 tier at £875, worked out from the comps the price had just
+thrown away. Nothing on the row said any of it had happened.
+
+`settings.subjectGrade` (from `subjectGradeFrom()`, one definition in
+`packages/core/pricing.js`) is what the engine was missing, and the exclusion
+**inverts** on it rather than standing down: pricing a slab, the raw copies go
+as `rawCopy` and slabs of a different grade go as `otherGrade`.
+
+- **Grades are kept apart; grading companies are pooled.** A PSA 10 goes for
+  several times the same card in a PSA 8, so pooling grades swaps one confident
+  wrong number for another. PSA over CGC is a real premium but nothing like
+  that gap, and splitting on it as well empties most pools. Worth revisiting
+  with a corpus; not worth guessing at.
+- **Below `gradedMinComps` there is NO price, and never a fall back to the raw
+  market.** That fall back is the original fault, and it is silent. The tiers
+  still ride along on `rec.graded`, so the screen shows what was found.
+- **The subject test is where the blast radius is.** A false positive on a comp
+  costs one comp out of forty; one on the subject throws away every comp that
+  *is* the card. Hence `NOT_GRADED_PATTERN` — "not graded", "non-graded", "raw"
+  — and why `check-exclusions.mjs` pins ACE SPEC, TAG TEAM and "pristine
+  condition" as raw a second time on the subject side.
+- **It costs nothing upstream.** `queryForCard()` is unchanged, so a graded and
+  a raw search share one cache entry and one SoldComps call; only the filtering
+  differs. On the public page the grade is read from what the visitor TYPED
+  (`card.asked`), never from `card.q` — `q` is the canonical string the cache
+  key hashes, with the grade already stripped out of it.
+
+**On the Show Desk a graded sticker starts from what we already ask on eBay**,
+rounded to the pound (`stickerRows`, `listed`). The only place a listing price
+leads rather than sits beside the suggestion, and scoped to slabs on purpose:
+slab sales are thin enough that plenty of cards have none at their grade in
+ninety days, and the listing price is a decision already made about that exact
+copy with the grade on the label. A raw card is untouched by it — the ladder
+and the gate are right there. The sticker box still beats both, and every row
+says which of the three it is.
 
 ## Measure before adding a pricing rule
 

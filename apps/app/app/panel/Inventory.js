@@ -70,7 +70,10 @@ async function priceForTitle(title) {
     body: JSON.stringify({ query, options: { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 } })
   }).then((r) => r.json());
   if (!res || !res.ok) throw new Error((res && res.error) || "Pricing request failed.");
-  return CompFinderPricing.recommend(res.comps || [], settings, nameTokens, "sold", number || null, null);
+  // A graded listing of ours is priced against graded sales — otherwise the
+  // "above market" verdict on a £200 slab is measured against the raw card.
+  const cardSettings = { ...settings, subjectGrade: CompFinderPricing.subjectGradeFrom(title || "") };
+  return CompFinderPricing.recommend(res.comps || [], cardSettings, nameTokens, "sold", number || null, null);
 }
 
 // Compare a listing's ask to the recommended market price.

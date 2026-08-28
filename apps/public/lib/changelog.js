@@ -27,6 +27,7 @@ export const CHANGELOG = [
   {
     date: "2026-08-28",
     changes: [
+      "Search for a graded card and you now get a graded price. Put a grade in your search — \"PSA 10 Umbreon VMAX 215/203\" — and until now we quietly threw away every sale of a slab, priced the raw card underneath it instead, and showed you that number as if it were the answer. On a card whose slabs sell for hundreds that could come back as a couple of pounds. Slab sales at the grade you asked for are now what the price is built from, raw copies are excluded, and the page says which. If there aren't enough sales at that grade we say so rather than falling back to the raw card — a wrong price is worse than none.",
       "There's a Recent button on the search screen now, listing the last few cards you've looked at so you can get back to one without typing it again. It's kept in your own browser and never sent to us — there's a Clear on it, and clearing your browser data removes it too.",
       "The opening animation no longer replays every time you come back from a card. It was meant to run once when you open the site; if you'd added Last Comp to your home screen it was running on every trip back to the search screen, which is the opposite of what a splash screen is for. Going back is also instant now, rather than reloading the whole page."
     ]

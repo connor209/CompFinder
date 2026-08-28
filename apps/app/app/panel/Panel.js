@@ -1554,7 +1554,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
    * customer standing in front of you.
    */
   async function applyStickers() {
-    const rows = stickerRows(results, { nameMax, overrides }).filter((r) => !r.held && r.sku);
+    const rows = stickerRows(results, { nameMax, overrides, listed: listedByIndex }).filter((r) => !r.held && r.sku);
     if (rows.length === 0) return;
     setApplyingStickers(true);
     setStickerNotice("Saving sticker prices to the show desk…");
@@ -1614,7 +1614,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
    * repairExcelDateMangling in lib/carduploader.js).
    */
   function downloadLabelFile() {
-    const bytes = labelFile(results, { nameMax, overrides });
+    const bytes = labelFile(results, { nameMax, overrides, listed: listedByIndex });
     if (bytes.length === 0) return;
     const blob = new Blob([bytes], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -1663,6 +1663,24 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     });
   const inStockCount = known ? results.filter((r) => knownFor(r)?.stock).length : 0;
 
+  /**
+   * What we already ask for each row on eBay, keyed by position in the run.
+   *
+   * Built ONCE and handed to every caller of stickerRows — the panel, the
+   * write-back and the label file — because on a graded card it is no longer
+   * decoration beside the sticker, it IS the sticker (see stickerRows). A
+   * second lookup here would be a second answer to "what do we ask for this
+   * card", and the screen and the printed label are exactly the two places
+   * that must not disagree about that.
+   */
+  const listedByIndex = poolRun
+    ? results.reduce((acc, r, i) => {
+        const p = knownFor(r)?.stock?.match?.pricePence;
+        if (p != null) acc[i] = p;
+        return acc;
+      }, {})
+    : {};
+
   // Sticker rows for a pool run. Derived at render from the same results the
   // table shows, through the one function that owns the rounding — the number
   // on screen, the number written to the show desk and the number in the CSV
@@ -1676,9 +1694,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // and where that was done by ENDING the listing rather than setting quantity
   // to zero, the row leaves ebay_listings on the next sync. A missing figure
   // means "we don't know", never "it was free".
-  const stickers = (poolRun ? stickerRows(results, { nameMax, overrides }) : []).map((r, i) => ({
+  const stickers = (poolRun ? stickerRows(results, { nameMax, overrides, listed: listedByIndex }) : []).map((r, i) => ({
     ...r,
-    listedPence: knownFor(results[i])?.stock?.match?.pricePence ?? null
+    listedPence: listedByIndex[i] ?? null
   }));
   const stickerCounts = stickerSummary(stickers);
   const listedCount = stickers.filter((r) => r.listedPence != null).length;
@@ -1998,6 +2016,12 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             other, because what you type there is an eBay price; type in the box here and it goes on
             the label exactly as typed, because here you are writing the label.
           </p>
+          <p className="hint">
+            <b>Graded cards start from what we already ask for them on eBay</b>, rounded to the pound,
+            rather than from the comps. Slab sales are thin — plenty of cards have none at their grade
+            in ninety days — and the price on our own listing was decided with that exact copy in hand.
+            The comps figure is still on the row, and the box still wins over both.
+          </p>
           <div className="stack-list">
             {stickers.map((r, i) => (
               <div className="ps-row" key={i}>
@@ -2039,6 +2063,18 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 ) : r.edited ? (
                   <span className="hint-small" style={{ color: "var(--accent-2)", flex: "none" }}>
                     set by hand
+                  </span>
+                ) : r.stickerSource === "listed" ? (
+                  /* A slab priced off our own listing rather than off the run.
+                     Marked for the same reason an override is: a £200 sticker
+                     between a £2 and a £3 one has to be able to say where it
+                     came from, or it reads as a fault in the run. */
+                  <span className="hint-small" style={{ color: "var(--accent-2)", flex: "none" }} title="Graded card — the sticker starts from what we already ask for it on eBay, not from the comps. Type over it to change it.">
+                    graded — your eBay price
+                  </span>
+                ) : r.graded ? (
+                  <span className="hint-small" style={{ color: "var(--warn-ink)", flex: "none" }} title="Graded card with no live listing of ours to read a price from, so this came off the slab comps.">
+                    graded
                   </span>
                 ) : null}
                 <label className="sd-sticker-edit" title="What goes on the label. Whole pounds — it is cash across a table.">
@@ -2631,6 +2667,11 @@ const EXCLUSION_LABELS = {
   nameMismatch: "Different card — name didn't match",
   variantMismatch: "Reverse-holo variant mismatch",
   graded: "Graded card",
+  // The two that only ever appear when the card being priced is ITSELF a slab
+  // — the exclusion inverts there, and a deep dive full of unexplained drops
+  // is how you end up trusting the wrong number. See classifyExclusion.
+  rawCopy: "Raw copy — this card is graded",
+  otherGrade: "A different grade of the same slab",
   multiCardLot: "Multi-card lot",
   nonUkLocation: "Non-UK seller location",
   setMismatch: "Different set",

@@ -249,8 +249,190 @@ for (const [title, number, want] of NUMBERED_CASES) {
   check("Vaporeon ex 149/131 SIR Prismatic Evolutions Italian Pokemon Card NM", null, "foreignPrint");
 }
 
+// --- the grade is not part of the card's NAME --------------------------------
+// The second leak, and it sat in front of the first: nameTokensMatch requires
+// EVERY token, so a graded title tokenised whole makes "PSA" and "10" words a
+// comp has to contain. That drops a CGC 10 of the same card, and drops a
+// "PSA10" written without the space, since \bPSA\b does not match inside it —
+// both as "nameMismatch", before any of the graded logic below runs. A graded
+// title and the raw title underneath it must produce the SAME name tokens.
+{
+  const tokensOf = (title) =>
+    CompFinderPricing.extractNameTokens(CompFinderPricing.simplifyTitle(title, DEFAULT_SETTINGS.stripWords));
+  const same = (a, b, why) => {
+    if (JSON.stringify(tokensOf(a)) !== JSON.stringify(tokensOf(b))) {
+      failed++;
+      console.error(`FAIL  tokens ${why}:\n      ${a} -> ${JSON.stringify(tokensOf(a))}\n      ${b} -> ${JSON.stringify(tokensOf(b))}`);
+    }
+  };
+  same("PSA 10 Umbreon VMAX 215/203 Evolving Skies", "Umbreon VMAX 215/203 Evolving Skies", "a slab and its raw card");
+  same("CGC 9.5 Charizard 4/102 Base Set", "Charizard 4/102 Base Set", "a half grade");
+  same("Umbreon VMAX 215/203 Evolving Skies graded slab", "Umbreon VMAX 215/203 Evolving Skies", "a bare graded/slab");
+
+  const tok = tokensOf("PSA 10 Umbreon VMAX 215/203 Evolving Skies");
+  const matches = (title, want, why) => {
+    if (CompFinderPricing.nameTokensMatch(title, tok) !== want) {
+      failed++;
+      console.error(`FAIL  ${why}: want ${want ? "match" : "no match"}\n      ${title}`);
+    }
+  };
+  matches("CGC 10 Umbreon VMAX 215/203 Evolving Skies", true, "a CGC slab of the same card");
+  matches("PSA10 Umbreon VMAX 215/203 Evolving Skies", true, "a grade written without the space");
+  // ...and the tokens must still do the job they were there for.
+  matches("PSA 10 Charizard 4/102 Base Set", false, "a different card in a slab");
+
+  // The two live false positives again, from this side: a grader word inside a
+  // card's real NAME must survive, or the token set loses what identifies it.
+  const ace = tokensOf("Master Ball Pattern ACE SPEC 153/191 Surging Sparks");
+  if (!ace.includes("ACE") || !ace.includes("SPEC")) {
+    failed++;
+    console.error(`FAIL  ACE SPEC must stay in the name tokens, got ${JSON.stringify(ace)}`);
+  }
+  const tag = tokensOf("Reshiram & Charizard GX TAG TEAM 20/214 Unbroken Bonds");
+  if (!tag.includes("TAG") || !tag.includes("TEAM")) {
+    failed++;
+    console.error(`FAIL  TAG TEAM must stay in the name tokens, got ${JSON.stringify(tag)}`);
+  }
+}
+
+// --- is the card WE hold a slab ----------------------------------------------
+// The highest-stakes question in the whole rule, and the one with the widest
+// blast radius. A false positive on a COMP costs one comp out of forty and the
+// median absorbs it. A false positive on the SUBJECT inverts the exclusion and
+// throws away every comp that IS the card — the same shape of fault, from the
+// opposite direction, as the one this whole change exists to fix.
+//
+// So the false negatives below are the important half: every one is a raw card
+// whose own title says something about grading.
+{
+  const subject = (title, want, why) => {
+    const got = CompFinderPricing.subjectGradeFrom(title);
+    const isGraded = !!got;
+    if (isGraded !== want) {
+      failed++;
+      console.error(`FAIL  subject ${why}: want ${want ? "slab" : "raw"}, got ${want ? "raw" : "slab"}\n      ${title}`);
+    }
+    return got;
+  };
+
+  subject("PSA 10 Umbreon VMAX (Alternate Art Secret) 215/203 Swsh07: Evolving Skies", true, "a slab");
+  subject("Umbreon VMAX 215/203 Evolving Skies graded slab", true, "a slab with no readable grade");
+  subject("Charizard 4/102 Base Set Holo NM", false, "a plain raw card");
+
+  // A seller saying what the card ISN'T. "ungraded" never matched anything
+  // (there is no word boundary in front of the "graded" inside it) but the
+  // spaced and hyphenated forms do, and "raw" is how half of them are written.
+  subject("Charizard 4/102 Base Set - not graded, raw", false, "a title saying NOT graded");
+  subject("Charizard 4/102 Base Set NON-GRADED", false, "a hyphenated non-graded");
+  subject("Charizard 4/102 Base Set ungraded", false, "an ungraded card");
+  subject("Charizard 4/102 Base Set raw copy", false, "a card described as raw");
+
+  // The two live false positives the comp-side pattern was already built to
+  // dodge, re-pinned here because the subject test now rides on it and the
+  // cost of getting them wrong is no longer one comp.
+  subject("Master Ball Pattern ACE SPEC 153/191 Surging Sparks", false, "an ACE SPEC card, not an ACE grade");
+  subject("Reshiram & Charizard GX TAG TEAM 20/214 Unbroken Bonds", false, "a TAG TEAM card, not a TAG grade");
+  subject("Charizard VMAX 074/073 Champion's Path Secret Rare - pristine condition", false, "pristine condition, not PRISTINE 10");
+
+  // The grade itself, since it is what splits the comps.
+  const half = subject("CGC 9.5 Pikachu 58/102 Base Set", true, "a half grade");
+  if (!half || half.grade !== 9.5 || half.company !== "CGC") {
+    failed++;
+    console.error(`FAIL  subject half grade: want CGC 9.5, got ${JSON.stringify(half)}`);
+  }
+}
+
+// --- the card being priced is ITSELF a slab ----------------------------------
+// The rule that shipped the £2.49 PSA 10. Every comp below is a title from the
+// same search; what changes between the two halves is only WHICH CARD WE HOLD,
+// and the exclusion has to invert on that alone. The pairs are the point: the
+// same title is evidence in one column and contamination in the other, and a
+// rule that reads only the comp can never get both right.
+{
+  const SUBJECT = "PSA 10 Umbreon VMAX (Alternate Art Secret) 215/203 Swsh07: Evolving Skies";
+  const graded = { ...DEFAULT_SETTINGS, subjectGrade: CompFinderPricing.subjectGradeFrom(SUBJECT) };
+  const check = (title, settings, want, label) => {
+    const rec = recommend([{ title, itemPricePence: 5000, postagePence: 0 }], settings, null, "sold", null, null);
+    const got = (rec.excluded || [])[0]?.exclusionReason ?? null;
+    if (got !== want) {
+      failed++;
+      console.error(`FAIL  ${label}: want ${String(want)}, got ${String(got)}\n      ${title}`);
+    }
+  };
+
+  const SLAB_SAME_GRADE = "PSA 10 Umbreon VMAX Alt Art 215/203 Evolving Skies";
+  const SLAB_OTHER_COMPANY = "CGC 10 Umbreon VMAX 215/203 Evolving Skies";
+  const SLAB_OTHER_GRADE = "PSA 9 Umbreon VMAX 215/203 Evolving Skies";
+  const RAW = "Umbreon VMAX 215/203 Evolving Skies Secret Rare Holo NM";
+  const SLAB_NO_GRADE = "Umbreon VMAX 215/203 Evolving Skies graded slab";
+
+  // Holding a raw card: unchanged from the day the graded rule was written.
+  check(SLAB_SAME_GRADE, DEFAULT_SETTINGS, "graded", "raw subject still drops slabs");
+  check(SLAB_OTHER_GRADE, DEFAULT_SETTINGS, "graded", "raw subject still drops other grades");
+  check(RAW, DEFAULT_SETTINGS, null, "raw subject keeps raw comps");
+
+  // Holding the slab: the same five titles, read the other way round.
+  check(SLAB_SAME_GRADE, graded, null, "slab subject keeps its own grade");
+  check(RAW, graded, "rawCopy", "slab subject drops raw copies");
+  check(SLAB_OTHER_GRADE, graded, "otherGrade", "slab subject drops a different grade");
+  // Companies are pooled and grades are not — the gap between PSA and CGC is
+  // nothing like the gap between a 10 and a 9, and splitting on both empties
+  // most pools. Pinned because it is a judgement call, not an accident.
+  check(SLAB_OTHER_COMPANY, graded, null, "slab subject pools companies at the same grade");
+  // A slab whose grade cannot be read is a wide answer, not a wrong one.
+  check(SLAB_NO_GRADE, graded, null, "slab subject keeps an unreadable grade");
+  // Everything else still applies on top: a slab in a display case is still
+  // not a card, and a different card is still a different card.
+  check("PSA 10 Umbreon VMAX 215/203 Evolving Skies display case", graded, "notACard", "slab subject still drops non-cards");
+
+  // ...and the keyword group. This is the one that undid the whole fix in an
+  // earlier draft: settings.excludeKeywords carries its own "psa"/"slab" list,
+  // which re-excluded every slab one line after the pattern had let it through
+  // and left the card priced from nothing at all.
+  const kept = recommend(
+    [{ title: SLAB_SAME_GRADE, itemPricePence: 84000, postagePence: 0 }],
+    graded, null, "sold", null, null
+  );
+  if ((kept.included || []).length !== 1) {
+    failed++;
+    console.error("FAIL  the graded KEYWORD list must stand down too, not just the pattern");
+  }
+
+  // The £2.49 itself, end to end: the pool that shipped, priced both ways.
+  const POOL = [
+    { title: SLAB_SAME_GRADE, itemPricePence: 84000, postagePence: 0 },
+    { title: "PSA 10 Umbreon VMAX Alternate Art 215/203", itemPricePence: 91000, postagePence: 0 },
+    { title: SLAB_OTHER_COMPANY, itemPricePence: 79000, postagePence: 0 },
+    { title: SLAB_OTHER_GRADE, itemPricePence: 62000, postagePence: 0 },
+    { title: "Umbreon VMAX 215/203 Evolving Skies proxy custom card", itemPricePence: 199, postagePence: 50 },
+    { title: RAW, itemPricePence: 250, postagePence: 0 }
+  ];
+  const asSlab = recommend(POOL, graded, ["umbreon"], "sold", "215/203", null);
+  if (!(asSlab.rawPence > 50000)) {
+    failed++;
+    console.error(`FAIL  the PSA 10 must price off its own slabs, got ${asSlab.rawPence}`);
+  }
+  if (!/[Gg]raded card/.test(asSlab.note || "")) {
+    failed++;
+    console.error("FAIL  a graded price must say on the row that it is one");
+  }
+
+  // Too few slabs at our grade is NO price — never a quiet fall back to the
+  // raw copies, which is the exact shape of the original fault.
+  const thin = recommend(POOL.filter((c) => !/PSA 10|CGC 10/.test(c.title)), graded, ["umbreon"], "sold", "215/203", null);
+  if (thin.rawPence !== null || !thin.priceHeld) {
+    failed++;
+    console.error(`FAIL  a thin slab pool must hold, got ${thin.rawPence}`);
+  }
+  // The tiers still travel, so the screen can show what WAS found.
+  if (!(thin.graded || []).length) {
+    failed++;
+    console.error("FAIL  a held slab must still hand back the graded tiers it found");
+  }
+}
+
 if (failed) {
   console.error(`\n${failed} exclusion checks failed.`);
   process.exit(1);
 }
-console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier and foreign-print cases pass.`);
+console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier, foreign-print and graded-subject cases pass.`);

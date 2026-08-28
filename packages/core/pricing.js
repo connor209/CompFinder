@@ -16,6 +16,22 @@ const CompFinderPricing = (() => {
     poolConditionsBelowPence: 1500, // pool NM/LP/MP together under £15 raw cluster
     lowConfidenceMax: 3,      // 0-3 comps => Low
     mediumConfidenceMax: 9,   // 4-9 comps => Medium, 10+ => High
+    // THE CARD BEING PRICED, when it is itself a slab — null for a raw card,
+    // which is every card unless a caller says otherwise. Set it with
+    // subjectGradeFrom(title); see the block above classifyExclusion for what
+    // it changes and why the exclusion has to invert rather than stand down.
+    //
+    // A per-card fact rather than a preference, and in settings anyway because
+    // that is already where per-card policy enters the engine — settingsForText()
+    // in the app and settingsForCard() on the public page both build one of
+    // these per card, so neither had to grow a new argument to say this.
+    subjectGrade: null,
+    // How many same-grade comps a slab needs before its price is published.
+    // Below this the answer is NO price, never a fall back to the raw copies:
+    // the raw market for a card is not soft evidence about the slab, it is
+    // evidence about a different object. Same number as the app's
+    // MIN_SOLD_COMPS_TO_PRICE, for the same reason — two comps is not a price.
+    gradedMinComps: 3,
     freePostage: true,        // add buyer's postage to seller's item price for a fair "total price" comp
     interItemDelayMs: 1500,   // pause between items in a batch — gentler pacing, and doubles as
                               // a diagnostic: if a "breaks after ~N items" issue disappears at a
@@ -201,6 +217,16 @@ const CompFinderPricing = (() => {
   const GRADER_ALT = GRADERS.join("|");
   const GRADED_NUMBER_PATTERN = new RegExp(
     `\\b(${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*\\d{1,2}\\b`, "i"
+  );
+
+  // The same pattern, for CUTTING the grade out of a string rather than
+  // detecting one in it — a fourth use of the one GRADERS list. Two
+  // differences, both because a leftover is worse than a miss when cutting:
+  // it takes the half grade with it (the detector stops at "CGC 9" and is
+  // right to, but cutting there strands a ".5" that then becomes a name
+  // token), and it is global, since a title can carry the grade twice.
+  const GRADED_PREFIX_PATTERN = new RegExp(
+    `\\b(?:${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*(?:10|\\d(?:\\.5)?)\\b`, "ig"
   );
 
   // Bundles written with a COUNT rather than a bundle word. The keyword list
@@ -649,7 +675,23 @@ const CompFinderPricing = (() => {
     // names like "Kingdra (Cosmos Holo)" or "Unown (E)" would otherwise
     // leak literal "(" / ")" into a token and break the word-boundary
     // regex in nameTokensMatch), and keep words of reasonable length.
+    //
+    // THE GRADE IS NOT PART OF THE CARD'S NAME. nameTokensMatch requires
+    // EVERY token, so a graded title left intact here makes "PSA" and "10"
+    // things a comp has to say to count — which drops a CGC 10 of the same
+    // card, and drops a "PSA10" written without the space, since \bPSA\b
+    // does not match inside it. Both are the card. The grade is carried
+    // structurally now, on settings.subjectGrade, which is a better place for
+    // it than a word a seller may or may not have spaced.
+    //
+    // buildCardQuery already filtered these out of its own token list; this
+    // is the same rule reaching the callers that build tokens from a
+    // simplified title instead — the app's batch run above all, where every
+    // stock title is an eBay listing title with the grade written into it.
+    // No effect on a raw card: the pattern does not match one.
     return simplifiedQuery
+      .replace(GRADED_PREFIX_PATTERN, " ")
+      .replace(/\b(?:graded|slab|slabbed)\b/gi, " ")
       .replace(/\b[A-Z]{0,3}\d{1,4}\s*\/\s*[A-Z]{0,3}\d{1,4}\b/i, "")
       .replace(/[()[\]#]/g, " ")
       .split(/\s+/)
@@ -697,8 +739,44 @@ const CompFinderPricing = (() => {
     return re.test(text);
   }
 
-  function classifyExclusion(listingTitle, excludeKeywords = DEFAULT_SETTINGS.excludeKeywords, nameTokens = null, cardNumber = null) {
+  /**
+   * Why one comp is not evidence about this card — or null when it is.
+   *
+   * `subjectGrade` is the card WE are pricing, from subjectGradeFrom(). For a
+   * raw card it is null and nothing below changes: graded slabs are excluded,
+   * as they have been since the beginning, because a slab is a different
+   * object at a different price and pooling the two moves a raw median by
+   * multiples.
+   *
+   * When the card we are pricing is ITSELF a slab, that same reasoning runs
+   * the other way and the exclusion has to INVERT rather than stand down. A
+   * raw copy is not weak evidence about a graded one, it is evidence about a
+   * different object — so it goes, with its own reason.
+   *
+   * This is the fault that made it worth writing. A PSA 10 Umbreon VMAX
+   * 215/203 was fetched with "PSA 10" in the query, so nearly every comp that
+   * came back was the right card in the right slab — and every one of them was
+   * dropped as "graded". What survived was a proxy, a sleeve and a raw copy,
+   * and the card priced at the £2.49 floor while the graded panel on the same
+   * screen showed the PSA 10 tier at £875, worked out from the very comps the
+   * price had just thrown away. Nothing about that was visible on the row: it
+   * read as an ordinary cheap card with a confident number on it.
+   *
+   * Grades are then kept apart, because they are as different from each other
+   * as a slab is from a raw card — a PSA 10 routinely goes for several times
+   * the same card in a PSA 8, and pooling every grade would swap one confident
+   * wrong number for another. A comp whose grade we cannot read is kept: it is
+   * a slab of unknown grade, which is a wide answer, not a wrong one.
+   *
+   * The company is deliberately NOT part of that test. PSA does command a
+   * premium over CGC and BGS, but the gap between companies is nothing like
+   * the gap between grades, and splitting on it as well empties most pools —
+   * and an empty pool here means no price at all. Worth revisiting with a
+   * corpus behind it; not worth guessing at.
+   */
+  function classifyExclusion(listingTitle, excludeKeywords = DEFAULT_SETTINGS.excludeKeywords, nameTokens = null, cardNumber = null, subjectGrade = null) {
     const t = listingTitle || "";
+    const pricingASlab = !!(subjectGrade && subjectGrade.graded);
     if (!nameTokensMatch(t, nameTokens)) return "nameMismatch";
     // Reverse Holo is a distinct, separately-priced variant (see simplifyTitle
     // comments). nameTokens only checks required words ARE present, which
@@ -708,11 +786,22 @@ const CompFinderPricing = (() => {
     // straight into a £2.34-£3.48 regular-printing comp set.
     const queryWantsReverseHolo = (nameTokens || []).some((tok) => /^reverse$/i.test(tok));
     if (!queryWantsReverseHolo && /\breverse\s*holo\b/i.test(t)) return "variantMismatch";
-    if (GRADED_NUMBER_PATTERN.test(t)) return "graded";
+    if (pricingASlab) {
+      if (!isGradedTitle(t)) return "rawCopy";
+      const compGrade = parseGrade(t);
+      if (subjectGrade.grade != null && compGrade && compGrade.grade !== subjectGrade.grade) return "otherGrade";
+    } else if (GRADED_NUMBER_PATTERN.test(t)) {
+      return "graded";
+    }
     if (NOT_A_CARD_PATTERN.test(t)) return "notACard";
     if (COUNTED_LOT_PATTERN.test(t) || PLUS_JOINED_NAMES.test(t)) return "bundle";
     if (looksLikeNamedMultiCardLot(t, cardNumber)) return "multiCardLot";
     for (const [reason, words] of Object.entries(excludeKeywords)) {
+      // The keyword list carries its own "psa"/"cgc"/"slab" group, which would
+      // undo the inversion above one word later and leave a slab priced from
+      // nothing at all. It is the same rule as the pattern, so it stands down
+      // in the same case.
+      if (reason === "graded" && pricingASlab) continue;
       if (words.some((w) => wordBoundaryMatch(t, w))) return reason;
     }
     return null; // not excluded
@@ -849,7 +938,7 @@ const CompFinderPricing = (() => {
     const excluded = [];
 
     for (const comp of comps) {
-      const reason = classifyExclusion(comp.title, settings.excludeKeywords, nameTokens, cardNumber);
+      const reason = classifyExclusion(comp.title, settings.excludeKeywords, nameTokens, cardNumber, settings.subjectGrade);
       if (reason) {
         excluded.push({ ...comp, exclusionReason: reason });
       } else {
@@ -905,6 +994,35 @@ const CompFinderPricing = (() => {
     included = kept;
     excluded.push(...flagged);
 
+    // A slab priced from a handful of slabs is a wide answer; a slab priced
+    // from the raw copies underneath it is a wrong one, and classifyExclusion
+    // is what stops the second. This is what stops the first quietly taking
+    // its place: below gradedMinComps there is no fall back to the raw market,
+    // because there is no sense in which evidence about a different object
+    // adds up to an answer about this one. The tiers still ride along on
+    // `graded`, so the screen can show what WAS found and let a human judge it
+    // — which is the whole difference between a thin answer and a silent one.
+    //
+    // Ahead of the empty-pool return below, so a slab with nothing to price
+    // from says WHY rather than giving the generic line: on a graded card
+    // "no comps found" is the most misleading way to put it, since the comps
+    // were found and then deliberately not used.
+    const pricingASlab = !!(settings.subjectGrade && settings.subjectGrade.graded);
+    if (pricingASlab && included.length < settings.gradedMinComps) {
+      const tierName = settings.subjectGrade.grade != null ? `grade ${settings.subjectGrade.grade}` : "this grade";
+      return {
+        rawPence: null,
+        finalPence: null,
+        confidence: included.length === 0 ? "None" : "Low",
+        priceHeld: true,
+        dataSource,
+        note: `This is a graded card, and only ${included.length} ${dataSource === "active" ? "listed" : "sold"} slab(s) at ${tierName} were found — too few to price from. The raw copies were NOT used to make up the difference: a raw card and a slab are different objects at different prices, so a price built from the wrong one is worse than no price. Any graded sales that were found are below.`,
+        included,
+        excluded,
+        graded: gradedBreakdown(comps, settings, nameTokens)
+      };
+    }
+
     if (included.length === 0) {
       return {
         rawPence: null,
@@ -956,6 +1074,13 @@ const CompFinderPricing = (() => {
     const spreadNote = wideSpread
       ? ` ⚠ Comps used span a wide price range (${toPoundsStr(totals[0])}-${toPoundsStr(totals[totals.length - 1])}) — may include more than one distinct product tier, worth a manual check rather than trusting the median alone.`
       : "";
+    // A graded price has to say so on the row. It is a different market from
+    // the raw card of the same name, the figure will look wrong beside every
+    // other row in a run, and "priced from slabs" is the one sentence that
+    // makes it read as an answer rather than an error.
+    const gradedSubjectNote = pricingASlab
+      ? ` (Graded card: priced from ${included.length} ${dataSource === "active" ? "listed" : "sold"} ${settings.subjectGrade.grade != null ? `grade ${settings.subjectGrade.grade}` : "graded"} slab(s). Raw copies were excluded — a slab is a different object at a different price. Grading companies are pooled; grades are not.)`
+      : "";
     const locationNote = locationExcludedCount > 0
       ? ` (Note: ${locationExcludedCount} comp(s) excluded as non-UK sellers, per eBay's own item-location data — priced from UK-domestic sales only.)`
       : "";
@@ -981,7 +1106,7 @@ const CompFinderPricing = (() => {
         ? `No sold comps — based on ${included.length} ACTIVE (asking) price(s), median ${toPoundsStr(rawPence)}${roundedNote}. Actual sold price is typically lower than asking — treat as a starting estimate.`
         : priceBasis.weighted
           ? `Recency-weighted price from ${included.length} sale(s): ${toPoundsStr(rawPence)}${roundedNote} (recent sales weighted more heavily).`
-          : `Median of ${included.length} comparable sale(s): ${toPoundsStr(rawPence)}${roundedNote}.`) + locationNote + catalogNote + setNote + spreadNote;
+          : `Median of ${included.length} comparable sale(s): ${toPoundsStr(rawPence)}${roundedNote}.`) + gradedSubjectNote + locationNote + catalogNote + setNote + spreadNote;
 
     const graded = gradedBreakdown(comps, settings, nameTokens);
 
@@ -1008,6 +1133,38 @@ const CompFinderPricing = (() => {
     const grade = parseFloat(m[2]);
     if (Number.isNaN(grade) || grade < 1 || grade > 10) return null;
     return { company, grade };
+  }
+
+  const NOT_GRADED_PATTERN = /\b(?:un|non[\s-]?|not\s+)graded\b|\braw\b/i;
+
+  /**
+   * The card WE are pricing, read off its own title, for settings.subjectGrade.
+   *
+   * Returns null for a raw card — which is the overwhelming majority, and the
+   * reason every caller that does not ask this question keeps the behaviour it
+   * has always had. `grade` is null for a title that says it is graded without
+   * saying what to ("graded slab", "PSA graded"): that is still a slab and
+   * still must not be priced against raw copies, we just cannot pick a tier
+   * out of it, so every grade is kept rather than none.
+   *
+   * ONE definition, because both apps ask it about different text — the app
+   * about an eBay listing title it holds in stock, the public page about what
+   * a visitor typed — and two parsers would eventually disagree about whether
+   * the same card was a slab.
+   */
+  function subjectGradeFrom(text) {
+    const t = String(text || "");
+    // A seller saying what the card ISN'T. On a comp this never mattered —
+    // "ungraded" carries no word boundary before "graded" so it never matched
+    // anyway, and a stray drop costs one comp out of forty. On the SUBJECT it
+    // matters a great deal: reading "Charizard 4/102 — not graded, raw" as a
+    // slab inverts the whole rule and throws away every comp that is the card.
+    // The blast radius is the reason this guard exists and the comp side never
+    // needed one.
+    if (NOT_GRADED_PATTERN.test(t)) return null;
+    if (!isGradedTitle(t)) return null;
+    const g = parseGrade(t);
+    return { graded: true, company: g ? g.company : null, grade: g ? g.grade : null };
   }
 
   /**
@@ -1124,6 +1281,7 @@ const CompFinderPricing = (() => {
     buildCardQuery,
     isGradedTitle,
     parseGrade,
+    subjectGradeFrom,
     gradedBreakdown,
     isBundleTitle,
     extractNameTokens,

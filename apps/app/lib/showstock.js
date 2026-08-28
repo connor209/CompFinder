@@ -19,8 +19,11 @@
  *   stickerFor() below.
  *
  * Framework-free and app-import-free on purpose, so scripts/check-showstock.mjs
- * can load it under bare node and assert the ladder and the gate.
+ * can load it under bare node and assert the ladder and the gate. The one
+ * import from outside is packages/core, which is a workspace package rather
+ * than app code and loads under bare node exactly the same way.
  */
+import CompFinderPricing from "@compfinder/core/pricing.js";
 import { effectivePence, isOverridden, overriddenFromPence } from "./price-override.js";
 
 /** No sticker goes out below this — you cannot take 40p across a table. */
@@ -81,11 +84,20 @@ export function stickerPence(finalPence) {
  * Returns { pence, held, reason, overridden } — `reason` is prose, meant to
  * be shown.
  */
-export function stickerFor(rec) {
+export function stickerFor(rec, { graded = false } = {}) {
   const pence = effectivePence(rec);
   const overridden = isOverridden(rec);
   if (pence == null) {
-    return { pence: null, held: true, reason: "no price found", overridden: false };
+    // A slab with no price is not the same silence as a card with no comps,
+    // and saying so is what sends you to the right remedy — the engine found
+    // sales and declined to price from the wrong ones, so what this row wants
+    // is your eBay price or a typed number, not another run.
+    return {
+      pence: null,
+      held: true,
+      reason: graded ? "graded card — no matching slab sales" : "no price found",
+      overridden: false
+    };
   }
   if (!overridden && rec.dataSource === "active") {
     return { pence: null, held: true, reason: "priced from asking prices, not sales", overridden: false };
@@ -233,10 +245,30 @@ export function labelName(title, max = DEFAULT_NAME_MAX) {
  * Panel.js. Read the block inside for how it differs from a price typed on the
  * result itself.
  */
-export function stickerRows(results, { nameMax = DEFAULT_NAME_MAX, overrides = {} } = {}) {
+export function stickerRows(results, { nameMax = DEFAULT_NAME_MAX, overrides = {}, listed = {} } = {}) {
   return (results || []).map((r, i) => {
-    const s = stickerFor(r.rec);
-    const suggested = s.pence;
+    const graded = !!CompFinderPricing.subjectGradeFrom(r.title || "");
+    const s = stickerFor(r.rec, { graded });
+    // WHAT WE ALREADY ASK ON EBAY IS THE SUGGESTION FOR A SLAB, and it is the
+    // only place in this file where a listing price leads rather than sits
+    // beside one. Two reasons, and neither generalises to a raw card:
+    //
+    // A graded card is a thin market. Even now the engine prices it against
+    // slabs of the same grade rather than the raw copies, plenty of cards have
+    // no matching slab sales in ninety days at all — and a £200 PSA 9 that
+    // gets no sticker goes to the table with no price on it.
+    //
+    // And the listing price is not a guess about that card, it is a decision
+    // already made about that exact copy, with the slab in hand and the grade
+    // on the label. That is a better answer than a median over three sales of
+    // somebody else's copy, and it is what the card would have sold for if it
+    // had stayed on eBay instead of going in the box.
+    //
+    // It is a suggestion, not a lock: the comps figure is on the row beside
+    // it, the sticker box overrides it, and a slab with no live listing falls
+    // straight through to the ordinary ladder and gate.
+    const listedPound = graded ? toPoundPence(listed?.[i]) : null;
+    const suggested = listedPound ?? s.pence;
     // TWO hand-set prices meet here and they are NOT the same thing, so neither
     // is named just "override":
     //
@@ -265,6 +297,13 @@ export function stickerRows(results, { nameMax = DEFAULT_NAME_MAX, overrides = {
       // price the card would actually be listed at, not one it was talked out
       // of.
       recommendedPence: effectivePence(r.rec),
+      // Whether the card itself is a slab, so the row can say so — a £200
+      // sticker sat between a £2 and a £3 one reads as a mistake without it.
+      graded,
+      // Where the suggestion came from, for the same reason an override is
+      // loud everywhere else: a number nobody can trace is indistinguishable
+      // from one the tool stands behind.
+      stickerSource: stickerSet ? "hand" : listedPound != null ? "listed" : s.pence != null ? "comps" : null,
       // What the app had said, kept only where it was overridden: a row that
       // can't say what a price replaced can't be checked against its run.
       overriddenFromPence: overriddenFromPence(r.rec),
@@ -272,12 +311,15 @@ export function stickerRows(results, { nameMax = DEFAULT_NAME_MAX, overrides = {
       confidence: r.rec?.confidence ?? null,
       suggestedPence: suggested,
       stickerPence: stickerSet ? Math.round(Number(set)) : suggested,
-      held: stickerSet ? false : s.held,
+      // A listing price is a price somebody set, so it lifts the hold for the
+      // same reason a typed one does — the gate is asking about the strength
+      // of the EVIDENCE, and this row isn't relying on any.
+      held: stickerSet || listedPound != null ? false : s.held,
       // Only "edited" when it actually differs from what we suggested: a saved
       // run re-opened at the show rehydrates every price it wrote, and marking
       // all of them as hand-set would say something untrue about most.
       edited: stickerSet && suggested !== Math.round(Number(set)),
-      reason: stickerSet ? null : s.reason
+      reason: stickerSet || listedPound != null ? null : s.reason
     };
   });
 }

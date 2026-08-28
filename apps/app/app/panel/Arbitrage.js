@@ -51,7 +51,11 @@ async function soldPriceForTitle(title, resolved) {
     body: JSON.stringify({ query, options: { ebaySite: "ebay.co.uk", itemLocation: "worldwide", soldAfterDays: 90 } })
   }).then((r) => r.json());
   if (!res || !res.ok) throw new Error((res && res.error) || "Pricing failed");
-  const rec = CompFinderPricing.recommend(res.comps || [], settings, nameTokens, "sold", number || null, null);
+  // The title decides whether this is a slab, and a slab is priced against
+  // slabs. Before this the row carried a "priced vs raw comps" warning and the
+  // number underneath it was still the raw card's — a warning is not a fix.
+  const cardSettings = { ...settings, subjectGrade: CompFinderPricing.subjectGradeFrom(title || "") };
+  const rec = CompFinderPricing.recommend(res.comps || [], cardSettings, nameTokens, "sold", number || null, null);
   return {
     recPence: rec.finalPence ?? null,
     comps: rec.included.length,

@@ -154,7 +154,7 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
             status: "ready",
             query,
             card,
-            derived: derive(card, searchText, initial.sold, listings, windowDays),
+            derived: derive(card, searchText, initial.sold, listings, windowDays, query),
             listingsPending: false,
             fromCache: initial.sold.fetchedAt || null
           });
@@ -253,7 +253,7 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
         status: "ready",
         query,
         card: { ...card, q: searchText },
-        derived: derive(card, searchText, sold, { comps: [] }, windowDays),
+        derived: derive(card, searchText, sold, { comps: [] }, windowDays, query),
         listingsPending: true
       });
 
@@ -263,7 +263,7 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
         status: "ready",
         query,
         card: { ...card, q: searchText },
-        derived: derive(card, searchText, sold, listings, windowDays),
+        derived: derive(card, searchText, sold, listings, windowDays, query),
         listingsPending: false
       });
     })();
@@ -277,9 +277,21 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
 /**
  * The whole read of one card, in one pure function so it can be reasoned about
  * (and, later, tested) without a browser.
+ *
+ * `asked` is what the VISITOR typed, and it is not the same string as
+ * `searchText`. Once a card resolves, searchText becomes the canonical
+ * "name number set" — that is the point of it, since the cache is keyed on
+ * its hash — and anything the visitor said ABOUT their copy rather than about
+ * the card is gone by then. A grade is exactly that: "PSA 10 Umbreon VMAX
+ * 215/203" and "Umbreon VMAX 215/203" are one search for eBay and two
+ * different questions from the person asking.
+ *
+ * So the grade rides alongside rather than in the query, which also means it
+ * costs nothing: both searches hit the same cache entry and the same comps,
+ * and only the filtering differs.
  */
-export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_SOLD_WINDOW) {
-  const withQ = { ...card, q: searchText };
+export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_SOLD_WINDOW, asked = null) {
+  const withQ = { ...card, q: searchText, asked: asked ?? card.asked ?? searchText };
   const comps = soldRes.comps || [];
   const priced = priceCard(withQ, comps);
   const rec = priced.rec;
@@ -373,6 +385,10 @@ export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_
     restUsed: restRec ? (restRec.included || []).length : 0,
     bands,
     gradedTiers: rec ? (rec.graded || []).length : 0,
+    // The search asked about a SLAB, so the answer is about a slab: raw copies
+    // were excluded rather than the other way round. The page has to say so —
+    // a graded figure looks like an ordinary one and is several times bigger.
+    subjectGrade: settings.subjectGrade || null,
     foreign: foreignCount(comps),
     variantsHere: variantsPresent(comps),
     rec,

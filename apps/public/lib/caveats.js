@@ -71,10 +71,23 @@ export function caveatsFor({ rec, derived, card }) {
     });
   }
 
-  if (derived.gradedTiers > 0 && used.length === 0) {
+  if (derived.gradedTiers > 0 && used.length === 0 && !derived.subjectGrade) {
     out.push({
       tone: "info",
       text: "Every sale found was a graded slab. Those are a different market from a raw card."
+    });
+  }
+
+  // The other way round, and it needs saying louder: the figure above is for a
+  // SLAB. It will be several times the raw card's price, it looks exactly like
+  // an ordinary answer, and nobody scrolls up to re-read their own search.
+  if (derived.subjectGrade) {
+    const grade = derived.subjectGrade.grade;
+    out.push({
+      tone: "info",
+      text: grade != null
+        ? `You searched for a graded card, so this is priced from sales of slabs at grade ${grade} — raw copies are excluded, and grading companies are counted together.`
+        : "You searched for a graded card, so this is priced from sales of slabs — raw copies are excluded."
     });
   }
 

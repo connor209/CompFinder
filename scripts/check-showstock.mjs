@@ -192,6 +192,65 @@ for (const [bad, why] of [[0, "zero"], [null, "null"], [-500, "negative"], ["nop
   eq(`${why} is no price, not £0`, toPoundPence(bad), null);
 }
 
+// --- 4d. a graded card starts from what we already ask for it ---------------
+// The one place a listing price LEADS rather than sits beside the suggestion,
+// and it is scoped to slabs on purpose. Two reasons, both about graded cards
+// specifically: slab sales are thin enough that plenty of cards have none at
+// their grade in ninety days, and a listing price on a slab is a decision
+// somebody made with that exact copy in hand and the grade printed on it.
+//
+// The false-positive cases below are the ones that matter. A raw card must NOT
+// pick up its listing price — the ladder and the gate are right there and this
+// would quietly route around both — and a slab with no listing must fall
+// through to the ordinary path rather than losing its sticker.
+{
+  const GRADED = [
+    // Priced from slab comps, and also listed by us.
+    { sku: "G1", title: "PSA 10 Umbreon VMAX 215/203 Evolving Skies", rec: rec({ finalPence: 84000 }) },
+    // A slab the engine refused to price: no matching grade in the comps.
+    { sku: "G2", title: "PSA 9 Charizard V 154/185 Vivid Voltage", rec: rec({ finalPence: null }) },
+    // A raw card, listed by us, sitting in the same run.
+    { sku: "R1", title: "Snorlax 131/198 Chilling Reign", rec: rec({ finalPence: 1249 }) }
+  ];
+  const listed = { 0: 20000, 1: 15049, 2: 2249 };
+  const g = stickerRows(GRADED, { listed });
+
+  eq("a graded card takes our eBay price, to the pound", g[0].stickerPence, 20000);
+  eq("...and says where it came from", g[0].stickerSource, "listed");
+  eq("...ahead of the comps figure, which is still on the row",
+    { sticker: g[0].stickerPence, comps: g[0].recommendedPence }, { sticker: 20000, comps: 84000 });
+  eq("a graded card the engine would not price is no longer held", g[1].held, false);
+  eq("...and rounds to the pound, not down the ladder", g[1].stickerPence, 15000);
+  eq("...and loses the hold reason with it", g[1].reason, null);
+  eq("a RAW card in the same run is untouched by any of it",
+    { sticker: g[2].stickerPence, source: g[2].stickerSource }, { sticker: 1200, source: "comps" });
+  eq("every row says whether the card is a slab",
+    g.map((r) => r.graded), [true, true, false]);
+  eq("the summary counts the graded rows as priced", stickerSummary(g), { priced: 3, held: 0 });
+
+  // No listing of ours: back to the ordinary path, hold and all. "not listed"
+  // means we don't know, and a guess is not an improvement on that.
+  const none = stickerRows(GRADED, { listed: {} });
+  eq("a slab with no listing still prices off its comps", none[0].stickerPence, 84000);
+  eq("...and one with neither is held", none[1].held, true);
+  eq("...saying it is the GRADE that has no sales, not the card",
+    /graded/i.test(none[1].reason || ""), true);
+
+  // The sticker box still wins. It is the later, more specific decision, and
+  // it is the number somebody typed while looking at the label.
+  const typed = stickerRows(GRADED, { listed, overrides: { 0: 25000 } });
+  eq("a typed sticker beats the listing price", typed[0].stickerPence, 25000);
+  eq("...and counts as edited, because it differs from what we offered", typed[0].edited, true);
+  eq("a typed sticker equal to the listing price is not an edit", 
+    stickerRows(GRADED, { listed, overrides: { 0: 20000 } })[0].edited, false);
+
+  // A missing or nonsense listing price is not a £0 sticker.
+  for (const [bad, why] of [[0, "zero"], [null, "null"], [-100, "negative"], ["", "empty"]]) {
+    const r0 = stickerRows(GRADED, { listed: { 0: bad } })[0];
+    eq(`a ${why} listing price falls through to the comps`, r0.stickerPence, 84000);
+  }
+}
+
 // --- 5. one definition of the sticker --------------------------------------
 // The number shown on screen, the number written onto the checkout and the
 // number in the CSV all come through stickerRows(). A second call to the
@@ -203,6 +262,19 @@ if (!panel.includes("stickerRows(")) {
 }
 if (/\bstickerPence\s*\(/.test(panel)) {
   fail("Panel.js calls the ladder directly — it should read the sticker off stickerRows(), not round its own");
+}
+// Every caller has to hand over the SAME listing prices, because on a graded
+// card the listing price IS the sticker. A stickerRows() call that forgets
+// `listed` doesn't fail — it quietly reverts that one caller to the comps
+// figure, so the screen shows £200 and the printed label says £840.
+for (const call of panel.match(/stickerRows\([^)]*\)/g) || []) {
+  if (!/\blisted\b/.test(call)) {
+    fail(`Panel.js calls ${call} without the listing prices — the screen and the label can now disagree on a graded card`);
+  }
+}
+const labels = readFileSync(new URL("../apps/app/lib/labelexport.js", import.meta.url), "utf8");
+if (!/stickerRows\(results,\s*opts\)/.test(labels)) {
+  fail("labelexport.js no longer passes its options straight through — the label file can now round differently from the screen");
 }
 const showstock = readFileSync(new URL("../apps/app/lib/showstock.js", import.meta.url), "utf8");
 if (/^\s*import\s+.*from\s+["']@\//m.test(showstock)) {

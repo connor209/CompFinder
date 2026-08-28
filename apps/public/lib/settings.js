@@ -79,7 +79,20 @@ export function settingsForCard(card, { includeForeign = false } = {}) {
   const base = CompFinderPricing.DEFAULT_SETTINGS;
   const promo = isPromoCard(card);
   const english = wantsEnglishComps(card) && !includeForeign;
-  if (!promo && !english) return base;
+  // Read off what the visitor TYPED (`asked`), not off the catalogue row and
+  // not off `q`: the catalogue knows about cards, and a grade is a fact about
+  // one particular copy of one. `q` is no good either — once a card resolves
+  // it holds the canonical "name number set" the cache is keyed on, with the
+  // grade already stripped out of it, so reading the grade from there would
+  // find one only on a search that failed to resolve.
+  //
+  // Someone who searches "PSA 10 Charizard 4/102" is asking what the slab is
+  // worth, and answering with the raw card's price is answering a different
+  // question — confidently, in the largest type on the page. A card page
+  // rendered on the server has no visitor text at all, which is correct: a
+  // published card page is about the raw card.
+  const subjectGrade = CompFinderPricing.subjectGradeFrom((card && (card.asked || card.q)) || "");
+  if (!promo && !english) return subjectGrade ? { ...base, subjectGrade } : base;
 
   const excludeKeywords = { ...base.excludeKeywords };
   if (promo) {
@@ -89,7 +102,7 @@ export function settingsForCard(card, { includeForeign = false } = {}) {
     excludeKeywords.promoVariant = base.excludeKeywords.promoVariant.filter((w) => w !== "promo");
   }
   if (english) excludeKeywords.foreignPrint = FOREIGN_LANGUAGE;
-  return { ...base, excludeKeywords };
+  return { ...base, excludeKeywords, subjectGrade };
 }
 
 export default { isPromoCard, settingsForCard, foreignCount, FOREIGN_LANGUAGE };

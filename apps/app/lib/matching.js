@@ -119,13 +119,22 @@ export const FOREIGN_LANGUAGE = [
  * would be excluded as foreign and the pool would empty. That is caught rather
  * than silent — the pool falls under MIN_SOLD_COMPS_TO_PRICE, the run checks
  * the live market, and the row says how many comps went and why.
+ *
+ * IS THE CARD ITSELF A SLAB. Same shape, same seam, and the reason neither
+ * Panel.js nor QuickSearch.js needed a new argument to carry it: this function
+ * is already handed the card's own eBay title, and "PSA 10" is written on it.
+ * Without this the engine assumes every card it is asked about is raw and
+ * throws away exactly the comps that ARE the card — see the block above
+ * classifyExclusion for the £2.49 PSA 10 Umbreon that made it worth fixing.
  */
 export function settingsForText(text) {
   const t = String(text || "");
+  const subjectGrade = CompFinderPricing.subjectGradeFrom(t);
   const namesALanguage = FOREIGN_LANGUAGE.some((l) => new RegExp(`\\b${l}\\b`, "i").test(t));
-  if (namesALanguage) return APP_SETTINGS;   // not an English card — leave the pool alone
+  if (namesALanguage) return { ...APP_SETTINGS, subjectGrade };   // not an English card — leave the pool alone
   return {
     ...APP_SETTINGS,
+    subjectGrade,
     excludeKeywords: { ...APP_SETTINGS.excludeKeywords, foreignPrint: FOREIGN_LANGUAGE }
   };
 }
