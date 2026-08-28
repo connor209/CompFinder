@@ -215,8 +215,28 @@ const CompFinderPricing = (() => {
   // requiring the digit is what keeps "pristine condition" out.
   const GRADERS = ["psa", "cgc", "bgs", "sgc", "ace", "tag", "graad", "mgc", "ags", "pristine"];
   const GRADER_ALT = GRADERS.join("|");
+  // The words a slab's own label puts between the company and the number. PSA
+  // prints "GEM MINT 10", "MINT 9" and "NM-MT 8" on the flip and sellers copy
+  // it verbatim — "PSA GEM MINT 10" was read as NOT graded, which excluded the
+  // best comps on a slab's own search as "rawCopy" and left the subject test
+  // blind to a slab whose title was written the way PSA writes it. Our own
+  // stripWords can also leave "PSA GEM 10" or "PSA -MT 8" behind, so the
+  // middle tolerates up to three fragments, not one exact phrase.
+  //
+  // Only after a company whose name is never card text. "…TAG TEAM Mint 9/10"
+  // is a raw TAG TEAM card and One Piece sells a raw "…Ace Mint 9/10", so
+  // "tag" and "ace" keep requiring the digit directly — the same reasoning
+  // that kept bare "ace" out of the keyword list. "pristine" IS the grade
+  // word, with nothing to sit between. And a companyless "Gem Mint 10" stays
+  // raw: sellers use it freely about ungraded cards (335 corpus hits, mostly
+  // raw — see the excludeKeywords note), so it is the company's name that
+  // makes it a slab, never the label wording alone.
+  const GRADER_COMPANIES = GRADERS.filter((g) => g !== "tag" && g !== "ace" && g !== "pristine");
+  const GRADER_COMPANY_ALT = GRADER_COMPANIES.join("|");
+  const GRADE_LINK = `\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*`;
+  const LABEL_LINK = `\\s*(?:grad(?:e|ed|ing)\\s*)?(?:[\\s.\\-]*(?:gem|mint|mt|nm|near)\\b){1,3}[\\s.\\-]*`;
   const GRADED_NUMBER_PATTERN = new RegExp(
-    `\\b(${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*\\d{1,2}\\b`, "i"
+    `\\b(?:(?:${GRADER_ALT})${GRADE_LINK}|(?:${GRADER_COMPANY_ALT})${LABEL_LINK})\\d{1,2}\\b`, "i"
   );
 
   // The same pattern, for CUTTING the grade out of a string rather than
@@ -226,8 +246,18 @@ const CompFinderPricing = (() => {
   // right to, but cutting there strands a ".5" that then becomes a name
   // token), and it is global, since a title can carry the grade twice.
   const GRADED_PREFIX_PATTERN = new RegExp(
-    `\\b(?:${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*(?:10|\\d(?:\\.5)?)\\b`, "ig"
+    `\\b(?:(?:${GRADER_ALT})${GRADE_LINK}|(?:${GRADER_COMPANY_ALT})${LABEL_LINK})(?:10|\\d(?:\\.5)?)\\b`, "ig"
   );
+
+  // For parseGrade: the same two shapes, with the company and the grade
+  // captured. Kept beside the patterns above because all of them must agree
+  // about what counts as "a company followed by its grade" — a title the
+  // detector calls graded but the parser cannot read becomes a slab of
+  // unknown grade, which is a wide answer where a precise one was available.
+  const PARSE_GRADE_PATTERNS = [
+    new RegExp(`\\b(${GRADER_ALT})${GRADE_LINK}(10|\\d(?:\\.5)?)\\b`, "i"),
+    new RegExp(`\\b(${GRADER_COMPANY_ALT})${LABEL_LINK}(10|\\d(?:\\.5)?)\\b`, "i")
+  ];
 
   // Bundles written with a COUNT rather than a bundle word. The keyword list
   // has "lot of", "job lot" and "x2".."x6", but a leading count is at least as
@@ -692,6 +722,17 @@ const CompFinderPricing = (() => {
     return simplifiedQuery
       .replace(GRADED_PREFIX_PATTERN, " ")
       .replace(/\b(?:graded|slab|slabbed)\b/gi, " ")
+      // A grader named without a number ("PSA Graded Charizard", a trailing
+      // "…PSA"), and the label words the cut above can strand ("PSA 10 GEM
+      // MINT" loses only "PSA 10"). None of these is ever the card's name, so
+      // dropping them only loosens what a comp must contain — leaving them
+      // makes "PSA" a required word, which drops a CGC slab of the same card
+      // as nameMismatch one rule before the pooling decision can be reached.
+      // "ace", "tag" and "pristine" deliberately stay: ACE SPEC and TAG TEAM
+      // are card text and "pristine" is seller talk on raw cards — all three
+      // pinned in check-exclusions. Mt. Coronet and Gem-Knight each lose one
+      // generic token to this and keep the ones that identify them.
+      .replace(new RegExp(`\\b(?:${GRADER_COMPANY_ALT}|gem|mint|mt|nm|near)\\b`, "gi"), " ")
       .replace(/\b[A-Z]{0,3}\d{1,4}\s*\/\s*[A-Z]{0,3}\d{1,4}\b/i, "")
       .replace(/[()[\]#]/g, " ")
       .split(/\s+/)
@@ -1125,9 +1166,12 @@ const CompFinderPricing = (() => {
    * title has no company+number grade (e.g. a bare "graded" with no number).
    */
   function parseGrade(title) {
-    const m = (title || "").match(
-      new RegExp(`\\b(${GRADER_ALT})\\s*(?:grad(?:e|ed|ing)\\s*)?-?\\s*(10|\\d(?:\\.5)?)\\b`, "i")
-    );
+    const t = title || "";
+    let m = null;
+    for (const p of PARSE_GRADE_PATTERNS) {
+      m = t.match(p);
+      if (m) break;
+    }
     if (!m) return null;
     const company = m[1].toUpperCase();
     const grade = parseFloat(m[2]);

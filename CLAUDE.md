@@ -245,6 +245,13 @@ as `rawCopy` and slabs of a different grade go as `otherGrade`.
   *is* the card. Hence `NOT_GRADED_PATTERN` — "not graded", "non-graded", "raw"
   — and why `check-exclusions.mjs` pins ACE SPEC, TAG TEAM and "pristine
   condition" as raw a second time on the subject side.
+- **Sellers copy the slab's own label**, so "PSA GEM MINT 10" and "PSA NM-MT 8"
+  are graded — the label words may sit between the company and the number, and
+  the first version read those titles as raw, excluding the best comps on a
+  slab's own search as `rawCopy`. Company name required: a companyless "Gem
+  Mint 10/10" is a raw card being praised (335 corpus hits, mostly raw), and
+  "tag"/"ace" still need the digit directly or "…TAG TEAM Mint 9/10" and One
+  Piece's "…Ace Mint 9/10" read as slabs.
 - **It costs nothing upstream.** `queryForCard()` is unchanged, so a graded and
   a raw search share one cache entry and one SoldComps call; only the filtering
   differs. On the public page the grade is read from what the visitor TYPED

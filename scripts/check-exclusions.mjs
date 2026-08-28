@@ -268,6 +268,13 @@ for (const [title, number, want] of NUMBERED_CASES) {
   same("PSA 10 Umbreon VMAX 215/203 Evolving Skies", "Umbreon VMAX 215/203 Evolving Skies", "a slab and its raw card");
   same("CGC 9.5 Charizard 4/102 Base Set", "Charizard 4/102 Base Set", "a half grade");
   same("Umbreon VMAX 215/203 Evolving Skies graded slab", "Umbreon VMAX 215/203 Evolving Skies", "a bare graded/slab");
+  // PSA's own label wording, which the first cut missed: "GEM MINT 10" left
+  // "GEM" (and, unsimplified, "MINT" and "10") in the required tokens, an
+  // NM-MT 8 left a mangled "-MT", and a grader named with no number left the
+  // company itself — each a word the right comp has no reason to contain.
+  same("Umbreon VMAX 215/203 Evolving Skies PSA GEM MINT 10", "Umbreon VMAX 215/203 Evolving Skies", "PSA's label wording");
+  same("PSA NM-MT 8 Charizard 4/102 Base Set", "Charizard 4/102 Base Set", "an NM-MT 8 label");
+  same("PSA Graded Umbreon VMAX 215/203 Evolving Skies", "Umbreon VMAX 215/203 Evolving Skies", "a grader named with no number");
 
   const tok = tokensOf("PSA 10 Umbreon VMAX 215/203 Evolving Skies");
   const matches = (title, want, why) => {
@@ -340,6 +347,21 @@ for (const [title, number, want] of NUMBERED_CASES) {
     failed++;
     console.error(`FAIL  subject half grade: want CGC 9.5, got ${JSON.stringify(half)}`);
   }
+
+  // The wording PSA itself prints on the flip, which the first version read
+  // as raw: "GEM MINT" (and "NM-MT", and our own stripWords' leftover
+  // "GEM") may sit between the company and the number.
+  const label = subject("Charizard VMAX 074/073 Champion's Path PSA GEM MINT 10", true, "a slab written the way PSA writes it");
+  if (!label || label.grade !== 10 || label.company !== "PSA") {
+    failed++;
+    console.error(`FAIL  subject label wording: want PSA 10, got ${JSON.stringify(label)}`);
+  }
+  // ...and only between a COMPANY and the number. "Mint 9/10" is seller talk
+  // about a raw card, and "tag"/"ace" keep requiring the digit directly —
+  // the same reasoning that kept bare "ace" out of the keyword list.
+  subject("Umbreon VMAX 215/203 Evolving Skies Gem Mint 10/10 Pack Fresh", false, "gem mint with no company named");
+  subject("Reshiram & Charizard GX TAG TEAM 20/214 Mint 9/10 condition", false, "a raw TAG TEAM in mint-9/10 seller talk");
+  subject("Portgas D Ace Mint 9/10 One Piece OP02 Alt Art", false, "One Piece's Ace beside condition talk");
 }
 
 // --- the card being priced is ITSELF a slab ----------------------------------
@@ -381,6 +403,15 @@ for (const [title, number, want] of NUMBERED_CASES) {
   check(SLAB_OTHER_COMPANY, graded, null, "slab subject pools companies at the same grade");
   // A slab whose grade cannot be read is a wide answer, not a wrong one.
   check(SLAB_NO_GRADE, graded, null, "slab subject keeps an unreadable grade");
+  // PSA's label wording, both ways round. Before the pattern learned it,
+  // this title was "rawCopy" while holding the slab — the best comp on the
+  // search, excluded for being written the way PSA writes it.
+  const SLAB_LABEL = "Umbreon VMAX Alt Art 215/203 Evolving Skies PSA GEM MINT 10";
+  check(SLAB_LABEL, DEFAULT_SETTINGS, "graded", "raw subject drops PSA's label wording");
+  check(SLAB_LABEL, graded, null, "slab subject keeps PSA's label wording");
+  check("Umbreon VMAX 215/203 Evolving Skies PSA MINT 9", graded, "otherGrade", "label wording still splits the grades");
+  // Companyless "gem mint" is a raw card being praised, not a slab.
+  check("Umbreon VMAX 215/203 Evolving Skies Gem Mint 10/10 Pack Fresh", graded, "rawCopy", "gem mint alone is still a raw copy");
   // Everything else still applies on top: a slab in a display case is still
   // not a card, and a different card is still a different card.
   check("PSA 10 Umbreon VMAX 215/203 Evolving Skies display case", graded, "notACard", "slab subject still drops non-cards");
