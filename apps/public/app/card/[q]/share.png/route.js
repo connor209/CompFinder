@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
 import { shareFields, drawableArt, DRAWABLE_TYPES } from "@/lib/share-card";
+import { gradeAskFrom } from "@/lib/grade-ask";
 import { windowFromParam } from "@/lib/windows";
 import { serverCard } from "@/lib/card-page";
 import { priceCard } from "@/lib/price";
@@ -192,6 +193,12 @@ async function renderFromBody(request) {
     lastSale: body.lastSale && typeof body.lastSale === "object"
       ? { pence: pence(body.lastSale.pence), endedAt: body.lastSale.endedAt }
       : null,
+    // The grade the search asked about, derived HERE from the query the
+    // payload already carries — never taken as free text from the body, so
+    // nothing a caller writes is drawn onto the image verbatim. gradeAskFrom
+    // is the same parser the page priced by, so the image and the screen
+    // cannot disagree about whether this was a slab's figure.
+    grade: gradeAskFrom(String(body.query || "")),
     now: new Date()
   });
 

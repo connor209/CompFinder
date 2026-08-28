@@ -37,7 +37,7 @@ export function fit(text, max) {
  * `now` is a parameter rather than a call to Date.now() so the tests can pin
  * it — the same reason the audit scripts take a timestamp.
  */
-export function shareFields({ card, marketPence, used = 0, windowDays = 90, lastSale = null, now = new Date() } = {}) {
+export function shareFields({ card, marketPence, used = 0, windowDays = 90, lastSale = null, grade = null, now = new Date() } = {}) {
   // Not a default parameter: a default only fires on undefined, and the caller
   // that hands this a null card is exactly the one that has nothing to draw.
   const c = card || {};
@@ -45,15 +45,27 @@ export function shareFields({ card, marketPence, used = 0, windowDays = 90, last
     .filter(Boolean)
     .join(" · ");
 
+  // The grade the search asked about — "PSA 10", or "graded" for a slab with
+  // no readable tier — from gradeAskFrom, never free text. It has to be ON the
+  // image: a graded figure is several times the raw card's price, this PNG is
+  // built to be quoted in a thread for months, and "Umbreon VMAX sells for
+  // £875" with the PSA 10 left off is the site misquoting itself with its own
+  // brand in the corner. On the label directly over the figure, because that
+  // is the binding a crop can't lose.
+  const askedGrade = typeof grade === "string" && grade.trim() ? grade.trim() : null;
+  const gradeLabel = askedGrade
+    ? (askedGrade.toLowerCase() === "graded" ? "Graded slab" : `${askedGrade} slab`)
+    : null;
+
   return {
     name: fit(c.name || "Unknown card", 34),
     setLine: fit(setLine, 46),
     figure: gbp(marketPence),
     // "Sells for" rather than "worth": the number is what comparable copies
     // actually sold for, which is a narrower and more defensible claim.
-    figureLabel: "Sells for",
+    figureLabel: gradeLabel ? `${gradeLabel} sells for` : "Sells for",
     basis: used
-      ? `${used} sold ${used === 1 ? "listing" : "listings"} · last ${windowDays} days`
+      ? `${used} sold ${askedGrade ? (used === 1 ? "slab" : "slabs") : (used === 1 ? "listing" : "listings")} · last ${windowDays} days`
       : `No sales in the last ${windowDays} days`,
     lastSale: lastSale && lastSale.pence != null
       ? `Last one ${gbp(lastSale.pence)}${lastSale.endedAt ? ` on ${shortDate(lastSale.endedAt)}` : ""}`

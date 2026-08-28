@@ -583,6 +583,14 @@ still being quoted in March while the listing sold in August. Sold figures are
 facts about things that already happened. The image is also always DATED, for
 the same reason. `check-share.mjs` greps for both.
 
+**A graded ask is on the image, bound to the figure.** A slab's price is
+several times the raw card's, so "Umbreon VMAX sells for £875" with the PSA 10
+left off is the site misquoting itself under its own brand. The label over the
+figure carries it ("PSA 10 slab sells for"), derived server-side from the
+query the payload already sends via `gradeAskFrom` — never free text off the
+body, or anyone could draw their own words onto a branded, dated price card.
+`check-share.mjs` pins both halves.
+
 
 **The cards you looked at are yours, and they stay on your device.**
 `lib/recent-searches.js` owns the list behind the **Recent** button on the

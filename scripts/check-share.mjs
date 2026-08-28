@@ -69,6 +69,22 @@ eq("a last sale with no price is omitted too",
 ok("the basis follows the window",
    shareFields({ ...UMBREON, windowDays: 30 }).basis.includes("30 days"));
 
+// A graded ask is ON the image, bound to the figure. A slab's price is several
+// times the raw card's, this PNG gets quoted in threads for months, and
+// "Umbreon VMAX sells for £875" with the PSA 10 left off is the site
+// misquoting itself under its own brand. On the label over the figure, where
+// a crop can't separate them.
+eq("a graded ask labels the figure",
+   shareFields({ ...UMBREON, grade: "PSA 10" }).figureLabel, "PSA 10 slab sells for");
+eq("…and the basis counts slabs",
+   shareFields({ ...UMBREON, grade: "PSA 10" }).basis, "8 sold slabs · last 90 days");
+eq("a slab with no readable tier still says slab",
+   shareFields({ ...UMBREON, grade: "graded" }).figureLabel, "Graded slab sells for");
+eq("a raw card's label is exactly what it always was",
+   shareFields(UMBREON).figureLabel, "Sells for");
+eq("…and its basis still counts listings",
+   shareFields(UMBREON).basis, "8 sold listings · last 90 days");
+
 // However broken the input, the date survives — see the note at the top.
 for (const broken of [{}, { card: null }, { marketPence: null, used: 0 }]) {
   const s = shareFields({ ...broken, now: NOW });
@@ -107,6 +123,11 @@ ok("the route still has a POST", postBody.length > 40);
 for (const term of ["serverCard", "loadCachedSold", "createPublicClient"]) {
   ok(`the POST handler does not read the cache (${term})`, !postBody.includes(term));
 }
+// The grade on the image is DERIVED from the query, through the same parser
+// the page priced by — never taken as free text from the body, or anyone
+// could draw their own words onto a branded, dated price card.
+ok("the POST derives the grade with gradeAskFrom", postBody.includes("gradeAskFrom("));
+ok("…and never reads a grade string off the body", !postBody.includes("body.grade"));
 
 // GET is the OpenGraph image and may read the cache — but only read it. The
 // standing rule is that a crawler never costs a SoldComps request, so an
