@@ -10,6 +10,8 @@ import { cardCustomId } from "@/lib/epn-tag";
 import { assessAsk } from "@/lib/verdict";
 import { useCard, queryForCard } from "@/lib/use-card";
 import { rememberSearch } from "@/lib/recent-searches";
+import { carryGrade } from "@/lib/grade-ask";
+import { remember as rememberHandoff } from "@/lib/card-handoff";
 import { SOLD_WINDOWS, cardHref } from "@/lib/windows";
 import { VARIANTS, variantQueryTerms } from "@/lib/variants";
 import TrendChart from "../../TrendChart";
@@ -110,7 +112,14 @@ function WhichOne({ query, candidates, fuzzy }) {
   // six-way collision doesn't become six identical squares to read through.
   const big = candidates.slice(0, 2);
   const rest = candidates.slice(2);
-  const go = (c) => router.push(`/card/${encodeURIComponent(queryForCard(c))}`);
+  // carryGrade: the visitor may have typed a grade into the search that led
+  // here, and picking which printing they meant is not withdrawing that
+  // question. The handoff saves the pick a second resolve, same as the
+  // dropdown's does.
+  const go = (c) => {
+    rememberHandoff(c);
+    router.push(`/card/${encodeURIComponent(carryGrade(query, queryForCard(c)))}`);
+  };
   const name = candidates[0] ? candidates[0].name : query;
 
   return (

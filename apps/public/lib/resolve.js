@@ -1,4 +1,5 @@
 import { detectLanguage } from "@compfinder/core/catalog.js";
+import { stripAsk } from "./grade-ask.js";
 
 /**
  * Language from the EXPANSION CODE, which the set name can't give us.
@@ -137,9 +138,18 @@ const ODDITY = /\b(oversized|jumbo|giant|xxl)\b/i;
  * So: everything before the number is the name, everything after it is a hint
  * about the set. The hint is not thrown away — scoreCard uses it, which is
  * what makes naming the set help rather than hurt.
+ *
+ * THE GRADE COMES OFF FIRST, because it reads as everything this parser is
+ * looking for while being none of it. "PSA 10 Umbreon VMAX 215" parsed as a
+ * card NAMED "PSA" with collector number 10; with a slash number the "psa 10"
+ * stayed glued to the name and demoted an exact match to a fuzzy guess. The
+ * grade is a fact about the visitor's copy, not about which card exists —
+ * settingsForCard reads it from `card.asked` for the pricing, so cutting it
+ * here loses nothing. stripAsk, not a local regex: one definition of what a
+ * grade looks like, shared with the engine that prices by it.
  */
 export function parseQuery(text) {
-  const raw = String(text || "").trim();
+  const raw = stripAsk(String(text || "")).trim();
   const strip = (n) => String(n).replace(/^0+(?=\d)/, "");
 
   const cut = (index, length, number, total) => {

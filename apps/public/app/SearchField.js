@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { queryForCard } from "@/lib/card-query";
+import { carryGrade } from "@/lib/grade-ask";
 import { remember } from "@/lib/card-handoff";
 import { readRecent, clearRecent } from "@/lib/recent-searches";
 import { gbp } from "./ui";
@@ -52,10 +53,15 @@ export default function SearchField({ seeds = [] }) {
    * the card it was just given — half a second on the critical path.
    * queryForCard rather than joining the fields here: that string is what the
    * cache key hashes, and it wants one definition.
+   *
+   * carryGrade, because picking from the dropdown must not change the
+   * question. Someone who typed "PSA 10 umbreon" and tapped the suggestion has
+   * still asked about the slab; navigating with the bare canonical string
+   * silently priced the raw card instead — in the largest type on the page.
    */
   function goToCard(card) {
     remember(card);
-    go(queryForCard(card));
+    go(carryGrade(q, queryForCard(card)));
   }
 
   /**

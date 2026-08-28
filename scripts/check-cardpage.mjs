@@ -124,6 +124,14 @@ eq("and it is single use", take(HIT), null);
 remember(PICKED);
 eq("matching survives spacing and case", take("  umbreon  VMAX 215   evolving skies ")?.id, PICKED.id);
 
+// A grade in the URL is the visitor's question about their copy, not a
+// different card — the dropdown and the picker both prefix it now, and
+// without the strip every graded pick paid the resolve the handoff saves.
+remember(PICKED);
+eq("a graded ask is still the same card", take("PSA 10 Umbreon VMAX 215 Evolving Skies")?.id, PICKED.id);
+remember(PICKED);
+eq("a graded ask for a DIFFERENT card is still refused", take("PSA 10 Charizard ex 199 151"), null);
+
 // Nothing stored, nothing claimed.
 eq("no handoff, no card", take(HIT), null);
 // Junk in storage must not throw on the way to a page.

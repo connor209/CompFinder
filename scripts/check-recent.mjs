@@ -55,6 +55,19 @@ check("case and spacing are the same card", names(), ["Umbreon VMAX", "Charizard
 rememberSearch(card("Umbreon VMAX", "215", "Evolving Skies Alt"));
 check("a different set is a different card", names().length, 3);
 
+// A grade the visitor typed rides on the row, so coming back to a graded
+// search asks about the slab again rather than quietly swapping to the raw
+// card. Still ONE row per card — the graded and the raw search dedupe
+// together, and the latest way it was asked is the way the row asks it.
+clearRecent();
+rememberSearch(card("Umbreon VMAX", "215", "Evolving Skies"));
+rememberSearch(card("Umbreon VMAX", "215", "Evolving Skies"), "PSA 10 umbreon vmax 215");
+check("a graded repeat is still one row", names(), ["Umbreon VMAX"]);
+check("the row replays the graded ask", readRecent()[0].q, "PSA 10 Umbreon VMAX 215 Evolving Skies");
+rememberSearch(card("Umbreon VMAX", "215", "Evolving Skies"), "umbreon vmax 215");
+check("a raw repeat is still one row", names(), ["Umbreon VMAX"]);
+check("and the latest ask wins", readRecent()[0].q, "Umbreon VMAX 215 Evolving Skies");
+
 // The cap holds, and it drops the OLDEST rather than refusing the newest.
 clearRecent();
 for (let i = 1; i <= RECENT_LIMIT + 4; i++) rememberSearch(card(`Card ${i}`, String(i), "Set"));

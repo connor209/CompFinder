@@ -259,6 +259,32 @@ const CompFinderPricing = (() => {
     new RegExp(`\\b(${GRADER_COMPANY_ALT})${LABEL_LINK}(10|\\d(?:\\.5)?)\\b`, "i")
   ];
 
+  // A grader named without a number: "PSA Graded Charizard", a trailing
+  // "…PSA". Only the companies whose names are never card text — ACE SPEC and
+  // TAG TEAM are cards, and "pristine" without its digit is seller talk.
+  const GRADER_COMPANY_WORD = new RegExp(`\\b(?:${GRADER_COMPANY_ALT})\\b`, "gi");
+  const GRADED_WORD = /\b(?:graded|slab|slabbed)\b/gi;
+
+  /**
+   * The grade, cut out of a string — the company+number phrase in any of its
+   * label spellings, a bare graded/slab/slabbed, and a company named on its
+   * own. What remains is about the CARD; what was cut is about one copy of it.
+   *
+   * ONE definition, shared by the token builder here and the public page's
+   * resolver: the resolver reads the same graded searches ("PSA 10 Umbreon
+   * VMAX 215") that the pricing engine reads off titles, and its number
+   * parser was taking "10" for the collector number and "PSA" for the name.
+   * Deliberately NOT cut: the bare label words (gem/mint/nm) — on a typed
+   * search "Mt. Coronet" is a card being asked for, and dropping "Mt" would
+   * turn an exact name match into a maybe.
+   */
+  function stripGradeMarkers(text) {
+    return String(text || "")
+      .replace(GRADED_PREFIX_PATTERN, " ")
+      .replace(GRADED_WORD, " ")
+      .replace(GRADER_COMPANY_WORD, " ");
+  }
+
   // Bundles written with a COUNT rather than a bundle word. The keyword list
   // has "lot of", "job lot" and "x2".."x6", but a leading count is at least as
   // common and matched none of them: "Pokémon TCG 10 Card Lot Mewtwo VSTAR
@@ -719,20 +745,13 @@ const CompFinderPricing = (() => {
     // simplified title instead — the app's batch run above all, where every
     // stock title is an eBay listing title with the grade written into it.
     // No effect on a raw card: the pattern does not match one.
-    return simplifiedQuery
-      .replace(GRADED_PREFIX_PATTERN, " ")
-      .replace(/\b(?:graded|slab|slabbed)\b/gi, " ")
-      // A grader named without a number ("PSA Graded Charizard", a trailing
-      // "…PSA"), and the label words the cut above can strand ("PSA 10 GEM
-      // MINT" loses only "PSA 10"). None of these is ever the card's name, so
-      // dropping them only loosens what a comp must contain — leaving them
-      // makes "PSA" a required word, which drops a CGC slab of the same card
-      // as nameMismatch one rule before the pooling decision can be reached.
-      // "ace", "tag" and "pristine" deliberately stay: ACE SPEC and TAG TEAM
-      // are card text and "pristine" is seller talk on raw cards — all three
-      // pinned in check-exclusions. Mt. Coronet and Gem-Knight each lose one
-      // generic token to this and keep the ones that identify them.
-      .replace(new RegExp(`\\b(?:${GRADER_COMPANY_ALT}|gem|mint|mt|nm|near)\\b`, "gi"), " ")
+    return stripGradeMarkers(simplifiedQuery)
+      // The label words the cut can strand ("PSA 10 GEM MINT" loses only
+      // "PSA 10"). Never a card's name, so dropping them only loosens what a
+      // comp must contain. Deliberately NOT part of stripGradeMarkers: the
+      // public resolver strips markers from what a visitor typed, and there
+      // "Mt. Coronet" is a card being searched for, not a leftover.
+      .replace(/\b(?:gem|mint|mt|nm|near)\b/gi, " ")
       .replace(/\b[A-Z]{0,3}\d{1,4}\s*\/\s*[A-Z]{0,3}\d{1,4}\b/i, "")
       .replace(/[()[\]#]/g, " ")
       .split(/\s+/)
@@ -1326,6 +1345,7 @@ const CompFinderPricing = (() => {
     isGradedTitle,
     parseGrade,
     subjectGradeFrom,
+    stripGradeMarkers,
     gradedBreakdown,
     isBundleTitle,
     extractNameTokens,

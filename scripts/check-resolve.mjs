@@ -39,7 +39,22 @@ const PARSE = [
   ["Deoxys VMAX GG45", { name: "Deoxys VMAX", number: "GG45", setHint: "" }],
   ["Charizard VMAX SV107 Shining Fates", { name: "Charizard VMAX", number: "SV107", setHint: "Shining Fates" }],
   // The prefix has to be attached to the digits, or "ex" would be swallowed.
-  ["Umbreon ex 161", { name: "Umbreon ex", number: "161", setHint: "" }]
+  ["Umbreon ex 161", { name: "Umbreon ex", number: "161", setHint: "" }],
+
+  // A GRADE reads as everything this parser looks for and is none of it.
+  // Ungated, "PSA 10 Umbreon VMAX 215" parsed as a card NAMED "PSA" with
+  // collector number 10; the slash form kept "PSA 10" glued to the name and
+  // demoted an exact match to a fuzzy guess. The grade comes off first —
+  // settingsForCard reads it from what the visitor typed, so nothing is lost.
+  ["PSA 10 Umbreon VMAX 215", { name: "Umbreon VMAX", number: "215", setHint: "" }],
+  ["PSA 10 Umbreon VMAX 215/203 Evolving Skies", { name: "Umbreon VMAX", number: "215", setHint: "Evolving Skies" }],
+  ["Umbreon VMAX 215/203 PSA 10", { name: "Umbreon VMAX", number: "215", setHint: "" }],
+  ["psa10 charizard ex 223/197", { name: "charizard ex", number: "223", setHint: "" }],
+  ["CGC 9.5 Pikachu 58/102", { name: "Pikachu", number: "58", setHint: "" }],
+  ["Charizard 4/102 graded", { name: "Charizard", number: "4", setHint: "" }],
+  // ...and only a grade. "Mt." is a card's name, not a stray NM-MT — the strip
+  // cuts grade markers, never the label words on their own.
+  ["Mt. Coronet 130/156", { name: "Mt. Coronet", number: "130", setHint: "" }]
 ];
 for (const [q, want] of PARSE) {
   const got = parseQuery(q);

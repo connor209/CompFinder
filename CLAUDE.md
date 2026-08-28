@@ -257,6 +257,18 @@ as `rawCopy` and slabs of a different grade go as `otherGrade`.
   differs. On the public page the grade is read from what the visitor TYPED
   (`card.asked`), never from `card.q` — `q` is the canonical string the cache
   key hashes, with the grade already stripped out of it.
+- **On the public page the ask rides in the URL**, and `apps/public/lib/
+  grade-ask.js` owns it. `asked` covered exactly one of the six routes into a
+  card page — free text plus Enter — while the dropdown and the which-one
+  picker navigated to the bare canonical string, so tapping the card you meant
+  silently swapped "what's the slab worth" for the raw price. `carryGrade()`
+  prefixes the normalised ask onto the canonical query ("PSA 10 Umbreon VMAX
+  215/203 …"), `stripAsk()` recovers the canonical string for the resolver,
+  the handoff guard and the recents dedupe, and `parseQuery()` strips the
+  grade before parsing — without that, "PSA 10 Umbreon VMAX 215" parsed as a
+  card *named PSA, number 10*. In the URL rather than the handoff because the
+  URL survives a reload, a share and the Back button; a handoff is deleted on
+  read. A recents row replays the latest ask, still one row per card.
 
 **On the Show Desk a graded sticker starts from what we already ask on eBay**,
 rounded to the pound (`stickerRows`, `listed`). The only place a listing price

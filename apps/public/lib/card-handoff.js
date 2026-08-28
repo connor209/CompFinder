@@ -1,6 +1,7 @@
 "use client";
 
 import { normaliseQuery } from "./card-query.js";
+import { stripAsk } from "./grade-ask.js";
 
 /**
  * Carries the card a visitor CLICKED across the navigation to its page.
@@ -51,9 +52,12 @@ export function take(query) {
     const card = JSON.parse(raw);
     // The guard that matters. Matching on the query the card produces — not on
     // whatever was stored last — is what stops a stale entry answering for a
-    // different card.
+    // different card. stripAsk on the incoming side only: a grade in the URL
+    // ("PSA 10 Umbreon VMAX 215/203…") is the visitor's question about their
+    // copy, not a different card, and without the strip every graded pick
+    // paid the resolve this handoff exists to save.
     const want = normaliseQuery([card.name, card.number || "", card.set || ""].join(" "));
-    return want && want === normaliseQuery(query) ? card : null;
+    return want && want === normaliseQuery(stripAsk(query)) ? card : null;
   } catch {
     return null;
   }

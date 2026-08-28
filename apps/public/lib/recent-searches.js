@@ -1,6 +1,7 @@
 "use client";
 
 import { normaliseQuery } from "./card-query.js";
+import { carryGrade, stripAsk } from "./grade-ask.js";
 
 /**
  * The cards this visitor has actually looked at, on their own device.
@@ -65,10 +66,17 @@ export function readRecent() {
  * render it without a second read.
  */
 export function rememberSearch(card, query) {
-  const q = ((card && card.q) || query || "").trim();
-  if (!q || !card || !card.name) return readRecent();
-  const key = normaliseQuery(q);
-  const next = [trim(card, q), ...load().filter((r) => normaliseQuery(r.q) !== key)].slice(0, RECENT_LIMIT);
+  const canonical = ((card && card.q) || query || "").trim();
+  if (!canonical || !card || !card.name) return readRecent();
+  // The row replays the visitor's QUESTION, so a grade they typed rides along
+  // — coming back to "PSA 10 Umbreon VMAX" must ask about the slab again, not
+  // quietly swap to the raw card. Deduped on the CARD (the ask stripped):
+  // the graded and the raw search of one card are one row, and the latest way
+  // it was asked is the way the row asks it. Old rows carry no ask and strip
+  // to themselves, so a list written by an earlier build dedupes the same.
+  const q = carryGrade(query || canonical, canonical);
+  const key = normaliseQuery(stripAsk(q));
+  const next = [trim(card, q), ...load().filter((r) => normaliseQuery(stripAsk(r.q)) !== key)].slice(0, RECENT_LIMIT);
   try {
     localStorage.setItem(KEY, JSON.stringify(next));
   } catch {
