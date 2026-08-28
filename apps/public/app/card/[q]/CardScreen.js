@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { cardCustomId } from "@/lib/epn-tag";
 import { assessAsk } from "@/lib/verdict";
 import { useCard, queryForCard } from "@/lib/use-card";
+import { rememberSearch } from "@/lib/recent-searches";
 import { SOLD_WINDOWS, cardHref } from "@/lib/windows";
 import { VARIANTS, variantQueryTerms } from "@/lib/variants";
 import TrendChart from "../../TrendChart";
@@ -38,6 +40,18 @@ export default function CardScreen({ query, days, initial = null, set = null, si
   // (and the HTML a crawler gets) carries the answer rather than a spinner.
   const state = useCard(query, days, initial);
 
+  // Recorded HERE rather than at the search box, because this is the one place
+  // every route in arrives at: the dropdown, a typed query, a chip, a set
+  // page, a sibling link, a pasted URL. Recording at the box would have caught
+  // the first of those and none of the rest. Only a card that actually
+  // resolved counts — a search that failed is not somewhere to send someone
+  // back to. The effect can run twice as the listings land; the store dedupes
+  // on the query, so a second write moves the row rather than adding one.
+  const readyCard = state.status === "ready" ? state.card : null;
+  useEffect(() => {
+    if (readyCard) rememberSearch(readyCard, query);
+  }, [readyCard, query]);
+
   if (state.status === "loading") {
     return (
       <main>
@@ -64,7 +78,7 @@ export default function CardScreen({ query, days, initial = null, set = null, si
           <p className="body" style={{ marginTop: 9 }}>{state.error}</p>
           <p style={{ marginTop: 14, display: "flex", gap: 16, alignItems: "baseline", flexWrap: "wrap" }}>
             <button type="button" className="link" onClick={state.retry}>Try again →</button>
-            <a className="link" href="/">← Try another card</a>
+            <Link className="link" href="/">← Try another card</Link>
           </p>
           {/* Small print, and it earns its place: this site has no analytics
               by promise, so a check that fails on a stranger's phone is

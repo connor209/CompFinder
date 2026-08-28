@@ -113,15 +113,27 @@ export const viewport = {
  * the server. A blocking inline script is the only thing that runs earlier
  * than paint. It sets an attribute; CSS does the rest.
  *
+ * ONCE A SESSION, AND AN INSTALLED APP IS NOT AN EXCEPTION. It used to skip
+ * that check when the page was running standalone, on the reasoning that a
+ * home-screen LAUNCH should always splash — which is right, and which this
+ * still does, because a launch starts a new session. What it also did was
+ * splash on every full page load inside the app: the back arrow is an <a>, so
+ * returning from a card reloaded the document and played the whole animation
+ * again on the way out of a search. iOS draws its launch PNG on a launch and
+ * not on a navigation, so that one had nothing behind it to continue from —
+ * it was the obstacle this file's own comment warns against.
+ *
+ * sessionStorage is the right proxy for a launch: an in-app navigation keeps
+ * it, swiping the app away and reopening does not.
+ *
  * Fails safe: the splash is display:none until this says otherwise, so a
  * broken script means no splash rather than a late one.
  */
 const SPLASH_DECIDER = `(function(){try{
 var m=window.matchMedia;
 if(m&&m("(prefers-reduced-motion: reduce)").matches)return;
-var installed=(m&&m("(display-mode: standalone)").matches)||window.navigator.standalone===true;
 var seen=false;try{seen=sessionStorage.getItem("lc-splash")==="1"}catch(e){}
-if(seen&&!installed)return;
+if(seen)return;
 try{sessionStorage.setItem("lc-splash","1")}catch(e){}
 document.documentElement.setAttribute("data-splash","show");
 }catch(e){}})();`;

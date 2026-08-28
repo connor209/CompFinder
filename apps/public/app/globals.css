@@ -225,6 +225,15 @@ h3.sub-h { font:800 14px var(--font-display); font-variation-settings:"wdth" 125
 .sugs .nm { font-size:13px; font-weight:600; }
 .sugs .mt { font:12px var(--font-mono); color:var(--ink-soft); margin-left:auto; }
 
+/* The recents control. Sits directly under the field because that is what
+   it is about — the last thing you typed there — and it only exists once
+   there is a history to show. */
+.recentrow { display:flex; align-items:center; gap:14px; margin-top:12px; }
+.recentrow .pill[data-on="true"] { border-color:var(--accent); background:var(--selected); }
+
+/* Same rows as the suggestions, laid in the page instead of over it. */
+.sugs.inline { position:static; margin-top:8px; box-shadow:none; }
+
 .pills { display:flex; gap:8px; flex-wrap:wrap; }
 .pill {
   display:inline-flex; align-items:baseline; gap:8px; cursor:pointer;

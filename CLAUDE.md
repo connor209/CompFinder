@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-two table tests, no framework, non-zero exit on failure:
+`npm run check` runs twenty-three table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes.
@@ -93,6 +93,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-instock.mjs` — whether a card is still ours to sell: that a
   listing at quantity zero is a card that has gone, that a missing quantity is
   not a zero, and a grep over the two screens that ask.
+- `scripts/check-recent.mjs` — the cards you looked at: newest first, one row
+  per card however it was spelled, capped, and junk from an older build
+  dropped rather than drawn.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -510,6 +513,32 @@ still being quoted in March while the listing sold in August. Sold figures are
 facts about things that already happened. The image is also always DATED, for
 the same reason. `check-share.mjs` greps for both.
 
+
+**The cards you looked at are yours, and they stay on your device.**
+`lib/recent-searches.js` owns the list behind the **Recent** button on the
+search screen — localStorage, capped at eight, deduped on `normaliseQuery` so
+one card can't sit in it twice under two spellings. It is recorded on the CARD
+screen rather than at the search box, because the box is one of six ways in:
+the dropdown, a typed query, a chip, a set page, a sibling link, a pasted URL.
+Only a card that actually resolved is recorded — a search that failed is not
+somewhere to send someone back to. `check-recent.mjs` pins the order, the cap,
+the dedupe and that junk from an older build is dropped rather than drawn.
+
+It is a different thing from `card-handoff.js` and deliberately not a mode on
+it: a handoff is one card, carried across one navigation and deleted on read,
+so it can never answer for a card nobody asked for. This is a list, kept. A
+recents row still leaves a handoff on its way out, so coming back to a card
+costs no resolve.
+
+**The splash shows once a SESSION, and an installed app is not an exception.**
+It used to skip that check when running standalone, reasoning that a
+home-screen launch should always splash — which it still does, because a launch
+starts a new session. What it also did was replay on every full page load
+inside the app, so coming back from a card played the whole animation again.
+iOS draws its launch PNG on a launch and not on a navigation, so that one had
+nothing behind it to continue from. The back arrow and the wordmark are
+`next/link` for the same reason: a full document load to leave a card is a
+round trip and a splash where neither was wanted.
 
 Both card screens run off `lib/use-card.js`. That is deliberate: the workings
 exist to show the arithmetic behind the answer, and a second fetching path

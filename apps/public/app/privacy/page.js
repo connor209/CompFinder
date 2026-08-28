@@ -60,6 +60,15 @@ export default function PrivacyPage() {
           </li>
         </ul>
 
+        <h2 className="section-title" style={{ marginTop: 26 }}>What stays on your device</h2>
+        <ul className="body">
+          <li>
+            <b>The cards you&rsquo;ve looked at.</b> The last few are kept in your own browser so the
+            &ldquo;Recent&rdquo; button on the search screen has something to show. They are never sent to us and we
+            have no way to read them &mdash; clearing them, or your browser data, removes them for good.
+          </li>
+        </ul>
+
         <h2 className="section-title" style={{ marginTop: 26 }}>What we don&rsquo;t collect</h2>
         <ul className="body">
           <li>No accounts, names, email addresses or payment details. There is nothing to sign up for.</li>

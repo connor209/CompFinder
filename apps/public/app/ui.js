@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { STEP_MS, stepFor } from "@/lib/progress-steps";
 import { DEFAULT_SOLD_WINDOW } from "@/lib/windows";
@@ -17,7 +18,9 @@ export const gbp = (pence) => (pence == null ? "—" : CompFinderPricing.toPound
  * neither fits.
  */
 export function Wordmark({ href = "/", size = 13, id, inline = false }) {
-  const El = href ? "a" : "span";
+  // Link, not <a>: every mark on a card screen points home, and a full
+  // document load there replays the launch splash on the way out of a search.
+  const El = href ? Link : "span";
   return (
     <El className={`wordmark${inline ? " inline" : ""}`} id={id}
         href={href || undefined} style={{ fontSize: size }}>
@@ -81,7 +84,9 @@ export function CardArt({ src, alt, className = "", width }) {
 export function Crumb({ back = "/", label, scope = null }) {
   return (
     <div className="crumb">
-      <a className="back" href={back} aria-label="Back">←</a>
+      {/* The one control people use to leave a card. As an <a> it reloaded
+          the document, which cost a round trip and replayed the splash. */}
+      <Link className="back" href={back} aria-label="Back">←</Link>
       <span className="q">{label}</span>
       {scope ? <span className="scope">{scope}</span> : null}
       <Wordmark href="/" size={12} inline />

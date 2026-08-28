@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { queryForCard } from "@/lib/card-query";
 import { remember } from "@/lib/card-handoff";
+import { readRecent, clearRecent } from "@/lib/recent-searches";
 import { gbp } from "./ui";
 
 /**
@@ -21,20 +22,15 @@ export default function SearchField({ seeds = [] }) {
   const [sugs, setSugs] = useState([]);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
-  const [recent, setRecent] = useState(null);
+  const [recent, setRecent] = useState([]);
+  const [showRecent, setShowRecent] = useState(false);
   const box = useRef(null);
   const timer = useRef(null);
 
-  // The visitor's own recent lookups beat the seeded examples when they exist.
-  // Kept in localStorage: there are no accounts here and nothing is sent
-  // anywhere.
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("lc-recent");
-      const list = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(list) && list.length) setRecent(list.slice(0, 3));
-    } catch { /* private mode, or nothing stored yet */ }
-  }, []);
+  // Read after mount, never during render: the list lives on the device, the
+  // first paint is server HTML, and reading it any earlier is a hydration
+  // mismatch waiting to happen.
+  useEffect(() => { setRecent(readRecent()); }, []);
 
   useEffect(() => {
     function onDocClick(e) {
@@ -60,6 +56,16 @@ export default function SearchField({ seeds = [] }) {
   function goToCard(card) {
     remember(card);
     go(queryForCard(card));
+  }
+
+  /**
+   * A card off the recents list. It carries enough of itself to be handed
+   * over, so coming back to a card you looked at a minute ago skips the
+   * resolve exactly the way picking it from the dropdown does.
+   */
+  function goToRecent(row) {
+    if (row.id || row.number) remember(row);
+    go(row.q);
   }
 
   function onType(value) {
@@ -92,7 +98,12 @@ export default function SearchField({ seeds = [] }) {
     }
   }
 
-  const chips = recent && recent.length ? recent : seeds;
+  // The chips are the seeded examples, always. They used to be replaced by
+  // the visitor's own recents — but nothing ever wrote that list, so no
+  // visitor saw it, and now that there IS a history it has a control of its
+  // own. Two rows saying the same thing would be noise, and a first-time
+  // visitor still needs something to tap.
+  const chips = seeds;
 
   return (
     <>
@@ -128,9 +139,43 @@ export default function SearchField({ seeds = [] }) {
         )}
       </div>
 
+      {recent.length > 0 && (
+        <div className="recentrow">
+          <button
+            type="button"
+            className="pill"
+            data-on={showRecent}
+            aria-expanded={showRecent}
+            onClick={() => setShowRecent((v) => !v)}
+          >
+            <b>Recent</b>
+            <span>{recent.length}</span>
+          </button>
+          {showRecent && (
+            <button type="button" className="link" onClick={() => { setRecent(clearRecent()); setShowRecent(false); }}>
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Inline rather than a dropdown over the page: on a phone an overlay
+          anchored to the field can open off the bottom of the screen, and
+          there is nothing underneath here worth covering. */}
+      {showRecent && recent.length > 0 && (
+        <div className="sugs inline">
+          {recent.map((r) => (
+            <button key={r.q} type="button" onClick={() => goToRecent(r)}>
+              <span className="nm">{r.name}</span>
+              <span className="mt">{[r.number, r.set].filter(Boolean).join(" · ")}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {chips.length > 0 && (
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 9 }}>
-          <span className="eyebrow">{recent && recent.length ? "You looked at" : "People are checking"}</span>
+          <span className="eyebrow">People are checking</span>
           <div className="pills">
             {chips.map((c) => (
               <button key={c.q || c.name} type="button" className="pill" onClick={() => go(c.q || c.name)}>
