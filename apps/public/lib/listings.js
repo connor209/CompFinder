@@ -121,7 +121,48 @@ export function safeListings({ candidates = [], number = null, soldPence = null,
   };
 }
 
+/**
+ * What the page is allowed to SAY about the live listings, from the counts at
+ * each stage of the funnel above.
+ *
+ * "Nothing listed in the UK right now" is a claim about eBay, and the page was
+ * making it in three situations where it wasn't true: when the listings
+ * request had failed and been swallowed into an empty array; when eBay had
+ * listings but none were UK-domestic; and when our own guards — the number
+ * rule, the exclusions, the floor — had taken every one of them. Reported on
+ * 28 Aug 2026 with a screenshot of 72 live results for the Umbreon VMAX 215
+ * this file was written for, beside our page saying there were none.
+ *
+ * A guard that drops a listing is doing its job. Printing the result as though
+ * eBay were empty is not: it is the same class of mistake as the £44.75 hero,
+ * stated with total confidence and impossible for the visitor to check. The
+ * funnel is counted so each of those states can say which one it is.
+ *
+ * @param counts.fetched    live listings the API returned for this card
+ * @param counts.uk         of those, UK-domestic and carrying our number
+ * @param counts.elsewhere  of those, listed from outside the UK
+ * @param counts.shown      what survived everything and reached the page
+ */
+export function listingsVerdict({ pending = false, unknown = false, fetched = 0, uk = 0, elsewhere = 0, shown = 0 } = {}) {
+  if (pending) return { state: "pending", text: null };
+  // Never a claim about eBay. We asked and didn't get an answer, which is a
+  // fact about us.
+  if (unknown) return { state: "unknown", text: "couldn't check what's listed right now" };
+  if (shown > 0) return { state: "showing", text: null };
+  if (!fetched) return { state: "none", text: "nothing listed in the UK right now" };
+  if (!uk && elsewhere) {
+    return {
+      state: "elsewhere",
+      text: `nothing listed in the UK · ${elsewhere} listed from elsewhere`
+    };
+  }
+  return {
+    state: "filtered",
+    text: `${fetched} listed, none we could confirm as this card`
+  };
+}
+
 const priceOf = (c) => c.totalPence ?? c.itemPricePence ?? 0;
 const byPrice = (a, b) => priceOf(a) - priceOf(b);
 
-export default { safeListings, requireNumber, LISTING_FLOOR_FRACTION, MIN_COMPS_FOR_FLOOR };
+export default { safeListings, requireNumber, listingsVerdict, LISTING_FLOOR_FRACTION, MIN_COMPS_FOR_FLOOR };

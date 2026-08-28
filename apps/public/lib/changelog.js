@@ -27,6 +27,8 @@ export const CHANGELOG = [
   {
     date: "2026-08-28",
     changes: [
+      "\"Nothing listed in the UK right now\" is a claim we were making without always being entitled to it. If the check on what's for sale didn't come back — a shaky connection, or the human check refusing on a phone — the page said there was nothing listed, which reads as a fact about eBay and was nothing of the kind. It now says we couldn't check. And where a card really is listed but we can't confirm any of the listings are the same card, or they're all from sellers abroad, it says that instead, with a link to go and look for yourself.",
+      "The workings screen now shows what's listed as well as what sold: how many are up on eBay UK, how many we could confirm as your card, and how many were held back for being too cheap to be it. Every one of those was already being worked out and thrown away.",
       "There's a Recent button on the search screen now, listing the last few cards you've looked at so you can get back to one without typing it again. It's kept in your own browser and never sent to us — there's a Clear on it, and clearing your browser data removes it too.",
       "The opening animation no longer replays every time you come back from a card. It was meant to run once when you open the site; if you'd added Last Comp to your home screen it was running on every trip back to the search screen, which is the opposite of what a splash screen is for. Going back is also instant now, rather than reloading the whole page."
     ]

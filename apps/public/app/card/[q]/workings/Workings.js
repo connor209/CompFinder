@@ -114,6 +114,50 @@ export default function Workings({ query, days }) {
           </>
         )}
 
+        {/* The live half of the working, which used to be invisible.
+            "Nothing listed in the UK right now" is one sentence covering four
+            different outcomes, and the visitor can check it against eBay in ten
+            seconds — so the counts that produced it belong on the screen whose
+            whole job is showing the arithmetic. It is also the only route from
+            "there are clearly listings" to knowing which rule ate them, on a
+            site that carries no analytics. */}
+        {!state.listingsPending && (d.listingsUnknown || d.listingCounts.fetched > 0) && (
+          <>
+            <h3 className="sub-h">What&rsquo;s listed right now</h3>
+            {d.listingsUnknown ? (
+              <p className="body" style={{ margin: "8px 0 0", fontSize: 12.5 }}>
+                We couldn&rsquo;t reach the live listings this time, so the page can&rsquo;t say what
+                is for sale. Nothing above depends on it — the price is built from completed sales.
+              </p>
+            ) : (
+              <div className="panel list" style={{ marginTop: 12 }}>
+                <div className="exrow">
+                  <span className="reason">Listed on eBay UK</span>
+                  <span className="n">{d.listingCounts.fetched}</span>
+                </div>
+                {d.listingCounts.elsewhere > 0 && (
+                  <div className="exrow">
+                    <span className="reason">Listed from outside the UK</span>
+                    <span className="n">{d.listingCounts.elsewhere}</span>
+                  </div>
+                )}
+                <div className="exrow">
+                  <span className="reason">Confirmed as this card</span>
+                  <span className="n">{d.listingCounts.shown}</span>
+                </div>
+                {d.suppressedListings > 0 && (
+                  <div className="exrow">
+                    <span className="reason">
+                      Too cheap to be it{d.listingFloorPence ? ` — under ${gbp(d.listingFloorPence)}` : ""}
+                    </span>
+                    <span className="n">{d.suppressedListings}</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
         {net != null && (
           <div className="panel pad13" style={{ marginTop: 16 }}>
             <span className="eyebrow">If you sold it yourself</span>

@@ -16,7 +16,8 @@
  * still weren't the card — so both a stricter number rule and a price floor
  * are needed, and this asserts each of them separately.
  */
-import { safeListings, requireNumber, LISTING_FLOOR_FRACTION } from "../apps/public/lib/listings.js";
+import { readFileSync } from "node:fs";
+import { safeListings, requireNumber, listingsVerdict, LISTING_FLOOR_FRACTION } from "../apps/public/lib/listings.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -111,8 +112,54 @@ const bargain = safeListings({ candidates: BARGAIN, number: "215", soldPence: 84
 eq("a keen seller at 62% of market survives", bargain.listings.length, 2);
 eq("cheapest-first is still the order", bargain.listings[0].totalPence, 52000);
 
+// --- 5. what an EMPTY buy module is allowed to say -------------------------
+// Reported 28 Aug 2026: a screenshot of 72 live eBay results for this same
+// Umbreon VMAX 215, beside our page saying "nothing listed in the UK right
+// now". That sentence is a claim about eBay, and it was being printed over
+// four different outcomes — three of which are claims about US.
+const state = (counts) => listingsVerdict(counts).state;
+
+eq("still checking says nothing yet", state({ pending: true, fetched: 0 }), "pending");
+// The one that shipped. A failed request is swallowed so the sold price still
+// renders, and used to arrive downstream as an empty array — indistinguishable
+// from eBay being empty. On a phone that fails the human check, that is every
+// card.
+eq("a failed request is not a fact about eBay", state({ unknown: true }), "unknown");
+if (/nothing listed/.test(listingsVerdict({ unknown: true }).text)) {
+  fail("a request we could not make is being reported as eBay having nothing");
+}
+eq("genuinely nothing on eBay", state({ fetched: 0 }), "none");
+eq("listed, but only from abroad", state({ fetched: 9, uk: 0, elsewhere: 9, shown: 0 }), "elsewhere");
+// Our own guards took them: the number rule, the exclusions, the floor. Real
+// listings exist and the visitor can see them in ten seconds.
+eq("our guards emptied it", state({ fetched: 12, uk: 12, elsewhere: 0, shown: 0 }), "filtered");
+if (!/12/.test(listingsVerdict({ fetched: 12, uk: 12, shown: 0 }).text)) {
+  fail("the filtered message should say how many are actually listed");
+}
+eq("anything to show wins over all of it", state({ fetched: 12, uk: 12, shown: 3 }), "showing");
+// Pending outranks the counts: a half-finished funnel reads as an empty one.
+eq("pending beats a zero count", state({ pending: true, unknown: true, fetched: 0 }), "pending");
+
+// --- 6. one definition of the sentence -------------------------------------
+// The copy lives here so the four states can be tested. A second hardcoded
+// "nothing listed" in the screen would drift back to the confident version.
+const SCREEN = readFileSync(new URL("../apps/public/app/card/[q]/CardScreen.js", import.meta.url), "utf8");
+// Comments are where the history of this bug is written down; it is the CODE
+// that must not carry the sentence.
+const screenCode = SCREEN
+  .split("\n")
+  .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+  .map((line) => line.replace(/\/\/.*$/, ""))
+  .join("\n");
+if (/nothing listed/i.test(screenCode)) {
+  fail("CardScreen hardcodes 'nothing listed' again — it must come from listingsVerdict()");
+}
+if (!/listingsVerdict/.test(SCREEN)) {
+  fail("CardScreen no longer asks listingsVerdict what it may say about the listings");
+}
+
 if (failures) {
   console.error(`\nlistings: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log("listings: the £44.75 Umbreon hero is rejected; number rule, floor, fallbacks and bargains all hold.");
+console.log("listings: the £44.75 Umbreon hero is rejected; number rule, floor, fallbacks, bargains and the four empty states all hold.");

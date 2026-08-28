@@ -139,6 +139,26 @@ disagrees.
 
 Nothing is dropped quietly: the count is handed back and the page says so.
 
+**An empty buy module is four different things, and it used to say one.**
+"Nothing listed in the UK right now" is a claim about eBay, printed under the
+price — and the page printed it when the listings request had FAILED and been
+swallowed into an empty array, when eBay held only listings from abroad, and
+when our own guards had taken every one of them. Reported 2026-08-28 with a
+screenshot of 72 live results for the same Umbreon VMAX 215 the guards were
+written for. `listingsVerdict()` in `listings.js` reads the funnel counted in
+`derive()` (`fetched → uk / elsewhere → shown`) and picks between *pending*,
+*unknown*, *elsewhere*, *filtered* and *none*; the failed live fetch is now
+marked (`LIVE_UNAVAILABLE` in `use-card.js`) instead of arriving as `[]`. The
+swallowing itself is right — the sold figure is the answer and a missing buy
+module must not take the page down — but a fact we could not check is never
+reported as a fact about the market. `check-listings.mjs` pins the five states
+and greps the screen against a second hardcoded "nothing listed".
+
+The counts are on the **workings** screen too, which is the only route from
+"there are obviously listings" to which rule ate them on a site with no
+analytics — the same "instrument first, then fix" the Turnstile diagnosis cost
+two wrong guesses to learn.
+
 ## Card pages, crawlers, and the budget
 
 `/card/<query>` is a client component that fetches on mount, so what left the

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
+import { bareNumber } from "@compfinder/core/cardnumber.js";
 import { ebaySearchUrl } from "@compfinder/core/marketplace.js";
 import { cardCustomId } from "@/lib/epn-tag";
 import { assessAsk } from "@/lib/verdict";
@@ -12,6 +13,7 @@ import { useCard, queryForCard } from "@/lib/use-card";
 import { rememberSearch } from "@/lib/recent-searches";
 import { SOLD_WINDOWS, cardHref } from "@/lib/windows";
 import { VARIANTS, variantQueryTerms } from "@/lib/variants";
+import { listingsVerdict } from "@/lib/listings";
 import TrendChart from "../../TrendChart";
 import { CardArt, Crumb, SearchProgress, gbp } from "../../ui";
 import ShareButton from "../../ShareButton";
@@ -181,6 +183,10 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
 
   const cheapest = d.cheapest;
   const heroPence = cheapest ? cheapest.totalPence : d.marketPence;
+  // What we are entitled to say about the live listings. An empty buy module
+  // used to print "nothing listed in the UK right now" whatever had emptied it
+  // — including a request that never came back. See lib/listings.js.
+  const live = listingsVerdict({ pending, unknown: d.listingsUnknown, ...(d.listingCounts || {}) });
   const med = median(d.usedComps.map((c) => c.totalPence ?? c.itemPricePence).filter(Boolean));
   const workings = cardHref(query, days, "/workings");
   // Every outbound eBay link reports which card it was on, not just which
@@ -237,7 +243,7 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
                   // right now takes longer, and saying so beats a spinner where
                   // the answer should be.
                   ? <><span className="spinner" /> &nbsp;checking what&rsquo;s listed right now…</>
-                  : <>nothing listed in the UK right now · {d.used} recent sale{d.used === 1 ? "" : "s"}</>}
+                  : <>{live.text} · {d.used} recent sale{d.used === 1 ? "" : "s"}</>}
             </span>
           </span>
         </div>
@@ -254,7 +260,7 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
           // move is a standing eBay search rather than a dead button.
           <a className="cta" href={searchUrl} target="_blank"
              rel={relFor("https://www.ebay.co.uk/", "noopener noreferrer")}>
-            Watch this card on eBay →
+            {live.state === "none" ? <>Watch this card on eBay →</> : <>See what&rsquo;s listed on eBay →</>}
           </a>
         )}
         <p className="disclosure">
@@ -472,6 +478,45 @@ function Answer({ query, card, d, set = null, siblings = [], pending, days, setD
                href={searchUrl} target="_blank"
                rel={relFor("https://www.ebay.co.uk/", "noopener noreferrer")}>
               All {d.listings.length} on eBay →
+            </a>
+          </div>
+        )}
+
+        {/* An empty buy module that ISN'T "eBay has none". The visitor can see
+            the listings on eBay in ten seconds, so a page claiming there are
+            none spends its credibility on the one thing it is easiest to check
+            — and the honest version is also the more useful one, because it
+            says what to go and look at. */}
+        {!pending && d.listings.length === 0 && live.state !== "none" && (
+          <div className="panel list" style={{ marginTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6, paddingTop: 9 }}>
+              <span className="section-title">
+                {live.state === "unknown"
+                  ? <>Couldn&rsquo;t check what&rsquo;s listed</>
+                  : live.state === "elsewhere"
+                    ? <>Listed, but not in the UK</>
+                    : <>Listed, but not confirmed as this card</>}
+              </span>
+            </div>
+            <p className="body soft" style={{ margin: "0 0 4px", fontSize: 12.5, lineHeight: 1.6 }}>
+              {live.state === "unknown" ? (
+                <>We couldn&rsquo;t check what&rsquo;s listed right now — that&rsquo;s us, not eBay.
+                  The sold prices above are unaffected. Have a look yourself, or try again in a moment.</>
+              ) : live.state === "elsewhere" ? (
+                <>{d.listingCounts.elsewhere} listed right now, all from sellers outside the UK.
+                  We only lead with UK listings, because postage and import charges make a price
+                  from abroad a different number to the one above.</>
+              ) : (
+                <>{d.listingCounts.fetched} listed right now, and we couldn&rsquo;t confirm any of them
+                  as this card — the title has to carry {bareNumber(card.number) || "the collector number"}, and an
+                  asking price far below what the card sells for is where fakes and wrong printings
+                  collect. Worth looking yourself.</>
+              )}
+            </p>
+            <a className="link" style={{ display: "inline-block", margin: "8px 0 6px" }}
+               href={searchUrl} target="_blank"
+               rel={relFor("https://www.ebay.co.uk/", "noopener noreferrer")}>
+              See what&rsquo;s on eBay →
             </a>
           </div>
         )}

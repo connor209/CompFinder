@@ -55,6 +55,21 @@ export { queryForCard };
  */
 const CHALLENGE_ROUNDS = 2;
 
+/**
+ * What a failed live-listings request hands back.
+ *
+ * The failure is swallowed on purpose — the sold figure IS the answer and a
+ * missing buy module must never take the page down with it. What must not be
+ * swallowed is the DIFFERENCE between "eBay has nothing" and "we couldn't
+ * ask": an empty array read as the former, and the page went on to state it as
+ * a fact under the price. On a phone that fails the human check (a stale Home
+ * Screen icon, a shaky connection) that is every single card.
+ *
+ * So the empty result is marked. Everything downstream still sees no comps;
+ * only the copy changes.
+ */
+const LIVE_UNAVAILABLE = { comps: [], unavailable: true };
+
 /** The pricing error that means "the human check is what stopped us". */
 function challengeError() {
   const err = new Error(
@@ -147,7 +162,7 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
       // Silent or not at all: the sold answer is already on screen, and the
       // listings behind "buy it today for" are not worth a checkbox.
       price(searchText, false, DEFAULT_SOLD_WINDOW, { interactive: false })
-        .catch(() => ({ comps: [] }))
+        .catch(() => LIVE_UNAVAILABLE)
         .then((listings) => {
           if (!alive) return;
           setState({
@@ -217,7 +232,7 @@ export function useCard(query, windowDays = DEFAULT_SOLD_WINDOW, initial = null)
       const soldPromise = price(searchText, true, DEFAULT_SOLD_WINDOW);
       // Live listings ignore the window; passing the default keeps them on one
       // cache entry rather than one per window.
-      const livePromise = price(searchText, false, DEFAULT_SOLD_WINDOW).catch(() => ({ comps: [] }));
+      const livePromise = price(searchText, false, DEFAULT_SOLD_WINDOW).catch(() => LIVE_UNAVAILABLE);
 
       let sold;
       try {
@@ -290,16 +305,21 @@ export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_
   // listings up now would clear in about 12 days" and this one said nothing.
   // Counted from the guarded, UK-filtered live set below rather than the raw
   // response, so it's the same population the price used.
+  const liveRaw = liveRes.comps || [];
   const liveGuarded = dropWrongNumerator(
-    dropWrongSetTotal(liveRes.comps || [], card.number), card.number
+    dropWrongSetTotal(liveRaw, card.number), card.number
   );
-  const liveUkCount = splitByMarket(liveGuarded, UK).chosen.length;
+  // Kept apart rather than counted twice: what the page may SAY when it ends up
+  // with nothing to show turns on which of these emptied it — see
+  // listingsVerdict in lib/listings.js.
+  const liveSplit = splitByMarket(liveGuarded, UK);
+  const liveUkCount = liveSplit.chosen.length;
 
   const liquidity = assessLiquidity({
     used,
     response: soldRes,
     comps,
-    activeCount: (liveRes.comps || []).length ? liveUkCount : null,
+    activeCount: liveRaw.length ? liveUkCount : null,
     windowDays
   });
   const confidence = assessConfidence({ rec, comps, windowDays, market: UK });
@@ -309,7 +329,7 @@ export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_
   // £2.60 copies of a different card.
   const settings = settingsForCard(withQ);
   const tokens = buildCompTokens({ name: card.name, number: card.number }, searchText);
-  const liveUk = splitByMarket(liveGuarded, UK).chosen;
+  const liveUk = liveSplit.chosen;
   const liveRec = liveUk.length
     ? CompFinderPricing.recommend(liveUk, settings, tokens, "active", card.number, card.set)
     : null;
@@ -386,6 +406,18 @@ export function derive(card, searchText, soldRes, liveRes, windowDays = DEFAULT_
     // saying: these were too cheap to be this card.
     suppressedListings: safe.suppressed,
     listingFloorPence: safe.floorPence,
+    // The whole funnel, so an empty buy module can say WHICH kind of empty it
+    // is. "Nothing listed in the UK right now" was printed over a failed
+    // request, over a card listed only from abroad, and over listings our own
+    // guards had taken — three different things, one confident sentence.
+    listingCounts: {
+      fetched: liveRaw.length,
+      uk: liveUk.length,
+      elsewhere: liveSplit.rest.length,
+      shown: listings.length
+    },
+    // We asked and got nothing back. Not a fact about eBay.
+    listingsUnknown: !!liveRes.unavailable,
     liquidity,
     confidence,
     exclusions: groupExclusions((rec && rec.excluded) || []),
