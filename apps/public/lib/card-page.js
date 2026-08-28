@@ -22,6 +22,7 @@
 import { createServiceClient, createPublicClient } from "./supabase.js";
 import { selectCatalog } from "./catalog-select.js";
 import { cardFromRow, queryForCard, normaliseQuery } from "./card-query.js";
+import { stripAsk } from "./grade-ask.js";
 import { cacheKeyFor } from "./cache-key.js";
 import { DEFAULT_SOLD_WINDOW, deriveWindow } from "./windows.js";
 import { priceCard } from "./price.js";
@@ -126,6 +127,52 @@ export async function serverCard(query, windowDays = DEFAULT_SOLD_WINDOW) {
 }
 
 /**
+ * What a card URL tells search engines about itself.
+ *
+ * ONE LOOKUP, TWO MUTUALLY EXCLUSIVE ANSWERS, and the exclusivity is the
+ * point. Either we can name the published page this URL is a spelling of — and
+ * we say so with a canonical, and it is a page for the index — or we cannot,
+ * and then it is not a page for the index at all.
+ *
+ * Never both, by construction. A URL carrying `noindex` AND a canonical
+ * pointing elsewhere is the one combination Google names as conflicting: the
+ * noindex can carry across to the canonical target, which here would be a card
+ * page we DO stand behind. Branching on a single lookup makes that
+ * unrepresentable rather than merely avoided.
+ *
+ * WHY THE UNPUBLISHED SIDE IS NOINDEX. Any string is a valid /card/ URL, so
+ * this is an unbounded space — every typo, every long-tail card, and since the
+ * grade started riding in the URL, every "PSA 10 …" variant of all 455 as
+ * well. None of them server-renders anything: serverCard only answers for the
+ * published set, so what a crawler gets is the spinner. The sitemap has always
+ * refused to submit those ("a thin page submitted in bulk demotes the good
+ * ones with it") while the pages themselves stayed indexable if discovered any
+ * other way, which left the sitemap and the pages giving different answers
+ * about the same URL — the same shape of split that robots.txt and the page
+ * metadata are kept in step to avoid.
+ *
+ * A published card that is not currently warm stays INDEXABLE. It is one of
+ * the 455 we chose to stand behind and the warmer is coming back to it;
+ * noindex is a slow signal to undo, and spending it on a cache gap would be
+ * trading a thin page for a lost one. This is also why the test is the
+ * manifest and not the cache: a manifest lookup cannot fail transiently, and
+ * a Supabase blip must never be able to noindex the site.
+ *
+ * `follow` stays true: the long-tail page still carries a set strip and links
+ * up to pages that ARE published, and that is the one useful thing about it.
+ * When the site-wide flag is shut, layout.js is stricter and robots.txt has
+ * already said don't crawl; this only ever ADDS a noindex, never removes one.
+ */
+export const NOT_FOR_INDEX = { index: false, follow: true };
+
+export function cardPageDirectives(query) {
+  const entry = findPublished(query);
+  return entry
+    ? { canonical: `/card/${encodeURIComponent(entry.q)}`, robots: null }
+    : { canonical: null, robots: NOT_FOR_INDEX };
+}
+
+/**
  * The published cards that currently have a price, for the sitemap.
  *
  * Only priced ones, deliberately: a card page with nothing cached is honest
@@ -207,7 +254,12 @@ export function findSet(slug) {
  * evenly across the set, so every page is reachable from several others.
  */
 export function siblingsOf(query, limit = 6) {
-  const entry = findPublished(query);
+  // stripAsk, because "PSA 10 Umbreon VMAX 215/203 …" is a question about a
+  // published card, not a different one. Without it a graded search landed on
+  // a page with no set line and no way onward — the dead end the sibling strip
+  // exists to remove. Safe here in a way it is NOT in findPublished itself:
+  // this hands back links, where that hands back a card to price.
+  const entry = findPublished(query) || findPublished(stripAsk(query));
   if (!entry) return { set: null, siblings: [] };
   const set = findSet(entry.slug);
   if (!set) return { set: null, siblings: [] };
@@ -294,4 +346,4 @@ export async function loadSetCards(slug, { windowDays = DEFAULT_SOLD_WINDOW, max
   return { slug: set.slug, name: set.name, cards };
 }
 
-export default { publishedCards, findPublished, publishedSets, findSet, siblingsOf, loadSetCards, loadCard, loadCachedSold, serverCard, pricedCards, MAX_SERVER_PRICE_AGE_DAYS };
+export default { publishedCards, findPublished, cardPageDirectives, NOT_FOR_INDEX, publishedSets, findSet, siblingsOf, loadSetCards, loadCard, loadCachedSold, serverCard, pricedCards, MAX_SERVER_PRICE_AGE_DAYS };

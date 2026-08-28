@@ -68,7 +68,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-cardpage.mjs` — that a cached card server-renders a price, and
   that everything else falls through to the client.
 - `scripts/check-indexing.mjs` — that the door to search engines defaults shut,
-  and that robots.txt and the page metadata give the same answer.
+  that robots.txt and the page metadata give the same answer, and which card
+  URLs are pages for the index at all: a canonical and a `noindex` are
+  mutually exclusive and one of them is always emitted.
 - `scripts/check-canonical-host.mjs` — the hostname redirect: production
   bounces to the one canonical host, previews and dev are never bounced, and a
   missing `NEXT_PUBLIC_SITE_URL` means no redirect rather than a loop through
@@ -177,6 +179,25 @@ price, just no price, while the warmer keeps writing entries nobody reads.
 page submitted in bulk demotes the good ones with it. Card pages carry a
 **canonical** to the published spelling: the same card is reachable under every
 typo, and without one those compete with each other.
+
+**A page is for the index only if it answers without JavaScript**, and
+`cardPageDirectives()` is the one lookup that decides. Either we can name the
+published page a URL is a spelling of — canonical, indexable — or we cannot,
+and it gets `noindex, follow`. **Never both**: `noindex` beside a canonical
+pointing elsewhere is the combination Google calls conflicting, and the
+noindex can carry to the target, which here is a page we do stand behind.
+Branching on one lookup makes that unrepresentable rather than merely avoided.
+
+The unpublished side is unbounded — every typo, every long-tail card, and
+since the grade rides in the URL, every "PSA 10 …" variant of all 455 — and
+none of it server-renders anything, so a crawler gets the spinner. The sitemap
+always refused to submit those; the pages themselves stayed indexable if found
+any other way, which is the same split as robots.txt disagreeing with the
+metadata. The **workings screen is never indexed on any card**, published or
+not, for the same reason: it runs entirely on the client. A published card
+that is not currently warm stays indexable — the test is the MANIFEST, not the
+cache, so a Supabase blip can never noindex the site, and a cache gap on one
+of the 455 is not worth spending a slow-to-undo signal on.
 
 **Set pages are the internal linking, not just content.** `/set/<name>` lists
 every card in a set by value, and each card page links up to its set and across

@@ -17,6 +17,7 @@
  *      anyway. Both must come from one answer.
  */
 import { readFileSync } from "node:fs";
+import { cardPageDirectives, publishedCards, NOT_FOR_INDEX } from "../apps/public/lib/card-page.js";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -75,8 +76,57 @@ if (/NEXT_PUBLIC_SITE_URL/.test(sitemap) || /NEXT_PUBLIC_SITE_URL/.test(robots))
   fail("robots.js or sitemap.js builds its own base URL instead of using siteUrl()");
 }
 
+// --- 4. which card URLs are pages for the index -----------------------------
+// The sitemap has always refused to submit a thin page ("a thin page submitted
+// in bulk demotes the good ones with it") while the pages themselves stayed
+// indexable if a crawler found them any other way. Same split as robots.txt
+// disagreeing with the metadata, one level down: the site's own two lists of
+// what is worth indexing have to say the same thing.
+{
+  const PUBLISHED_Q = publishedCards()[0].q;
+  const cases = [
+    [PUBLISHED_Q, true, "a published card"],
+    [PUBLISHED_Q.toUpperCase(), true, "…under a different spelling"],
+    // The unbounded space: any string is a valid card URL, and since the grade
+    // started riding in one, every "PSA 10 …" variant of all 455 as well.
+    [`PSA 10 ${PUBLISHED_Q}`, false, "a graded ask"],
+    ["Umbreon VMAX 215 Evolvingg Skiess", false, "a typo nobody publishes"],
+    ["a card that does not exist", false, "an arbitrary string"],
+    ["", false, "an empty query"]
+  ];
+  for (const [query, shouldIndex, why] of cases) {
+    const { canonical, robots } = cardPageDirectives(query);
+    const indexed = robots === null;
+    if (indexed !== shouldIndex) {
+      fail(`${why} (${JSON.stringify(query)}): want ${shouldIndex ? "indexable" : "noindex"}, got the other`);
+    }
+    // THE INVARIANT. noindex plus a canonical pointing elsewhere is the one
+    // combination Google names as conflicting — the noindex can carry across
+    // to the target, which here would be a page we DO stand behind. The two
+    // come off one lookup so this cannot happen; pinned because a later hand
+    // adding "a canonical costs nothing" would make it happen quietly.
+    if (canonical && robots) fail(`${why}: emitted BOTH a canonical and robots — conflicting signals`);
+    if (!canonical && !robots) fail(`${why}: emitted neither a canonical nor a noindex`);
+  }
+  if (NOT_FOR_INDEX.index !== false) fail("NOT_FOR_INDEX does not say noindex");
+  // follow, so the long tail still passes what little it has up to the
+  // published pages it links to.
+  if (NOT_FOR_INDEX.follow !== true) fail("NOT_FOR_INDEX drops follow — the set links are the point of it");
+
+  // The two surfaces that must actually use it.
+  const cardPage = readFileSync(join(ROOT, "apps/public/app/card/[q]/page.js"), "utf8");
+  const workings = readFileSync(join(ROOT, "apps/public/app/card/[q]/workings/page.js"), "utf8");
+  if (!/cardPageDirectives\s*\(/.test(cardPage)) fail("the card page doesn't consult cardPageDirectives()");
+  if (/findPublished[\s\S]{0,120}canonical/.test(cardPage)) {
+    fail("the card page builds its own canonical instead of taking the one from cardPageDirectives()");
+  }
+  // The workings screen fetches on the client, so what leaves the server is a
+  // spinner — on every card, published or not.
+  if (!/NOT_FOR_INDEX/.test(workings)) fail("the workings screen doesn't carry a noindex");
+}
+
 if (failures) {
   console.error(`\nindexing: ${failures} case(s) failed.`);
   process.exit(1);
 }
-console.log("indexing: default is closed, the flag reads as intended, robots and metadata share one answer.");
+console.log("indexing: default is closed, the flag reads as intended, robots and metadata share one answer, and only pages that answer are for the index.");

@@ -1,7 +1,7 @@
 import { unstable_cache } from "next/cache";
 import CardScreen from "./CardScreen";
 import { windowFromParam } from "@/lib/windows";
-import { serverCard, findPublished, siblingsOf } from "@/lib/card-page";
+import { serverCard, findPublished, siblingsOf, cardPageDirectives } from "@/lib/card-page";
 
 /**
  * The answer lives at its own URL so it can be shared, linked and cached —
@@ -41,16 +41,19 @@ export async function generateMetadata({ params }) {
   const title = query ? `${query} — what's it worth?` : "What's it worth?";
   const description = `Real eBay UK sold prices for ${query}, and the cheapest one you could buy today.`;
   const og = ogImageFor(query);
+  // Canonical and noindex come from ONE lookup and are mutually exclusive —
+  // see cardPageDirectives. Either the same card reachable under every
+  // spelling, ordering and typo is consolidated onto the published one, or
+  // this URL is not a page for the index at all. `robots: null` leaves the
+  // site-wide answer in layout.js untouched, so the flag stays the one place
+  // that decides whether search engines are welcome here yet.
+  const { canonical, robots } = cardPageDirectives(query);
 
   return {
     title,
     description,
-    // Any string is a valid card URL, so the same card is reachable under
-    // every spelling, ordering and typo someone searches. Without a canonical
-    // those are all separate pages competing with each other; with one they
-    // are the published spelling. Only claimed for a card we publish — a
-    // canonical pointing at a URL we don't stand behind would be worse.
-    alternates: canonicalFor(query),
+    alternates: canonical ? { canonical } : undefined,
+    ...(robots ? { robots } : {}),
     openGraph: { title, description, type: "website", ...(og ? { images: [og] } : {}) },
     twitter: { card: og ? "summary_large_image" : "summary", title, description,
                ...(og ? { images: [og.url] } : {}) }
@@ -76,11 +79,6 @@ function ogImageFor(query) {
     height: 630,
     alt: `${entry.q} — recent eBay UK sold prices`
   };
-}
-
-function canonicalFor(query) {
-  const entry = findPublished(query);
-  return entry ? { canonical: `/card/${encodeURIComponent(entry.q)}` } : undefined;
 }
 
 export default async function CardPage({ params, searchParams }) {
