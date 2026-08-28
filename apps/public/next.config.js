@@ -17,7 +17,8 @@ const nextConfig = {
   // The key was wrong and is now right; it was never the outage.
   outputFileTracingIncludes: {
     "/launch-image": ["./assets/**"],
-    "/card/**": ["./assets/**"]
+    "/card/**": ["./assets/**"],
+    "/set/**": ["./assets/**"]
   }
 };
 

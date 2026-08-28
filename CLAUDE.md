@@ -75,9 +75,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   bounces to the one canonical host, previews and dev are never bounced, and a
   missing `NEXT_PUBLIC_SITE_URL` means no redirect rather than a loop through
   Vercel's apex 308.
-- `scripts/check-share.mjs` — the shareable PNG: always dated, sold figures
-  only, long names cut, and greps against it ever reading the price cache or
-  growing an asking price.
+- `scripts/check-share.mjs` — the shareable PNGs, card and set: always dated,
+  sold figures only, long names cut, the set board ranked and capped, and greps
+  against either ever growing an asking price or reaching past the cache.
 - `scripts/check-epn-tag.mjs` — what an affiliate link reports about itself:
   the sub-IDs, that the slot prefix still selects what it always did, that
   `epn.js` passes them through unrewritten, and a grep against hand-writing
@@ -569,6 +569,18 @@ disagree about which one is the shareable card; `check-share.mjs` counts the
 `ImageResponse` calls. GET takes its headline from `priceCard`, the same
 function the answer screen's figure comes from, so an unfurl and the page
 cannot quote different numbers.
+
+**A set page unfurls as its leaderboard.** `/set/<slug>/share.png` draws the
+five dearest cards with their prices, dated, on the same 1200x630 ground as the
+card image — because the set pages are the ones with search volume behind them
+and the ones people actually post, and they were going out as a bare link.
+GET only, unlike the card image: a set is always one of ours and its prices are
+always already cached, so there is nothing for a caller to hand us. **No card
+art on it**, deliberately — five remote fetches on a route unfurlers hammer,
+each a chance to time out or return a WEBP Satori can't draw, for pictures at
+postage-stamp size beside the numbers people came for. It reads through
+`loadSetCards` (one catalogue read, one cache read, no SoldComps) and 404s —
+never throws — including when nothing in the set is priced yet.
 
 **A card page only claims an OG image it can actually draw.** `ogImageFor()`
 gates on `findPublished` — a manifest lookup, free on a page render — and an

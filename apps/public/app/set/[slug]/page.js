@@ -35,12 +35,27 @@ export async function generateMetadata({ params }) {
   const set = await getSet(slug);
   if (!set) return { title: "Set not found" };
   const top = set.cards.find((c) => c.pence != null);
+  const title = `${set.name} card values`;
+  const description = top
+    ? `What the ${set.name} chase cards are worth on eBay UK. ${top.name} leads at about ${gbp(top.pence)}, from real sold listings — junk comps thrown out, and you can see the workings.`
+    : `What the ${set.name} cards are worth on eBay UK, from real sold listings.`;
+
+  // Only claimed when there is a leaderboard to draw — the same rule as a card
+  // page's image: the route 404s on a set with nothing priced, and a claimed
+  // image that 404s unfurls as a broken box, which is worse than the plain
+  // link it replaced. `top` is that test, already loaded, so it costs nothing.
+  const og = top
+    ? [{ url: `/set/${slug}/share.png`, width: 1200, height: 630,
+         alt: `Most valuable cards in ${set.name} — recent eBay UK sold prices` }]
+    : null;
+
   return {
-    title: `${set.name} card values`,
-    description: top
-      ? `What the ${set.name} chase cards are worth on eBay UK. ${top.name} leads at about ${gbp(top.pence)}, from real sold listings — junk comps thrown out, and you can see the workings.`
-      : `What the ${set.name} cards are worth on eBay UK, from real sold listings.`,
-    alternates: { canonical: `/set/${slug}` }
+    title,
+    description,
+    alternates: { canonical: `/set/${slug}` },
+    openGraph: { title, description, type: "website", ...(og ? { images: og } : {}) },
+    twitter: { card: og ? "summary_large_image" : "summary", title, description,
+               ...(og ? { images: [og[0].url] } : {}) }
   };
 }
 

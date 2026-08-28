@@ -20,6 +20,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { shareFields, fit, shortDate, drawableArt, DRAWABLE_TYPES } from "../apps/public/lib/share-card.js";
+import { setShareFields, TOP_ROWS } from "../apps/public/lib/set-share.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
@@ -230,4 +231,4 @@ if (failed) {
   console.error(`\ncheck-share: ${failed} failed`);
   process.exit(1);
 }
-console.log("share image: dated, sold-only, long names cut; POST reads nothing, GET reads only the cache.");
+console.log("share image: dated, sold-only, long names cut; POST reads nothing, GET reads only the cache; the set board is ranked, capped and cache-only.");
