@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-three table tests, no framework, non-zero exit on failure:
+`npm run check` runs twenty-four table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes,
@@ -69,6 +69,10 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   that everything else falls through to the client.
 - `scripts/check-indexing.mjs` — that the door to search engines defaults shut,
   and that robots.txt and the page metadata give the same answer.
+- `scripts/check-canonical-host.mjs` — the hostname redirect: production
+  bounces to the one canonical host, previews and dev are never bounced, and a
+  missing `NEXT_PUBLIC_SITE_URL` means no redirect rather than a loop through
+  Vercel's apex 308.
 - `scripts/check-share.mjs` — the shareable PNG: always dated, sold figures
   only, long names cut, and greps against it ever reading the price cache or
   growing an asking price.
@@ -1023,7 +1027,14 @@ moment strangers can reach it.
       scope and ignored, so it would be a no-op dressed as a fix. The real
       remedies are a canonical-host redirect in middleware (gated to
       production, or a preview deploy bounces to live) or re-adding the icon.
-      Neither is in place; the diagnostic below is.
+      **The redirect is in place as of 2026-08-28** — `apps/public/middleware.js`,
+      with the decision in `lib/canonical-host.js` and `check-canonical-host.mjs`
+      pinning it: production only, 308 so a POST keeps its method, and **no
+      redirect at all when `NEXT_PUBLIC_SITE_URL` is unset**, because the
+      `siteUrl()` fallback is the apex and Vercel 308s the apex to www — a
+      redirect built from the fallback would loop forever, precisely when a
+      config var went missing. A stale icon now heals on its next launch; the
+      diagnostic below stays.
 
       **This cost two wrong diagnoses, and both were confident.** First the
       mobile-network story — carrier drift, a corner-pinned widget — three
