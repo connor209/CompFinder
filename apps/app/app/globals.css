@@ -847,6 +847,20 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-plan-count { font-weight:700; font-size:13.5px; color:var(--ink); flex:none; }
 .sd-rowacts { display:flex; gap:6px; flex:none; margin-left:auto; }
 .sd-scope .badge2 { white-space:nowrap; }
+/* The show desk's headers carry a title, a count and up to three buttons, and
+   `.panel-head` is a nowrap flex row. On a phone that squeezed "Away at the
+   show" to one word per line and pushed the last button clean off the right
+   edge — which is how a button that was definitely rendered was definitely
+   not findable. Wrapping costs nothing on a desktop, where it still fits on
+   one line and space-between behaves exactly as before. */
+.sd-scope .panel-head { flex-wrap:wrap; row-gap:8px; }
+.sd-scope .panel-head h3, .sd-scope .panel-head .eyebrow { flex:none; white-space:nowrap; }
+.sd-scope .panel-head .btn { flex:none; }
+@media (max-width: 720px) {
+  /* Wrapped, space-between strands the last row's single button against the
+     right edge; left-aligned they read as one group. */
+  .sd-scope .panel-head { justify-content:flex-start; }
+}
 
 /* Counter mode — the list turned round to face a customer.
    Bigger type and a real gap between rows: this is read at arm's length by
@@ -861,8 +875,20 @@ html, body { overflow-x: clip; max-width: 100%; }
    an empty frame in it. */
 .sd-counter-art { width:44px; height:62px; flex:none; border-radius:4px; object-fit:cover; background:var(--line); }
 .sd-counter-noart { display:inline-block; border:1px dashed var(--line-strong); background:transparent; }
+/* An ask is a label, not a price. Set smaller and in the body face so it
+   doesn't read as a figure beside the rows that carry one — and so it fits on
+   the row rather than wrapping below the card it belongs to. */
+.sd-scope .sd-counter-row .sd-price-ask { font-family:var(--font-body); font-size:13px; font-weight:600; color:var(--ink-soft); letter-spacing:0; }
 @media (max-width: 720px) {
-  .sd-counter-row .stack-title { flex:1 1 auto; }
+  /* The desk's rows wrap on a phone, which is right for a row carrying a SKU,
+     four chips and three buttons. A counter row is three things and the price
+     must stay beside its card, so this one opts out and lets the NAME wrap
+     inside its own column instead. */
+  /* Specificity, not order: the desk rule below is `.sd-scope .ps-row`, which
+     outranks a bare `.sd-counter-row` wherever it sits in the file. */
+  .sd-scope .ps-row.sd-counter-row { flex-wrap:nowrap; }
+  .sd-scope .sd-counter-row .stack-title { flex:1 1 auto; min-width:0; }
+  .sd-scope .sd-counter-row .sd-price { flex:none; margin-left:auto; white-space:nowrap; }
 }
 /* Recommended show stock leads with the SKU, so the position sits BEHIND a
    chip whose width varies with the SKU ("A5" vs "AB123"). Without a floor on
