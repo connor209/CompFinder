@@ -31,6 +31,8 @@ import {
   counterRow,
   counterView,
   listingRow,
+  conditionOf,
+  largeImage,
   onlineMatches,
   inBoxSkus,
   ONLINE_LIMIT,
@@ -163,16 +165,53 @@ for (const r of counterView(POOL, {}).rows) {
   eq("every counter row is projected", Object.keys(r).sort(), [...COUNTER_FIELDS].sort());
 }
 
+// --- 6b. the condition, which is the fact a customer cannot check --------
+// They can see a card in the box. They cannot see one that is online, and
+// condition is the difference between a £40 card and a £12 one.
+eq("the grade in the title is written out in full", conditionOf({ title: "Gengar VMAX 020/198 NM" }), "Near Mint");
+eq("played grades too", conditionOf({ title: "Charizard Base Set lightly played" }), "Lightly Played");
+eq("nothing stated is not a claim", conditionOf({ title: "Pikachu 25/100" }), null);
+// eBay's own field is SECOND, not first, and its generic values are dropped.
+// On a TCG single the seller writes the grade in the title and leaves the
+// dropdown on "Ungraded" — true, and no use to somebody choosing a copy.
+eq("a useless eBay condition is not shown", conditionOf({ title: "Gengar 020/198", extra: { condition: "Ungraded" } }), null);
+eq("a meaningful eBay condition is", conditionOf({ title: "Gengar 020/198", extra: { condition: "Graded - PSA 9" } }), "Graded - PSA 9");
+eq("the title beats the dropdown", conditionOf({ title: "Gengar 020/198 NM", extra: { condition: "Used" } }), "Near Mint");
+// The name is cut at the collector number, so condition could never ride
+// along inside it — which is why it is its own field.
+if (/NM|Near Mint/.test(counterName("Gengar VMAX 020/198 Near Mint"))) {
+  fail("the condition is inside the name — it belongs in its own field, where it survives the title being cut");
+}
+
+// --- 6c. the picture, at a size worth looking at -------------------------
+eq(
+  "eBay's size is swapped, not the URL rebuilt",
+  largeImage("https://i.ebayimg.com/images/g/abc/s-l140.jpg"),
+  "https://i.ebayimg.com/images/g/abc/s-l1600.jpg"
+);
+// A picture we cannot resize is still a picture. Returning null here would
+// trade a small view for no view.
+eq("a URL that isn't eBay's is left alone", largeImage("https://x.test/pic.jpg"), "https://x.test/pic.jpg");
+eq("no picture stays no picture", largeImage(null), null);
+
 // --- 7b. the online stock, and the line between it and the box ------------
 // A second list of cards we own but may not have in the room. Everything here
 // is about not promising the wrong thing, in either direction.
 const LISTING_PRIVATE = { sku: "AB12", url: "https://www.ebay.co.uk/itm/115566778899" };
+// `extra` is a jsonb bag — conditionOf() reads ONE key out of it, and the rest
+// (what we watch, what it cost us to list, whatever gets added next) must not
+// ride along behind it.
+// Distinctive values on purpose: a short number like 77 is a substring of the
+// item id, and the search below would "find" a leak that isn't there. The
+// first version of this case did exactly that.
+const LISTING_EXTRA_PRIVATE = { watchCount: 987654, quantitySold: 876543, category: "Our internal category" };
 const LISTING = {
   ebay_item_id: "115566778899",
   title: "Pokemon Card Gengar VMAX 020/198 Chilling Reign",
   price_value: 45.5,
   quantity: 1,
   image_url: "https://i.ebayimg.com/x.jpg",
+  extra: { condition: "Ungraded", ...LISTING_EXTRA_PRIVATE },
   ...LISTING_PRIVATE
 };
 eq("an online row is the same shape as a box row", Object.keys(listingRow(LISTING)).sort(), [...COUNTER_FIELDS].sort());
@@ -181,6 +220,9 @@ for (const [field, value] of Object.entries(LISTING_PRIVATE)) {
   // The SKU is our shelf address. The URL is an invitation to buy it online
   // instead of from the table the customer is standing at.
   if (lSerialised.includes(value)) fail(`${field} reached the counter from an eBay listing`);
+}
+for (const [field, value] of Object.entries(LISTING_EXTRA_PRIVATE)) {
+  if (lSerialised.includes(String(value))) fail(`extra.${field} rode along behind the condition lookup`);
 }
 eq("the eBay price is shown as it stands", listingRow(LISTING).priceText, "£45.50");
 
@@ -356,6 +398,14 @@ if (onlineAt < 0) {
   if (block.includes("c.sku") || block.includes("stack-sku")) {
     fail("the online row renders the SKU — that is our shelf address, facing a customer");
   }
+}
+
+// The picture opens from the row rather than being fetched per row: a route
+// that costs an API call for every card on screen is one nobody can use at a
+// table on venue wifi.
+if (!desk.includes("setPhoto(")) fail("the counter photos can no longer be opened");
+if (/imageLarge.*fetch\(|fetch\(.*imageLarge/.test(desk)) {
+  fail("the large photo is being fetched — it is a string swap on a URL we already hold");
 }
 
 // The two lists must stay two lists. Merged, a card we might have at home is

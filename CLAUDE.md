@@ -1009,7 +1009,23 @@ sort, projected.
 - **The picture is a photo of THIS copy** (`ebay_listings.image_url`), never
   catalogue art. Cards checked out by ENDING their listing have none, and a gap
   is fine: catalogue art would show a mint scan of a played card to the person
-  holding that card.
+  holding that card. **Tapping it opens the same photo large**, which is a
+  string swap on eBay's CDN filename (`s-l140` → `s-l1600` in `largeImage()`)
+  rather than a fetch: a route costing an API call per row on screen is one
+  nobody can use on venue wifi. Only the GALLERY shot is stored, so that is the
+  one picture available — the full set would need a `GetItem` call per listing.
+- **Condition is its own field, not part of the name.** It is the fact a
+  customer can't check for themselves: they can see a card in the box, and they
+  cannot see one that is online. It could never have ridden inside the name
+  anyway, since `labelName()` cuts a title at the collector number and the
+  grade is written after it. `conditionOf()` reads the TITLE first and eBay's
+  `ConditionDisplayName` second — the opposite of what the authoritative-looking
+  field suggests, because on a TCG single the seller types "NM" in the title and
+  leaves the dropdown on "Ungraded", which is why those generic values are
+  dropped rather than shown. The reading itself is `packages/core`'s
+  `inferCondition()`, not a third copy: the pricing engine splits its comps on
+  exactly that, and a counter disagreeing about what "NM" means would be a
+  second opinion nobody asked for.
 - **One search, two screens.** Both go through `showView()`, so what a customer
   finds and what you find are the same set — a search that answers differently
   sends you to a card they cannot see, or promises one that is not in the box.

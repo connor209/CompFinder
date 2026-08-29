@@ -1154,12 +1154,17 @@ export default function ShowDesk() {
                   {online.map((c) => (
                     <div className="ps-row sd-counter-row sd-counter-online" key={c.id}>
                       {c.image ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img className="sd-counter-art" src={c.image} alt="" loading="lazy" width="44" height="62" />
+                        <button className="sd-counter-artbtn" onClick={() => setPhoto({ url: c.imageLarge || c.image, name: c.name })} title="See the photo" aria-label={`See the photo of ${c.name}`}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img className="sd-counter-art" src={c.image} alt="" loading="lazy" width="44" height="62" />
+                        </button>
                       ) : (
                         <span className="sd-counter-art sd-counter-noart" aria-hidden="true" />
                       )}
-                        <span className="stack-title">{c.name}</span>
+                      <span className="stack-title">
+                        {c.name}
+                        {c.condition ? <span className="sd-cond">{c.condition}</span> : null}
+                      </span>
                       <span className={c.pricePence == null ? "sd-price sd-price-ask" : "sd-price"}>{c.priceText}</span>
                       {/* Where it is, on a tap and never before one.
                           A stack name and a depth tell a stranger how much
@@ -1194,6 +1199,19 @@ export default function ShowDesk() {
           </>
         )}
       </div>
+
+      {/* The photo, big. eBay serves the gallery shot at thumbnail size and
+          encodes the size in the filename, so this is the same picture asked
+          for larger — no API call, nothing fetched per row until somebody
+          taps. Tap anywhere to close: at a table the gesture has to be
+          obvious, and a small × is not. */}
+      {photo ? (
+        <div className="sd-photo" role="dialog" aria-label={photo.name} onClick={() => setPhoto(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img className="sd-photo-img" src={photo.url} alt={photo.name} />
+          <p className="sd-photo-cap">{photo.name} <span>— tap to close</span></p>
+        </div>
+      ) : null}
 
       {/* The want list. Desk-only: it is a record of what we could not sell,
           which is a buying note to ourselves and nothing a customer should
