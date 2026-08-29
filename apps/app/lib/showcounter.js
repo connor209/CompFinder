@@ -34,6 +34,7 @@
 import { showView, matchesQuery, normalise } from "./showfilter.js";
 import { labelName } from "./showstock.js";
 import { isListingAvailable } from "./stockcheck.js";
+import SoldCompsApi from "@compfinder/core/soldcomps.js";
 
 /**
  * What a buyer is shown when there is no sticker price.
@@ -61,7 +62,70 @@ export const COUNTER_NAME_MAX = 64;
  * exactly these and no others, so adding a field here is a deliberate act with
  * a test behind it.
  */
-export const COUNTER_FIELDS = ["id", "name", "pricePence", "priceText", "image"];
+export const COUNTER_FIELDS = ["id", "name", "condition", "pricePence", "priceText", "image", "imageLarge"];
+
+/**
+ * The trade's shorthand, written out.
+ *
+ * "NM" is what a seller types and what every price guide prints; it is not
+ * what somebody across a table reads. This screen is the one place in the app
+ * where the audience isn't us.
+ */
+const CONDITION_WORDS = {
+  NM: "Near Mint",
+  LP: "Lightly Played",
+  MP: "Moderately Played",
+  HP: "Heavily Played",
+  DMG: "Damaged"
+};
+
+/**
+ * eBay's own condition values that say nothing about a card.
+ *
+ * `ConditionDisplayName` on a TCG single is usually "Ungraded", "New" or
+ * "Used" — true, and useless to somebody deciding whether to buy this copy.
+ * The title is the better source precisely because sellers write the grade
+ * there, so those values are discarded rather than shown as if they answered
+ * the question.
+ */
+const EMPTY_CONDITIONS = /^(ungraded|new|used|brand new|not specified|--)$/i;
+
+/**
+ * What can honestly be said about this copy's condition, or null.
+ *
+ * The title comes first and eBay's field second, which is the opposite of what
+ * you'd expect from an authoritative-looking API field — but on trading cards
+ * the seller writes "NM" in the title and leaves the dropdown on "Ungraded".
+ *
+ * `inferCondition()` is `packages/core`'s, not a third copy: the pricing engine
+ * splits its comps on exactly this reading, and a counter that disagreed with
+ * it about what "NM" means would be a second opinion nobody asked for.
+ */
+export function conditionOf(source) {
+  const code = SoldCompsApi.inferCondition(source?.title || "");
+  if (code && code !== "Unknown" && CONDITION_WORDS[code]) return CONDITION_WORDS[code];
+  const stated = String(source?.extra?.condition || source?.condition || "").trim();
+  if (stated && !EMPTY_CONDITIONS.test(stated)) return stated;
+  return null;
+}
+
+/**
+ * The same eBay photo, asked for at a size worth looking at.
+ *
+ * `image_url` is `PictureDetails.GalleryURL`, which eBay serves at thumbnail
+ * size — fine in a 44px frame, useless when somebody wants to see the card.
+ * eBay's image CDN encodes the size in the filename (`s-l140.jpg`), so a
+ * larger one is a string swap rather than an API call, which matters on a
+ * route that must not cost a request per row.
+ *
+ * A URL that doesn't match the pattern is returned unchanged: a smaller
+ * picture is a worse view, a broken one is no view at all.
+ */
+export function largeImage(url) {
+  const u = String(url || "").trim();
+  if (!u) return null;
+  return /\/s-l\d+\.(jpe?g|png|webp)/i.test(u) ? u.replace(/\/s-l\d+\./i, "/s-l1600.") : u;
+}
 
 /**
  * How many online-only cards a search may show.
@@ -134,12 +198,15 @@ export function counterImage(co, images) {
 export function counterRow(co, { images } = {}) {
   const pence = co?.sticker_pence == null ? null : Number(co.sticker_pence);
   const valid = pence != null && Number.isFinite(pence) && pence > 0;
+  const art = counterImage(co, images);
   return {
     id: co?.id ?? null,
     name: counterName(co?.title),
+    condition: conditionOf(co),
     pricePence: valid ? Math.round(pence) : null,
     priceText: counterPrice(valid ? pence : null),
-    image: counterImage(co, images)
+    image: art,
+    imageLarge: largeImage(art)
   };
 }
 
@@ -177,9 +244,11 @@ export function listingRow(l) {
   return {
     id: l?.ebay_item_id || l?.id || null,
     name: counterName(l?.title),
+    condition: conditionOf(l),
     pricePence: pence,
     priceText: counterPrice(pence),
-    image: l?.image_url || null
+    image: l?.image_url || null,
+    imageLarge: largeImage(l?.image_url)
   };
 }
 
