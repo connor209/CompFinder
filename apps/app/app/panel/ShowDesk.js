@@ -1053,7 +1053,11 @@ export default function ShowDesk() {
                       <span className="sd-counter-art sd-counter-noart" aria-hidden="true" />
                     )}
                     <span className="stack-title">{c.name}</span>
-                    <span className="sd-price">{c.priceText}</span>
+                    {/* An ask is not a figure, and shouldn't be set like one:
+                        at price size it competes with the real numbers in the
+                        rows above and below, and on a phone it was long enough
+                        to drop onto a line of its own, away from its card. */}
+                    <span className={c.pricePence == null ? "sd-price sd-price-ask" : "sd-price"}>{c.priceText}</span>
                   </div>
                 ))}
               </div>

@@ -236,6 +236,18 @@ if (toggleAt < 0) {
     fail("the counter-mode toggle is gated on stock being checked out again — it vanishes when someone goes looking for it");
   }
 }
+// Rendered is not the same as visible. The toggle shipped ungated and still
+// could not be found: `.panel-head` is a nowrap flex row, and on a phone the
+// third button in that header sat off the right-hand edge of the screen.
+const css = readFileSync(new URL("../apps/app/app/globals.css", import.meta.url), "utf8");
+if (!/\.sd-scope \.panel-head\s*\{[^}]*flex-wrap:\s*wrap/.test(css)) {
+  fail("the show desk's panel headers no longer wrap — a third button in one goes off the side of a phone");
+}
+// A held price must stay on its card's row rather than dropping below it.
+if (!/\.sd-scope \.ps-row\.sd-counter-row\s*\{[^}]*flex-wrap:\s*nowrap/.test(css)) {
+  fail("counter rows wrap again — \"Ask at the table\" drops onto a line of its own, away from the card it belongs to");
+}
+
 // An empty box must not hand a customer the desk's own copy, which tells them
 // to type a SKU into a form counter mode does not render.
 if (!/counterMode \? \(\s*\n\s*<p className="dd-empty">/.test(desk)) {
