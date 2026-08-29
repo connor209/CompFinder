@@ -847,6 +847,23 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-plan-count { font-weight:700; font-size:13.5px; color:var(--ink); flex:none; }
 .sd-rowacts { display:flex; gap:6px; flex:none; margin-left:auto; }
 .sd-scope .badge2 { white-space:nowrap; }
+
+/* Counter mode — the list turned round to face a customer.
+   Bigger type and a real gap between rows: this is read at arm's length by
+   somebody who is not holding the tablet, across a table, in a hall with bad
+   lighting. The desk's density is right for picking and wrong for showing. */
+.sd-counter-row { gap:12px; padding:10px 0; font-size:15px; }
+.sd-counter-row .stack-title { font-size:15px; font-weight:600; }
+.sd-counter-row .sd-price { font-size:17px; }
+/* A fixed box whether or not there is a picture, so the names stay in one
+   column. Cards checked out by ENDING their listing have no photo, and a list
+   that jogs left and right where the gaps are is harder to read than one with
+   an empty frame in it. */
+.sd-counter-art { width:44px; height:62px; flex:none; border-radius:4px; object-fit:cover; background:var(--line); }
+.sd-counter-noart { display:inline-block; border:1px dashed var(--line-strong); background:transparent; }
+@media (max-width: 720px) {
+  .sd-counter-row .stack-title { flex:1 1 auto; }
+}
 /* Recommended show stock leads with the SKU, so the position sits BEHIND a
    chip whose width varies with the SKU ("A5" vs "AB123"). Without a floor on
    the chip the positions come out ragged, and a column of numbers you cannot

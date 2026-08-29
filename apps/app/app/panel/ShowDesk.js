@@ -15,6 +15,8 @@ import {
   showView, selectionFor, facetsOf, listingState, matchesQuery,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
+import { counterView } from "@/lib/showcounter.js";
+import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -77,6 +79,14 @@ export default function ShowDesk() {
   const [stackFilter, setStackFilter] = useState("");
   const [stickerFilter, setStickerFilter] = useState("any");
   const [listingFilter, setListingFilter] = useState("any");
+  // Counter mode — the list turned round to face a customer. NOT persisted,
+  // for the same reason the search isn't: coming back tomorrow to a desk that
+  // is still in customer mode hides every button you need and looks broken.
+  const [counterMode, setCounterMode] = useState(false);
+  const [images, setImages] = useState(new Map()); // sku -> eBay photo of THIS copy
+  const [wants, setWants] = useState([]);
+  const [wantsMissing, setWantsMissing] = useState(false); // migration 026 not applied
+  const [showWants, setShowWants] = useState(false);
   const [backPickerOpen, setBackPickerOpen] = useState(false);
   const [recs, setRecs] = useState(null); // null = closed; [] = built, empty
   const [recsLoading, setRecsLoading] = useState(false);
@@ -138,6 +148,26 @@ export default function ShowDesk() {
       return;
     }
     setOpen(away || []);
+
+    // A photo of THIS copy, for the counter view. Read from the listings we
+    // already sync rather than fetched per row, and absent for anything
+    // checked out by ENDING its listing — those drop out of ebay_listings on
+    // the next sync. A gap is fine; catalogue art in its place would not be,
+    // since it shows a mint scan of a played card to the person holding it.
+    try {
+      const listings = await pagedSelect(() =>
+        sb.from("ebay_listings").select("sku,image_url").not("sku", "is", null)
+      );
+      const bySku = new Map();
+      for (const l of listings) {
+        if (l.image_url) bySku.set(String(l.sku).toLowerCase(), l.image_url);
+      }
+      setImages(bySku);
+    } catch { /* no pictures is a gap, not a failure */ }
+
+    const w = await loadWants(sb);
+    setWantsMissing(Boolean(w.missing));
+    setWants(w.rows || []);
     const { data: past } = await sb
       .from("stock_checkouts")
       .select("*")
@@ -291,8 +321,56 @@ export default function ShowDesk() {
   );
   const visible = view.rows;
   const selected = useMemo(() => selectionFor(visible, sel), [visible, sel]);
+  // The customer's list. Same search, same sort, same rows — projected through
+  // showcounter.js so what reaches a stranger's eyes is an allow-list rather
+  // than this row with the private bits hidden by CSS.
+  const counter = useMemo(
+    () => counterView(open, {
+      query: q, sort, event: eventFilter, stack: stackFilter,
+      sticker: stickerFilter, listing: listingFilter
+    }, { images }),
+    [open, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter, images]
+  );
+  const wantGroups = useMemo(() => wantsSummary(wants), [wants]);
   const events = useMemo(() => facetsOf(open, "event"), [open]);
   const stackFacets = useMemo(() => facetsOf(open, "stack_name"), [open]);
+  // Record what somebody just asked for. Pre-filled from the search box,
+  // because by the time you want this you have already typed it — "gengar" is
+  // in the box and the answer is on screen. `hadMatch` is taken from THAT
+  // search rather than recomputed later: the useful fact is whether we could
+  // meet the ask at the moment it was made.
+  async function noteWant(text) {
+    const raw = String(text ?? q).trim();
+    if (!raw) return;
+    setBusy(true);
+    const res = await recordWant(supabase(), {
+      query: raw,
+      event,
+      hadMatch: visible.length > 0
+    });
+    setBusy(false);
+    if (res.missing) {
+      setWantsMissing(true);
+      setMsg("Want list needs migration 026 — run it in Supabase and this starts recording.");
+      return;
+    }
+    if (!res.ok) {
+      setMsg(`Couldn't record that: ${res.error}`);
+      return;
+    }
+    setWants((prev) => [res.row, ...prev]);
+    setMsg(`Noted: “${raw}”${visible.length > 0 ? "" : " — we didn't have it"}.`);
+  }
+
+  async function removeWant(id) {
+    const res = await deleteWant(supabase(), id);
+    if (!res.ok && !res.missing) {
+      setMsg(`Couldn't remove that: ${res.error}`);
+      return;
+    }
+    setWants((prev) => prev.filter((w) => w.id !== id));
+  }
+
   function clearFilters() {
     setQ("");
     setEventFilter("");
@@ -589,6 +667,10 @@ export default function ShowDesk() {
 
   return (
     <div className="rise-group sd-scope">
+      {/* Counter mode hides every screen that isn't the stock list. Not styled
+          away — not rendered. A customer holding the tablet can scroll, and a
+          "£ Sold" button that is merely off-palette is still a button. */}
+      {counterMode ? null : (
       <div className="panel">
         <div className="panel-head">
           <span className="eyebrow">Check stock out</span>
@@ -653,8 +735,9 @@ export default function ShowDesk() {
           </div>
         ) : null}
       </div>
+      )}
 
-      {recs !== null ? (
+      {recs !== null && !counterMode ? (
         <div className="panel">
           <div className="panel-head">
             <span className="eyebrow">Recommended show stock — highest value first</span>
@@ -732,9 +815,9 @@ export default function ShowDesk() {
 
       <div className="panel">
         <div className="panel-head">
-          <h3>Away at the show</h3>
-          <span className="badge2">{open.length} out</span>
-          {open.length > 0 ? (
+          <h3>{counterMode ? "In stock today" : "Away at the show"}</h3>
+          <span className="badge2">{counterMode ? `${counter.shown} card${counter.shown === 1 ? "" : "s"}` : `${open.length} out`}</span>
+          {open.length > 0 && !counterMode ? (
             <button
               className="btn btn-ghost"
               onClick={() => router.push("/panel/batch?pool=show")}
@@ -742,6 +825,22 @@ export default function ShowDesk() {
               disabled={busy}
             >
               🏷 Price this pool
+            </button>
+          ) : null}
+          {open.length > 0 ? (
+            <button
+              className={counterMode ? "btn btn-primary" : "btn btn-ghost"}
+              onClick={() => { setCounterMode((v) => !v); setSel(new Set()); }}
+              title={counterMode
+                ? "Back to the desk — the SKUs, the eBay state and the sold/return buttons come back"
+                : "Turn the list round to face a customer: pictures, names and prices only"}
+            >
+              {counterMode ? "✕ Back to the desk" : "👋 Show a customer"}
+            </button>
+          ) : null}
+          {!counterMode && !wantsMissing && wantGroups.length > 0 ? (
+            <button className="btn btn-ghost" onClick={() => setShowWants((v) => !v)} title="What people have asked for">
+              🔎 Asked for ({wantGroups.length})
             </button>
           ) : null}
         </div>
@@ -755,7 +854,7 @@ export default function ShowDesk() {
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder="Find a card — name, SKU, number, show"
+                  placeholder={counterMode ? "Search the stock — name or number" : "Find a card — name, SKU, number, show"}
                   aria-label="Search the show stock"
                 />
                 {q ? (
@@ -765,6 +864,12 @@ export default function ShowDesk() {
               <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort the show stock">
                 {SHOW_SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
+              {/* Operational filters, not a customer's. "Still sellable
+                  online" in particular says out loud that the card is on eBay,
+                  which invites a price-check against the sticker in front of
+                  them. */}
+              {counterMode ? null : (
+                <>
               <select className="sd-select" value={stickerFilter} onChange={(e) => setStickerFilter(e.target.value)} aria-label="Filter by sticker">
                 {STICKER_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
               </select>
@@ -777,22 +882,24 @@ export default function ShowDesk() {
               >
                 {LISTING_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
               </select>
+                </>
+              )}
               {/* Only offered when there's a choice to make: one show, or one
                   stack, is not a filter — it's a dropdown with one answer. */}
-              {events.length > 1 ? (
+              {events.length > 1 && !counterMode ? (
                 <select className="sd-select" value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} aria-label="Filter by show">
                   <option value="">Any show</option>
                   {events.map((e) => <option key={e.value} value={e.value}>{e.value} ({e.count})</option>)}
                 </select>
               ) : null}
-              {stackFacets.length > 1 ? (
+              {stackFacets.length > 1 && !counterMode ? (
                 <select className="sd-select" value={stackFilter} onChange={(e) => setStackFilter(e.target.value)} aria-label="Filter by the stack it left">
                   <option value="">Any stack</option>
                   {stackFacets.map((s) => <option key={s.value} value={s.value}>{s.value} ({s.count})</option>)}
                 </select>
               ) : null}
             </div>
-            {view.filtering ? (
+            {view.filtering && !counterMode ? (
               /* Said out loud, because the alternative is a button that looks
                  like it does one thing and does another. A card filed while it
                  was off screen leaves nothing behind to notice. */
@@ -803,6 +910,7 @@ export default function ShowDesk() {
                 {" "}<button className="sd-clear-all" onClick={clearFilters}>Clear</button>
               </p>
             ) : null}
+            {counterMode ? null : (
             <div className="sd-bulkbar">
               <label className="sd-toggle">
                 <input
@@ -836,8 +944,9 @@ export default function ShowDesk() {
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
               </div>
             </div>
+            )}
 
-            {plan ? (
+            {plan && !counterMode ? (
               <div className="sd-plan">
                 <div className="sd-plan-head">
                   <b>Filing plan for {selCount} card(s)</b>
@@ -877,7 +986,7 @@ export default function ShowDesk() {
               </div>
             ) : null}
 
-            {backPickerOpen ? (
+            {backPickerOpen && !counterMode ? (
               <div className="sd-backpicker">
                 <span className="hint-small">Add {selCount} card(s), in order, to the back of:</span>
                 {stacksWithSpace.map((s) => (
@@ -895,6 +1004,22 @@ export default function ShowDesk() {
             ) : null}
             {busy && progress ? <p className="hint hint-small"><span className="spinner" /> &nbsp;{progress}</p> : null}
             {visible.length === 0 ? (
+              counterMode ? (
+                /* The miss is the valuable moment — this is exactly the ask
+                   that leaves no trace anywhere else. The button is right here
+                   because the query is already typed and the answer is already
+                   known. */
+                <p className="dd-empty">
+                  Nothing here matches that.{" "}
+                  {q.trim() && !wantsMissing ? (
+                    <button className="sd-clear-all" onClick={() => noteWant(q)} disabled={busy}>
+                      Note that someone asked for “{q.trim()}”
+                    </button>
+                  ) : null}
+                  {q.trim() ? " " : ""}
+                  <button className="sd-clear-all" onClick={clearFilters}>Clear the search</button>
+                </p>
+              ) : (
               <p className="dd-empty">
                 Nothing checked out matches that.{" "}
                 {q.trim() && pastMatches.length > 0
@@ -902,7 +1027,27 @@ export default function ShowDesk() {
                   : ""}
                 <button className="sd-clear-all" onClick={clearFilters}>Clear the search</button>
               </p>
+              )
             ) : null}
+            {/* Two lists, one search. The counter list is built from
+                counterView() and never from `visible`, so nothing on this
+                branch can reach a field the projection didn't allow. */}
+            {counterMode ? (
+              <div className="stack-list sd-counter">
+                {counter.rows.map((c) => (
+                  <div className="ps-row sd-counter-row" key={c.id}>
+                    {c.image ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img className="sd-counter-art" src={c.image} alt="" loading="lazy" width="44" height="62" />
+                    ) : (
+                      <span className="sd-counter-art sd-counter-noart" aria-hidden="true" />
+                    )}
+                    <span className="stack-title">{c.name}</span>
+                    <span className="sd-price">{c.priceText}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
             <div className="stack-list">
               {visible.map((co) => {
                 const chip = hideChip(co);
@@ -931,11 +1076,64 @@ export default function ShowDesk() {
                 );
               })}
             </div>
+            )}
+            {/* Someone asked, and we HAD it. Worth as much as a miss: it says
+                which cards are worth packing again, and it is the same tap. */}
+            {counterMode && !wantsMissing && q.trim() && counter.shown > 0 ? (
+              <p className="hint hint-small sd-find-note">
+                <button className="sd-clear-all" onClick={() => noteWant(q)} disabled={busy}>
+                  Note that someone asked for “{q.trim()}”
+                </button>
+              </p>
+            ) : null}
           </>
         )}
       </div>
 
-      {history.length > 0 ? (
+      {/* The want list. Desk-only: it is a record of what we could not sell,
+          which is a buying note to ourselves and nothing a customer should
+          read over the counter. */}
+      {showWants && !counterMode && !wantsMissing ? (
+        <div className="panel">
+          <div className="panel-head">
+            <span className="eyebrow">Asked for</span>
+            <span className="badge2">{wantGroups.filter((g) => g.misses > 0).length} we couldn&apos;t meet</span>
+            <button className="btn btn-ghost" onClick={() => setShowWants(false)}>Close</button>
+          </div>
+          <p className="hint hint-small">
+            What people asked for at the table. The ones we didn&apos;t have are the
+            buying list — nothing else records them.
+          </p>
+          <div className="stack-list">
+            {wantGroups.map((g) => (
+              <div className="stack-row" key={g.key}>
+                <span className="stack-title">{g.query}</span>
+                <span className="badge2">{g.asks} ask{g.asks === 1 ? "" : "s"}</span>
+                {g.misses > 0 ? (
+                  <span className="hint-small" style={{ color: "var(--warn-ink)", flex: "none" }}>
+                    {g.misses} not in stock
+                  </span>
+                ) : (
+                  <span className="hint-small" style={{ color: "var(--conf-high)", flex: "none" }}>had it</span>
+                )}
+                <span className="sd-rowacts">
+                  <button className="stack-pull" onClick={() => setQ(g.query)} title="Search the stock for this">⌕</button>
+                  <button className="stack-pull" onClick={() => removeWant(g.ids[0])} title="Remove one of these">✕</button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {wantsMissing && !counterMode ? (
+        <p className="hint hint-small">
+          The want list needs <b>migration 026</b>, applied in Supabase. Everything
+          else on this screen works without it.
+        </p>
+      ) : null}
+
+      {history.length > 0 && !counterMode ? (
         <div className="panel">
           <div className="panel-head">
             <span className="eyebrow">Recent activity</span>
