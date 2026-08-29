@@ -1013,6 +1013,23 @@ sort, projected.
 - **One search, two screens.** Both go through `showView()`, so what a customer
   finds and what you find are the same set — a search that answers differently
   sends you to a card they cannot see, or promises one that is not in the box.
+- **The eBay stock is a SECOND list, under its own heading, never merged.**
+  `onlineMatches()` answers a search with cards we have listed online and don't
+  have checked out. Merged into the list above, a card that might be at home
+  becomes indistinguishable from one you can hand over, and the top list is the
+  only one anybody can act on.
+- **It says "ask", not "not here", and that wording is load-bearing.** Not
+  everything that travels to a show gets checked out, so a card can be in the
+  box and missing from the checked-out list — and telling a customer we haven't
+  got it, while it sits in the box, loses a sale already made. What the data
+  knows is that we own one; whether it is in the room is a question for the
+  person at the table. `check-showcounter.mjs` greps the copy for both halves.
+- **Only ever on a search, capped, dearest first.** The box is a hundred-odd
+  cards and the listings are thousands: unsearched, the second list buries the
+  first. A sold card is still a row in `ebay_listings`, so it goes through
+  `isListingAvailable()` — and a missing quantity is silence, not a zero, or
+  real stock is hidden. The eBay price shows as it stands, which is the right
+  number for a card that would be posted.
 
 **This is the projection the public storefront needs.** See
 `docs/SHOW_STOREFRONT.md`: an anonymous route serves exactly this shape and

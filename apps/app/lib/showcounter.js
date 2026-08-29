@@ -31,8 +31,9 @@
  * Framework-free and app-import-free on purpose, so scripts/check-showcounter.mjs
  * can load it under bare node.
  */
-import { showView } from "./showfilter.js";
+import { showView, matchesQuery, normalise } from "./showfilter.js";
 import { labelName } from "./showstock.js";
+import { isListingAvailable } from "./stockcheck.js";
 
 /**
  * What a buyer is shown when there is no sticker price.
@@ -61,6 +62,15 @@ export const COUNTER_NAME_MAX = 64;
  * a test behind it.
  */
 export const COUNTER_FIELDS = ["id", "name", "pricePence", "priceText", "image"];
+
+/**
+ * How many online-only cards a search may show.
+ *
+ * The box is a hundred-odd cards; the eBay listings are thousands. Uncapped,
+ * the second list buries the first, and the first is the one you can actually
+ * put in somebody's hand.
+ */
+export const ONLINE_LIMIT = 24;
 
 /**
  * Cash, the way a label writes it: whole pounds lose their ".00".
@@ -148,4 +158,70 @@ export function counterView(rows, criteria = {}, { images } = {}) {
     rows: view.rows.map((co) => counterRow(co, { images })),
     priced: view.rows.filter((co) => co?.sticker_pence != null).length
   };
+}
+
+/**
+ * A live eBay listing, projected for the counter — the same shape a checkout
+ * row projects to, so one row component renders both and one allow-list covers
+ * both. The SKU and the listing URL are excluded for different reasons: the
+ * SKU is our shelf address, and the URL is an invitation to buy it online
+ * instead of from the table you are standing at.
+ *
+ * The price is eBay's, unconverted. For a card that would be POSTED that is
+ * the right number — the fees and postage baked into it are costs a posted
+ * sale really does pay — and the section it appears under says what it is.
+ */
+export function listingRow(l) {
+  const pounds = Number(l?.price_value);
+  const pence = Number.isFinite(pounds) && pounds > 0 ? Math.round(pounds * 100) : null;
+  return {
+    id: l?.ebay_item_id || l?.id || null,
+    name: counterName(l?.title),
+    pricePence: pence,
+    priceText: counterPrice(pence),
+    image: l?.image_url || null
+  };
+}
+
+/**
+ * The online stock a search turns up, minus anything already in the box.
+ *
+ * Three rules, and the middle one is the one that costs cards:
+ *
+ * 1. **Only on a search.** With an empty query this returns nothing. Thousands
+ *    of listings under a hundred-odd real ones is not a stock list, it is a
+ *    catalogue with the useful part at the top.
+ * 2. **A sold card is still a row in `ebay_listings`.** eBay's out-of-stock
+ *    control leaves a sold fixed-price listing in the ActiveList with the
+ *    quantity zeroed, so `isListingAvailable()` is the one definition of
+ *    whether there is anything to sell — the same trap that once put sold
+ *    cards at the top of the show-stock shortlist.
+ * 3. **Never twice.** A card checked out with its listing left live is in both
+ *    sets, and showing it under "ask us" as well as in the box reads as two
+ *    copies.
+ */
+export function onlineMatches(listings, { query = "", inBoxSkus = null, limit = ONLINE_LIMIT } = {}) {
+  if (!normalise(query)) return [];
+  const skip = inBoxSkus instanceof Set ? inBoxSkus : new Set(inBoxSkus || []);
+  const seen = new Set();
+  const out = [];
+  for (const l of listings || []) {
+    if (!isListingAvailable(l)) continue;
+    const key = l?.sku ? String(l.sku).toLowerCase() : "";
+    if (key && (skip.has(key) || seen.has(key))) continue;
+    if (!matchesQuery(l, query)) continue;
+    if (key) seen.add(key);
+    out.push(l);
+  }
+  // Dearest first: on a query that catches a lot, the cards worth a
+  // conversation should be the ones that fit on the screen.
+  out.sort((a, b) => (Number(b?.price_value) || 0) - (Number(a?.price_value) || 0));
+  return out.slice(0, Math.max(0, limit)).map(listingRow);
+}
+
+/** The lowercased SKUs currently in the box, for keeping the two lists apart. */
+export function inBoxSkus(checkouts) {
+  const set = new Set();
+  for (const co of checkouts || []) if (co?.sku) set.add(String(co.sku).toLowerCase());
+  return set;
 }

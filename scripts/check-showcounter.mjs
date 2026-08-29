@@ -30,6 +30,10 @@ import { readFileSync } from "node:fs";
 import {
   counterRow,
   counterView,
+  listingRow,
+  onlineMatches,
+  inBoxSkus,
+  ONLINE_LIMIT,
   counterName,
   counterPrice,
   counterImage,
@@ -158,6 +162,60 @@ for (const r of counterView(POOL, {}).rows) {
   eq("every counter row is projected", Object.keys(r).sort(), [...COUNTER_FIELDS].sort());
 }
 
+// --- 7b. the online stock, and the line between it and the box ------------
+// A second list of cards we own but may not have in the room. Everything here
+// is about not promising the wrong thing, in either direction.
+const LISTING_PRIVATE = { sku: "AB12", url: "https://www.ebay.co.uk/itm/115566778899" };
+const LISTING = {
+  ebay_item_id: "115566778899",
+  title: "Pokemon Card Gengar VMAX 020/198 Chilling Reign",
+  price_value: 45.5,
+  quantity: 1,
+  image_url: "https://i.ebayimg.com/x.jpg",
+  ...LISTING_PRIVATE
+};
+eq("an online row is the same shape as a box row", Object.keys(listingRow(LISTING)).sort(), [...COUNTER_FIELDS].sort());
+const lSerialised = JSON.stringify(listingRow(LISTING));
+for (const [field, value] of Object.entries(LISTING_PRIVATE)) {
+  // The SKU is our shelf address. The URL is an invitation to buy it online
+  // instead of from the table the customer is standing at.
+  if (lSerialised.includes(value)) fail(`${field} reached the counter from an eBay listing`);
+}
+eq("the eBay price is shown as it stands", listingRow(LISTING).priceText, "£45.50");
+
+const STOCK = [
+  LISTING,
+  { ebay_item_id: "2", sku: "AB13", title: "Gengar ex 094/091", price_value: 12, quantity: 0 },
+  { ebay_item_id: "3", sku: "AB14", title: "Gengar V 156/198", price_value: 8 },
+  { ebay_item_id: "4", sku: "AB15", title: "Umbreon VMAX 215/203", price_value: 900, quantity: 2 }
+];
+// Thousands of listings under a hundred real ones is a catalogue, not a stock
+// list — so the second list exists only in answer to a question.
+eq("no query, no online list", onlineMatches(STOCK, { query: "" }).length, 0);
+eq("a query finds the online stock", onlineMatches(STOCK, { query: "gengar" }).map((r) => r.name), ["Gengar VMAX 020/198", "Gengar V 156/198"]);
+// A sold card is STILL a row in ebay_listings — eBay's out-of-stock control
+// zeroes the quantity and leaves it active. Offering one at a table is worse
+// than never showing it.
+if (onlineMatches(STOCK, { query: "gengar" }).some((r) => r.name.includes("094"))) {
+  fail("a sold-out listing is offered to a customer");
+}
+// The false positive that costs a sale: no quantity column is SILENCE, not a
+// zero. Reading it as sold-out hides real stock.
+if (!onlineMatches(STOCK, { query: "gengar" }).some((r) => r.name.includes("156/198"))) {
+  fail("a listing with no quantity is being read as sold out — that is stock we could have sold");
+}
+// A card checked out with its listing left live is in both sets. Shown twice,
+// it reads as two copies.
+eq(
+  "a card already in the box is not offered again below it",
+  onlineMatches(STOCK, { query: "gengar", inBoxSkus: inBoxSkus([{ sku: "ab12" }]) }).map((r) => r.name),
+  ["Gengar V 156/198"]
+);
+eq("the box SKUs are matched case-insensitively", [...inBoxSkus([{ sku: "AB12" }])], ["ab12"]);
+const many = Array.from({ length: 60 }, (_, i) => ({ ebay_item_id: String(i), sku: `S${i}`, title: `Gengar ${i}/198`, price_value: i + 1, quantity: 1 }));
+eq("the online list is capped", onlineMatches(many, { query: "gengar" }).length, ONLINE_LIMIT);
+eq("dearest first, so the cards worth a conversation are the ones on screen", onlineMatches(many, { query: "gengar" })[0].name, "Gengar 59/198");
+
 // --- 8. the want list ------------------------------------------------------
 eq("wants group the way the search matches", normaliseWant("  GENGAR vmax "), normaliseWant("gengar VMAX"));
 const WANTS = [
@@ -249,9 +307,30 @@ if (!/\.sd-scope \.ps-row\.sd-counter-row\s*\{[^}]*flex-wrap:\s*nowrap/.test(css
 }
 
 // An empty box must not hand a customer the desk's own copy, which tells them
-// to type a SKU into a form counter mode does not render.
-if (!/counterMode \? \(\s*\n\s*<p className="dd-empty">/.test(desk)) {
-  fail("counter mode has no empty state of its own — an empty box shows the desk's 'enter a SKU above' copy");
+// to type a SKU into a form counter mode does not render — and must not stop
+// there either: with nothing checked out the online list is the only stock
+// there is, and the search box is the only way to it.
+if (!/open\.length === 0 && !counterMode \?/.test(desk)) {
+  fail("the desk's empty state is not gated on counterMode — a customer is told to enter a SKU, or loses the search entirely");
+}
+
+// The two lists must stay two lists. Merged, a card we might have at home is
+// indistinguishable from one in the box, and the box is the only one anybody
+// can actually hand over.
+if (!desk.includes("sd-counter-split")) {
+  fail("the online stock is no longer under a heading of its own — merged, it reads as cards in the box");
+}
+// And the wording must express doubt rather than absence. Not everything that
+// travels to a show gets checked out, so "not here" is a claim the data cannot
+// support — and saying it about a card that IS in the box loses a sale we had
+// already made.
+const splitAt = desk.indexOf("sd-counter-split");
+if (splitAt > 0) {
+  const heading = desk.slice(splitAt, splitAt + 600);
+  if (!/Ask us about these/.test(heading)) fail("the online section no longer asks — check the copy still invites a question");
+  if (/not here|we don't have|haven't got/i.test(heading)) {
+    fail("the online section claims the card is absent — checkout is not complete enough to know that");
+  }
 }
 
 // Counter mode has to REMOVE the desk, not restyle it: a customer can scroll,
