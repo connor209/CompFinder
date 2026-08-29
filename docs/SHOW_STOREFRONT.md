@@ -4,11 +4,18 @@ Concept note, 2026-08-29. Question: buyers at a show scan a QR code, browse the
 stock we brought but couldn't fit on the table, and submit a request; we pull
 the cards and show them. Is it worth building, and what shape should it take?
 
-Nothing here is built. This is the reasoning written down before any of it is,
-so the decisions that matter get made deliberately rather than discovered.
+**Updated the same day, after a test at a show.** The first of the three
+products below was tried with no code at all and worked: someone asked "do you
+have any gengars", the Show Desk was searched in front of them, and cards sold
+that were in a box under the table. What that settles, what it does not, and
+what shipped in response are in "Measured" below. The rest of this note is the
+reasoning as it was written before any of it existed.
 
 ## TL;DR
 
+- **The counter tool is proved as of 2026-08-29** — cards sold off-table at a
+  show because the stock list was searched in front of a customer. That is
+  product 1 of the three below; the QR remains untested and unbuilt.
 - **Worth building, but the best argument for it isn't the pitch.** Checking a
   card out to a show currently makes it invisible *everywhere* — the eBay
   listing is hidden so it can't double-sell, and there's no table space to
@@ -49,6 +56,46 @@ so the decisions that matter get made deliberately rather than discovered.
 
 ---
 
+## Measured, 2026-08-29
+
+The counter tool was tested at a show with no build behind it — the Show Desk
+on a tablet, turned round when a customer asked a question. **Cards sold that
+were not on the table.**
+
+**What that proves:** stock nobody can see converts the moment somebody can see
+it, and the retrieval is fast enough to hold a conversation over. That is the
+premise of everything below, and it is no longer an assumption.
+
+**What it does not prove:** nothing about the QR. Nobody scanned anything — the
+tablet was handed over, in a conversation that had already started. The
+self-serve product is exactly as untested as it was this morning, and the
+scan-rate question in "What would make this a mistake" is still open.
+
+**The most useful thing the test surfaced was a gap, not a success.** "Do you
+have any gengars" is a want. The ones where the answer is NO leave no trace
+anywhere — no sale, no checkout, no row — and they are the buying list. A day
+of them is gone by the next morning.
+
+### What shipped in response
+
+- **Counter mode on the Show Desk** (`apps/app/lib/showcounter.js`). The same
+  list, search and sort, projected to picture, name and price. The desk's own
+  screens are not rendered at all while it is on, rather than styled away.
+- **The projection is the one this note specifies for the anonymous route.**
+  Built now, against real customers, on a tablet where the result is visible —
+  rather than designed abstractly for a web route nobody has used. The public
+  storefront serves this shape or it serves a second, quietly divergent copy.
+- **`show_wants`** (migration 026) and `apps/app/lib/wants-store.js` — one tap
+  from the search box, recording what was asked for and whether we had it.
+- **`scripts/check-showcounter.mjs`**, which stuffs a checkout row with every
+  private value and asserts none survives the projection, then slices the
+  counter branch out of the render and checks it for desk data and destructive
+  buttons.
+
+Three things the test did NOT settle, still open below: what share of revenue
+shows are, whether anyone scans a cold QR, and whether the pull-request flow
+earns its place at all once the search exists.
+
 ## The problem, stated properly
 
 A table at a show is a fixed cost that buys a fixed amount of display area. We
@@ -81,9 +128,12 @@ little more.
 | Photos we took | `listing-photos` public bucket (012) | Already a *public* bucket, which is what a storefront needs. |
 | Catalogue art | `card_catalog.image_small` (022) | Fallback art for anything with no photo. |
 | Camera capture | `lib/camera.js`, `Scan.js` | The iOS rear-camera problem is already solved. |
+| **The buyer projection** | `lib/showcounter.js` (2026-08-29) | An allow-list: picture, name, price. What the anonymous route should serve. |
+| **The want list** | `show_wants` (026), `lib/wants-store.js` | What people asked for, and whether we had it. |
 
-What is missing is a read route, a request table, a queue screen at the desk,
-and a decision about pictures.
+What is missing is a read route, a request table and a queue screen at the
+desk. The picture decision and the buyer-facing projection are now made — see
+"Measured" — which were the two parts that needed judgement rather than typing.
 
 ## Pictures are the part that decides whether it feels like a binder
 
@@ -220,6 +270,26 @@ contained on purpose:
   failing to load is survivable; the desk failing to receive a request is not.
   Whatever gets built should assume the desk's connection drops and comes back.
 
+## Three products, not one
+
+Written after the fact, because the note above conflates them and they do not
+share a verdict. All three read the same table and the same price, which is why
+they look like one idea.
+
+| | What it is | Verdict |
+|---|---|---|
+| **1. The counter tool** | You search your own stock in front of a customer who asked. No QR, nothing buyer-facing. | **Proved, 2026-08-29.** Needed no new code to test. Now built properly. |
+| **2. The self-serve QR** | Strangers scan, browse, submit a request, wait for a pull. The original pitch. | Weakest. Low scan rate, and the wait competes with walking to the next table. Untested. |
+| **3. The persistent storefront** | Stock browsable from anywhere, all the time — between shows, from social, taking requests for the next event. | Where the business is. Works at a scan rate of zero. |
+
+**The dead-inventory argument at the top of this note justifies 3, not 2.** If
+nobody scans, checked-out stock is just as invisible as it was. Worth being
+precise about, because the two arguments are easy to run together and only one
+of them survives a low scan rate.
+
+**1 and 3 can be built without ever building 2**, and 1 is now the thing 3
+inherits its projection from.
+
 ## Beyond show day, which is where it compounds
 
 Show day is the narrowest use of this. The same system, barely changed:
@@ -274,6 +344,11 @@ request flow at all — just the catalogue and a count of how many people looked
 If the scan rate is there, the rest is worth writing. If it isn't, the
 between-shows version above is still worth building, and none of this
 paragraph applies to it.
+
+**The counter tool has now had its equivalent test and passed** (see
+"Measured"), which is why it is built and the QR is not. Test each product on
+its own evidence: product 1 working says nothing about whether strangers
+scan.
 
 ## Open questions
 

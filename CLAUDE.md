@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-six table tests, no framework, non-zero exit on failure:
+`npm run check` runs twenty-seven table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes,
@@ -96,6 +96,10 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   looks at, that AB2 sorts before AB11 and an unstickered card sorts last in
   both directions, and — the one that costs cards — that a bulk action only
   ever acts on rows that are on screen.
+- `scripts/check-showcounter.mjs` — the list turned round to face a customer:
+  that the projection is an allow-list rather than a filter, that no private
+  value survives it, that a held price asks instead of showing a number, and a
+  slice of the render itself checked for desk data or a destructive button.
 - `scripts/check-override.mjs` — a price you typed: what counts as one, that
   the recommendation is never edited, that the sticker gate lets yours through,
   and a grep over every path that spends money for a direct read of
@@ -967,6 +971,80 @@ until there is more than one to choose between.
 The row chip and the "still sellable online" filter both read `listingState()`
 — a filter that finds three cards the chips call hidden is the kind of
 disagreement nobody notices until one of them sells twice.
+
+## The list turned round to face a customer
+
+Tested at a show on 2026-08-29 before any of it was built: someone asked *"do
+you have any gengars"*, the Show Desk was searched in front of them, and cards
+sold that were in a box under the table. **What that proved is not that the
+software works — it is that stock nobody can see converts the moment somebody
+can see it.** Table space is the cap, and the Show Desk was already the way
+round it.
+
+What it also showed is that the desk is dressed for us. Counter mode
+(`apps/app/lib/showcounter.js`) is the same list, the same search and the same
+sort, projected.
+
+- **The projection is an ALLOW-LIST, not a tidy-up.** `counterRow()` builds a
+  new object key by key; it never spreads the checkout row and deletes the
+  private parts. The leak worth designing against is not one anybody would
+  write — it is the column added to `stock_checkouts` a year from now for an
+  unrelated reason, appearing on a tablet pointed at a customer. Built the
+  allow-list way that is unrepresentable; built the other way it is invisible
+  until it happens. `check-showcounter.mjs` stuffs a row with private values
+  and searches the serialised result for every one of them.
+- **What was on screen that shouldn't be**, and why each matters: the **SKU**
+  is a stack name plus a position, so it tells a stranger how deep the stock
+  runs; **"still live on eBay"** says out loud that the card is listed, which
+  invites a price-check against the sticker in front of them; and **`£ Sold`
+  and `↩ Return`** are one mis-tap from a customer holding the tablet.
+- **Counter mode REMOVES the desk rather than restyling it.** The checkout
+  form, the bulk bar, the recommendations and the recent activity are not
+  rendered at all. A customer can scroll, and an off-palette destructive button
+  is still a button.
+- **A held price says "Ask at the table".** `stickerFor()` withholds a price on
+  low or no confidence, and on prices built from active listings. Facing a
+  customer a blank reads as free, and the eBay figure is wrong by ~13.25% of
+  fees plus £1.35 of postage a table sale never pays.
+- **The picture is a photo of THIS copy** (`ebay_listings.image_url`), never
+  catalogue art. Cards checked out by ENDING their listing have none, and a gap
+  is fine: catalogue art would show a mint scan of a played card to the person
+  holding that card.
+- **One search, two screens.** Both go through `showView()`, so what a customer
+  finds and what you find are the same set — a search that answers differently
+  sends you to a card they cannot see, or promises one that is not in the box.
+
+**This is the projection the public storefront needs.** See
+`docs/SHOW_STOREFRONT.md`: an anonymous route serves exactly this shape and
+nothing else, so the hard part is settled here, on a tablet in your own hands,
+where you can see what a customer sees. Two projections would eventually
+disagree about what is private, and the one that disagrees quietly is the one
+on the internet.
+
+## What we were asked for is the only demand signal a show gives
+
+"Do you have any gengars" is a **want**, and until migration 026 nothing
+recorded it. The asks where the answer is NO leave no trace anywhere — no sale,
+no checkout, no row — and they are the valuable half: a buying list and a
+packing list, unreconstructable the next morning.
+
+`apps/app/lib/wants-store.js` is the only file naming `show_wants`, the same
+rule `batch-store.js` follows and for the same reason. Three things worth
+knowing:
+
+- **It is recorded from the search box**, because by then you have already
+  typed it: "gengar" is in the box and the answer is on screen. `had_match`
+  comes from THAT search rather than being recomputed later — the useful fact
+  is whether we could meet the ask at the moment it was made, and stock has
+  moved by the time anyone reads the list.
+- **A miss and a hit are both worth a tap.** The miss says what to buy; the hit
+  says what to pack again. `wantsSummary()` breaks ties toward the misses,
+  because the list gets read with a float in hand.
+- **A pending migration degrades rather than breaks.** Migrations here are
+  applied by hand and the code ships first, so every call returns
+  `{ ok: false, missing: true }` until 026 is run and the desk carries on
+  working. A desk that white-screens at a show because a migration is pending
+  is a worse outcome than no want list.
 
 ## A SKU is a name; a position is an address
 
