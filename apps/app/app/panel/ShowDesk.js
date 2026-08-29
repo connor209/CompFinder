@@ -827,17 +827,20 @@ export default function ShowDesk() {
               🏷 Price this pool
             </button>
           ) : null}
-          {open.length > 0 ? (
-            <button
-              className={counterMode ? "btn btn-primary" : "btn btn-ghost"}
-              onClick={() => { setCounterMode((v) => !v); setSel(new Set()); }}
-              title={counterMode
-                ? "Back to the desk — the SKUs, the eBay state and the sold/return buttons come back"
-                : "Turn the list round to face a customer: pictures, names and prices only"}
-            >
-              {counterMode ? "✕ Back to the desk" : "👋 Show a customer"}
-            </button>
-          ) : null}
+          {/* Always offered, including with an empty box. Gated on there being
+              stock out, it vanished exactly when someone wanted to find out what
+              it did — and a control you can only discover while packing for a
+              show is one nobody discovers. An empty counter screen is also an
+              honest thing to hand somebody at a table that has sold out. */}
+          <button
+            className={counterMode ? "btn btn-primary" : "btn btn-ghost"}
+            onClick={() => { setCounterMode((v) => !v); setSel(new Set()); }}
+            title={counterMode
+              ? "Back to the desk — the SKUs, the eBay state and the sold/return buttons come back"
+              : "Turn the list round to face a customer: pictures, names and prices only"}
+          >
+            {counterMode ? "✕ Back to the desk" : "👋 Show a customer"}
+          </button>
           {!counterMode && !wantsMissing && wantGroups.length > 0 ? (
             <button className="btn btn-ghost" onClick={() => setShowWants((v) => !v)} title="What people have asked for">
               🔎 Asked for ({wantGroups.length})
@@ -845,7 +848,14 @@ export default function ShowDesk() {
           ) : null}
         </div>
         {open.length === 0 ? (
-          <p className="dd-empty">Nothing checked out. Enter a SKU above as you pack for a show — numbering in its stack adjusts automatically while it&apos;s away.</p>
+          /* The desk's empty state points at the checkout form, which counter
+             mode does not render — so it would be telling a customer to enter
+             a SKU into a box that isn't on screen. */
+          counterMode ? (
+            <p className="dd-empty">Nothing in the box right now.</p>
+          ) : (
+            <p className="dd-empty">Nothing checked out. Enter a SKU above as you pack for a show — numbering in its stack adjusts automatically while it&apos;s away.</p>
+          )
         ) : (
           <>
             <div className="sd-find">

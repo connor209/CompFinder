@@ -219,6 +219,29 @@ if (open < 0 || close < 0) {
   if (/\bvisible\b/.test(branch)) fail("the counter list reads `visible` — it must render only projected rows");
 }
 
+// The way IN has to be findable. Gated on there being stock checked out, the
+// toggle disappeared exactly when somebody went looking for it — a control you
+// can only discover while packing for a show is one nobody discovers.
+const toggleAt = desk.indexOf("Show a customer");
+if (toggleAt < 0) {
+  fail("the counter-mode toggle is gone — there is no way into the customer view");
+} else {
+  // Anchored on the enclosing <button rather than a fixed window back from the
+  // label: the button's own title strings are long enough to fill any window
+  // small enough to be meaningful, which is how the first version of this
+  // assertion passed while the gate was back in place.
+  const tagAt = desk.lastIndexOf("<button", toggleAt);
+  const before = desk.slice(Math.max(0, tagAt - 300), tagAt);
+  if (/open\.length\s*[><=]/.test(before)) {
+    fail("the counter-mode toggle is gated on stock being checked out again — it vanishes when someone goes looking for it");
+  }
+}
+// An empty box must not hand a customer the desk's own copy, which tells them
+// to type a SKU into a form counter mode does not render.
+if (!/counterMode \? \(\s*\n\s*<p className="dd-empty">/.test(desk)) {
+  fail("counter mode has no empty state of its own — an empty box shows the desk's 'enter a SKU above' copy");
+}
+
 // Counter mode has to REMOVE the desk, not restyle it: a customer can scroll,
 // and an off-palette "£ Sold" is still a button.
 if (!desk.includes("{counterMode ? null : (")) {
