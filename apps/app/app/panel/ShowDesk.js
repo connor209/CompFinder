@@ -11,6 +11,10 @@ import {
   DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode
 } from "@/lib/checkout";
 import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
+import {
+  showView, selectionFor, facetsOf, listingState, matchesQuery,
+  SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
+} from "@/lib/showfilter.js";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -32,11 +36,19 @@ function parsePricePence(raw) {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
 }
 
+// The chip and the "still sellable online" filter classify a row the same way,
+// through listingState() — a filter that finds three cards a chip says are
+// hidden is the sort of disagreement nobody notices until one sells twice. The
+// two hidden methods differ only in their wording, which is the chip's job.
 function hideChip(co) {
-  if (co.hide_error) return { text: "hide failed", color: "var(--bad-ink)", title: co.hide_error };
-  if (co.hide_method === "quantity") return { text: "hidden on eBay", color: "var(--conf-high)", title: "Quantity set to 0 — restores to the same listing at check-in." };
-  if (co.hide_method === "ended") return { text: "ended · relists on return", color: "var(--warn-ink)", title: "The listing was ended and will be relisted (new item id) at check-in." };
-  if (co.ebay_item_id) return { text: "still live on eBay", color: "var(--ink-faint)", title: "The listing was left active — it could still sell online while you're away." };
+  const state = listingState(co);
+  if (state === "failed") return { text: "hide failed", color: "var(--bad-ink)", title: co.hide_error };
+  if (state === "hidden") {
+    return co.hide_method === "ended"
+      ? { text: "ended · relists on return", color: "var(--warn-ink)", title: "The listing was ended and will be relisted (new item id) at check-in." }
+      : { text: "hidden on eBay", color: "var(--conf-high)", title: "Quantity set to 0 — restores to the same listing at check-in." };
+  }
+  if (state === "live") return { text: "still live on eBay", color: "var(--ink-faint)", title: "The listing was left active — it could still sell online while you're away." };
   return { text: "no eBay listing", color: "var(--ink-faint)", title: "No active listing matched this SKU." };
 }
 
@@ -56,6 +68,15 @@ export default function ShowDesk() {
   const [progress, setProgress] = useState("");
   const [msg, setMsg] = useState("");
   const [sel, setSel] = useState(new Set());
+  // How the away list is being read right now. Not persisted: a search is
+  // about the card in your hand a moment ago, and coming back tomorrow to a
+  // list still filtered to Saturday's show would look like missing stock.
+  const [q, setQ] = useState("");
+  const [sort, setSort] = useState(DEFAULT_SORT);
+  const [eventFilter, setEventFilter] = useState("");
+  const [stackFilter, setStackFilter] = useState("");
+  const [stickerFilter, setStickerFilter] = useState("any");
+  const [listingFilter, setListingFilter] = useState("any");
   const [backPickerOpen, setBackPickerOpen] = useState(false);
   const [recs, setRecs] = useState(null); // null = closed; [] = built, empty
   const [recsLoading, setRecsLoading] = useState(false);
@@ -257,7 +278,28 @@ export default function ShowDesk() {
 
   // ---- Check-in ------------------------------------------------------------
 
-  const selected = useMemo(() => (sel.size > 0 ? open.filter((o) => sel.has(o.id)) : open), [sel, open]);
+  // What's on screen, and what the buttons under it act on. Both come out of
+  // showfilter.js, so "all of them" can never mean more than you can see —
+  // read the note on selectionFor(): the cards a bulk action moves silently
+  // are the ones that were never rendered.
+  const view = useMemo(
+    () => showView(open, {
+      query: q, sort, event: eventFilter, stack: stackFilter,
+      sticker: stickerFilter, listing: listingFilter
+    }),
+    [open, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter]
+  );
+  const visible = view.rows;
+  const selected = useMemo(() => selectionFor(visible, sel), [visible, sel]);
+  const events = useMemo(() => facetsOf(open, "event"), [open]);
+  const stackFacets = useMemo(() => facetsOf(open, "stack_name"), [open]);
+  function clearFilters() {
+    setQ("");
+    setEventFilter("");
+    setStackFilter("");
+    setStickerFilter("any");
+    setListingFilter("any");
+  }
 
   function toggleSel(id) {
     setSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -539,7 +581,11 @@ export default function ShowDesk() {
 
   const soldRows = history.filter((h) => h.resolution === "sold");
   const takings = soldRows.reduce((t, h) => t + (h.sold_price_pence || 0), 0);
-  const selCount = sel.size > 0 ? sel.size : open.length;
+  const selCount = selected.length;
+  // The same words you typed above, over the cards that have already been
+  // sold or filed. Searching the show stock and finding nothing usually means
+  // the card is here rather than gone, and that is worth one line.
+  const pastMatches = q.trim() ? history.filter((h) => matchesQuery(h, q)) : history;
 
   return (
     <div className="rise-group sd-scope">
@@ -703,21 +749,91 @@ export default function ShowDesk() {
           <p className="dd-empty">Nothing checked out. Enter a SKU above as you pack for a show — numbering in its stack adjusts automatically while it&apos;s away.</p>
         ) : (
           <>
+            <div className="sd-find">
+              <div className="dd-inp sd-find-inp">
+                <span className="mag" aria-hidden="true">⌕</span>
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Find a card — name, SKU, number, show"
+                  aria-label="Search the show stock"
+                />
+                {q ? (
+                  <button className="sd-clear" onClick={() => setQ("")} title="Clear the search" aria-label="Clear the search">×</button>
+                ) : null}
+              </div>
+              <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort the show stock">
+                {SHOW_SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+              </select>
+              <select className="sd-select" value={stickerFilter} onChange={(e) => setStickerFilter(e.target.value)} aria-label="Filter by sticker">
+                {STICKER_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+              </select>
+              <select
+                className="sd-select"
+                value={listingFilter}
+                onChange={(e) => setListingFilter(e.target.value)}
+                aria-label="Filter by eBay listing"
+                title="“Still sellable online” is the one to check before you leave: those listings can take somebody's money while the card is in the box."
+              >
+                {LISTING_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+              </select>
+              {/* Only offered when there's a choice to make: one show, or one
+                  stack, is not a filter — it's a dropdown with one answer. */}
+              {events.length > 1 ? (
+                <select className="sd-select" value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} aria-label="Filter by show">
+                  <option value="">Any show</option>
+                  {events.map((e) => <option key={e.value} value={e.value}>{e.value} ({e.count})</option>)}
+                </select>
+              ) : null}
+              {stackFacets.length > 1 ? (
+                <select className="sd-select" value={stackFilter} onChange={(e) => setStackFilter(e.target.value)} aria-label="Filter by the stack it left">
+                  <option value="">Any stack</option>
+                  {stackFacets.map((s) => <option key={s.value} value={s.value}>{s.value} ({s.count})</option>)}
+                </select>
+              ) : null}
+            </div>
+            {view.filtering ? (
+              /* Said out loud, because the alternative is a button that looks
+                 like it does one thing and does another. A card filed while it
+                 was off screen leaves nothing behind to notice. */
+              <p className="hint hint-small sd-find-note">
+                Showing <b>{view.shown}</b> of {view.total} checked out
+                {view.hidden > 0 ? ` — ${view.hidden} hidden by the search` : ""}.
+                {" "}Everything below acts on {selCount === 1 ? "the one card" : `these ${selCount} cards`}, never on what you can&apos;t see.
+                {" "}<button className="sd-clear-all" onClick={clearFilters}>Clear</button>
+              </p>
+            ) : null}
             <div className="sd-bulkbar">
               <label className="sd-toggle">
                 <input
                   type="checkbox"
-                  checked={sel.size === open.length && open.length > 0}
-                  ref={(el) => { if (el) el.indeterminate = sel.size > 0 && sel.size < open.length; }}
-                  onChange={(e) => setSel(e.target.checked ? new Set(open.map((o) => o.id)) : new Set())}
+                  checked={visible.length > 0 && visible.every((o) => sel.has(o.id))}
+                  ref={(el) => {
+                    if (el) el.indeterminate = visible.some((o) => sel.has(o.id)) && !visible.every((o) => sel.has(o.id));
+                  }}
+                  // Ticking adds the rows on screen and leaves any tick outside
+                  // the search alone: unticking a row you can't see is its own
+                  // surprise. selectionFor() is what stops those being acted on.
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setSel((prev) => {
+                      const n = new Set(prev);
+                      for (const o of visible) { if (on) n.add(o.id); else n.delete(o.id); }
+                      return n;
+                    });
+                  }}
+                  disabled={visible.length === 0}
                 />
-                {sel.size > 0 ? `${sel.size} selected` : "All"}
+                {sel.size > 0 ? `${selCount} selected` : `All ${visible.length}`}
               </label>
+              {/* Nothing on screen is nothing to act on: a search that matches
+                  no card leaves these buttons pointing at an empty set, and a
+                  "Return to spots" that quietly does nothing reads as broken. */}
               <div className="ps-actions">
-                <button className="btn btn-primary" onClick={buildPlan} disabled={busy}>✨ Reallocate ({selCount})</button>
-                <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy}>↩ Return to spots</button>
-                <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy}>⤵ Pick a stack…</button>
-                <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy}>✚ New stack</button>
+                <button className="btn btn-primary" onClick={buildPlan} disabled={busy || selCount === 0}>✨ Reallocate ({selCount})</button>
+                <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy || selCount === 0}>↩ Return to spots</button>
+                <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
+                <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
               </div>
             </div>
 
@@ -778,8 +894,17 @@ export default function ShowDesk() {
               </div>
             ) : null}
             {busy && progress ? <p className="hint hint-small"><span className="spinner" /> &nbsp;{progress}</p> : null}
+            {visible.length === 0 ? (
+              <p className="dd-empty">
+                Nothing checked out matches that.{" "}
+                {q.trim() && pastMatches.length > 0
+                  ? `${pastMatches.length} card${pastMatches.length === 1 ? "" : "s"} in Recent activity below ${pastMatches.length === 1 ? "does" : "do"} — it may already be sold or back in its stack. `
+                  : ""}
+                <button className="sd-clear-all" onClick={clearFilters}>Clear the search</button>
+              </p>
+            ) : null}
             <div className="stack-list">
-              {open.map((co) => {
+              {visible.map((co) => {
                 const chip = hideChip(co);
                 return (
                   <label className="ps-row" key={co.id}>
@@ -814,10 +939,17 @@ export default function ShowDesk() {
         <div className="panel">
           <div className="panel-head">
             <span className="eyebrow">Recent activity</span>
+            {/* The takings are the day's, not the search's: a total that moved
+                while you looked for one card would be read as money going
+                missing. */}
             {soldRows.length > 0 ? <span className="badge2">{soldRows.length} sold · {pounds(takings)}</span> : null}
+            {q.trim() ? <span className="badge2">{pastMatches.length} of {history.length} match your search</span> : null}
           </div>
+          {q.trim() && pastMatches.length === 0 ? (
+            <p className="dd-empty">Nothing here matches “{q.trim()}” either.</p>
+          ) : null}
           <div className="stack-list">
-            {history.map((co) => (
+            {pastMatches.map((co) => (
               <div className="stack-row" key={co.id}>
                 <span className="stack-sku">{co.sku || "—"}</span>
                 <span className="stack-title">{co.title || <em>—</em>}</span>

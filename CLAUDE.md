@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-five table tests, no framework, non-zero exit on failure:
+`npm run check` runs twenty-six table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes,
@@ -92,6 +92,10 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   label: the cash ladder as a table, which prices are held back, that a graded
   card starts from our own eBay price while a raw one never does, and that a
   column added by a hand-applied migration degrades instead of breaking.
+- `scripts/check-showfilter.mjs` — finding one card in the box: what a query
+  looks at, that AB2 sorts before AB11 and an unstickered card sorts last in
+  both directions, and — the one that costs cards — that a bulk action only
+  ever acts on rows that are on screen.
 - `scripts/check-override.mjs` — a price you typed: what counts as one, that
   the recommendation is never edited, that the sticker gate lets yours through,
   and a grep over every path that spends money for a direct read of
@@ -931,6 +935,38 @@ stranger their card is worth.
   here are applied by hand, so the code always ships first, and Postgres
   rejects a whole statement that names a missing column — a required one would
   take out the saved-runs list and every save with it, show-related or not.
+
+## What a bulk action acts on is what you can see
+
+The away list is the show stock list, and it was one flat list in the order you
+happened to pack it — fine for a dozen cards, useless for two hundred with a
+customer holding one up at the table. `apps/app/lib/showfilter.js` is the
+search box, the sort and the filters over it: SKU, card name, event and stack
+searched together with tokens AND-ed and order-free, so "215 umbreon" and
+"umbreon 215" land on the same row, and both sides flattened through one
+`normalise()` so "pokemon" finds "Pokémon" and "215/203" finds the number as it
+is written on the card.
+
+**`selectionFor()` is why the file exists.** The desk's convention is that
+ticking nothing means "all of them", which was unambiguous while the list
+showed everything: search "sunday", press ↩ Return to spots, and Saturday's two
+hundred cards get filed too — silently, because the rows that moved were never
+rendered. So "all" means all of what is on screen, a ticked row the search has
+since hidden is not acted on either (it keeps its tick and comes back with it),
+and every count on the buttons comes from that one function.
+`check-showfilter.mjs` pins it, along with a grep against the old inline
+convention coming back.
+
+Two smaller rules worth keeping. **A card with no sticker sorts last in both
+price directions** — treating it as £0 would head the cheapest-first list with
+the cards that have no price at all, which is the opposite of what that view is
+for. And **the event and stack dropdowns are built from the rows themselves**,
+so an option that filters to nothing can't be offered; they don't appear at all
+until there is more than one to choose between.
+
+The row chip and the "still sellable online" filter both read `listingState()`
+— a filter that finds three cards the chips call hidden is the kind of
+disagreement nobody notices until one of them sells twice.
 
 ## A SKU is a name; a position is an address
 
