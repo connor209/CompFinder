@@ -91,6 +91,13 @@ of them is gone by the next morning.
   private value and asserts none survives the projection, then slices the
   counter branch out of the render and checks it for desk data and destructive
   buttons.
+- **The online stock, as a second list.** Counter mode answers a search with
+  cards we have listed on eBay and haven't checked out — under its own heading,
+  never merged, and worded as *"ask us"* rather than *"not here"*. Checkout is
+  not complete enough to claim absence: a card can be in the box and missing
+  from the checked-out list, and saying we haven't got it loses a sale already
+  made. This is the honest version of the "unbounded catalogue" the note above
+  wanted, and it needs no new table.
 
 Three things the test did NOT settle, still open below: what share of revenue
 shows are, whether anyone scans a cold QR, and whether the pull-request flow

@@ -878,6 +878,13 @@ html, body { overflow-x: clip; max-width: 100%; }
 /* An ask is a label, not a price. Set smaller and in the body face so it
    doesn't read as a figure beside the rows that carry one — and so it fits on
    the row rather than wrapping below the card it belongs to. */
+/* The line between what you can hand over and what you have to talk about.
+   A heading and a rule, not a subtle tint: merged lists are the failure this
+   section exists to avoid. */
+.sd-counter-split { display:flex; flex-direction:column; gap:2px; margin:18px 0 6px; padding-top:14px; border-top:1px solid var(--line-strong); }
+.sd-counter-split .hint-small { margin-top:0; }
+/* Quieter than the box rows above: same information, lower claim. */
+.sd-counter-online { opacity:.88; }
 .sd-scope .sd-counter-row .sd-price-ask { font-family:var(--font-body); font-size:13px; font-weight:600; color:var(--ink-soft); letter-spacing:0; }
 @media (max-width: 720px) {
   /* The desk's rows wrap on a phone, which is right for a row carrying a SKU,

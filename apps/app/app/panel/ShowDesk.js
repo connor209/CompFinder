@@ -15,7 +15,7 @@ import {
   showView, selectionFor, facetsOf, listingState, matchesQuery,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
-import { counterView } from "@/lib/showcounter.js";
+import { counterView, onlineMatches, inBoxSkus } from "@/lib/showcounter.js";
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 
 /**
@@ -84,6 +84,7 @@ export default function ShowDesk() {
   // is still in customer mode hides every button you need and looks broken.
   const [counterMode, setCounterMode] = useState(false);
   const [images, setImages] = useState(new Map()); // sku -> eBay photo of THIS copy
+  const [listings, setListings] = useState([]);    // live eBay stock, for the counter
   const [wants, setWants] = useState([]);
   const [wantsMissing, setWantsMissing] = useState(false); // migration 026 not applied
   const [showWants, setShowWants] = useState(false);
@@ -155,15 +156,16 @@ export default function ShowDesk() {
     // the next sync. A gap is fine; catalogue art in its place would not be,
     // since it shows a mint scan of a played card to the person holding it.
     try {
-      const listings = await pagedSelect(() =>
-        sb.from("ebay_listings").select("sku,image_url").not("sku", "is", null)
+      const live = await pagedSelect(() =>
+        sb.from("ebay_listings").select("ebay_item_id,sku,title,price_value,quantity,image_url")
       );
       const bySku = new Map();
-      for (const l of listings) {
-        if (l.image_url) bySku.set(String(l.sku).toLowerCase(), l.image_url);
+      for (const l of live) {
+        if (l.sku && l.image_url) bySku.set(String(l.sku).toLowerCase(), l.image_url);
       }
       setImages(bySku);
-    } catch { /* no pictures is a gap, not a failure */ }
+      setListings(live || []);
+    } catch { /* no pictures and no online list is a gap, not a failure */ }
 
     const w = await loadWants(sb);
     setWantsMissing(Boolean(w.missing));
@@ -332,6 +334,12 @@ export default function ShowDesk() {
     [open, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter, images]
   );
   const wantGroups = useMemo(() => wantsSummary(wants), [wants]);
+  // Stock that is listed online and not in the box. Only ever on a search, and
+  // never a card already in the list above it — see onlineMatches().
+  const online = useMemo(
+    () => (counterMode ? onlineMatches(listings, { query: q, inBoxSkus: inBoxSkus(open) }) : []),
+    [counterMode, listings, q, open]
+  );
   const events = useMemo(() => facetsOf(open, "event"), [open]);
   const stackFacets = useMemo(() => facetsOf(open, "stack_name"), [open]);
   // Record what somebody just asked for. Pre-filled from the search box,
@@ -847,15 +855,14 @@ export default function ShowDesk() {
             </button>
           ) : null}
         </div>
-        {open.length === 0 ? (
+        {open.length === 0 && !counterMode ? (
           /* The desk's empty state points at the checkout form, which counter
              mode does not render — so it would be telling a customer to enter
-             a SKU into a box that isn't on screen. */
-          counterMode ? (
-            <p className="dd-empty">Nothing in the box right now.</p>
-          ) : (
-            <p className="dd-empty">Nothing checked out. Enter a SKU above as you pack for a show — numbering in its stack adjusts automatically while it&apos;s away.</p>
-          )
+             a SKU into a box that isn't on screen. Counter mode therefore
+             keeps the search below instead of stopping here: with nothing
+             checked out the online list is the only stock there is, and it is
+             reachable only through that box. */
+          <p className="dd-empty">Nothing checked out. Enter a SKU above as you pack for a show — numbering in its stack adjusts automatically while it&apos;s away.</p>
         ) : (
           <>
             <div className="sd-find">
@@ -1015,20 +1022,30 @@ export default function ShowDesk() {
             {busy && progress ? <p className="hint hint-small"><span className="spinner" /> &nbsp;{progress}</p> : null}
             {visible.length === 0 ? (
               counterMode ? (
-                /* The miss is the valuable moment — this is exactly the ask
-                   that leaves no trace anywhere else. The button is right here
-                   because the query is already typed and the answer is already
-                   known. */
+                /* Three different situations, and saying the wrong one is
+                   confusing rather than merely terse: nothing searched for
+                   yet, searched and found only online stock (which renders
+                   below, so this must keep quiet), or a genuine miss — the
+                   valuable moment, and the ask that leaves no trace anywhere
+                   else. */
+                !q.trim() ? (
+                  <p className="dd-empty">
+                    {open.length === 0
+                      ? "Nothing in the box. Search to check what we have online."
+                      : "Search to find a card."}
+                  </p>
+                ) : online.length > 0 ? null : (
                 <p className="dd-empty">
                   Nothing here matches that.{" "}
-                  {q.trim() && !wantsMissing ? (
+                  {!wantsMissing ? (
                     <button className="sd-clear-all" onClick={() => noteWant(q)} disabled={busy}>
                       Note that someone asked for “{q.trim()}”
                     </button>
                   ) : null}
-                  {q.trim() ? " " : ""}
+                  {" "}
                   <button className="sd-clear-all" onClick={clearFilters}>Clear the search</button>
                 </p>
+                )
               ) : (
               <p className="dd-empty">
                 Nothing checked out matches that.{" "}
@@ -1091,9 +1108,44 @@ export default function ShowDesk() {
               })}
             </div>
             )}
+            {/* Stock we have listed online. A SEPARATE list under its own
+                heading, never merged into the one above, because the list
+                above is cards you can physically hand over.
+
+                The wording says "ask", not "not here", and that is the whole
+                point of it. Not everything that travels to a show gets checked
+                out, so a card can be in the box and absent from the list above
+                — and telling a customer we haven't got it, while it sits in
+                the box, loses a sale we had already made. What the system
+                actually knows is that we own one; whether it is in this room
+                is a question for the person at the table. */}
+            {counterMode && online.length > 0 ? (
+              <>
+                <div className="sd-counter-split">
+                  <span className="eyebrow">Ask us about these</span>
+                  <span className="hint-small">
+                    Also in our stock — some travel with us, some are at home. Ask and we&apos;ll check.
+                  </span>
+                </div>
+                <div className="stack-list sd-counter">
+                  {online.map((c) => (
+                    <div className="ps-row sd-counter-row sd-counter-online" key={c.id}>
+                      {c.image ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img className="sd-counter-art" src={c.image} alt="" loading="lazy" width="44" height="62" />
+                      ) : (
+                        <span className="sd-counter-art sd-counter-noart" aria-hidden="true" />
+                      )}
+                      <span className="stack-title">{c.name}</span>
+                      <span className={c.pricePence == null ? "sd-price sd-price-ask" : "sd-price"}>{c.priceText}</span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : null}
             {/* Someone asked, and we HAD it. Worth as much as a miss: it says
                 which cards are worth packing again, and it is the same tap. */}
-            {counterMode && !wantsMissing && q.trim() && counter.shown > 0 ? (
+            {counterMode && !wantsMissing && q.trim() && (counter.shown > 0 || online.length > 0) ? (
               <p className="hint hint-small sd-find-note">
                 <button className="sd-clear-all" onClick={() => noteWant(q)} disabled={busy}>
                   Note that someone asked for “{q.trim()}”
