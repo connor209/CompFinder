@@ -78,3 +78,32 @@ export function positionLabel(stackName, rank, depth = null) {
   if (rank == null) return stack;
   return depth ? `${stack} · ${rank} of ${depth}` : `${stack} · ${rank}`;
 }
+
+/**
+ * Where each card is, keyed by SKU — "A · 12 of 40" for every card physically
+ * in a stack right now.
+ *
+ * Built here rather than at the call site because it is the same rule as
+ * everything else in this file: the number is the LIVE rank, not the stored
+ * position, and a card that is pulled or away has no honest number so it gets
+ * no entry. A SKU that comes back undefined means "not somewhere I can direct
+ * you to", which is a different statement from "we don't have it".
+ *
+ * Keyed by lowercased SKU because the callers hold SKUs — an eBay listing, a
+ * counter row — rather than stack-card ids.
+ */
+export function locationsBySku(cards, stackNames) {
+  const ranks = liveRanks(cards);
+  const depths = stackDepths(cards);
+  const names = stackNames instanceof Map ? stackNames : new Map(Object.entries(stackNames || {}));
+  const out = new Map();
+  for (const c of cards || []) {
+    if (!c?.sku) continue;
+    const rank = ranks.get(c.id);
+    if (rank == null) continue; // pulled or away: no honest number
+    const key = String(c.sku).toLowerCase();
+    if (out.has(key)) continue; // first wins, matching the sorted rank order
+    out.set(key, positionLabel(names.get(c.stack_id), rank, depths.get(c.stack_id)));
+  }
+  return out;
+}

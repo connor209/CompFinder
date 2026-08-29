@@ -1024,6 +1024,15 @@ sort, projected.
   got it, while it sits in the box, loses a sale already made. What the data
   knows is that we own one; whether it is in the room is a question for the
   person at the table. `check-showcounter.mjs` greps the copy for both halves.
+- **Where it is, on a tap and never before one.** An online row carries a
+  reveal that resolves the card's live stack position (`locationsBySku()` in
+  `stackpos.js`, so it is the same rule as everywhere else: pulled and
+  checked-out cards close the numbering up, and a card with no honest number
+  gets no entry). It is the one piece of desk data allowed on this screen, and
+  it is looked up from state the desk already holds rather than carried on the
+  row — putting the SKU on the projection to make the tap easier is exactly the
+  shortcut the check refuses. Note the position of an un-checked-out card is
+  where it lives at HOME, which is right only if its stack travelled.
 - **Only ever on a search, capped, dearest first.** The box is a hundred-odd
   cards and the listings are thousands: unsearched, the second list buries the
   first. A sold card is still a row in `ebay_listings`, so it goes through
