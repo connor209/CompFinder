@@ -883,6 +883,9 @@ html, body { overflow-x: clip; max-width: 100%; }
    section exists to avoid. */
 .sd-counter-split { display:flex; flex-direction:column; gap:2px; margin:18px 0 6px; padding-top:14px; border-top:1px solid var(--line-strong); }
 .sd-counter-split .hint-small { margin-top:0; }
+/* The reveal. Small and unlabelled until tapped, because it is for the person
+   holding the tablet rather than the person it is pointed at. */
+.sd-locate { flex:none; min-width:34px; font-family:var(--font-mono); font-size:11.5px; white-space:nowrap; }
 /* Quieter than the box rows above: same information, lower claim. */
 .sd-counter-online { opacity:.88; }
 .sd-scope .sd-counter-row .sd-price-ask { font-family:var(--font-body); font-size:13px; font-weight:600; color:var(--ink-soft); letter-spacing:0; }

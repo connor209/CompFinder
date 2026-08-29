@@ -43,6 +43,7 @@ import {
 } from "../apps/app/lib/showcounter.js";
 import { normaliseWant, wantsSummary, isMissingTable } from "../apps/app/lib/wants-store.js";
 import { showView } from "../apps/app/lib/showfilter.js";
+import { locationsBySku } from "../apps/app/lib/stackpos.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -216,6 +217,33 @@ const many = Array.from({ length: 60 }, (_, i) => ({ ebay_item_id: String(i), sk
 eq("the online list is capped", onlineMatches(many, { query: "gengar" }).length, ONLINE_LIMIT);
 eq("dearest first, so the cards worth a conversation are the ones on screen", onlineMatches(many, { query: "gengar" })[0].name, "Gengar 59/198");
 
+// --- 7c. where a card is, and who is allowed to see it -------------------
+// The location is the one piece of desk data allowed on the counter screen,
+// and only on a tap. Two things have to hold: the number has to be right, and
+// it must not be on the row until somebody asks for it.
+const STACK_CARDS = [
+  { id: "1", sku: "AB1", stack_id: "s1", position: 1 },
+  { id: "2", sku: "AB2", stack_id: "s1", position: 2, pulled_at: "2026-08-01" },
+  { id: "3", sku: "AB3", stack_id: "s1", position: 3 },
+  { id: "4", sku: "AB4", stack_id: "s1", position: 4, checked_out_at: "2026-08-29" },
+  { id: "5", sku: "AB5", stack_id: "s1", position: 5 }
+];
+const LOC = locationsBySku(STACK_CARDS, new Map([["s1", "A"]]));
+// The rule this whole file inherits: pulled and checked-out cards close the
+// numbering up behind them, so AB3 is the SECOND card you count to, not the
+// third. Reading the SKU as the position is the mistake that sends you to the
+// wrong card.
+eq("the numbering closes up behind a pulled card", LOC.get("ab3"), "A · 2 of 3");
+eq("and behind a card away at the show", LOC.get("ab5"), "A · 3 of 3");
+if (LOC.has("ab2")) fail("a pulled card is given a position — there is no honest number for it");
+if (LOC.has("ab4")) fail("a card away at the show is given a position in its stack");
+eq("SKUs are matched however they are cased", LOC.get("ab1"), "A · 1 of 3");
+
+// The lookup must not be smuggled onto the row to make the tap easier.
+if (/location|stack|position/i.test(JSON.stringify(Object.keys(listingRow(LISTING))))) {
+  fail("a projected row carries location data — it must be resolved from desk state instead");
+}
+
 // --- 8. the want list ------------------------------------------------------
 eq("wants group the way the search matches", normaliseWant("  GENGAR vmax "), normaliseWant("gengar VMAX"));
 const WANTS = [
@@ -312,6 +340,22 @@ if (!/\.sd-scope \.ps-row\.sd-counter-row\s*\{[^}]*flex-wrap:\s*nowrap/.test(css
 // there is, and the search box is the only way to it.
 if (!/open\.length === 0 && !counterMode \?/.test(desk)) {
   fail("the desk's empty state is not gated on counterMode — a customer is told to enter a SKU, or loses the search entirely");
+}
+
+// The reveal is a tap, not a default. Gated wrong, every stack name and depth
+// is on a screen pointed at a customer.
+const onlineAt = desk.indexOf("sd-counter-online");
+if (onlineAt < 0) {
+  fail("the online list is gone");
+} else {
+  const block = desk.slice(onlineAt, onlineAt + 2200);
+  if (!/locationOpen === c\.id \?/.test(block)) {
+    fail("the location is not gated on a tap — a stack name and depth are on screen by default");
+  }
+  // Same allow-list rule as the box rows: the SKU is our shelf address.
+  if (block.includes("c.sku") || block.includes("stack-sku")) {
+    fail("the online row renders the SKU — that is our shelf address, facing a customer");
+  }
 }
 
 // The two lists must stay two lists. Merged, a card we might have at home is

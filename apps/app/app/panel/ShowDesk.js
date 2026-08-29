@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
-import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
+import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/stackpos.js";
 import { isListingAvailable, soldOutSkus } from "@/lib/stockcheck.js";
 import {
   checkoutStackCard, unhideListing, nextStackName, planReallocation,
@@ -85,6 +85,11 @@ export default function ShowDesk() {
   const [counterMode, setCounterMode] = useState(false);
   const [images, setImages] = useState(new Map()); // sku -> eBay photo of THIS copy
   const [listings, setListings] = useState([]);    // live eBay stock, for the counter
+  const [stackCards, setStackCards] = useState([]); // every unpulled card, for locating one
+  // Which online row has had its location revealed. One at a time, and never
+  // by default: a stack name and a depth are picking data, and counter mode is
+  // pointed at a customer. See the note on the reveal button below.
+  const [locationOpen, setLocationOpen] = useState(null);
   const [wants, setWants] = useState([]);
   const [wantsMissing, setWantsMissing] = useState(false); // migration 026 not applied
   const [showWants, setShowWants] = useState(false);
@@ -128,6 +133,7 @@ export default function ShowDesk() {
     const used = new Map();
     for (const c of all) if (!c.checked_out_at) used.set(c.stack_id, (used.get(c.stack_id) || 0) + 1);
     setUsedByStack(used);
+    setStackCards(all);
 
     // Cards-per-stack is a property of how you physically store them, so it's
     // a user setting rather than a per-stack column.
@@ -340,6 +346,23 @@ export default function ShowDesk() {
     () => (counterMode ? onlineMatches(listings, { query: q, inBoxSkus: inBoxSkus(open) }) : []),
     [counterMode, listings, q, open]
   );
+  // Where every card physically is, and which SKU each online row came from.
+  //
+  // The SKU map is deliberately NOT part of the projected row. counterRow()
+  // and listingRow() stay an allow-list of what a customer may read; this is
+  // the desk resolving one of its own rows back to its own data, on a tap, out
+  // of state it already holds. Putting the SKU on the row to make the lookup
+  // easier is exactly the shortcut check-showcounter.mjs exists to refuse.
+  const locations = useMemo(() => locationsBySku(stackCards, stackName), [stackCards, stackName]);
+  const skuByListingId = useMemo(() => {
+    const m = new Map();
+    for (const l of listings) if (l?.ebay_item_id && l?.sku) m.set(String(l.ebay_item_id), String(l.sku).toLowerCase());
+    return m;
+  }, [listings]);
+  function locationFor(rowId) {
+    const sku = skuByListingId.get(String(rowId));
+    return sku ? locations.get(sku) || null : null;
+  }
   const events = useMemo(() => facetsOf(open, "event"), [open]);
   const stackFacets = useMemo(() => facetsOf(open, "stack_name"), [open]);
   // Record what somebody just asked for. Pre-filled from the search box,
@@ -1136,8 +1159,24 @@ export default function ShowDesk() {
                       ) : (
                         <span className="sd-counter-art sd-counter-noart" aria-hidden="true" />
                       )}
-                      <span className="stack-title">{c.name}</span>
+                        <span className="stack-title">{c.name}</span>
                       <span className={c.pricePence == null ? "sd-price sd-price-ask" : "sd-price"}>{c.priceText}</span>
+                      {/* Where it is, on a tap and never before one.
+                          A stack name and a depth tell a stranger how much
+                          stock there is and where it lives, so this is the one
+                          piece of desk data allowed on this screen and it is
+                          allowed only because YOU asked for it, one row at a
+                          time. It is looked up from state the desk already
+                          holds rather than carried on the row — the projection
+                          stays an allow-list. */}
+                      <button
+                        className="stack-pull sd-locate"
+                        onClick={() => setLocationOpen((cur) => (cur === c.id ? null : c.id))}
+                        title="Where is this one?"
+                        aria-label="Where is this one?"
+                      >
+                        {locationOpen === c.id ? (locationFor(c.id) || "not in a stack") : "⌖"}
+                      </button>
                     </div>
                   ))}
                 </div>
