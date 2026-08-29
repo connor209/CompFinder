@@ -74,6 +74,17 @@ Anything you think of goes here first. Newest at the top.
 
 <!-- New items get added below this line -->
 
+- 🟡 **Multi-quantity listings, and re-seating the scan when a copy sells** —
+  consolidate duplicate cards into one quantity-N eBay listing whose picture is
+  the seated copy's scan, and swap in the next scan on dispatch. Researched and
+  planned: both halves are possible (pictures are NOT frozen by a sale), the
+  eBay side is one new Revise call, and the hard half is ours — one SKU would
+  stand for N physical cards. Read `docs/EBAY_MULTI_QUANTITY.md` for whether,
+  `docs/EBAY_MULTI_QUANTITY_PLAN.md` for how. **Three business calls block the
+  retroactive half** (value ceiling, condition bands, whether to consolidate
+  existing duplicates at all — ending a listing destroys its sales history).
+  `lib/ebay.js`, a new `lib/listingqueue.js`, migration 026
+
 - 🔵 **Stock check — widen it beyond live listings** — batch pricing now flags
   cards we already sell (SKU first, then card number + name) and what we priced
   them at last time. Two natural extensions: match against stacks and show-checked-out
