@@ -1,0 +1,191 @@
+<title>Ask Us Poster</title>
+<!--
+  A4 portrait poster for the show table: the table is a fraction of the stock,
+  so ask and we will search the boxes.
+
+  Not part of either deployable — it imports nothing, ships nowhere, and is
+  here so the file that gets printed is the file under version control. Open it
+  in a browser and print at A4, 100% scale, no page margins (the sheet carries
+  its own). print/show-poster.pdf is this page rendered.
+
+  Colours are the Last Comp tokens re-pitched for paper: the ground is white
+  because a dark A4 drinks an ink cartridge and dries grey, so the ink is spent
+  on two teal blocks and the type.
+-->
+<style>
+  /* The launch image's own file, so a checkout prints the real face with no
+     network. The Google link below is the fallback for anywhere else. */
+  @font-face {
+    font-family:"Archivo Expanded Local";
+    src:url("../apps/public/assets/Archivo-Expanded-800.ttf") format("truetype");
+    font-weight:800; font-display:swap;
+  }
+
+  @page { size: A4 portrait; margin: 0; }
+
+  :root {
+    --paper:#FFFFFF;
+    --ink:#0B1011;
+    --ink-soft:#42514F;
+    --teal:#2BBAA6;      /* brand accent — solid blocks only */
+    --teal-ink:#0B6E60;  /* the same hue taken dark enough to read as type */
+    --rule:#C6D2D0;
+    --workspace:#DDE4E3;
+
+    --display:"Archivo Expanded Local","Archivo",Helvetica,Arial,sans-serif;
+    --sans:"IBM Plex Sans",-apple-system,Segoe UI,Helvetica,sans-serif;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+
+  * { box-sizing:border-box; }
+
+  body {
+    margin:0;
+    background:var(--workspace);
+    color:var(--ink);
+    font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;
+    display:flex; flex-direction:column; align-items:center;
+    gap:8mm; padding:8mm 4mm 14mm;
+  }
+
+  /* The sheet is the deliverable; everything outside it is screen furniture. */
+  .sheet {
+    width:210mm; height:297mm;
+    flex:0 0 auto;
+    background:var(--paper);
+    padding:15mm 15mm 0;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+    box-shadow:0 2mm 8mm rgba(11,16,17,.22);
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  }
+
+  /* --- eyebrow ----------------------------------------------------------- */
+  .eyebrow {
+    font-family:var(--display); font-weight:700; font-variation-settings:"wdth" 125; font-stretch:125%;
+    text-transform:uppercase; letter-spacing:.14em;
+    font-size:11.5pt; line-height:1.1; color:var(--teal-ink);
+    padding-bottom:4mm; border-bottom:1.2pt solid var(--ink);
+  }
+
+  /* --- headline ---------------------------------------------------------- */
+  h1 {
+    margin:8mm 0 0;
+    font-family:var(--display); font-weight:800; font-variation-settings:"wdth" 125; font-stretch:125%;
+    text-transform:uppercase; letter-spacing:-.005em;
+    font-size:40pt; line-height:.93; color:var(--ink);
+  }
+  h1 .ask {
+    display:block; margin-top:2mm;
+    font-size:74pt; line-height:.88; color:var(--teal-ink);
+  }
+
+  .lead {
+    margin:9mm 0 0; max-width:162mm;
+    font-size:16pt; line-height:1.36; color:var(--ink);
+  }
+  .lead b { font-weight:600; }
+
+  /* --- what happens, in order -------------------------------------------- */
+  .steps { margin-top:auto; padding-top:8mm; display:flex; flex-direction:column; }
+  .step {
+    display:grid; grid-template-columns:16mm 1fr; align-items:baseline;
+    gap:0 6mm; padding:6.5mm 0; border-top:.8pt solid var(--rule);
+  }
+  .step:first-child { border-top:1.2pt solid var(--ink); }
+  .num {
+    font-family:var(--mono); font-weight:700; font-size:20pt;
+    color:var(--teal-ink); font-variant-numeric:tabular-nums;
+  }
+  .step h2 {
+    margin:0;
+    font-family:var(--display); font-weight:800; font-variation-settings:"wdth" 125; font-stretch:125%;
+    text-transform:uppercase; letter-spacing:.02em;
+    font-size:18pt; line-height:1.05;
+  }
+  .step p { margin:2.5mm 0 0; font-size:12.5pt; line-height:1.34; color:var(--ink-soft); }
+
+  /* --- footer bar -------------------------------------------------------- */
+  .bar {
+    margin:8mm -15mm 0; padding:7mm 15mm 6.5mm;
+    background:var(--teal); color:#04231F;
+  }
+  .bar p {
+    margin:0;
+    font-family:var(--display); font-weight:800; font-variation-settings:"wdth" 125; font-stretch:125%;
+    text-transform:uppercase; font-size:25pt; line-height:1.02; letter-spacing:.005em;
+  }
+  .bar .sub {
+    margin-top:3.5mm; font-family:var(--sans); font-weight:500;
+    text-transform:none; font-size:12pt; letter-spacing:0; line-height:1.3;
+    color:#083A33;
+  }
+
+  /* --- screen-only note --------------------------------------------------- */
+  .note {
+    max-width:210mm; font-size:13px; line-height:1.5; color:#33403E;
+    font-family:var(--mono);
+  }
+  .note b { font-family:var(--sans); font-weight:600; }
+
+  /* Screen only: the sheet is a fixed 210mm, so a narrow window scales it
+     down rather than scrolling sideways. Print never sees any of this. */
+  @media screen and (max-width:830px) { .sheet { zoom:.85; } }
+  @media screen and (max-width:700px) { .sheet { zoom:.72; } }
+  @media screen and (max-width:600px) { .sheet { zoom:.60; } }
+  @media screen and (max-width:500px) { .sheet { zoom:.48; } }
+  @media screen and (max-width:400px) { .sheet { zoom:.38; } }
+  @media screen and (max-width:340px) { .sheet { zoom:.31; } }
+
+  @media print {
+    body { background:none; padding:0; gap:0; display:block; }
+    .sheet { box-shadow:none; }
+    .note { display:none; }
+  }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62.5..125,400..900&family=IBM+Plex+Mono:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<div class="sheet">
+  <p class="eyebrow">The table is a fraction of the stock</p>
+
+  <h1>Can’t see<br>the card<br>you want?<span class="ask">Ask us.</span></h1>
+
+  <p class="lead">Our <b>entire eBay stock</b> came to the show with us. If it’s listed
+  online, it’s in a box behind this table — and we can have it in your hand in a minute.</p>
+
+  <div class="steps">
+    <div class="step">
+      <span class="num">01</span>
+      <div>
+        <h2>Tell us the card</h2>
+        <p>Name, set and number is ideal. A photo or an eBay listing on your phone works just as well.</p>
+      </div>
+    </div>
+    <div class="step">
+      <span class="num">02</span>
+      <div>
+        <h2>We search the stock</h2>
+        <p>On the spot, against everything we brought — not just what fitted on the table.</p>
+      </div>
+    </div>
+    <div class="step">
+      <span class="num">03</span>
+      <div>
+        <h2>We pull it for you</h2>
+        <p>Same card, show price, straight across the table. No postage, no waiting for the post.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="bar">
+    <p>If it’s on our eBay,<br>it’s in the box.</p>
+    <p class="sub">Ask any of us — bring a want list, we’ll check the lot.</p>
+  </div>
+</div>
+
+<p class="note"><b>Printing:</b> A4 portrait, scale 100% (not "fit to page"), margins
+set to None — the sheet carries its own 15mm. Colour on, or the two teal blocks
+come out grey.</p>
