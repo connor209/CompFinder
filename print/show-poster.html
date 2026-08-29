@@ -3,37 +3,41 @@
   A4 portrait poster for the show table: the table is a fraction of the stock,
   so ask and we will search the boxes.
 
-  Not part of either deployable — it imports nothing, ships nowhere, and is
+  Drawn in CompFinder's "price terminal" system, not Last Comp's — Space
+  Grotesk set tight and in sentence case, the deep teal accent, the holo foil
+  where the app puts it (the brand tile, and a bar above a primary action), and
+  the three steps in a panel with hairline rules like an app row group. Tokens
+  are lifted from apps/app/app/globals.css so the poster and the tool on the
+  table look like the same thing.
+
+  Not part of either deployable: it imports nothing and ships nowhere. It is
   here so the file that gets printed is the file under version control. Open it
   in a browser and print at A4, 100% scale, no page margins (the sheet carries
-  its own). print/show-poster.pdf is this page rendered.
+  its own). print/show-poster.pdf is this page rendered with fonts embedded.
 
-  Colours are the Last Comp tokens re-pitched for paper: the ground is white
-  because a dark A4 drinks an ink cartridge and dries grey, so the ink is spent
-  on two teal blocks and the type.
+  The ground is white because a dark A4 drinks an ink cartridge and dries grey,
+  so the ink is spent on the type, one foil band and the footer bar.
 -->
 <style>
-  /* The launch image's own file, so a checkout prints the real face with no
-     network. The Google link below is the fallback for anywhere else. */
-  @font-face {
-    font-family:"Archivo Expanded Local";
-    src:url("../apps/public/assets/Archivo-Expanded-800.ttf") format("truetype");
-    font-weight:800; font-display:swap;
-  }
-
   @page { size: A4 portrait; margin: 0; }
 
   :root {
+    /* apps/app/app/globals.css, light theme */
     --paper:#FFFFFF;
-    --ink:#0B1011;
-    --ink-soft:#42514F;
-    --teal:#2BBAA6;      /* brand accent — solid blocks only */
-    --teal-ink:#0B6E60;  /* the same hue taken dark enough to read as type */
-    --rule:#C6D2D0;
+    --ink:#111A1C;
+    --ink-soft:#57696C;
+    --line:#E3EAE8;
+    --line-strong:#D2DBD9;
+    --sink:#EEF3F1;
+    --accent:#0C7B6E;
+    --accent-2:#0A6357;
+    --accent-ink:#FFFFFF;
+    --accent-soft:#E1F0ED;
+    --holo:linear-gradient(118deg,#7CE7F0 0%,#9FA6FF 34%,#F0A6D8 64%,#FCD79A 100%);
     --workspace:#DDE4E3;
 
-    --display:"Archivo Expanded Local","Archivo",Helvetica,Arial,sans-serif;
-    --sans:"IBM Plex Sans",-apple-system,Segoe UI,Helvetica,sans-serif;
+    --display:"Space Grotesk","Segoe UI",system-ui,-apple-system,sans-serif;
+    --body:"IBM Plex Sans",ui-sans-serif,system-ui,-apple-system,sans-serif;
     --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
   }
 
@@ -43,7 +47,7 @@
     margin:0;
     background:var(--workspace);
     color:var(--ink);
-    font-family:var(--sans);
+    font-family:var(--body);
     -webkit-font-smoothing:antialiased;
     display:flex; flex-direction:column; align-items:center;
     gap:8mm; padding:8mm 4mm 14mm;
@@ -54,80 +58,92 @@
     width:210mm; height:297mm;
     flex:0 0 auto;
     background:var(--paper);
-    padding:15mm 15mm 0;
+    padding:0 15mm;
     display:flex; flex-direction:column;
     overflow:hidden;
-    box-shadow:0 2mm 8mm rgba(11,16,17,.22);
+    box-shadow:0 2mm 8mm rgba(17,26,28,.22);
     -webkit-print-color-adjust:exact; print-color-adjust:exact;
   }
 
-  /* --- eyebrow ----------------------------------------------------------- */
+  /* The foil band is the app's --btn-holo-h at poster scale: the one
+     subject-specific flourish, and the only thing on the page that isn't
+     teal, black or white. */
+  .foil { height:4.5mm; margin:0 -15mm; background:var(--holo); }
+
+  /* --- brand + eyebrow ---------------------------------------------------- */
+  .top { display:flex; align-items:center; gap:4mm; padding:8mm 0 0; }
+  .tile {
+    width:13mm; height:13mm; border-radius:3.4mm; flex:none;
+    background:var(--holo); box-shadow:inset 0 0 0 .4mm rgba(255,255,255,.45);
+    display:grid; place-items:center;
+    font-family:var(--display); font-weight:700; font-size:17pt; letter-spacing:-.03em;
+    color:#0D1C22; text-shadow:0 .3mm 0 rgba(255,255,255,.5);
+  }
+  .wm { font-family:var(--display); font-weight:700; font-size:22pt; letter-spacing:-.03em; }
+
   .eyebrow {
-    font-family:var(--display); font-weight:700; font-variation-settings:"wdth" 125; font-stretch:125%;
-    text-transform:uppercase; letter-spacing:.14em;
-    font-size:11.5pt; line-height:1.1; color:var(--teal-ink);
-    padding-bottom:4mm; border-bottom:1.2pt solid var(--ink);
+    margin:8mm 0 0;
+    font-family:var(--body); font-weight:700;
+    text-transform:uppercase; letter-spacing:.13em;
+    font-size:11.5pt; line-height:1.1; color:var(--accent-2);
+    padding-bottom:3.5mm; border-bottom:1pt solid var(--line-strong);
   }
 
-  /* --- headline ---------------------------------------------------------- */
+  /* --- headline ----------------------------------------------------------- */
   h1 {
     margin:8mm 0 0;
-    font-family:var(--display); font-weight:800; font-variation-settings:"wdth" 125; font-stretch:125%;
-    text-transform:uppercase; letter-spacing:-.005em;
-    font-size:40pt; line-height:.93; color:var(--ink);
+    font-family:var(--display); font-weight:700;
+    font-size:45pt; line-height:1.02; letter-spacing:-.025em; color:var(--ink);
   }
-  h1 .ask {
-    display:block; margin-top:2mm;
-    font-size:74pt; line-height:.88; color:var(--teal-ink);
-  }
+  h1 .ask { display:block; margin-top:2mm; font-size:76pt; line-height:1; color:var(--accent); }
 
   .lead {
-    margin:9mm 0 0; max-width:162mm;
-    font-size:16pt; line-height:1.36; color:var(--ink);
+    margin:8mm 0 8mm; max-width:160mm;
+    font-size:16pt; line-height:1.4; color:var(--ink-soft);
   }
-  .lead b { font-weight:600; }
+  .lead b { font-weight:600; color:var(--ink); }
 
-  /* --- what happens, in order -------------------------------------------- */
-  .steps { margin-top:auto; padding-top:8mm; display:flex; flex-direction:column; }
-  .step {
-    display:grid; grid-template-columns:16mm 1fr; align-items:baseline;
-    gap:0 6mm; padding:6.5mm 0; border-top:.8pt solid var(--rule);
+  /* --- what happens, in order --------------------------------------------- */
+  .steps {
+    margin-top:auto; flex:0 0 auto; background:var(--paper);
+    border:1pt solid var(--line-strong); border-radius:4mm;
+    overflow:hidden;
   }
-  .step:first-child { border-top:1.2pt solid var(--ink); }
+  .step {
+    display:grid; grid-template-columns:14mm 1fr; align-items:baseline;
+    gap:0 5mm; padding:5.5mm 7mm; border-top:1pt solid var(--line);
+  }
+  .step:first-child { border-top:0; }
+  .step:nth-child(even) { background:var(--sink); }
   .num {
-    font-family:var(--mono); font-weight:700; font-size:20pt;
-    color:var(--teal-ink); font-variant-numeric:tabular-nums;
+    font-family:var(--mono); font-weight:600; font-size:17pt;
+    color:var(--accent); font-variant-numeric:tabular-nums; letter-spacing:.02em;
   }
   .step h2 {
-    margin:0;
-    font-family:var(--display); font-weight:800; font-variation-settings:"wdth" 125; font-stretch:125%;
-    text-transform:uppercase; letter-spacing:.02em;
-    font-size:18pt; line-height:1.05;
+    margin:0; font-family:var(--display); font-weight:700;
+    font-size:19pt; line-height:1.05; letter-spacing:-.02em;
   }
-  .step p { margin:2.5mm 0 0; font-size:12.5pt; line-height:1.34; color:var(--ink-soft); }
+  .step p { margin:2.5mm 0 0; font-size:12pt; line-height:1.36; color:var(--ink-soft); }
 
-  /* --- footer bar -------------------------------------------------------- */
-  .bar {
-    margin:8mm -15mm 0; padding:7mm 15mm 6.5mm;
-    background:var(--teal); color:#04231F;
-  }
+  /* --- the footer bar is the app's primary button, full width -------------- */
+  .bar { margin:8mm -15mm 0; }
+  .bar .foilstrip { height:1.6mm; background:var(--holo); }
+  .bar .fill { background:var(--accent); color:var(--accent-ink); padding:8mm 15mm 11mm; }
   .bar p {
-    margin:0;
-    font-family:var(--display); font-weight:800; font-variation-settings:"wdth" 125; font-stretch:125%;
-    text-transform:uppercase; font-size:25pt; line-height:1.02; letter-spacing:.005em;
+    margin:0; font-family:var(--display); font-weight:700;
+    font-size:27pt; line-height:1.06; letter-spacing:-.02em;
   }
   .bar .sub {
-    margin-top:3.5mm; font-family:var(--sans); font-weight:500;
-    text-transform:none; font-size:12pt; letter-spacing:0; line-height:1.3;
-    color:#083A33;
+    margin-top:3.5mm; font-family:var(--body); font-weight:500;
+    font-size:12pt; letter-spacing:0; line-height:1.35; color:#BFE3DD;
   }
 
-  /* --- screen-only note --------------------------------------------------- */
+  /* --- screen-only note ---------------------------------------------------- */
   .note {
     max-width:210mm; font-size:13px; line-height:1.5; color:#33403E;
     font-family:var(--mono);
   }
-  .note b { font-family:var(--sans); font-weight:600; }
+  .note b { font-family:var(--body); font-weight:600; }
 
   /* Screen only: the sheet is a fixed 210mm, so a narrow window scales it
      down rather than scrolling sideways. Print never sees any of this. */
@@ -146,12 +162,19 @@
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62.5..125,400..900&family=IBM+Plex+Mono:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@700&display=swap">
 
 <div class="sheet">
+  <div class="foil"></div>
+
+  <div class="top">
+    <span class="tile">CF</span>
+    <span class="wm">CompFinder</span>
+  </div>
+
   <p class="eyebrow">The table is a fraction of the stock</p>
 
-  <h1>Can’t see<br>the card<br>you want?<span class="ask">Ask us.</span></h1>
+  <h1>Can’t see the card<br>you want?<span class="ask">Ask us.</span></h1>
 
   <p class="lead">Our <b>entire eBay stock</b> came to the show with us. If it’s listed
   online, it’s in a box behind this table — and we can have it in your hand in a minute.</p>
@@ -175,17 +198,21 @@
       <span class="num">03</span>
       <div>
         <h2>We pull it for you</h2>
-        <p>Same card, show price, straight across the table. No postage, no waiting for the post.</p>
+        <p>Same card, show price, across the table. No postage, no waiting for the post.</p>
       </div>
     </div>
   </div>
 
   <div class="bar">
-    <p>If it’s on our eBay,<br>it’s in the box.</p>
-    <p class="sub">Ask any of us — bring a want list, we’ll check the lot.</p>
+    <div class="foilstrip"></div>
+    <div class="fill">
+      <p>If it’s on our eBay,<br>it’s in the box.</p>
+      <p class="sub">Ask any of us — bring a want list, we’ll check the lot.</p>
+    </div>
   </div>
 </div>
 
 <p class="note"><b>Printing:</b> A4 portrait, scale 100% (not "fit to page"), margins
-set to None — the sheet carries its own 15mm. Colour on, or the two teal blocks
-come out grey.</p>
+set to None — the sheet carries its own 15mm. Colour on, or the foil band and the
+footer bar come out grey. No borderless printer? Choose "fit to printable area":
+the foil and the bar simply stop short of the edge.</p>
