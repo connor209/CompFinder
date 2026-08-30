@@ -90,6 +90,8 @@ export default function ShowDesk() {
   // by default: a stack name and a depth are picking data, and counter mode is
   // pointed at a customer. See the note on the reveal button below.
   const [locationOpen, setLocationOpen] = useState(null);
+  // The picture, opened big. { url, name } or null.
+  const [photo, setPhoto] = useState(null);
   const [wants, setWants] = useState([]);
   const [wantsMissing, setWantsMissing] = useState(false); // migration 026 not applied
   const [showWants, setShowWants] = useState(false);
@@ -1087,12 +1089,17 @@ export default function ShowDesk() {
                 {counter.rows.map((c) => (
                   <div className="ps-row sd-counter-row" key={c.id}>
                     {c.image ? (
-                      /* eslint-disable-next-line @next/next/no-img-element */
-                      <img className="sd-counter-art" src={c.image} alt="" loading="lazy" width="44" height="62" />
+                      <button className="sd-counter-artbtn" onClick={() => setPhoto({ url: c.imageLarge || c.image, name: c.name })} title="See the photo" aria-label={`See the photo of ${c.name}`}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img className="sd-counter-art" src={c.image} alt="" loading="lazy" width="44" height="62" />
+                      </button>
                     ) : (
                       <span className="sd-counter-art sd-counter-noart" aria-hidden="true" />
                     )}
-                    <span className="stack-title">{c.name}</span>
+                    <span className="stack-title">
+                      {c.name}
+                      {c.condition ? <span className="sd-cond">{c.condition}</span> : null}
+                    </span>
                     {/* An ask is not a figure, and shouldn't be set like one:
                         at price size it competes with the real numbers in the
                         rows above and below, and on a phone it was long enough
