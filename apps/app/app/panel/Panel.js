@@ -21,6 +21,7 @@ import {
 } from "@/lib/batch-store.js";
 import { effectivePence, isOverridden, overrideNote, withOverride } from "@/lib/price-override.js";
 import { buildPool, poolLabel, stickerRows, stickerSummary, toPoundPence, NAME_LENGTHS, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
+import SoldCompsApi from "@compfinder/core/soldcomps.js";
 import { labelFile } from "@/lib/labelexport.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import QuickSearch from "./QuickSearch";
@@ -130,14 +131,20 @@ function incrementLocalBudget() {
   return next;
 }
 
+/**
+ * Condition from a listing title.
+ *
+ * This was a character-for-character copy of packages/core's inferCondition,
+ * differing only in returning null where core returns "Unknown". The copy is
+ * what let a bug hide: core's HP rule was rewritten to drop a regex lookbehind
+ * that older Safari cannot run, and this one kept the lookbehind and kept
+ * shipping it to every browser opening the panel. It now delegates, so there
+ * is one reading of "NM" in the app and it is the same one the pricing engine
+ * splits its comps on.
+ */
 function inferConditionFromTitle(title) {
-  const t = (title || "").toLowerCase();
-  if (/\bnm\b|near mint/.test(t)) return "NM";
-  if (/\blp\b|lightly played/.test(t)) return "LP";
-  if (/\bmp\b|moderately played/.test(t)) return "MP";
-  if (/(?<!\d\s)\bhp\b|heavily played/.test(t)) return "HP";
-  if (/damaged/.test(t)) return "DMG";
-  return null;
+  const code = SoldCompsApi.inferCondition(title || "");
+  return code === "Unknown" ? null : code;
 }
 
 /** Same logic as the extension's buildQueryForItem — unchanged, just takes

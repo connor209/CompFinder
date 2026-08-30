@@ -28,7 +28,14 @@ const SoldCompsApi = (() => {
     if (/\bnm\b|near mint/.test(t)) return "NM";
     if (/\blp\b|lightly played/.test(t)) return "LP";
     if (/\bmp\b|moderately played/.test(t)) return "MP";
-    if (/(?<!\d\s)\bhp\b|heavily played/.test(t)) return "HP";
+    // "60 hp" is a Pokemon's stat, not Heavily Played. A lookbehind would say
+    // that directly — /(?<!\d\s)\bhp\b/ — and this file is bundled into BOTH
+    // browsers, where Safari only learned lookbehind in 16.4. Older iPads throw
+    // a SyntaxError when the minifier rebuilds the literal as RegExp(string),
+    // which takes the whole screen down at the moment this function is first
+    // called. Dropping the stat first says the same thing in syntax every
+    // engine has.
+    if (/heavily played/.test(t) || /\bhp\b/.test(t.replace(/\d\shp\b/g, " "))) return "HP";
     if (/damaged/.test(t)) return "DMG";
     return "Unknown";
   }
