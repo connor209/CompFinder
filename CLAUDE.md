@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-seven table tests, no framework, non-zero exit on failure:
+`npm run check` runs twenty-eight table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes,
@@ -100,6 +100,10 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   that the projection is an allow-list rather than a filter, that no private
   value survives it, that a held price asks instead of showing a number, and a
   slice of the render itself checked for desk data or a destructive button.
+- `scripts/check-panelstate.mjs` — a state setter that was never declared.
+  Born from a white screen: the Show Desk shipped calling `setPhoto()` with no
+  `useState` behind it, which `next build` compiles, a JSX parse accepts and
+  every grep in this repo passes, because it only throws when React renders.
 - `scripts/check-override.mjs` — a price you typed: what counts as one, that
   the recommendation is never edited, that the sticker gate lets yours through,
   and a grep over every path that spends money for a direct read of
