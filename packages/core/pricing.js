@@ -694,7 +694,11 @@ const CompFinderPricing = (() => {
     // must survive into the search query (real example: "Tyrogue...Reverse
     // Holo" sold for £7.97 vs £2.34-£2.51 for the regular printing of the
     // identical card/number — pooling them would badly skew the price).
-    working = working.replace(/(?<!reverse\s)\bholo\b/gi, " ");
+    // Same constraint as inferCondition's HP rule: no lookbehind, because this
+    // file ships to browsers and Safari before 16.4 throws on one. Capturing
+    // the optional "reverse " and putting it back matches what
+    // /(?<!reverse\s)\bholo\b/gi did, case for case.
+    working = working.replace(/(reverse\s)?\bholo\b/gi, (m, rev) => (rev ? m : " "));
 
     // Deduplicate repeated words (case-insensitive) — a card whose actual
     // name contains a word that also appears as a separate descriptor (e.g.

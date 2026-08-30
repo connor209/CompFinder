@@ -48,9 +48,13 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-eight table tests, no framework, non-zero exit on failure:
+`npm run check` runs twenty-nine table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
+- `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
+  grep for regex lookbehind across core and both apps, plus the two rules
+  ("60 HP" is a stat, "Reverse Holo" is not "Holo") that the lookbehind-free
+  rewrites had to preserve.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes,
   and — since the rule inverts when the card being priced is itself a slab —
   which card we are holding.
@@ -1161,6 +1165,16 @@ is wrong: a missed deploy looks exactly like a bug that didn't take.
 
 ## Gotchas that have already bitten
 
+- **`packages/core` runs in a BROWSER, so its syntax is capped by Safari.**
+  `inferCondition` used a regex lookbehind to stop "60 HP" reading as Heavily
+  Played. Safari only learned lookbehind in 16.4, so an older iPad throws —
+  and because the minifier rebuilds a regex literal as `RegExp("(?<!…")`, a
+  runtime constructor rather than a literal, it does not fail at load. It
+  fails the first time the function is CALLED, so the app opened, every other
+  screen worked, and one screen white-screened on one device. Diagnosing that
+  from the symptom is nearly impossible; `check-corebrowser.mjs` greps for it
+  instead. **The copy that actually broke was not in core** — it was a third,
+  hand-copied `inferCondition` in `Panel.js`, which now delegates.
 - **Relative imports of moved modules.** Anything written against the pre-
   workspace layout may `import … from "./pricing.js"`. That resolves to nothing
   now — it must be `@compfinder/core/pricing.js`. The build catches it; it has
