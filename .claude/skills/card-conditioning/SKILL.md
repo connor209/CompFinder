@@ -49,7 +49,7 @@ for Desktop, Dropbox) if the crops should be available outside this session.
 It writes deskewed front and back per card, two review sheets from the back,
 and `triage.csv` — one row per card, **already sorted worst corner first**.
 
-- `corners-back.jpg` — the four corner tips at 6x. Corner nicks.
+- `corners-back.jpg` — the four corner tips at 5.3x. Corner nicks.
 - `edges-back.jpg` — the four edges flattened and stretched, outer edge of the
   card along the top of each strip. Edge whitening along its whole run.
 
@@ -82,6 +82,12 @@ nicks are what the NM line counts ("fewer than three countable wear points").
 Edge wear along a whole run is what the MP line turns on ("consistent
 full-perimeter back edge wear") — which no corner crop can show, because it is
 a judgement about the length of an edge rather than about any point on it.
+
+Both sheets are sized to arrive without being downscaled — an image is shrunk
+to 1568px on its longest edge before it reaches you, so a bigger sheet is not a
+clearer one. Reading both costs about 2,100 tokens a card. If a call is still
+too close to make, the answer is a tighter crop of that one card, never a
+larger version of the same sheet.
 
 **On the edge sheet, a continuous hairline right along the outer edge is the
 scanner catching the card, not wear.** It shows up on cards with nothing wrong

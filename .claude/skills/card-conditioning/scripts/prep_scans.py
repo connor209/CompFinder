@@ -92,7 +92,25 @@ CORNER_BOX = 90
 #: How deep an edge strip is cut for the edge sheet. A little thicker than the
 #: measured band so there is some card either side of the whitening to judge it
 #: against — a strip cropped exactly to the band gives nothing to compare with.
-EDGE_STRIP = 26
+EDGE_STRIP = 20
+
+#: How much of a corner is cut for the corner sheet, in card pixels.
+#:
+#: **Magnification comes from cropping tighter, not from drawing bigger.** An
+#: image is downscaled to 1568px on its longest edge before a model ever sees
+#: it, so a sheet built wider than that is shrunk on arrival: you pay for 1568
+#: either way and the extra pixels are discarded. The first version of this
+#: sheet cut 110px and drew it 660px wide, which arrived downscaled 1.7x — the
+#: same 110 pixels at 3.5x, having gone through two resamples to get there.
+#:
+#: So the sheet is now built to land at 1568 exactly, and the only way left to
+#: see more is to show less card. 72px is about the corner tip, the border
+#: either side of it and a little interior to judge the border against.
+CORNER_CROP = 72
+
+#: Sheet width, chosen to arrive without being downscaled. Four tiles plus
+#: three gaps.
+SHEET_W = 1544
 
 #: WotC-era sets, where a modern swirl back means the scanner paired the wrong
 #: two images. Not a wear check — a "look at this pair before listing" flag.
@@ -282,20 +300,26 @@ def triage(score):
 # ---------------------------------------------------------------- output
 
 
-def corner_sheet(card, path, box=110, scale=6):
-    """Four corner tips, magnified, unenhanced, labelled, in one image."""
+def corner_sheet(card, path, box=CORNER_CROP):
+    """
+    Four corner tips, magnified, unenhanced, labelled, in one image.
+
+    Sized so the sheet arrives at full resolution rather than being downscaled
+    on the way in — see CORNER_CROP for why that decides the crop size.
+    """
     w, h = card.size
     spots = [("TL", 0, 0), ("TR", w - box, 0), ("BL", 0, h - box), ("BR", w - box, h - box)]
-    side = box * scale
-    sheet = Image.new("RGB", (side * 4 + 30, side), (255, 255, 255))
+    gap = 8
+    side = (SHEET_W - gap * 3) // 4
+    sheet = Image.new("RGB", (SHEET_W, side), (255, 255, 255))
     for i, (name, x, y) in enumerate(spots):
         tile = card.crop((x, y, x + box, y + box)).resize((side, side), Image.LANCZOS)
         ImageDraw.Draw(tile).text((10, 10), name, fill=(255, 0, 0))
-        sheet.paste(tile, (i * (side + 10), 0))
+        sheet.paste(tile, (i * (side + gap), 0))
     sheet.save(path, quality=94)
 
 
-def edge_sheet(card, path, along=1.9, across=6):
+def edge_sheet(card, path, across=7.5):
     """
     All four edges as flattened strips, outer edge of the card along the top of
     each.
@@ -334,13 +358,13 @@ def edge_sheet(card, path, along=1.9, across=6):
         ("LEFT", card.crop((0, C, T, h - C)).transpose(Image.ROTATE_270)),
         ("RIGHT", card.crop((w - T, C, w, h - C)).transpose(Image.ROTATE_90)),
     ]
-    out_w = int(max(st.size[0] for _, st in strips) * along)
-    out_h = int(T * across)
-    sheet = Image.new("RGB", (out_w + 60, (out_h + 12) * 4), (255, 255, 255))
+    label_w = 56
+    out_w, out_h = SHEET_W - label_w, int(T * across)
+    sheet = Image.new("RGB", (SHEET_W, (out_h + 12) * 4), (255, 255, 255))
     for i, (name, strip) in enumerate(strips):
         tile = strip.resize((out_w, out_h), Image.LANCZOS)
         y = i * (out_h + 12)
-        sheet.paste(tile, (60, y))
+        sheet.paste(tile, (label_w, y))
         ImageDraw.Draw(sheet).text((6, y + out_h // 2 - 4), name, fill=(200, 0, 0))
     sheet.save(path, quality=94)
 

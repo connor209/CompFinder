@@ -36,7 +36,21 @@ them and the rest do not.
 <out>/triage.csv              one row per card, worst corner first
 ```
 
-About 75MB of crops and 22MB of originals for a hundred cards.
+About 70MB of crops and 22MB of originals for a hundred cards. Both sheets are
+built to land at 1544px wide, which matters more than it sounds: an image is
+downscaled to 1568px on its longest edge before a model sees it, so a sheet
+built wider is shrunk on arrival — you pay for 1568 either way and the extra
+pixels are thrown away. The first corner sheet cut 110px and drew it 660px
+wide, arriving downscaled 1.7x: the same 110 pixels at 3.5x, having been
+resampled twice to get there.
+
+**So magnification comes from cropping tighter, not from drawing bigger.** The
+corner crop is 72px shown at 380px — 5.3x, at slightly less cost than the old
+3.5x. Reading the two sheets costs about 2,100 tokens a card.
+
+There is a hard ceiling behind all of this: the scans are 285 DPI, so a corner
+is about 70 real pixels however it is displayed. Rescanning at 600 DPI is the
+only thing that adds actual detail.
 
 The edge sheet exists because an edge cannot be shown the way a corner can. A
 corner is compact and magnifies whole; an edge is 700px long and 20px deep, so
