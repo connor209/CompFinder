@@ -1217,6 +1217,35 @@ Short 20, Medium 30, Long 44 characters — and the sticker panel lists the cut
 text with a count of how many were shortened, so a wrong choice is visible
 before a hundred labels come off the roll.
 
+## Every migration is applied by hand, so ask before assuming
+
+Nothing here runs migrations automatically. The code always ships first and
+degrades when a migration is pending, which is right — and it means the
+database's actual state is never inferable from the repo. Two ways to ask it:
+
+```
+node scripts/check-migrations.mjs      # needs the Supabase URL + service-role key
+```
+
+Or **Actions → Which migrations are applied? → Run workflow**, which uses the
+secrets the warmer and the image backfill already hold. Read-only: it probes
+for tables, columns, functions and the one storage bucket, and it never CALLS a
+function — `claim_soldcomps_slot` hands out a pacer slot, and a health check
+that consumes one is changing the thing it measures.
+
+`supabase/HEALTH_CHECK.sql` asks the same question in SQL and is still the
+better answer with the dashboard open — one paste, one Run, and it can read row
+counts the probe cannot. The script exists because the SQL needs a human at the
+editor, so nothing else could ever answer "what's still to do".
+
+**An unanswered probe is not a missing migration.** Anything the script could
+not determine makes the whole run inconclusive and exits non-zero, rather than
+reporting absence — the first version printed "nothing to apply" when the
+database was simply unreachable, which is the most confident possible way to
+say the opposite of the truth. `supabase/APPLY_PENDING.sql` covers 012–016 in
+one paste; everything after that is its own file, because the later ones import
+data, replace functions and hold locks.
+
 ## Merging to main deploys — batch it
 
 Both Vercel projects build from this repo, so every push to `main` triggers

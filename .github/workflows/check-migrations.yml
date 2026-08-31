@@ -1,0 +1,86 @@
+# Which migrations are still to apply, from a button in the browser.
+#
+# Every migration in this repo is applied BY HAND in the Supabase SQL editor,
+# and the code always ships first — so "which ones has this database actually
+# had?" is a question that comes up constantly and, until now, could only be
+# answered by someone with the dashboard open and supabase/HEALTH_CHECK.sql
+# pasted into it. This asks the same question from here.
+#
+# READ-ONLY. It probes for the existence of tables, columns, functions and one
+# storage bucket. It writes nothing, reads no rows, and never CALLS a function
+# — claim_soldcomps_slot hands out a pacer slot, and a health check that
+# consumes one is changing the thing it measures.
+#
+# MANUAL ONLY, same posture as the image backfill: it holds the service-role
+# key, so it runs when someone asks and never as a side effect of a commit.
+#
+# Uses the two secrets the warmer and the backfill already need:
+#   NEXT_PUBLIC_SUPABASE_URL     the project URL, https://xxxx.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY    the service_role key, NOT the anon one
+#
+# A red run means the answer was INCONCLUSIVE — probes that could not complete
+# — not that migrations are missing. Read the summary before running any SQL.
+name: Which migrations are applied?
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      # No install step: the script uses fetch and nothing else, on purpose —
+      # the one job you want to work when you are trying to find out why
+      # something else doesn't should not depend on a lockfile resolving.
+
+      - name: Check the secrets are set
+        env:
+          URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          missing=""
+          [ -n "$URL" ] || missing="$missing NEXT_PUBLIC_SUPABASE_URL"
+          [ -n "$KEY" ] || missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Ask the database
+        id: ask
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -o pipefail
+          node scripts/check-migrations.mjs | tee run.log
+
+      # The whole point is to read the answer without opening a log, so the
+      # summary carries all of it — it is at most twenty lines.
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Which migrations are applied?"
+            echo
+            if [ "${{ steps.ask.outcome }}" != "success" ]; then
+              echo "> **Inconclusive.** Some probes could not complete, so nothing below is a verdict."
+              echo "> Check the project URL and the service-role key, then run it again **before** running any SQL."
+              echo
+            fi
+            echo '```'
+            cat run.log 2>/dev/null || echo "(no output — see the step log above)"
+            echo '```'
+            echo
+            echo "Files live in \`supabase/migrations/\`. Every one is safely re-runnable."
+          } >> "$GITHUB_STEP_SUMMARY"
