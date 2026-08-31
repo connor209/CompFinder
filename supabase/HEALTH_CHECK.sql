@@ -128,6 +128,17 @@ with schema_checks as (
         then '✅ present' else '❌ missing' end),
     (28, 'SCHEMA · 026 show wants', 'show_wants table',
       case when to_regclass('public.show_wants') is not null
+        then '✅ present' else '❌ missing' end),
+    (29, 'SCHEMA · 027 listing copies', 'stack_cards.copy_seq column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='stack_cards' and column_name='copy_seq')
+        then '✅ present' else '❌ missing' end),
+    (30, 'SCHEMA · 027 listing copies', 'stack_cards.scan_url column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='stack_cards' and column_name='scan_url')
+        then '✅ present' else '❌ missing' end),
+    (31, 'SCHEMA · 027 listing copies', 'listing_copy_state table',
+      case when to_regclass('public.listing_copy_state') is not null
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),

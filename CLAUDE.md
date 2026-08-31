@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs twenty-nine table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -124,6 +124,10 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-recent.mjs` — the cards you looked at: newest first, one row
   per card however it was spelled, capped, and junk from an older build
   dropped rather than drawn.
+- `scripts/check-copyqueue.mjs` — one listing, several copies of the card: that
+  the copy in the photograph is the copy that goes, that a quantity-2 order is
+  two cards at two positions, and that running the reconcile twice does nothing
+  the second time.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -1114,6 +1118,69 @@ The rule had been written out three times — the finder and the stack list in
 fourth. That is why it now lives in one file with a grep behind it: two screens
 each showing a confident number that differ by one is invisible on screen and
 sends you to the wrong card.
+
+## One listing, several copies of the card
+
+Quantity 3 behind one listing, three physical copies, each with its own scan and
+its own stack row. A copy sells, the listing's picture becomes the next copy's
+scan, and the pull sheet says which one to walk to. **Built and tested; no
+screen, and untested against live eBay** — see `docs/MULTI_QUANTITY_LISTINGS.md`
+for the process to run it by hand and for the 20-card experiment that decides
+whether the method is worth having at all.
+
+`apps/app/lib/copyqueue.js` owns it, `packages/core` is untouched, and migration
+027 adds `copy_seq`, `scan_url` and `listing_copy_state`.
+
+- **eBay reports the LISTING's SKU on a sale, never the copy's.** A sale says
+  "this item id sold two" and carries nothing that separates copy 1 from copy 2,
+  so the ordering is ours: `copy_seq`, then when the copy was added, then the
+  row id. That last key is not tidiness — the head of the queue is the card in
+  the photograph, and two reads of the same data disagreeing about it would
+  rotate the picture to a card nobody sold.
+- **It is a RECONCILIATION, not a ledger.** The first design consumed sale line
+  items and kept an event log so a replayed sync could not double-consume;
+  reading `PullSheet.js` killed that. The pull sheet already matches orders to
+  stack cards and marks them pulled on Commit, so **the card leaving the box is
+  the consumption**, recorded by the person holding it. Desired state is a pure
+  function of what is still in the box — quantity is copies left, picture is the
+  head's scan — so running it twice does nothing the second time and a missed
+  run is merely stale. A ledger would have been a second opinion about stock,
+  and the disagreement would have been silent.
+- **eBay REHOSTS pictures, which is the one thing that cannot be derived.** A
+  listing's image comes back as `i.ebayimg.com/…`, never the storage URL we
+  sent, so there is no comparison to make between the listing and the queue.
+  `listing_copy_state` records which copy the listing was last revised to show
+  and nothing else; delete it and the cost is one redundant revision each.
+- **eBay caches pictures BY URL.** Every copy's scan needs its own URL, never
+  overwritten in place — re-uploading different bytes to a path eBay has already
+  fetched changes nothing visible and looks exactly like the revise call
+  failing.
+- **One copy's scan on the listing, never several.** Three scans on a quantity-3
+  listing tell a buyer three cards exist and nothing about which they get, which
+  is worse than a stock photo because it looks like it is telling them
+  something. A picture swap needs `ReviseFixedPriceItem`
+  (`reviseFixedPriceListing`); `ReviseInventoryStatus` does price and quantity
+  only, and both changes go in one call so there is no window advertising a card
+  that has gone.
+- **A copy at a show is not a copy you can post.** Away and pulled both leave
+  the queue, and the listing's quantity drops with them — a listing left at 3
+  while one of the three is on a table sells a card twice.
+
+Two bugs in shipped code came out of building it, both invisible while every
+listing was a single card. **A line item carries a quantity and the pull sheet
+ignored it** — `fetchPendingOrders` always returned it — so one order for two
+copies pulled one card and the sheet looked complete; each unit is its own row
+and its own tick now. And **which of several same-SKU copies got pulled was
+arbitrary**, first-wins over an unordered `select *`, when the whole point is
+that the copy that goes is the copy in the photograph.
+
+```
+node scripts/copyqueue-run.mjs                      # what would change, dry
+node scripts/copyqueue-run.mjs --item <id> --apply  # send one, on purpose
+```
+
+`--apply` requires `--item`: the first live test is one listing you chose, not
+every listing you happen to hold two of.
 
 ## The label file, and why it is a real .xlsx
 

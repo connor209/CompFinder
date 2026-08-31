@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
+import { queuesBySku } from "@/lib/copyqueue";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -114,7 +115,14 @@ export default function PullSheet() {
     const nameMap = new Map((stacks || []).map((s) => [s.id, s.name]));
     const cards = await pagedSelect(() => sb.from("stack_cards").select("*"));
 
-    const unpulledBySku = new Map();
+    // A SKU maps to a QUEUE of copies, not to one card. One card per SKU is
+    // still the ordinary case and behaves exactly as before — the queue is one
+    // long. A multi-quantity listing is several copies sharing the listing's
+    // SKU, and then WHICH copy goes matters: it is the one in the listing's
+    // photograph. copyqueue.js owns that order; this used to keep the first row
+    // an unordered `select *` happened to return.
+    const copyQueues = queuesBySku(cards);
+    const takenBySku = new Map(); // sku -> units of its queue already spoken for
     const pulledSkus = new Set();
     const awaySkus = new Set(); // checked out to a show — physically not here
     const order = new Map();
@@ -128,7 +136,6 @@ export default function PullSheet() {
         if (skl) awaySkus.add(skl);
         continue;
       }
-      if (skl && !unpulledBySku.has(skl)) unpulledBySku.set(skl, c);
       if (!order.has(c.stack_id)) order.set(c.stack_id, []);
       order.get(c.stack_id).push({ id: c.id, position: c.position });
     }
@@ -142,19 +149,34 @@ export default function PullSheet() {
     let done = 0;
     for (const l of lines) {
       const skl = l.sku ? l.sku.toLowerCase() : null;
-      const card = skl ? unpulledBySku.get(skl) : null;
-      if (card) {
-        active.push({ key: l.lineItemId, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, buyer: l.buyer });
-      } else if (skl && awaySkus.has(skl)) {
-        // Ordered on eBay while the card is checked out to a show — it can't
-        // be picked from a stack. Needs a human call (it's in the show case).
-        awayLines.push({ key: l.lineItemId, sku: l.sku, title: l.title });
-      } else if (skl && pulledSkus.has(skl)) {
-        done += 1;
-      } else {
-        // Loose / variation pick — no stack match. Sort these by card number so
-        // they're a single pass through numbered storage (2, 4, 17, 101…).
-        unm.push({ key: l.lineItemId, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku), ...setInfo(l.title) });
+      // ONE LINE ITEM CAN BE SEVERAL CARDS. fetchPendingOrders has always
+      // returned the quantity and this loop always ignored it, which is
+      // invisible while every listing is a single card and is a card short the
+      // first time one isn't. Each unit is its own row, its own tick and its
+      // own card — `commit()` keys on card id, so two units of one order commit
+      // as the two cards they are.
+      const units = Math.max(1, Number(l.quantity) || 1);
+      for (let n = 0; n < units; n++) {
+        const seen = takenBySku.get(skl) || 0;
+        const card = skl ? (copyQueues.get(skl) || [])[seen] || null : null;
+        // A key per UNIT. Sharing the line item id would collapse two cards
+        // back into one row and pull half the order.
+        const key = units > 1 ? `${l.lineItemId}#${n + 1}` : l.lineItemId;
+        const unitOf = units > 1 ? { unit: n + 1, ofUnits: units } : null;
+        if (card) {
+          takenBySku.set(skl, seen + 1);
+          active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, buyer: l.buyer, ...unitOf });
+        } else if (skl && awaySkus.has(skl)) {
+          // Ordered on eBay while the card is checked out to a show — it can't
+          // be picked from a stack. Needs a human call (it's in the show case).
+          awayLines.push({ key, sku: l.sku, title: l.title });
+        } else if (skl && pulledSkus.has(skl)) {
+          done += 1;
+        } else {
+          // Loose / variation pick — no stack match. Sort these by card number so
+          // they're a single pass through numbered storage (2, 4, 17, 101…).
+          unm.push({ key, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku), ...setInfo(l.title), ...unitOf });
+        }
       }
     }
     active.sort((a, b) => {
@@ -194,6 +216,10 @@ export default function PullSheet() {
         position: card ? card.position : null,
         nk: numKey(l.variation || l.title || l.sku),
         matched: !!card,
+        // Pack deals ONE pile per order line — one buyer, one envelope — so a
+        // quantity-2 line stays a single entry and carries the count instead.
+        // Splitting it here would have you dealing two piles to one address.
+        qty: Math.max(1, Number(l.quantity) || 1),
         ...setInfo(l.title)
       };
     });
@@ -424,7 +450,14 @@ export default function PullSheet() {
                   <input type="checkbox" checked={isPicked} onChange={() => togglePick(r.cardId)} />
                   <span className="stack-pos">{isPicked ? "✓" : rank}</span>
                   <span className="stack-sku">{r.sku}</span>
-                  <span className="stack-title">{r.title || <em>—</em>}</span>
+                  <span className="stack-title">
+                    {r.title || <em>—</em>}
+                    {/* One order line, several cards. Without this the two rows
+                        are identical and look like the sheet listing a card
+                        twice by mistake — which is exactly what someone would
+                        "fix" by picking one. */}
+                    {r.ofUnits ? <span className="badge2"> copy {r.unit} of {r.ofUnits}</span> : null}
+                  </span>
                 </label>
               );
             })}
@@ -555,7 +588,10 @@ export default function PullSheet() {
                       <input type="checkbox" checked={done} onChange={() => togglePlaced(it.key)} />
                       <span className="stack-pos">{it.seqNo}</span>
                       <span className="pack-card">
-                        <span className="stack-sku">{it.variation || it.sku || "no SKU"}</span>
+                        <span className="stack-sku">
+                          {it.variation || it.sku || "no SKU"}
+                          {it.qty > 1 ? <span className="badge2"> ×{it.qty}</span> : null}
+                        </span>
                         {it.matched ? (
                           <span className="stack-title">{it.title || <em>—</em>}</span>
                         ) : (

@@ -428,6 +428,72 @@ export async function reviseItemQuantity(accessToken, itemId, quantity) {
   return { ok: true, ack: resp.Ack };
 }
 
+/**
+ * Revise a fixed-price listing's PICTURES, and optionally its quantity, in one
+ * call (Trading API ReviseFixedPriceItem).
+ *
+ * `ReviseInventoryStatus` — what reviseItemPrice and reviseItemQuantity use —
+ * does price and quantity only, so a picture swap needs the heavier call. Both
+ * changes go in one request on purpose: a multi-quantity listing whose picture
+ * and quantity are revised separately has a window where it advertises a card
+ * that has already gone.
+ *
+ * **`PictureURL` REPLACES the whole set**, so pass every picture the listing
+ * should end up with, in display order — the first is the gallery shot.
+ *
+ * **eBay caches pictures by URL.** Uploading different bytes to a path it has
+ * already fetched and revising again changes nothing visible, and looks
+ * exactly like this call failing. Every copy's scan needs its own URL.
+ */
+export async function reviseFixedPriceListing(accessToken, itemId, { imageUrls = null, quantity = null } = {}) {
+  const safeItem = String(itemId).replace(/[^0-9]/g, "");
+  if (!safeItem) throw new Error("Invalid item id.");
+
+  const pics = (imageUrls || []).map((u) => String(u || "").trim()).filter(Boolean);
+  const qty = quantity == null ? null : Number(quantity);
+  if (qty != null && (!Number.isInteger(qty) || qty < 0)) throw new Error("Invalid quantity.");
+  if (!pics.length && qty == null) throw new Error("Nothing to revise.");
+
+  const body =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><Item>` +
+    `<ItemID>${safeItem}</ItemID>` +
+    (qty != null ? `<Quantity>${qty}</Quantity>` : "") +
+    (pics.length
+      ? `<PictureDetails>${pics.map((u) => `<PictureURL>${escapeXml(u)}</PictureURL>`).join("")}</PictureDetails>`
+      : "") +
+    `</Item></ReviseFixedPriceItemRequest>`;
+
+  const res = await fetch(TRADING_URL, {
+    method: "POST",
+    headers: {
+      "X-EBAY-API-CALL-NAME": "ReviseFixedPriceItem",
+      "X-EBAY-API-SITEID": SITE_ID_UK,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
+      "X-EBAY-API-IAF-TOKEN": accessToken,
+      "Content-Type": "text/xml"
+    },
+    body
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`eBay listing revision failed (${res.status}).`);
+
+  const doc = parser.parse(text);
+  const resp = doc?.ReviseFixedPriceItemResponse || {};
+  if (resp.Ack !== "Success" && resp.Ack !== "Warning") {
+    const errs = resp.Errors;
+    const msg = Array.isArray(errs) ? errs[0]?.LongMessage : errs?.LongMessage;
+    throw new Error(msg || "eBay rejected the listing revision.");
+  }
+  // A Warning is worth surfacing rather than swallowing: eBay returns one for
+  // a picture it could not fetch, and the revision "succeeds" without it.
+  const errs = resp.Errors;
+  const warning = resp.Ack === "Warning"
+    ? (Array.isArray(errs) ? errs[0]?.LongMessage : errs?.LongMessage) || "eBay accepted it with a warning."
+    : null;
+  return { ok: true, ack: resp.Ack, warning, pictures: pics.length, quantity: qty };
+}
+
 function escapeXml(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;")
