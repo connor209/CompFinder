@@ -8,8 +8,19 @@
 -- Supabase dashboard → SQL Editor → New query → paste all → Run.
 --
 -- HOW TO READ IT
---   SCHEMA rows     ✅ present / ❌ missing — anything ❌ is fixed by running
---                   APPLY_PENDING.sql (safe to run whatever state you're in).
+--   SCHEMA rows     ✅ present / ❌ missing, one group per migration, in order.
+--                   A ❌ in 012–016 is fixed by running APPLY_PENDING.sql (safe
+--                   to run whatever state you're in). A ❌ in 017 and later is
+--                   fixed by running that migration's OWN file from
+--                   supabase/migrations/ — APPLY_PENDING stops at 016 and is
+--                   not going to grow, because the later ones import data,
+--                   replace functions and hold locks, and lumping those into a
+--                   paste-the-whole-thing file is how one gets run by accident.
+--                   Every migration here is applied BY HAND, so this list is
+--                   the only answer to "what's still to do".
+--                   018 is not listed: it imports Yu-Gi-Oh! rather than
+--                   changing the schema, so it shows in the CATALOGUE rows
+--                   below — a "yugioh" line means it ran.
 --   CATALOGUE rows  one per game, with cards / sets / set-codes. Ten games =
 --                   fully imported. Only "pokemon" = Pokémon works, the other
 --                   nine games are absent. "(stale — pre-015)" = rows that
@@ -62,6 +73,61 @@ with schema_checks as (
     (12, 'SCHEMA · 016 show desk', 'stack_cards.checked_out_at column',
       case when exists (select 1 from information_schema.columns
                         where table_schema='public' and table_name='stack_cards' and column_name='checked_out_at')
+        then '✅ present' else '❌ missing' end),
+    (13, 'SCHEMA · 017 price guide', 'cm_price_latest table',
+      case when to_regclass('public.cm_price_latest') is not null
+        then '✅ present' else '❌ missing' end),
+    (14, 'SCHEMA · 017 price guide', 'cm_price_history table',
+      case when to_regclass('public.cm_price_history') is not null
+        then '✅ present' else '❌ missing' end),
+    (15, 'SCHEMA · 019 public page', 'soldcomps_cache table',
+      case when to_regclass('public.soldcomps_cache') is not null
+        then '✅ present' else '❌ missing' end),
+    (16, 'SCHEMA · 019 public page', 'public_rate_limit table',
+      case when to_regclass('public.public_rate_limit') is not null
+        then '✅ present' else '❌ missing' end),
+    (17, 'SCHEMA · 020 fuzzy search', 'card_catalog.name_plain column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='card_catalog' and column_name='name_plain')
+        then '✅ present' else '❌ missing' end),
+    (18, 'SCHEMA · 020 fuzzy search', 'search_catalog_fuzzy() function',
+      case when exists (select 1 from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+                        where ns.nspname = 'public' and p.proname = 'search_catalog_fuzzy')
+        then '✅ present' else '❌ missing' end),
+    (19, 'SCHEMA · 021 soldcomps pacer', 'soldcomps_pacer table',
+      case when to_regclass('public.soldcomps_pacer') is not null
+        then '✅ present' else '❌ missing' end),
+    (20, 'SCHEMA · 021 soldcomps pacer', 'claim_soldcomps_slot() function',
+      case when exists (select 1 from pg_proc p join pg_namespace ns on ns.oid = p.pronamespace
+                        where ns.nspname = 'public' and p.proname = 'claim_soldcomps_slot')
+        then '✅ present' else '❌ missing' end),
+    (21, 'SCHEMA · 022 card images', 'card_catalog.image_small column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='card_catalog' and column_name='image_small')
+        then '✅ present' else '❌ missing' end),
+    (22, 'SCHEMA · 022 card images', 'card_catalog.image_checked_at column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='card_catalog' and column_name='image_checked_at')
+        then '✅ present' else '❌ missing' end),
+    (23, 'SCHEMA · 023 saved batches', 'price_batches table',
+      case when to_regclass('public.price_batches') is not null
+        then '✅ present' else '❌ missing' end),
+    (24, 'SCHEMA · 023 saved batches', 'price_batch_items table',
+      case when to_regclass('public.price_batch_items') is not null
+        then '✅ present' else '❌ missing' end),
+    (25, 'SCHEMA · 024 show stickers', 'stock_checkouts.sticker_pence column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='stock_checkouts' and column_name='sticker_pence')
+        then '✅ present' else '❌ missing' end),
+    (26, 'SCHEMA · 024 show stickers', 'price_batches.pool_name column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='price_batches' and column_name='pool_name')
+        then '✅ present' else '❌ missing' end),
+    (27, 'SCHEMA · 025 app comp cache', 'app_comp_cache table',
+      case when to_regclass('public.app_comp_cache') is not null
+        then '✅ present' else '❌ missing' end),
+    (28, 'SCHEMA · 026 show wants', 'show_wants table',
+      case when to_regclass('public.show_wants') is not null
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),
@@ -78,16 +144,16 @@ cat as (
   group by 1
 ),
 catalogue_rows as (
-  select 20, 'CATALOGUE', game,
+  select 100, 'CATALOGUE', game,
          to_char(rows,'FM999,999') || ' rows · ' || to_char(cards,'FM999,999') || ' cards · '
            || sets || ' sets · ' || codes || ' with codes'
   from cat
   union all
-  select 20, 'CATALOGUE', '— empty —', 'no rows: the import is needed'
+  select 100, 'CATALOGUE', '— empty —', 'no rows: the import is needed'
   where not exists (select 1 from cat)
 ),
 ebay_row as (
-  select 30, 'EBAY', 'account',
+  select 200, 'EBAY', 'account',
     coalesce((select 'connected ' || to_char(connected_at,'DD Mon YYYY') || ' — check the app for a Reconnect banner'
               from public.ebay_accounts order by connected_at desc limit 1),
              '❌ not connected')
