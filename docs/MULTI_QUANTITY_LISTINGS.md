@@ -69,7 +69,7 @@ one redundant revision per listing.
 | | Where |
 |---|---|
 | The queue, the desired state, the reconcile, the pull plan | `apps/app/lib/copyqueue.js` |
-| 24 table cases over all of it | `scripts/check-copyqueue.mjs`, in `npm run check` |
+| 60 table cases over all of it | `scripts/check-copyqueue.mjs`, in `npm run check` |
 | The picture + quantity revision | `reviseFixedPriceListing()` in `apps/app/lib/ebay.js` |
 | Reading what pictures a listing already has | `fetchListingPictures()` in `apps/app/lib/ebay.js` |
 | `copy_seq`, `scan_url`, `listing_copy_state` | `supabase/migrations/027_listing_copies.sql` |
