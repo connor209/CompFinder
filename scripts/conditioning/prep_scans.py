@@ -52,7 +52,7 @@ from collections import defaultdict
 
 try:
     import numpy as np
-    from PIL import Image, ImageDraw, ImageFilter
+    from PIL import Image, ImageDraw, ImageFilter, ImageFont
 except ImportError:
     sys.exit("Needs pillow and numpy:  pip install pillow numpy")
 
@@ -116,9 +116,37 @@ EDGE_STRIP = 30
 #: interior to judge the border against.
 CORNER_CROP = 140
 
-#: Sheet width, chosen to arrive without being downscaled. Four tiles plus
-#: three gaps.
+#: Sheet width, chosen to arrive without being downscaled. Four columns.
 SHEET_W = 1544
+
+#: How much background to keep OUTSIDE the card in a crop, in normalised px.
+#:
+#: Cropping flush to the card's bounding box seemed obviously right and is not:
+#: it puts the corner's arc hard against the tile edge, so the one thing a
+#: corner crop should show — the SILHOUETTE, the outline of the card against
+#: the scanner's black — is the one thing cut off. A corner that has been
+#: rounded off or crushed is read from its profile as much as from whitening
+#: on its face. The margin also stops the tile looking severed, which is worth
+#: something on its own when a person has a hundred of these to look through.
+CROP_MARGIN = 22
+
+#: Sheet palette. Dark, because the subject is a near-black navy border and a
+#: white surround drags the eye's adaptation the wrong way — the same crop
+#: reads lighter and worn against white than it does against black.
+SHEET_BG = (18, 18, 18)
+TILE_BG = (32, 32, 32)
+LABEL = (255, 224, 66)
+TITLE = (245, 245, 245)
+
+
+def _font(size, bold=False):
+    for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans%s.ttf"
+                 % ("-Bold" if bold else ""),
+                 "/usr/share/fonts/truetype/liberation/LiberationSans-%s.ttf"
+                 % ("Bold" if bold else "Regular")):
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
 
 #: WotC-era sets, where a modern swirl back means the scanner paired the wrong
 #: two images. Not a wear check — a "look at this pair before listing" flag.
@@ -197,7 +225,8 @@ def _skew_degrees(m):
 def straighten(im):
     """
     Deskew and crop to the card, at the scan's OWN resolution. Returns
-    (image, angle).
+    (exact, padded, angle) — the card cropped flush for SCORING, and the same
+    card with CROP_MARGIN of background kept around it for LOOKING at.
 
     It used to normalise to CARD_W x CARD_H here, which put a resample between
     the scan and every crop taken from it for no reason: the fixed size is
@@ -212,9 +241,12 @@ def straighten(im):
     rotated = im.rotate(-angle, resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0))
     box = _card_box(_mask(rotated))
     if box is None:
-        return rotated, angle
+        return rotated, rotated, angle
     x0, y0, x1, y1 = box
-    return rotated.crop((x0, y0, x1 + 1, y1 + 1)), angle
+    exact = rotated.crop((x0, y0, x1 + 1, y1 + 1))
+    m = round(CROP_MARGIN * exact.size[0] / CARD_W)
+    padded = rotated.crop((x0 - m, y0 - m, x1 + 1 + m, y1 + 1 + m))
+    return exact, padded, angle
 
 
 # ---------------------------------------------------------------- scoring
@@ -335,74 +367,87 @@ def _crisp(im):
     return im.filter(ImageFilter.UnsharpMask(radius=1.4, percent=85, threshold=3))
 
 
-def corner_sheet(card, path, box=CORNER_CROP):
+def _tile(img, w, h, label, font, fill=False):
     """
-    Four corner tips, magnified, unenhanced, labelled, in one image.
+    One crop on its own dark ground, captioned beneath in the sheet's yellow.
 
-    Sized so the sheet arrives at full resolution rather than being downscaled
-    on the way in — see CORNER_CROP for why that decides the crop size.
+    `fill` stretches to the whole tile rather than fitting proportionally. That
+    is right for an EDGE, where the strip is long and shallow and the extra
+    height is free magnification across the only axis that carries wear depth;
+    a corner keeps its proportions, since its shape is part of what is being
+    read.
+
+    Note the resize rather than Image.thumbnail: thumbnail only ever shrinks,
+    so the first version of this sheet drew every crop at its source size
+    inside a tile built to hold it magnified — a page of small pictures
+    surrounded by dead grey, which looked like a layout choice and was a bug.
     """
-    w, h = card.size
-    cut = max(1, round(box * w / CARD_W))          # box is in normalised px
-    spots = [("TL", 0, 0), ("TR", w - cut, 0), ("BL", 0, h - cut), ("BR", w - cut, h - cut)]
-    gap = 8
-    side = (SHEET_W - gap * 3) // 4
-    sheet = Image.new("RGB", (SHEET_W, side), (255, 255, 255))
-    for i, (name, x, y) in enumerate(spots):
-        tile = _crisp(card.crop((x, y, x + cut, y + cut)).resize((side, side), Image.LANCZOS))
-        ImageDraw.Draw(tile).text((10, 10), name, fill=(255, 0, 0))
-        sheet.paste(tile, (i * (side + gap), 0))
-    sheet.save(path, quality=96, subsampling=0)
+    tile = Image.new("RGB", (w, h), TILE_BG)
+    iw, ih = w - 10, h - 26
+    if fill:
+        size = (iw, ih)
+    else:
+        k = min(iw / img.size[0], ih / img.size[1])
+        size = (max(1, round(img.size[0] * k)), max(1, round(img.size[1] * k)))
+    fit = _crisp(img.resize(size, Image.LANCZOS))
+    tile.paste(fit, ((w - size[0]) // 2, (h - 26 - size[1]) // 2 + 4))
+    d = ImageDraw.Draw(tile)
+    d.text(((w - d.textlength(label, font=font)) / 2, h - 21), label, fill=LABEL, font=font)
+    return tile
 
 
-def edge_sheet(card, path, across=5):
+def contact_sheet(padded, path, face="BACK"):
     """
-    All four edges as flattened strips, outer edge of the card along the top of
-    each.
+    Every crop for one face of one card, on a single titled sheet.
 
-    An edge cannot be shown the way a corner can. A corner is compact, so it
-    magnifies whole; an edge is 700px long and 20px deep, and at any uniform
-    magnification that fits on screen the whitening is a hairline. So the
-    strips are stretched UNEVENLY — a little along their length, a lot across
-    it. Nothing is lost by that: along the edge the information is positional
-    (where the wear runs), across it there is only how far in the wear reaches.
+    One image per face rather than two files, because a grader opens these a
+    hundred at a time and a sheet you can take in at a glance is worth more
+    than two you have to hold in your head together. The layout is four
+    corners across the top, then each edge in halves — an edge split in two is
+    drawn at twice the length it would get whole, and the half is still long
+    enough to judge whether wear runs continuously.
 
-    This is the view the guide's MP line actually needs. "Consistent
-    full-perimeter back edge wear" is a judgement about the whole run of an
-    edge at once, which no corner crop can show and no single number can
-    settle.
-
-    Every strip is oriented the same way — card edge at the top, interior
-    below — and every strip is drawn to the same width, so the four read as one
-    comparable set rather than four rotations at four scales that the eye has
-    to correct for. The short edges are therefore at slightly more
-    magnification than the long ones, which costs nothing: the question being
-    asked of this sheet is whether wear runs the length of an edge, not how
-    long the edge is.
-
-    What it makes separable, which no number does: a continuous hairline along
-    the very edge is the scanner catching the card, and appears on clean cards
-    too. Wear is DISCRETE — distinct blobs with dark border between them. The
-    guide's "do not describe scanner streaks as scratches" is checkable here
-    rather than a matter of faith.
+    Everything is cut from the PADDED card, so each crop carries the card's
+    outline against the scanner's black. See CROP_MARGIN.
     """
-    w, h = card.size
-    C = round(CORNER_BOX * w / CARD_W)
-    T = round(EDGE_STRIP * w / CARD_W)
-    strips = [
-        ("TOP", card.crop((C, 0, w - C, T))),
-        ("BOTTOM", card.crop((C, h - T, w - C, h)).transpose(Image.FLIP_TOP_BOTTOM)),
-        ("LEFT", card.crop((0, C, T, h - C)).transpose(Image.ROTATE_270)),
-        ("RIGHT", card.crop((w - T, C, w, h - C)).transpose(Image.ROTATE_90)),
-    ]
-    label_w = 56
-    out_w, out_h = SHEET_W - label_w, int(T * across)
-    sheet = Image.new("RGB", (SHEET_W, (out_h + 12) * 4), (255, 255, 255))
-    for i, (name, strip) in enumerate(strips):
-        tile = strip.resize((out_w, out_h), Image.LANCZOS)
-        y = i * (out_h + 12)
-        sheet.paste(_crisp(tile), (label_w, y))
-        ImageDraw.Draw(sheet).text((6, y + out_h // 2 - 4), name, fill=(200, 0, 0))
+    w, h = padded.size
+    m = round(CROP_MARGIN * w / (CARD_W + 2 * CROP_MARGIN))
+    cut = round(CORNER_CROP * w / (CARD_W + 2 * CROP_MARGIN)) + m
+    # An edge strip is shallow, so the full corner margin would make it mostly
+    # background; a third of it is enough to show the card's outline.
+    T = round(EDGE_STRIP * w / (CARD_W + 2 * CROP_MARGIN)) + m // 3
+
+    corners = [("TOP-LEFT", padded.crop((0, 0, cut, cut))),
+               ("TOP-RIGHT", padded.crop((w - cut, 0, w, cut))),
+               ("BOTTOM-LEFT", padded.crop((0, h - cut, cut, h))),
+               ("BOTTOM-RIGHT", padded.crop((w - cut, h - cut, w, h)))]
+
+    def strip(name, img):
+        half = img.size[0] // 2
+        return [(f"{name} 1/2", img.crop((0, 0, half, img.size[1]))),
+                (f"{name} 2/2", img.crop((half, 0, img.size[0], img.size[1])))]
+
+    off = m - m // 3          # skip the margin the strips do not use
+    edges = (strip("TOP", padded.crop((cut, off, w - cut, off + T)))
+             + strip("BOTTOM", padded.crop((cut, h - off - T, w - cut, h - off))
+                     .transpose(Image.FLIP_TOP_BOTTOM))
+             + strip("LEFT", padded.crop((off, cut, off + T, h - cut))
+                     .transpose(Image.ROTATE_270))
+             + strip("RIGHT", padded.crop((w - off - T, cut, w - off, h - cut))
+                     .transpose(Image.ROTATE_90)))
+
+    col = SHEET_W // 4
+    title_h, corner_h, edge_h = 52, 412, 168
+    sheet = Image.new("RGB", (SHEET_W, title_h + corner_h + edge_h * 2), SHEET_BG)
+    d = ImageDraw.Draw(sheet)
+    d.text((14, 13), f"{face} — corner & edge crops", fill=TITLE, font=_font(26, True))
+
+    small = _font(15, True)
+    for i, (name, img) in enumerate(corners):
+        sheet.paste(_tile(img, col, corner_h, name, small), (i * col, title_h))
+    for i, (name, img) in enumerate(edges):
+        x, y = (i % 4) * col, title_h + corner_h + (i // 4) * edge_h
+        sheet.paste(_tile(img, col, edge_h, name, small, fill=True), (x, y))
     sheet.save(path, quality=96, subsampling=0)
 
 
@@ -526,8 +571,8 @@ def main():
             faces = {}
             for name, url in (("front", urls[0]), ("back", urls[1])):
                 blob = fetch(url, os.path.join(raw_dir, f"{sku}_{name}.jpg"), args.refresh)
-                card, angle = straighten(Image.open(io.BytesIO(blob)))
-                faces[name] = (card, angle)
+                card, padded, angle = straighten(Image.open(io.BytesIO(blob)))
+                faces[name] = (card, padded, angle)
                 if not args.no_crops:
                     card.save(os.path.join(dest, f"{name}.jpg"), quality=95, subsampling=0)
         except Exception as exc:                       # noqa: BLE001
@@ -536,11 +581,11 @@ def main():
             print(f"[{i}/{len(rows)}] {sku}  ERROR {exc}")
             continue
 
-        back, angle = faces["back"]
+        back, back_padded, angle = faces["back"]
         score = score_back(back)
         if not args.no_crops:
-            corner_sheet(back, os.path.join(dest, "corners-back.jpg"))
-            edge_sheet(back, os.path.join(dest, "edges-back.jpg"))
+            contact_sheet(back_padded, os.path.join(dest, "crops-back.jpg"), "BACK")
+            contact_sheet(faces["front"][1], os.path.join(dest, "crops-front.jpg"), "FRONT")
 
         rec.update({
             "triage": triage(score),

@@ -46,12 +46,15 @@ python3 scripts/prep_scans.py <export.csv> --out <output-dir>
 About two minutes per hundred cards. Point `--out` at a synced folder (Drive
 for Desktop, Dropbox) if the crops should be available outside this session.
 
-It writes deskewed front and back per card, two review sheets from the back,
-and `triage.csv` — one row per card, **already sorted worst corner first**.
+It writes deskewed front and back per card, a contact sheet for each face, and
+`triage.csv` — one row per card, **already sorted worst corner first**.
 
-- `corners-back.jpg` — the four corners at 2.7x. Corner nicks.
-- `edges-back.jpg` — the four edges flattened and stretched, outer edge of the
-  card along the top of each strip. Edge whitening along its whole run.
+`crops-back.jpg` and `crops-front.jpg` each carry the four corners across the
+top and then every edge in halves, on one titled sheet. Corners answer the NM
+question (countable nicks); the edge halves answer the MP one (does wear run
+the length of an edge). Every crop keeps a margin of background, so the card's
+outline is visible — a corner that has been rounded off is read from its
+profile as much as from whitening on its face.
 
 If the run reports `base` values much below 40, or puts nearly everything in
 `likely-worse`, the card-edge detection has missed and the scores mean nothing.
@@ -73,9 +76,11 @@ Read it before opening a single image.
   modern swirl back means the scanner paired the wrong two images. That is a
   hold under the guide, not a grade.
 
-When a card genuinely needs a close look, read the two sheets rather than the
-full-size scans — between them they cover every corner and every edge in two
-images instead of eight separate reads.
+When a card genuinely needs a close look, read `crops-back.jpg` rather than the
+full-size scans — it covers every corner and every edge in one image. Reach for
+`crops-front.jpg` when the guide's front-side calls are in question (creases,
+surface scratches, holo scratches showing silver), which the score cannot see
+at all.
 
 **The two sheets answer different questions, and the guide asks both.** Corner
 nicks are what the NM line counts ("fewer than three countable wear points").
@@ -83,9 +88,9 @@ Edge wear along a whole run is what the MP line turns on ("consistent
 full-perimeter back edge wear") — which no corner crop can show, because it is
 a judgement about the length of an edge rather than about any point on it.
 
-Both sheets are sized to arrive without being downscaled — an image is shrunk
+The sheet is sized to arrive without being downscaled — an image is shrunk
 to 1568px on its longest edge before it reaches you, so a bigger sheet is not a
-clearer one. Reading both costs about 2,100 tokens a card. If a call is still
+clearer one. Reading one costs about 1,650 tokens. If a call is still
 too close to make, the answer is a tighter crop of that one card, never a
 larger version of the same sheet.
 

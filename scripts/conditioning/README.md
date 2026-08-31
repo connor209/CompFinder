@@ -31,8 +31,8 @@ them and the rest do not.
 <out>/raw/<sku>_front.jpg     as downloaded, cached — never re-fetched
 <out>/cards/<sku>/front.jpg   deskewed, cropped, normalised to 700x980
 <out>/cards/<sku>/back.jpg
-<out>/cards/<sku>/corners-back.jpg   four corner tips at 6x, unenhanced
-<out>/cards/<sku>/edges-back.jpg     four edges flattened, outer edge up
+<out>/cards/<sku>/crops-back.jpg     one sheet: 4 corners + 8 edge halves
+<out>/cards/<sku>/crops-front.jpg    the same for the front
 <out>/triage.csv              one row per card, worst corner first
 ```
 
@@ -43,6 +43,13 @@ built wider is shrunk on arrival — you pay for 1568 either way and the extra
 pixels are thrown away. The first corner sheet cut 110px and drew it 660px
 wide, arriving downscaled 1.7x: the same 110 pixels at 3.5x, having been
 resampled twice to get there.
+
+Every crop keeps a margin of background OUTSIDE the card. Cropping flush to
+the bounding box seemed obviously right and is not: it puts the corner's arc
+hard against the tile edge, so the one thing a corner crop should show — the
+silhouette against the scanner's black — is the one thing cut off. A corner
+that has been rounded off or crushed is read from its profile as much as from
+whitening on its face.
 
 Within that fixed frame the crop size is a trade, not a maximum. At 285 DPI a
 corner is only about 70 real pixels, so cutting tight and blowing it up past
