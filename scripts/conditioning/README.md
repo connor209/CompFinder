@@ -142,6 +142,40 @@ python3 scripts/conditioning/prep_scans.py <csv> --out DIR --calibrate grades.cs
 thresholds can be set from data rather than from the examples that suggested
 them — the same discipline the pricing rules get, and for the same reason.
 
+## Putting the corners on the listing
+
+```
+NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python3 scripts/conditioning/prep_scans.py <csv> --out DIR --upload
+```
+
+Builds a listing photo per face — four corners, large, zoomable, none of the
+grading sheet's furniture — pushes both to the public `listing-photos` bucket
+(migration 012, which exists for exactly this: "eBay fetches images from a
+public URL"), and writes `<name>-with-photos.csv` with the urls appended to
+`PicURL`. One listing per card, so each row's photos are its own.
+
+Listing photos are built past 1600px because that is where eBay turns zoom on,
+and they are cut WIDER than the grading crops. A grading crop is for someone
+hunting flaws; a listing photo is seen by a buyer who has not been told what to
+look for, and at grading magnification paper fibre reads as damage — an
+immaculate card can be made to look wrecked by cropping it tightly enough.
+
+Four rules the code holds to, each guarding something that fails quietly:
+
+- **Append, never prepend.** The first url in `PicURL` is the gallery thumbnail.
+- **A new uuid path per image, never reused.** eBay caches by url, so writing
+  new bytes to a fetched path changes nothing and looks like the API failing.
+- **Fetch the url back before handing it over.** eBay's revise SUCCEEDS with
+  fewer pictures when it cannot fetch one, so a 200 from the upload is not
+  evidence the listing will get the photo.
+- **The original CSV is never modified**, and running twice appends nothing the
+  second time.
+
+eBay rehosts what it fetches, so the bucket copy is only needed until upload
+completes — worth a sweep, since 97 sheets is ~30MB a batch against a 1GB free
+tier.
+
 ## Also in the output
 
 `triage.csv` reports duplicate groups: same title, same condition, so

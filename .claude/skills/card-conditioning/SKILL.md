@@ -148,16 +148,47 @@ known; the rest cannot be derived, and a guessed enum either rejects the batch
 or lists a hundred cards at the wrong condition. `references/carduploader-csv.md`
 explains what to harvest to unlock direct writing.
 
-### 6. Report the two things that are not grades
+### 6. Optionally, put the corner photos on the listings
+
+One listing per card, so each row's photos are its own. `--upload` builds a
+clean listing photo per face — four corners, large, zoomable, without the
+grading sheet's yellow furniture — pushes them to the public `listing-photos`
+bucket, and writes a copy of the CSV with the urls appended to `PicURL`.
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  python3 scripts/prep_scans.py <export.csv> --out DIR --upload
+```
+
+Upload the `-with-photos.csv` it writes; the original is never modified. Each
+listing ends up with its original front and back plus the two corner sheets.
+
+Three things about it are worth stating plainly, because each protects
+something a listing gets wrong silently:
+
+- **Urls are appended, never prepended.** The first url in `PicURL` is the
+  gallery image — the thumbnail in search results — and that has to stay the
+  front of the card.
+- **A failed upload is not a failed run.** Uploads that fail are reported per
+  card and the run carries on; the output CSV simply has that card's `PicURL`
+  unchanged, so it is still a valid file. It says when nothing was hosted
+  rather than pointing at a copy of the input as though it were finished.
+- **Migration 012 has to be applied**, since it creates the bucket. Without it
+  every upload fails and the run tells you so.
+
+### 7. Report the two things that are not grades
 
 **Holds**, individually, with what is wrong and what to do — usually rescan the
 matching back.
 
 **Duplicate groups.** `triage.csv` carries `duplicate_of` and `copies`: same
-title and condition means interchangeable copies of one card. These are
-multi-quantity candidates, and a copy joining an existing listing inherits its
-price rather than needing one of its own — so they are worth knowing about
-*before* the batch is priced, not after.
+title, several physical copies. Each still gets its own listing and its own
+photos — that is the simpler arrangement and the one in use. What the grouping
+is for is PRICING: copies that come out at the same grade are the same product,
+so they can be priced once and the figure applied to all of them, which is
+worth knowing before the batch is priced rather than after. Copies that grade
+differently are different products and price separately, which is why
+conditioning comes first.
 
 ## Grading without the script
 

@@ -48,6 +48,7 @@ import math
 import os
 import sys
 import urllib.request
+import uuid
 from collections import defaultdict
 
 try:
@@ -129,6 +130,29 @@ SHEET_W = 1544
 #: on its face. The margin also stops the tile looking severed, which is worth
 #: something on its own when a person has a hundred of these to look through.
 CROP_MARGIN = 22
+
+#: How much of a corner a LISTING photo shows, in normalised px — wider than
+#: the grading crop on purpose.
+#:
+#: A grading crop is for someone hunting flaws. A listing photo is seen by a
+#: buyer who has not been told what to look for, and at grading magnification
+#: paper fibre and scanner noise read as damage: an immaculate NM card can be
+#: made to look wrecked by cropping it tightly enough. That is the opposite of
+#: honest. Wider framing keeps the corner legible as the corner of a card,
+#: with real wear still plain and nothing invented.
+#:
+#: There is an upper bound as well as a lower one. At a third of the card per
+#: corner the four tiles butt together into what looks like one card with a
+#: seam through it — confusing on a listing, and redundant beside the full back
+#: scan already in the photo set. They have to read as four separate details,
+#: which is what the gutters below are for.
+LISTING_CROP = 175
+
+#: Listing sheets are built past 1600px on the long edge because that is where
+#: eBay switches zoom on, and zoom is the entire point of a condition photo.
+#: The grading sheet's 1544px cap exists only to avoid being downscaled into a
+#: model's context, which is not a constraint that applies here.
+LISTING_W = 1600
 
 #: Sheet palette. Dark, because the subject is a near-black navy border and a
 #: white surround drags the eye's adaptation the wrong way — the same crop
@@ -451,6 +475,91 @@ def contact_sheet(padded, path, face="BACK"):
     sheet.save(path, quality=96, subsampling=0)
 
 
+def listing_sheet(padded, path, face="BACK"):
+    """
+    The four corners as a photo for the eBay listing itself: 2x2, large,
+    zoomable, and without the grading sheet's furniture.
+
+    Deliberately not the same image as the grading sheet. That one is captioned
+    in yellow under a title reading "corner & edge crops", which on a listing
+    reads as a screenshot of somebody's tooling rather than a photograph of the
+    card. It is also cut tighter than a stranger should be shown — see
+    LISTING_CROP.
+
+    The case for putting one on a listing at all is the guide's own: name the
+    real flaws, short, honest, no hiding. A described flaw tells a buyer there
+    is corner wear; a zoomable photograph shows it, and a buyer who has seen it
+    cannot credibly say the card was not as described.
+    """
+    w, h = padded.size
+    cut = round(LISTING_CROP * w / (CARD_W + 2 * CROP_MARGIN))
+    corners = [("Top left", (0, 0, cut, cut)),
+               ("Top right", (w - cut, 0, w, cut)),
+               ("Bottom left", (0, h - cut, cut, h)),
+               ("Bottom right", (w - cut, h - cut, w, h))]
+
+    gutter, caption_h = 22, 62
+    cell = (LISTING_W - gutter * 3) // 2
+    sheet = Image.new("RGB", (LISTING_W, cell * 2 + gutter * 3 + caption_h), SHEET_BG)
+    label_font, cap_font = _font(24), _font(27)
+    for i, (name, box) in enumerate(corners):
+        tile = _crisp(padded.crop(box).resize((cell, cell), Image.LANCZOS))
+        x = gutter + (i % 2) * (cell + gutter)
+        y = gutter + (i // 2) * (cell + gutter)
+        sheet.paste(tile, (x, y))
+        ImageDraw.Draw(sheet).text((x + 14, y + 12), name, fill=(235, 235, 235), font=label_font)
+    d = ImageDraw.Draw(sheet)
+    d.text((gutter, cell * 2 + gutter * 3 + 16),
+           f"Corner detail — {face.lower()} of the actual card you will receive",
+           fill=(190, 190, 190), font=cap_font)
+    sheet.save(path, quality=92)
+
+
+# ---------------------------------------------------------------- hosting
+
+
+def upload_public(base_url, key, bucket, path, data, content_type="image/jpeg"):
+    """
+    Put one file in a PUBLIC Supabase Storage bucket and return its URL.
+
+    Plain REST rather than the Supabase SDK: this is one POST, and a dependency
+    that exists to save four lines is a dependency that breaks a run at a show.
+
+    **The path must be unique per image and never reused.** eBay caches
+    pictures by URL, so writing different bytes to a path it has already
+    fetched changes nothing visible and looks exactly like the revise failing —
+    a lesson copyqueue.js already paid for.
+    """
+    endpoint = f"{base_url.rstrip('/')}/storage/v1/object/{bucket}/{path}"
+    req = urllib.request.Request(endpoint, data=data, method="POST", headers={
+        "Authorization": f"Bearer {key}",
+        "apikey": key,
+        "Content-Type": content_type,
+        "x-upsert": "false",
+    })
+    with urllib.request.urlopen(req, timeout=60) as r:
+        r.read()
+    return f"{base_url.rstrip('/')}/storage/v1/object/public/{bucket}/{path}"
+
+
+def url_is_fetchable(url):
+    """
+    Confirm the public URL actually serves an image before eBay is given it.
+
+    eBay fails SILENTLY here: ebay.js notes that a picture it cannot fetch
+    leaves the revision reporting success with fewer photos than were sent. So
+    an upload returning 200 is not evidence the listing will get the picture;
+    the only evidence is fetching it back.
+    """
+    try:
+        req = urllib.request.Request(url, method="GET", headers={"Range": "bytes=0-64"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.status in (200, 206) and \
+                (r.headers.get("Content-Type") or "").startswith("image/")
+    except Exception:                                   # noqa: BLE001
+        return False
+
+
 def fetch(url, path, refresh=False):
     """Cached download. A scan that is already on disk is never re-fetched."""
     if os.path.exists(path) and not refresh:
@@ -465,6 +574,52 @@ def fetch(url, path, refresh=False):
 
 
 # ---------------------------------------------------------------- main
+
+
+def _csv_field(v):
+    """Quote only where needed — eBay accepts both and the diff reads better."""
+    t = "" if v is None else str(v)
+    return f'"{t.replace(chr(34), chr(34) * 2)}"' if any(c in t for c in ',"\r\n') else t
+
+
+def append_photo_urls(csv_path, out_path, urls_by_sku):
+    """
+    Append each card's listing photos to its own `PicURL`, and write the result
+    beside the original.
+
+    Three rules hold this together:
+
+    **Append, never prepend.** The FIRST url in `PicURL` is the gallery image —
+    the thumbnail a buyer sees in search results. That has to stay the front of
+    the card; leading with a corner close-up would show a magnified edge where
+    the picture of the card should be.
+
+    **The original file is never modified.** A CardUploader export is the input
+    to a run that may be repeated, and a file that rewrites itself cannot be
+    re-run from a known state.
+
+    **Running twice adds nothing the second time.** A url already present is
+    skipped rather than appended again, so a partial run can simply be redone —
+    the same property the copy-queue reconcile has, and for the same reason.
+    """
+    rows = read_rows(csv_path)
+    with open(csv_path, encoding="utf-8-sig", newline="") as fh:
+        header = next(csv.reader(fh))
+    added = 0
+    for r in rows:
+        extra = urls_by_sku.get(r.get(SKU_COL, ""))
+        if not extra:
+            continue
+        have = [u for u in (r.get(PIC_COL) or "").split("|") if u]
+        new = [u for u in extra if u not in have]
+        if new:
+            r[PIC_COL] = "|".join(have + new)
+            added += len(new)
+    with open(out_path, "w", encoding="utf-8", newline="") as fh:
+        fh.write(",".join(_csv_field(c) for c in header) + "\r\n")
+        for r in rows:
+            fh.write(",".join(_csv_field(r.get(c, "")) for c in header) + "\r\n")
+    return added
 
 
 def read_rows(csv_path):
@@ -528,10 +683,25 @@ def main():
     ap.add_argument("--limit", type=int, help="only the first N rows")
     ap.add_argument("--refresh", action="store_true", help="re-download cached scans")
     ap.add_argument("--no-crops", action="store_true", help="score only, write no images")
+    ap.add_argument("--upload", action="store_true",
+                    help="build listing photos, push them to Supabase Storage, and write "
+                         "a copy of the CSV with the urls appended to PicURL. Needs "
+                         "NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
+    ap.add_argument("--bucket", default="listing-photos",
+                    help="storage bucket for listing photos (default: listing-photos)")
     ap.add_argument("--calibrate", metavar="GRADES_CSV",
                     help="a CSV of sku,grade — report the score distribution per grade "
                          "instead of triaging, so the thresholds can be set from data")
     args = ap.parse_args()
+
+    sb_url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "").strip()
+    sb_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    if args.upload and not (sb_url and sb_key):
+        sys.exit("--upload needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
+                 "in the environment.")
+    if args.upload and args.no_crops:
+        sys.exit("--upload has nothing to upload with --no-crops.")
+    photo_urls = {}
 
     rows = read_rows(args.csv)
     if args.limit:
@@ -587,6 +757,26 @@ def main():
             contact_sheet(back_padded, os.path.join(dest, "crops-back.jpg"), "BACK")
             contact_sheet(faces["front"][1], os.path.join(dest, "crops-front.jpg"), "FRONT")
 
+        if args.upload:
+            got = []
+            for face in ("back", "front"):
+                name = f"listing-{face}.jpg"
+                local = os.path.join(dest, name)
+                listing_sheet(faces[face][1], local, face.upper())
+                # A fresh uuid per image, never a path reused: eBay caches by url.
+                key = f"conditioning/{sku}/{uuid.uuid4().hex}.jpg"
+                try:
+                    url = upload_public(sb_url, sb_key, args.bucket, key,
+                                        open(local, "rb").read())
+                    if url_is_fetchable(url):
+                        got.append(url)
+                    else:
+                        print(f"      uploaded but not fetchable, skipped: {url}")
+                except Exception as exc:               # noqa: BLE001
+                    print(f"      upload failed ({face}): {str(exc)[:90]}")
+            if got:
+                photo_urls[sku] = got
+
         rec.update({
             "triage": triage(score),
             "wear_total_pct": score["total"],
@@ -621,6 +811,22 @@ def main():
 
     if args.calibrate:
         report_calibration(out_rows, args.calibrate)
+
+    if args.upload:
+        base = os.path.basename(args.csv)
+        stem = base[:-4] if base.lower().endswith(".csv") else base
+        out_csv = os.path.join(args.out, f"{stem}-with-photos.csv")
+        added = append_photo_urls(args.csv, out_csv, photo_urls)
+        print(f"\n{added} photo url(s) appended across {len(photo_urls)} card(s)")
+        if added:
+            print(f"upload this one to eBay: {out_csv}")
+            print("(the original is untouched)")
+        else:
+            # Saying "upload this one" here would be pointing at a file identical
+            # to the input. Nothing was hosted, so nothing was gained, and the
+            # run needs redoing rather than shipping.
+            print(f"nothing was hosted, so {os.path.basename(out_csv)} is a copy of "
+                  f"the input — fix the upload and run again.")
 
     counts = defaultdict(int)
     for r in out_rows:
