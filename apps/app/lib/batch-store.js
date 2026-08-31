@@ -250,6 +250,33 @@ function dropPoolNameColumn() {
   poolNameColumn = false;
 }
 
+/**
+ * Ask whether `pool_name` is there, without saving anything.
+ *
+ * Here rather than at the caller because this file is the only one that names
+ * `price_batches` — a probe elsewhere would be a second place to update, and
+ * the failure mode of getting it wrong is telling somebody at a show to run a
+ * migration they have already run.
+ *
+ * A zero-row select is the cheapest possible question: it names the column, so
+ * Postgres rejects it if the column is absent, and it returns no rows either
+ * way. Latching the flag off here is a small bonus — the first real save no
+ * longer has to fail once to discover it.
+ *
+ * Returns the raw error (or null) rather than a verdict; `probeState()` in
+ * desk-setup.js decides what it means, so that "a dropped connection is not a
+ * missing migration" is one rule in one place.
+ */
+export async function probePoolName(supabase) {
+  try {
+    const { error } = await supabase.from("price_batches").select("pool_name").limit(0);
+    if (error && isMissingPoolName(error)) dropPoolNameColumn();
+    return error || null;
+  } catch (err) {
+    return err;
+  }
+}
+
 // Structural failures — the table isn't there, or we aren't allowed to write
 // to it. Nothing about retrying a smaller slice helps, so don't spend thirty
 // round trips finding that out.

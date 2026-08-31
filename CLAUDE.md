@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs thirty table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-one table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -128,6 +128,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   the copy in the photograph is the copy that goes, that a quantity-2 order is
   two cards at two positions, and that running the reconcile twice does nothing
   the second time.
+- `scripts/check-desksetup.mjs` — what the Show Desk says is still to run, and
+  mostly what it refuses to say: a probe that fails on venue wifi is never
+  reported as a missing migration.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -946,6 +949,20 @@ stranger their card is worth.
   filtered and re-sorted, and a sticker on the wrong card is a card sold for
   the wrong money. Held rows are skipped rather than written null, so a card
   keeps a good sticker from an earlier run. `£ Sold` then pre-fills from it.
+- **The desk says what is still to run when it OPENS**, not when you press
+  save. Migration 024 used to announce itself by refusing a sticker price with
+  the card in your hand and a customer waiting — the one moment nothing can be
+  done about it. `apps/app/lib/desk-setup.js` asks three cheap questions after
+  the desk has rendered (never before: on venue wifi that ordering is the
+  difference between a warning and an obstacle), and says what each pending
+  migration costs you today rather than naming a database object. **A probe
+  that fails is not a missing migration** — a dropped connection, a timeout, an
+  RLS refusal all read as UNKNOWN and say nothing, because the person reading it
+  is at a show and cannot check. Never rendered in counter mode: a filename and
+  "one-off setup needed" read to a customer like a till about to go down.
+  `scripts/check-migrations.mjs` is the whole-database version and is right for
+  a terminal; twenty round trips to report on the price guide is not what
+  anybody wants at a table.
 - **Migration 024** adds `sticker_pence` to `stock_checkouts` and `pool_name`
   to `price_batches`. `pool_name` is read and written OPTIONALLY: migrations
   here are applied by hand, so the code always ships first, and Postgres

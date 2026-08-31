@@ -17,6 +17,8 @@ import {
 } from "@/lib/showfilter.js";
 import { counterView, onlineMatches, inBoxSkus } from "@/lib/showcounter.js";
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
+import { probePoolName } from "@/lib/batch-store";
+import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -94,6 +96,10 @@ export default function ShowDesk() {
   const [photo, setPhoto] = useState(null);
   const [wants, setWants] = useState([]);
   const [wantsMissing, setWantsMissing] = useState(false); // migration 026 not applied
+  // What Supabase still needs, asked when the desk opens rather than when you
+  // press save at a table. Empty until the probes answer, and empty forever if
+  // they cannot — see lib/desk-setup.js.
+  const [setup, setSetup] = useState([]);
   const [showWants, setShowWants] = useState(false);
   const [backPickerOpen, setBackPickerOpen] = useState(false);
   const [recs, setRecs] = useState(null); // null = closed; [] = built, empty
@@ -189,6 +195,45 @@ export default function ShowDesk() {
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
+
+  /**
+   * Ask what is still to run, AFTER the desk is on screen.
+   *
+   * Deliberately not part of load(): these three questions answer nothing the
+   * desk needs in order to work, so they must never sit between opening it and
+   * seeing the box. On venue wifi that ordering is the whole difference between
+   * a warning and an obstacle.
+   *
+   * Skipped entirely when 016 is missing, because then there is no desk to warn
+   * about — that case has its own screen.
+   */
+  useEffect(() => {
+    if (loading || needsMigration) return;
+    let live = true;
+    (async () => {
+      try {
+        const sb = supabase();
+        // `stock_checkouts` is named here because this file already names it;
+        // `price_batches` is asked through batch-store.js, which owns it.
+        const [stickerErr, poolErr] = await Promise.all([
+          sb.from("stock_checkouts").select("sticker_pence").limit(0).then((r) => r.error || null, (e) => e),
+          probePoolName(sb)
+        ]);
+        if (!live) return;
+        setSetup(deskSetup({
+          stickers: probeState(stickerErr),
+          poolName: probeState(poolErr),
+          // Already known: load() asked for the wants and got told. Asking
+          // again would be a second round trip for an answer we hold.
+          wants: wantsMissing ? "absent" : "present"
+        }));
+      } catch {
+        // A probe that cannot run tells us nothing, and nothing is what it says.
+        if (live) setSetup([]);
+      }
+    })();
+    return () => { live = false; };
+  }, [loading, needsMigration, wantsMissing]);
 
   const stackName = useMemo(() => new Map(stacks.map((s) => [s.id, s.name])), [stacks]);
 
@@ -700,6 +745,32 @@ export default function ShowDesk() {
 
   return (
     <div className="rise-group sd-scope">
+      {/* What Supabase still needs, at the top, before the day starts.
+          Migration 024 used to announce itself by refusing to save a sticker
+          price with a card in your hand and a customer waiting — the one moment
+          you can do nothing about it.
+
+          NEVER in counter mode. A tablet pointed at a customer has no business
+          showing them a filename, and "one-off setup needed" reads to a
+          stranger like a till that is about to go down. It is the same
+          allow-list discipline the counter projection follows. */}
+      {setup.length > 0 && !counterMode ? (
+        <div className="mine-banner">
+          <span className="mine-ic" aria-hidden="true">⚠</span>
+          <div>
+            <strong>{setupSummary(setup)}</strong>
+            {setup.map((e) => (
+              <p className="hint hint-small" style={{ marginTop: 4 }} key={e.migration}>
+                {e.effect} Run <code>{e.file}</code> in the Supabase SQL editor.
+              </p>
+            ))}
+            <p className="hint hint-small" style={{ marginTop: 4 }}>
+              Everything else on this screen works without it, so this is not a reason to stop.
+            </p>
+          </div>
+        </div>
+      ) : null}
+
       {/* Counter mode hides every screen that isn't the stock list. Not styled
           away — not rendered. A customer holding the tablet can scroll, and a
           "£ Sold" button that is merely off-palette is still a button. */}
@@ -1254,13 +1325,6 @@ export default function ShowDesk() {
             ))}
           </div>
         </div>
-      ) : null}
-
-      {wantsMissing && !counterMode ? (
-        <p className="hint hint-small">
-          The want list needs <b>migration 026</b>, applied in Supabase. Everything
-          else on this screen works without it.
-        </p>
       ) : null}
 
       {history.length > 0 && !counterMode ? (
