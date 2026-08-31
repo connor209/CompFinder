@@ -49,7 +49,7 @@ for Desktop, Dropbox) if the crops should be available outside this session.
 It writes deskewed front and back per card, two review sheets from the back,
 and `triage.csv` — one row per card, **already sorted worst corner first**.
 
-- `corners-back.jpg` — the four corner tips at 5.3x. Corner nicks.
+- `corners-back.jpg` — the four corners at 2.7x. Corner nicks.
 - `edges-back.jpg` — the four edges flattened and stretched, outer edge of the
   card along the top of each strip. Edge whitening along its whole run.
 

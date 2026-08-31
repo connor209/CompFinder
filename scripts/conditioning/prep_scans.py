@@ -52,7 +52,7 @@ from collections import defaultdict
 
 try:
     import numpy as np
-    from PIL import Image, ImageDraw
+    from PIL import Image, ImageDraw, ImageFilter
 except ImportError:
     sys.exit("Needs pillow and numpy:  pip install pillow numpy")
 
@@ -89,10 +89,10 @@ BRIGHT_DELTA = 30
 #: nicks, and a corner is where a card is handled.
 CORNER_BOX = 90
 
-#: How deep an edge strip is cut for the edge sheet. A little thicker than the
-#: measured band so there is some card either side of the whitening to judge it
-#: against — a strip cropped exactly to the band gives nothing to compare with.
-EDGE_STRIP = 20
+#: How deep an edge strip is cut for the edge sheet. Comfortably thicker than
+#: the measured band so there is card either side of the whitening to judge it
+#: against — a strip cropped tight to the band gives nothing to compare with.
+EDGE_STRIP = 30
 
 #: How much of a corner is cut for the corner sheet, in card pixels.
 #:
@@ -103,10 +103,18 @@ EDGE_STRIP = 20
 #: sheet cut 110px and drew it 660px wide, which arrived downscaled 1.7x — the
 #: same 110 pixels at 3.5x, having gone through two resamples to get there.
 #:
-#: So the sheet is now built to land at 1568 exactly, and the only way left to
-#: see more is to show less card. 72px is about the corner tip, the border
-#: either side of it and a little interior to judge the border against.
-CORNER_CROP = 72
+#: So the sheet is built to land at 1568 exactly. Within that, the crop size is
+#: a trade rather than a maximum: at 285 DPI a corner is only about 70 real
+#: pixels, so cutting tight and blowing it up past native buys apparent size
+#: and pays for it in mush — every pixel interpolated from its neighbours,
+#: which is the opposite of what a judgement about a small hard-edged chip
+#: needs. Cutting 72px at 5.3x was measurably softer to read than 140px at
+#: 2.7x, and no more informative: the chipping that decides the grade is
+#: obvious at both, and only the second one looks like a card.
+#:
+#: 140px covers the corner tip, the full border either side of it, and enough
+#: interior to judge the border against.
+CORNER_CROP = 140
 
 #: Sheet width, chosen to arrive without being downscaled. Four tiles plus
 #: three gaps.
@@ -187,15 +195,26 @@ def _skew_degrees(m):
 
 
 def straighten(im):
-    """Deskew, crop to the card, and normalise the size. Returns (image, angle)."""
+    """
+    Deskew and crop to the card, at the scan's OWN resolution. Returns
+    (image, angle).
+
+    It used to normalise to CARD_W x CARD_H here, which put a resample between
+    the scan and every crop taken from it for no reason: the fixed size is
+    needed by the SCORE, so that one set of thresholds holds across scans that
+    framed the card differently, and by nothing else. Crops were paying for it
+    — rotate, resize, then upscale, three interpolations deep before anything
+    reached an eye, each one costing a little edge definition on exactly the
+    fine detail the crop exists to show. Scoring now normalises for itself and
+    crops come straight off this.
+    """
     angle = _skew_degrees(_mask(im))
     rotated = im.rotate(-angle, resample=Image.BICUBIC, expand=True, fillcolor=(0, 0, 0))
     box = _card_box(_mask(rotated))
     if box is None:
-        return rotated.resize((CARD_W, CARD_H), Image.LANCZOS), angle
+        return rotated, angle
     x0, y0, x1, y1 = box
-    card = rotated.crop((x0, y0, x1 + 1, y1 + 1))
-    return card.resize((CARD_W, CARD_H), Image.LANCZOS), angle
+    return rotated.crop((x0, y0, x1 + 1, y1 + 1)), angle
 
 
 # ---------------------------------------------------------------- scoring
@@ -219,6 +238,8 @@ def score_back(card):
     Measured against the card's OWN border median, so a dark scan and a light
     scan of the same card score the same. Returns edges, corners, and a total.
     """
+    if card.size != (CARD_W, CARD_H):
+        card = card.resize((CARD_W, CARD_H), Image.LANCZOS)
     val = _value(card)
     base = float(np.median(val[BAND]))
     bright = (val > base + BRIGHT_DELTA) & BAND
@@ -300,6 +321,20 @@ def triage(score):
 # ---------------------------------------------------------------- output
 
 
+def _crisp(im):
+    """
+    A light unsharp mask after upscaling.
+
+    Interpolation is a weighted average, so it necessarily softens the edge
+    between a white chip and navy card — the boundary this whole exercise is
+    trying to read. This restores the acutance that enlarging removed; it is
+    not adding detail that was not there, and the radius is kept small and the
+    threshold non-zero so flat navy (where JPEG noise lives) is left alone
+    rather than being crunched into speckle that looks like whitening.
+    """
+    return im.filter(ImageFilter.UnsharpMask(radius=1.4, percent=85, threshold=3))
+
+
 def corner_sheet(card, path, box=CORNER_CROP):
     """
     Four corner tips, magnified, unenhanced, labelled, in one image.
@@ -308,18 +343,19 @@ def corner_sheet(card, path, box=CORNER_CROP):
     on the way in — see CORNER_CROP for why that decides the crop size.
     """
     w, h = card.size
-    spots = [("TL", 0, 0), ("TR", w - box, 0), ("BL", 0, h - box), ("BR", w - box, h - box)]
+    cut = max(1, round(box * w / CARD_W))          # box is in normalised px
+    spots = [("TL", 0, 0), ("TR", w - cut, 0), ("BL", 0, h - cut), ("BR", w - cut, h - cut)]
     gap = 8
     side = (SHEET_W - gap * 3) // 4
     sheet = Image.new("RGB", (SHEET_W, side), (255, 255, 255))
     for i, (name, x, y) in enumerate(spots):
-        tile = card.crop((x, y, x + box, y + box)).resize((side, side), Image.LANCZOS)
+        tile = _crisp(card.crop((x, y, x + cut, y + cut)).resize((side, side), Image.LANCZOS))
         ImageDraw.Draw(tile).text((10, 10), name, fill=(255, 0, 0))
         sheet.paste(tile, (i * (side + gap), 0))
-    sheet.save(path, quality=94)
+    sheet.save(path, quality=96, subsampling=0)
 
 
-def edge_sheet(card, path, across=7.5):
+def edge_sheet(card, path, across=5):
     """
     All four edges as flattened strips, outer edge of the card along the top of
     each.
@@ -351,7 +387,8 @@ def edge_sheet(card, path, across=7.5):
     rather than a matter of faith.
     """
     w, h = card.size
-    C, T = CORNER_BOX, EDGE_STRIP
+    C = round(CORNER_BOX * w / CARD_W)
+    T = round(EDGE_STRIP * w / CARD_W)
     strips = [
         ("TOP", card.crop((C, 0, w - C, T))),
         ("BOTTOM", card.crop((C, h - T, w - C, h)).transpose(Image.FLIP_TOP_BOTTOM)),
@@ -364,9 +401,9 @@ def edge_sheet(card, path, across=7.5):
     for i, (name, strip) in enumerate(strips):
         tile = strip.resize((out_w, out_h), Image.LANCZOS)
         y = i * (out_h + 12)
-        sheet.paste(tile, (label_w, y))
+        sheet.paste(_crisp(tile), (label_w, y))
         ImageDraw.Draw(sheet).text((6, y + out_h // 2 - 4), name, fill=(200, 0, 0))
-    sheet.save(path, quality=94)
+    sheet.save(path, quality=96, subsampling=0)
 
 
 def fetch(url, path, refresh=False):
@@ -492,7 +529,7 @@ def main():
                 card, angle = straighten(Image.open(io.BytesIO(blob)))
                 faces[name] = (card, angle)
                 if not args.no_crops:
-                    card.save(os.path.join(dest, f"{name}.jpg"), quality=93)
+                    card.save(os.path.join(dest, f"{name}.jpg"), quality=95, subsampling=0)
         except Exception as exc:                       # noqa: BLE001
             rec.update({"triage": "error", "note": str(exc)[:120]})
             out_rows.append(rec)

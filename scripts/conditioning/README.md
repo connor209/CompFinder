@@ -44,9 +44,20 @@ pixels are thrown away. The first corner sheet cut 110px and drew it 660px
 wide, arriving downscaled 1.7x: the same 110 pixels at 3.5x, having been
 resampled twice to get there.
 
-**So magnification comes from cropping tighter, not from drawing bigger.** The
-corner crop is 72px shown at 380px — 5.3x, at slightly less cost than the old
-3.5x. Reading the two sheets costs about 2,100 tokens a card.
+Within that fixed frame the crop size is a trade, not a maximum. At 285 DPI a
+corner is only about 70 real pixels, so cutting tight and blowing it up past
+native buys apparent size and pays in mush — every pixel interpolated from its
+neighbours, which is the opposite of what judging a small hard-edged chip
+needs. 72px at 5.3x read measurably softer than 140px at 2.7x and said nothing
+extra: the chipping that decides the grade is plain at both, and only the
+wider one still looks like a card. **140px at 2.7x is the default.** Reading
+the two sheets costs about 2,200 tokens a card.
+
+Crops are also taken at the scan's own resolution and sharpened lightly. They
+used to pass through a normalising resize to 700x980 first — needed by the
+SCORE, so one set of thresholds holds across differently-framed scans, and by
+nothing else — which put three interpolations between the scan and the eye.
+Scoring now normalises for itself.
 
 There is a hard ceiling behind all of this: the scans are 285 DPI, so a corner
 is about 70 real pixels however it is displayed. Rescanning at 600 DPI is the
