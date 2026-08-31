@@ -845,6 +845,17 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-plan-row { display:flex; align-items:center; gap:10px; padding:6px 0; border-top:1px solid color-mix(in srgb,var(--accent) 18%, transparent); }
 .sd-plan-row:first-child { border-top:0; }
 .sd-plan-count { font-weight:700; font-size:13.5px; color:var(--ink); flex:none; }
+/* Selling at the table. The panel borrows the filing plan's frame but not its
+   colour: this is the one bulk action with no undo behind it, so it reads as
+   money rather than as a suggestion. */
+.sd-soldplan { border-color:color-mix(in srgb,var(--conf-high) 40%, var(--line)); background:color-mix(in srgb,var(--conf-high) 7%, transparent); }
+.sd-soldplan .sd-plan-row { border-top-color:color-mix(in srgb,var(--conf-high) 16%, transparent); }
+.sd-soldplan .stack-title { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sd-sold-bulk { color:var(--conf-high); border-color:var(--line-strong); }
+/* The price box sits on the row it belongs to and stays finger-sized: this is
+   typed standing up, one-handed, with a customer waiting. */
+.sd-soldprice { display:inline-flex; align-items:center; gap:3px; flex:none; font-size:13px; color:var(--ink-faint); }
+.sd-soldprice input { width:5.5em; padding:5px 6px; font:inherit; font-size:14px; color:var(--ink); background:var(--bg); border:1px solid var(--line-strong); border-radius:8px; text-align:right; }
 .sd-rowacts { display:flex; gap:6px; flex:none; margin-left:auto; }
 .sd-scope .badge2 { white-space:nowrap; }
 /* The show desk's headers carry a title, a count and up to three buttons, and

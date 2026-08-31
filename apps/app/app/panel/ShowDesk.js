@@ -15,6 +15,7 @@ import {
   showView, selectionFor, facetsOf, listingState, matchesQuery,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
+import { soldDraft, soldEntries, soldSummary, soldMessage, endsListing, stickerText } from "@/lib/showsold.js";
 import { counterView, onlineMatches, inBoxSkus } from "@/lib/showcounter.js";
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 import { probePoolName } from "@/lib/batch-store";
@@ -32,13 +33,6 @@ import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
 const EVENT_KEY = "cf-show-event";
 
 const pounds = (pence) => `£${((pence || 0) / 100).toFixed(2)}`;
-
-function parsePricePence(raw) {
-  const cleaned = String(raw || "").replace(/[£,\s]/g, "");
-  if (!cleaned) return null;
-  const n = Number(cleaned);
-  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
-}
 
 // The chip and the "still sellable online" filter classify a row the same way,
 // through listingState() — a filter that finds three cards a chip says are
@@ -110,6 +104,9 @@ export default function ShowDesk() {
   const [usedByStack, setUsedByStack] = useState(new Map());
   const [capacity, setCapacity] = useState(DEFAULT_STACK_CAPACITY);
   const [plan, setPlan] = useState(null); // proposed reallocation, awaiting confirm
+  // The cards about to be sold, frozen with the price typed against each. null
+  // = closed. Nothing ends a listing until this panel is confirmed.
+  const [soldPlan, setSoldPlan] = useState(null);
   const profileSettings = useRef({});
   const router = useRouter();
 
@@ -376,6 +373,14 @@ export default function ShowDesk() {
   );
   const visible = view.rows;
   const selected = useMemo(() => selectionFor(visible, sel), [visible, sel]);
+  // The confirm panel's own arithmetic. Derived rather than stored, so a price
+  // typed into a box is read the same way the Confirm button reads it —
+  // storing a total would let the two drift apart between keystrokes.
+  const soldRowsPending = useMemo(
+    () => (soldPlan ? soldEntries(soldPlan.rows, soldPlan.prices) : []),
+    [soldPlan]
+  );
+  const soldTotals = useMemo(() => soldSummary(soldRowsPending), [soldRowsPending]);
   // The customer's list. Same search, same sort, same rows — projected through
   // showcounter.js so what reaches a stranger's eyes is an allow-list rather
   // than this row with the private bits hidden by CSS.
@@ -497,6 +502,7 @@ export default function ShowDesk() {
   function buildPlan() {
     setMsg("");
     setBackPickerOpen(false);
+    setSoldPlan(null);
     setPlan(planReallocation(selected.length, stacksWithSpace, capacity));
   }
 
@@ -667,51 +673,134 @@ export default function ShowDesk() {
     }
   }
 
-  async function markSold(co) {
-    // Pre-filled with the sticker where there is one: the number on the card is
-    // what was actually asked at the table, so typing it again is a chance to
-    // get it wrong. Still editable — haggling is the norm at a show, and what
-    // goes in the P&L has to be what changed hands, not what was printed.
-    const asked = co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : "";
-    const raw = prompt(
-      `Sold "${co.sku || co.title || "card"}" at the show for £… (leave blank to record without a price)`,
-      asked
-    );
-    if (raw === null) return;
-    const pence = parsePricePence(raw);
-    setBusy(true);
-    setMsg("");
-    const sb = supabase();
+  /**
+   * Sell one card, for good. The one definition — the row buttons and the bulk
+   * bar both come through here, and a second copy would eventually disagree
+   * about whether a listing gets ended.
+   *
+   * Three things happen and none of them can be undone: the stack card is
+   * pulled permanently, the eBay listing is ended so the card can't sell twice,
+   * and the checkout row is closed with what it fetched. Failures are HANDED
+   * BACK rather than thrown: a listing that wouldn't end must not stop the sale
+   * being recorded — the card has physically gone — but it does have to be said
+   * out loud, because the only other place it surfaces is eBay selling a card
+   * you no longer own.
+   */
+  async function soldOne(sb, co, pence) {
     const warnings = [];
+    const label = co.sku || co.title || "card";
 
     if (co.stack_card_id) {
       await sb.from("stack_cards").update({ pulled_at: new Date().toISOString(), checked_out_at: null }).eq("id", co.stack_card_id);
     }
 
     // The listing must go for good. Quantity-hidden or still-live → end it now;
-    // already-ended needs nothing.
-    if (co.ebay_item_id && co.hide_method !== "ended") {
+    // already-ended needs nothing. endsListing() is that rule, shared with the
+    // count on the confirm panel, so what it warned you about is what happens.
+    if (endsListing(co)) {
       try {
         const res = await fetch("/api/ebay/end-listing", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ itemId: co.ebay_item_id })
         }).then((r) => r.json());
-        if (!res.ok) warnings.push(`listing not ended: ${res.error || "unknown error"} — end it on eBay by hand.`);
+        if (!res.ok) warnings.push(`${label}: listing not ended (${res.error || "unknown error"}) — end it on eBay by hand.`);
       } catch {
-        warnings.push("couldn't reach eBay to end the listing — end it by hand.");
+        warnings.push(`${label}: couldn't reach eBay to end the listing — end it by hand.`);
       }
     }
 
-    await sb.from("stock_checkouts").update({
+    const { error } = await sb.from("stock_checkouts").update({
       resolved_at: new Date().toISOString(),
       resolution: "sold",
       sold_price_pence: pence
     }).eq("id", co.id);
+    if (error) {
+      warnings.push(`${label}: the sale wasn't recorded (${error.message}) — the card is pulled and the listing is gone, so mark it sold again.`);
+      return { sold: false, warnings };
+    }
+    return { sold: true, warnings };
+  }
 
+  async function markSold(co) {
+    // Pre-filled with the sticker where there is one: the number on the card is
+    // what was actually asked at the table, so typing it again is a chance to
+    // get it wrong. Still editable — haggling is the norm at a show, and what
+    // goes in the P&L has to be what changed hands, not what was printed.
+    const raw = prompt(
+      `Sold "${co.sku || co.title || "card"}" at the show for £… (leave blank to record without a price)`,
+      stickerText(co)
+    );
+    if (raw === null) return;
+    const { pence, error } = parseOverridePence(raw);
+    if (error) {
+      setMsg(error);
+      return;
+    }
+    setBusy(true);
+    setMsg("");
+    const { sold, warnings } = await soldOne(supabase(), co, pence);
     setBusy(false);
-    setMsg(`Marked ${co.sku || "card"} sold${pence != null ? ` for ${pounds(pence)}` : ""}.${warnings.length ? ` ⚠ ${warnings.join(" ")}` : ""}`);
+    setMsg(soldMessage({ sold: sold ? 1 : 0, priced: sold && pence != null ? 1 : 0, totalPence: pence || 0, warnings }));
     await load();
+  }
+
+  /**
+   * Sell everything in the confirm panel, one card at a time.
+   *
+   * Sequential rather than in parallel, deliberately: each card is an eBay
+   * call, and firing eight at once at a venue's wifi is how half of them time
+   * out. One bad card must not cost the rest of the sale either — the loop
+   * carries on and collects the warnings, the same discipline a batch save
+   * follows over its chunks.
+   */
+  async function markSoldMany() {
+    const entries = soldPlan ? soldEntries(soldPlan.rows, soldPlan.prices) : [];
+    const summary = soldSummary(entries);
+    if (!summary.ok) return;
+    setBusy(true);
+    setMsg("");
+    setSoldPlan(null);
+    const sb = supabase();
+    const warnings = [];
+    let sold = 0;
+    let priced = 0;
+    let totalPence = 0;
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      setProgress(`Selling ${i + 1} of ${entries.length}…`);
+      const res = await soldOne(sb, e.row, e.pence);
+      warnings.push(...res.warnings);
+      if (res.sold) {
+        sold += 1;
+        if (e.pence != null) { priced += 1; totalPence += e.pence; }
+      }
+    }
+    setProgress("");
+    setBusy(false);
+    setMsg(soldMessage({ sold, priced, totalPence, warnings }));
+    await load();
+  }
+
+  /**
+   * Open the confirm panel over what is selected, freezing those rows into it.
+   *
+   * Frozen because the panel is the last thing said before four listings end:
+   * the cards it names are the cards that were on screen when the button was
+   * pressed, and nothing typed into the search behind it can change what
+   * Confirm does.
+   */
+  function buildSoldPlan() {
+    setMsg("");
+    setPlan(null);
+    setBackPickerOpen(false);
+    const rows = selected;
+    if (rows.length === 0) return;
+    setSoldPlan({ rows, prices: soldDraft(rows) });
+  }
+
+  function setSoldPrice(id, text) {
+    setSoldPlan((prev) => (prev ? { ...prev, prices: { ...prev.prices, [id]: text } } : prev));
   }
 
   async function returnOne(co) { await checkin([co], "spot"); }
@@ -938,7 +1027,7 @@ export default function ShowDesk() {
               honest thing to hand somebody at a table that has sold out. */}
           <button
             className={counterMode ? "btn btn-primary" : "btn btn-ghost"}
-            onClick={() => { setCounterMode((v) => !v); setSel(new Set()); }}
+            onClick={() => { setCounterMode((v) => !v); setSel(new Set()); setSoldPlan(null); }}
             title={counterMode
               ? "Back to the desk — the SKUs, the eBay state and the sold/return buttons come back"
               : "Turn the list round to face a customer: pictures, names and prices only"}
@@ -1051,13 +1140,80 @@ export default function ShowDesk() {
                   no card leaves these buttons pointing at an empty set, and a
                   "Return to spots" that quietly does nothing reads as broken. */}
               <div className="ps-actions">
+                {/* The money button, and the only bulk action here that cannot
+                    be undone — so it opens a panel naming every card rather
+                    than acting on the click. */}
+                <button className="btn btn-ghost sd-sold-bulk" onClick={buildSoldPlan} disabled={busy || selCount === 0}>£ Sold ({selCount})</button>
                 <button className="btn btn-primary" onClick={buildPlan} disabled={busy || selCount === 0}>✨ Reallocate ({selCount})</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy || selCount === 0}>↩ Return to spots</button>
-                <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
+                <button className="btn btn-ghost" onClick={() => { setPlan(null); setSoldPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
               </div>
             </div>
             )}
+
+            {soldPlan && !counterMode ? (
+              /* Every card named, with the price it is going to be recorded at.
+                 This is the last screen before the listings end, and there is
+                 no undo behind it — a count on a button ("£ Sold (4)") is not
+                 enough to check that the four are the four on the counter. */
+              <div className="sd-plan sd-soldplan">
+                <div className="sd-plan-head">
+                  <b>Selling {soldTotals.count} card{soldTotals.count === 1 ? "" : "s"}</b>
+                  <span className="hint-small">
+                    {soldTotals.ending > 0
+                      ? `${soldTotals.ending} eBay listing${soldTotals.ending === 1 ? "" : "s"} will be ended`
+                      : "no eBay listings left to end"}
+                    {" · "}pulled for good
+                  </span>
+                </div>
+                <div className="sd-plan-rows">
+                  {soldRowsPending.map((e) => (
+                    <div className="sd-plan-row" key={e.id}>
+                      <span className="stack-sku">{e.row.sku || "—"}</span>
+                      <span className="stack-title">{e.row.title || <em>—</em>}</span>
+                      {/* Pre-filled with the sticker — the number the customer
+                          read off the card — and editable, because a show price
+                          is haggled and the P&L wants what changed hands. */}
+                      <label className="sd-soldprice" title="What this card actually sold for — clear the box to record it without a price">
+                        £
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={e.raw}
+                          onChange={(ev) => setSoldPrice(e.id, ev.target.value)}
+                          placeholder="—"
+                          disabled={busy}
+                        />
+                      </label>
+                      <span className="hint-small" style={{ color: e.error ? "var(--bad-ink)" : "var(--ink-faint)", flex: "none" }}>
+                        {/* Where the number came from, said in one word: a
+                            sticker taken as printed, one haggled at the table,
+                            or one typed onto a card that never had one. */}
+                        {e.error
+                          ? e.error
+                          : e.pence == null ? "no price recorded"
+                          : e.row.sticker_pence == null ? "typed"
+                          : e.row.sticker_pence === e.pence ? "sticker" : "changed"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="hint hint-small" style={{ marginTop: 0 }}>
+                  Takings <b>{poundsStr(soldTotals.totalPence)}</b> from {soldTotals.priced} card{soldTotals.priced === 1 ? "" : "s"}.
+                  {soldTotals.unpriced > 0
+                    ? ` ${soldTotals.unpriced} ${soldTotals.unpriced === 1 ? "card has" : "cards have"} an empty box and ${soldTotals.unpriced === 1 ? "is" : "are"} recorded sold with no price — never as £0, which would quietly pull the day's takings down.`
+                    : ""}
+                  {soldTotals.errors.length > 0 ? " Fix the prices in red before confirming." : ""}
+                </p>
+                <div className="ps-actions">
+                  <button className="btn btn-primary" onClick={markSoldMany} disabled={busy || !soldTotals.ok}>
+                    {busy ? progress || "Selling…" : `Confirm & mark ${soldTotals.count} sold`}
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => setSoldPlan(null)} disabled={busy}>Cancel</button>
+                </div>
+              </div>
+            ) : null}
 
             {plan && !counterMode ? (
               <div className="sd-plan">

@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs thirty-one table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-two table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -100,6 +100,12 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   looks at, that AB2 sorts before AB11 and an unstickered card sorts last in
   both directions, and — the one that costs cards — that a bulk action only
   ever acts on rows that are on screen.
+- `scripts/check-showsold.mjs` — selling several cards at once at the table:
+  that an empty price box is a card sold with NO price rather than one sold for
+  £0, which listings still have to be ended (a quantity-hidden one does), that
+  one unreadable box stops the whole sale instead of letting half of it
+  through, and a grep that there is still only one place in the desk that ends
+  a listing.
 - `scripts/check-showcounter.mjs` — the list turned round to face a customer:
   that the projection is an allow-list rather than a filter, that no private
   value survives it, that a held price asks instead of showing a number, and a
@@ -944,6 +950,24 @@ stranger their card is worth.
   not put through the ladder, because a sticker typed anywhere is the label
   rather than an eBay price. A price overridden on a RESULT is the other thing
   and is laddered like any other — see the override section above.
+- **A customer buys four cards, so £ Sold is a bulk action too.** Ticking rows
+  and pressing **£ Sold** opens a confirm panel over exactly what
+  `selectionFor()` says is on screen — frozen, so nothing typed into the search
+  behind it changes what Confirm does. It is the only bulk action on the desk
+  with no undo (the card is pulled for good and the listing ended), which is
+  why it names every card rather than acting on the click: a count on a button
+  is not enough to check that the four are the four on the counter. **Each card
+  defaults to its own sticker** — the number the customer read — and every one
+  stays editable, because a show price is haggled and the P&L wants what
+  changed hands. **An empty box records a sale with no price, never £0**: a
+  zero is a claim the card was given away and it would drag the takings down
+  where nobody would look. One unreadable box blocks the lot rather than
+  selling the readable rows and leaving you to work out which went through,
+  and a listing that wouldn't end is still a completed sale with a warning
+  against that card's name. `apps/app/lib/showsold.js` owns the rules and
+  `soldOne()` is the single definition both the row button and the bulk bar
+  sell through — two would eventually disagree about ending the listing, which
+  is how a card sells twice.
 - **Stickers are written back on a click, not silently**, onto the checkout
   they came from, matched by SKU rather than row order — the results list gets
   filtered and re-sorted, and a sticker on the wrong card is a card sold for
