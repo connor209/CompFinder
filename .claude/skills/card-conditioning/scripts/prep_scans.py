@@ -89,6 +89,11 @@ BRIGHT_DELTA = 30
 #: nicks, and a corner is where a card is handled.
 CORNER_BOX = 90
 
+#: How deep an edge strip is cut for the edge sheet. A little thicker than the
+#: measured band so there is some card either side of the whitening to judge it
+#: against — a strip cropped exactly to the band gives nothing to compare with.
+EDGE_STRIP = 26
+
 #: WotC-era sets, where a modern swirl back means the scanner paired the wrong
 #: two images. Not a wear check — a "look at this pair before listing" flag.
 VINTAGE_SETS = {
@@ -290,6 +295,56 @@ def corner_sheet(card, path, box=110, scale=6):
     sheet.save(path, quality=94)
 
 
+def edge_sheet(card, path, along=1.9, across=6):
+    """
+    All four edges as flattened strips, outer edge of the card along the top of
+    each.
+
+    An edge cannot be shown the way a corner can. A corner is compact, so it
+    magnifies whole; an edge is 700px long and 20px deep, and at any uniform
+    magnification that fits on screen the whitening is a hairline. So the
+    strips are stretched UNEVENLY — a little along their length, a lot across
+    it. Nothing is lost by that: along the edge the information is positional
+    (where the wear runs), across it there is only how far in the wear reaches.
+
+    This is the view the guide's MP line actually needs. "Consistent
+    full-perimeter back edge wear" is a judgement about the whole run of an
+    edge at once, which no corner crop can show and no single number can
+    settle.
+
+    Every strip is oriented the same way — card edge at the top, interior
+    below — and every strip is drawn to the same width, so the four read as one
+    comparable set rather than four rotations at four scales that the eye has
+    to correct for. The short edges are therefore at slightly more
+    magnification than the long ones, which costs nothing: the question being
+    asked of this sheet is whether wear runs the length of an edge, not how
+    long the edge is.
+
+    What it makes separable, which no number does: a continuous hairline along
+    the very edge is the scanner catching the card, and appears on clean cards
+    too. Wear is DISCRETE — distinct blobs with dark border between them. The
+    guide's "do not describe scanner streaks as scratches" is checkable here
+    rather than a matter of faith.
+    """
+    w, h = card.size
+    C, T = CORNER_BOX, EDGE_STRIP
+    strips = [
+        ("TOP", card.crop((C, 0, w - C, T))),
+        ("BOTTOM", card.crop((C, h - T, w - C, h)).transpose(Image.FLIP_TOP_BOTTOM)),
+        ("LEFT", card.crop((0, C, T, h - C)).transpose(Image.ROTATE_270)),
+        ("RIGHT", card.crop((w - T, C, w, h - C)).transpose(Image.ROTATE_90)),
+    ]
+    out_w = int(max(st.size[0] for _, st in strips) * along)
+    out_h = int(T * across)
+    sheet = Image.new("RGB", (out_w + 60, (out_h + 12) * 4), (255, 255, 255))
+    for i, (name, strip) in enumerate(strips):
+        tile = strip.resize((out_w, out_h), Image.LANCZOS)
+        y = i * (out_h + 12)
+        sheet.paste(tile, (60, y))
+        ImageDraw.Draw(sheet).text((6, y + out_h // 2 - 4), name, fill=(200, 0, 0))
+    sheet.save(path, quality=94)
+
+
 def fetch(url, path, refresh=False):
     """Cached download. A scan that is already on disk is never re-fetched."""
     if os.path.exists(path) and not refresh:
@@ -424,6 +479,7 @@ def main():
         score = score_back(back)
         if not args.no_crops:
             corner_sheet(back, os.path.join(dest, "corners-back.jpg"))
+            edge_sheet(back, os.path.join(dest, "edges-back.jpg"))
 
         rec.update({
             "triage": triage(score),

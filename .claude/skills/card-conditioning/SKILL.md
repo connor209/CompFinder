@@ -46,8 +46,12 @@ python3 scripts/prep_scans.py <export.csv> --out <output-dir>
 About two minutes per hundred cards. Point `--out` at a synced folder (Drive
 for Desktop, Dropbox) if the crops should be available outside this session.
 
-It writes deskewed front and back per card, a four-corner sheet from the back,
+It writes deskewed front and back per card, two review sheets from the back,
 and `triage.csv` — one row per card, **already sorted worst corner first**.
+
+- `corners-back.jpg` — the four corner tips at 6x. Corner nicks.
+- `edges-back.jpg` — the four edges flattened and stretched, outer edge of the
+  card along the top of each strip. Edge whitening along its whole run.
 
 If the run reports `base` values much below 40, or puts nearly everything in
 `likely-worse`, the card-edge detection has missed and the scores mean nothing.
@@ -69,8 +73,22 @@ Read it before opening a single image.
   modern swirl back means the scanner paired the wrong two images. That is a
   hold under the guide, not a grade.
 
-When a card genuinely needs a close look, read the corner sheet first — it is
-one image covering all four corners at 6×, rather than four separate reads.
+When a card genuinely needs a close look, read the two sheets rather than the
+full-size scans — between them they cover every corner and every edge in two
+images instead of eight separate reads.
+
+**The two sheets answer different questions, and the guide asks both.** Corner
+nicks are what the NM line counts ("fewer than three countable wear points").
+Edge wear along a whole run is what the MP line turns on ("consistent
+full-perimeter back edge wear") — which no corner crop can show, because it is
+a judgement about the length of an edge rather than about any point on it.
+
+**On the edge sheet, a continuous hairline right along the outer edge is the
+scanner catching the card, not wear.** It shows up on cards with nothing wrong
+with them. Real edge wear is DISCRETE: distinct blobs with dark border between
+them, and "full-perimeter" means those blobs run the length of several edges.
+Reading the hairline as whitening is the guide's "do not describe scanner
+streaks as scratches" failing in its most tempting form.
 
 ### 4. Grade against the guide
 

@@ -32,10 +32,25 @@ them and the rest do not.
 <out>/cards/<sku>/front.jpg   deskewed, cropped, normalised to 700x980
 <out>/cards/<sku>/back.jpg
 <out>/cards/<sku>/corners-back.jpg   four corner tips at 6x, unenhanced
+<out>/cards/<sku>/edges-back.jpg     four edges flattened, outer edge up
 <out>/triage.csv              one row per card, worst corner first
 ```
 
-About 55MB of crops and 22MB of originals for a hundred cards.
+About 75MB of crops and 22MB of originals for a hundred cards.
+
+The edge sheet exists because an edge cannot be shown the way a corner can. A
+corner is compact and magnifies whole; an edge is 700px long and 20px deep, so
+at any uniform magnification that fits on screen the whitening is a hairline.
+The strips are stretched unevenly — a little along their length, a lot across
+it — which loses nothing, because along an edge the information is positional
+and across it there is only how far in the wear reaches. It is the view the
+guide's MP line needs: "consistent full-perimeter back edge wear" is a
+judgement about a whole edge at once that no corner crop shows and no single
+number settles.
+
+It also separates the one artefact that fools everyone: **a continuous hairline
+along the very edge is the scanner catching the card**, and it appears on clean
+cards too. Wear is DISCRETE — distinct blobs with dark border between them.
 
 `triage.csv` carries the per-corner and per-edge scores, the deskew angle
 applied, the duplicate group, and a `check_back_era` flag for WotC-era sets.
