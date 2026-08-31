@@ -71,6 +71,7 @@ one redundant revision per listing.
 | The queue, the desired state, the reconcile, the pull plan | `apps/app/lib/copyqueue.js` |
 | 24 table cases over all of it | `scripts/check-copyqueue.mjs`, in `npm run check` |
 | The picture + quantity revision | `reviseFixedPriceListing()` in `apps/app/lib/ebay.js` |
+| Reading what pictures a listing already has | `fetchListingPictures()` in `apps/app/lib/ebay.js` |
 | `copy_seq`, `scan_url`, `listing_copy_state` | `supabase/migrations/027_listing_copies.sql` |
 | The pull sheet, now correct for multi-copy listings | `apps/app/app/panel/PullSheet.js` |
 | Dry-run and one-listing apply | `scripts/copyqueue-run.mjs` |
@@ -137,6 +138,29 @@ copy is pictured and next to pull, and what it would change.
 `--apply` requires `--item`, and a whole-inventory apply is not offered. The
 first live test is one listing you chose.
 
+It prints the full revision — quantity, and every picture URL in the order they
+will appear — and waits for you to type `yes`. That is not ceremony: a picture
+change cannot be undone by re-running, because eBay caches by URL, so putting
+the old photograph back needs the old URL and a second revision against an
+allowance nobody can see the size of. `--yes` skips the question for an
+unattended run; with no terminal to ask on and no `--yes`, nothing is sent.
+
+**`PictureURL` replaces the listing's WHOLE picture set**, so before sending,
+the script reads what the listing currently has (`GetItem`) and sends the other
+photographs back with the new scan — otherwise the first rotation deletes the
+back-of-card shot from a live listing, where nobody can put it back. The rule
+for which one is being replaced is `extrasFromListingPictures()`, and it is
+**position 1, always**: we send the scan at the head, so on a listing this has
+already revised, picture 1 *is* the previous copy's scan, and carrying that
+forward would stack every copy's scan onto the listing one per sale. On a
+listing never revised, picture 1 is the card front the scan is replacing on
+purpose. `check-copyqueue.mjs` pins three rotations of it.
+
+If that read fails the script sends **nothing** and says so, rather than
+falling back to the scan alone — a source that could not answer must not look
+like a listing with no other pictures. `--no-extras` is the explicit way to say
+the other photographs really should go.
+
 **7. Then look at the listing page**, because none of the next part is visible
 from the API:
 
@@ -164,6 +188,14 @@ position; after Commit, the script should propose quantity 2 and copy 2's scan.
   needs a host switch, a separate keyset and sandbox seller *and* buyer
   accounts — a day's work to answer one question that one live listing answers
   for the price of a cheap card.
+- **Whether eBay accepts its own rehosted URLs back.** Keeping the other
+  photographs means sending `i.ebayimg.com/…` URLs — the ones GetItem just
+  handed us — straight back in `PictureURL`. eBay generally takes its own EPS
+  URLs and keeps the picture in place, but "generally" is again not something
+  to build on, and the failure would be quiet: a listing that comes back with
+  fewer pictures than it went in with. **Count the pictures on the listing page
+  after step 6**, before and after, and note whether the kept ones survived. It
+  is the first thing to check and the cheapest.
 - **eBay's revision allowance.** Not documented usefully and not observable
   from sandbox. One rotation per sale is a low rate; it is worth watching the
   first time a listing turns over quickly.

@@ -7,7 +7,23 @@
  *   … EBAY_CLIENT_ID=… EBAY_CLIENT_SECRET=… \
  *     node scripts/copyqueue-run.mjs --item 1234567890 --apply
  *
- * **Dry by default, and `--apply` needs `--item`.** The first live test of this
+ *   --yes         send without asking (for an unattended run; stdin is not a
+ *                 terminal there, so without it nothing is sent)
+ *   --no-extras   send the scan as the listing's only picture, accepting that
+ *                 every other photograph on it is deleted
+ *
+ * **Dry by default, `--apply` needs `--item`, and an apply says what it is
+ * about to send and waits to be told to send it.** A picture revision is not
+ * undone by re-running: eBay caches by URL, so putting the old photograph back
+ * needs the old URL and a second revision. A printed diff and a typed "yes" is
+ * cheap against that.
+ *
+ * **The revision replaces the listing's WHOLE picture set**, so before sending
+ * one this reads the listing's current pictures (GetItem) and sends the others
+ * back with the new scan. If that read fails it sends NOTHING, because the
+ * alternative is deleting photographs nobody can put back.
+ *
+ * **`--apply` needs `--item`.** The first live test of this
  * is one listing you chose, not every listing you happen to hold two of. A
  * whole-inventory apply is not offered at all — when there is a screen for
  * this, it can offer one; a script run from a terminal at the end of a long
@@ -29,10 +45,14 @@
  * carries your SKUs and stack positions.
  */
 import { createClient } from "@supabase/supabase-js";
+import { createInterface } from "node:readline/promises";
 import {
-  queuesByListing, desiredStateFor, reconcile, loadCopyState, recordPictured
+  queuesByListing, desiredStateFor, reconcile, loadCopyState, recordPictured,
+  extrasFromListingPictures
 } from "../apps/app/lib/copyqueue.js";
-import { getValidUserAccessToken, reviseFixedPriceListing } from "../apps/app/lib/ebay.js";
+import {
+  getValidUserAccessToken, reviseFixedPriceListing, fetchListingPictures
+} from "../apps/app/lib/ebay.js";
 
 const args = process.argv.slice(2);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -42,6 +62,11 @@ const APPLY = args.includes("--apply");
 // Copies of one card that are not (yet) on a shared listing are the ordinary
 // single-card case and there are thousands of them. --all shows those too.
 const ALL = args.includes("--all");
+const YES = args.includes("--yes");
+// The escape hatch for a listing whose other pictures genuinely should go, and
+// for the case where GetItem will not answer and the rotation matters more.
+// Explicit on purpose: the default must be the one that cannot lose anything.
+const NO_EXTRAS = args.includes("--no-extras");
 
 if (APPLY && !ITEM) {
   console.error("--apply needs --item <ebay item id>. Run it dry first, pick one listing, then apply to that.");
@@ -68,6 +93,51 @@ async function all(table, select = "*") {
 }
 
 const money = (l) => (l?.price_value != null ? `£${Number(l.price_value).toFixed(2)}` : "—");
+
+/**
+ * Say exactly what is about to be sent, and wait to be told to send it.
+ *
+ * Everything else in this repo that spends something is either reversible or
+ * cheap. This is neither: the revision goes to a listing buyers are looking at
+ * right now, and a picture change cannot be undone by re-running, because eBay
+ * caches by URL — putting the old photograph back needs the old URL and a
+ * second revision against an allowance nobody can see the size of.
+ *
+ * It prints the FULL picture list rather than a count, because the failure this
+ * guards against is a set of one: the scan on its own, with the back of the
+ * card gone. That is invisible in "pictures → 1" and obvious in a list.
+ *
+ * With no terminal to ask on it returns false rather than proceeding. An
+ * unattended run that meant to send says so with --yes.
+ */
+async function confirm(itemId, listing, plan) {
+  console.log("\n  About to send to eBay:");
+  console.log(`    item ${itemId} — ${listing?.title || "(not in ebay_listings)"}`);
+  console.log(plan.changes.quantity != null
+    ? `    quantity → ${plan.changes.quantity}`
+    : "    quantity → unchanged");
+  if (plan.changes.pictureUrls) {
+    console.log(`    pictures → these ${plan.changes.pictureUrls.length}, replacing the whole set, in this order:`);
+    plan.changes.pictureUrls.forEach((u, i) => {
+      console.log(`      ${i + 1}. ${u}${i === 0 ? "   ← this copy's scan" : ""}`);
+    });
+  } else {
+    console.log("    pictures → unchanged");
+  }
+
+  if (YES) { console.log("  (--yes given, not asking)\n"); return true; }
+  // Non-zero, unlike a typed "no": that is a person deciding, this is a run
+  // that cannot decide at all, and a wrapper should hear about it rather than
+  // read a clean exit as a listing that was revised.
+  if (!process.stdin.isTTY) {
+    console.error("  ✗ no terminal to ask on, so nothing was sent. Re-run with --yes if you meant this unattended.\n");
+    process.exit(1);
+  }
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = (await rl.question("  Send it? (type yes) ")).trim().toLowerCase();
+  rl.close();
+  return answer === "yes";
+}
 
 async function main() {
   const [cards, listings] = await Promise.all([all("stack_cards"), all("ebay_listings")]);
@@ -122,7 +192,15 @@ async function main() {
     for (const r of plan.reasons) console.log(`  · ${r}`);
     for (const b of plan.blocked) console.log(`  ! ${b}`);
 
-    if (!APPLY) { console.log("  (dry run — nothing sent)\n"); continue; }
+    if (!APPLY) {
+      // Said here rather than left to be discovered at apply time, because it
+      // is the reason a dry run's picture count and an apply's can differ.
+      if (plan.changes.pictureUrls && !NO_EXTRAS) {
+        console.log("  · the listing's other photographs are read from eBay at apply time and sent back with it");
+      }
+      console.log("  (dry run — nothing sent)\n");
+      continue;
+    }
 
     // --- apply, one listing, on purpose ------------------------------------
     let userId = USER;
@@ -135,18 +213,40 @@ async function main() {
     const token = await getValidUserAccessToken(sb, userId);
     if (!token) { console.error("  ✗ could not get an eBay token for that account — reconnect it in the app.\n"); process.exit(1); }
 
+    // The revision replaces the WHOLE picture set, so anything else on the
+    // listing — the back of the card, a condition shot — has to be sent back
+    // with the new scan or it is deleted. Read here rather than in the dry run
+    // so that a dry run still needs nothing but the Supabase pair.
+    let send = plan;
+    if (plan.changes.pictureUrls && !NO_EXTRAS) {
+      let current;
+      try {
+        current = await fetchListingPictures(token, itemId);
+      } catch (err) {
+        console.error(`  ✗ could not read the listing's current pictures: ${err?.message || err}`);
+        console.error("    Nothing sent. Sending now would replace the picture set with this scan alone,");
+        console.error("    deleting every other photograph on the listing. Retry, or --no-extras to accept that.\n");
+        process.exit(1);
+      }
+      const extras = extrasFromListingPictures(current);
+      send = reconcile(desiredStateFor(itemId, cards, { extras }), listing || {}, state.state.get(itemId) || null);
+      console.log(`  · ${extras.length} other picture(s) on the listing, kept`);
+    }
+
+    if (!(await confirm(itemId, listing, send))) { console.log("  — not sent.\n"); continue; }
+
     const res = await reviseFixedPriceListing(token, itemId, {
-      imageUrls: plan.changes.pictureUrls || null,
-      quantity: plan.changes.quantity ?? null
+      imageUrls: send.changes.pictureUrls || null,
+      quantity: send.changes.quantity ?? null
     });
     console.log(`  ✓ eBay accepted it (${res.ack})${res.warning ? ` — warning: ${res.warning}` : ""}`);
 
     // Recorded AFTER eBay accepts, never before: a state row claiming a picture
     // that was never set stops the reconcile proposing the one change still
     // needed, and stops it quietly.
-    if (plan.changes.pictureUrls && head) {
+    if (send.changes.pictureUrls && head) {
       const rec = await recordPictured(sb, {
-        itemId, copyId: head.id, pictureUrl: plan.changes.pictureUrls[0], userId
+        itemId, copyId: head.id, pictureUrl: send.changes.pictureUrls[0], userId
       });
       if (rec.missing) console.log("  ! migration 027 is not applied, so this revision is not recorded — the next run will propose it again.");
       else if (!rec.ok) console.log(`  ! could not record which copy is pictured: ${rec.error}`);

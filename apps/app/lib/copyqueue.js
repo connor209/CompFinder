@@ -180,6 +180,43 @@ export function pictureUrlsFor(head, extras = []) {
 }
 
 /**
+ * The pictures already on a listing that are NOT the copy scan, in order.
+ *
+ * `PictureURL` replaces the WHOLE set, so a revision carrying only the head
+ * copy's scan silently deletes every other photograph the listing had — the
+ * back of the card, a condition shot, a scale reference. Those have to be sent
+ * back with it, which means knowing which of the listing's current pictures is
+ * the one being replaced.
+ *
+ * **It is the first one, always, and by construction rather than by luck.**
+ * `pictureUrlsFor` puts the scan at the head, so on any listing this has
+ * already revised, picture 1 IS the previous copy's scan — carrying that
+ * forward would leave two copies' scans on one listing, which is the thing
+ * `pictureUrlsFor` exists to prevent. On a listing never revised, picture 1 is
+ * whatever the card front was, which the scan is replacing on purpose. Either
+ * way position 1 is the copy-scan slot and 2..n are auxiliary, and what we send
+ * puts it back that way — so the rule holds on the fiftieth rotation as well as
+ * the first.
+ *
+ * Position is the ONLY handle there is. eBay rehosts every upload, so a
+ * listing's pictures come back as `i.ebayimg.com/…` and match nothing we sent;
+ * there is no URL comparison to make and no metadata to read.
+ *
+ * Deduplicated BEFORE the head is dropped, so a listing that carries the same
+ * URL at positions 1 and 2 cannot hand that copy back as an "extra" and end up
+ * showing the old scan beside the new one.
+ */
+export function extrasFromListingPictures(pictures) {
+  const seen = [];
+  for (const p of pictures || []) {
+    const s = p == null ? "" : String(p).trim();
+    if (!s || seen.includes(s)) continue;
+    seen.push(s);
+  }
+  return seen.slice(1);
+}
+
+/**
  * What one listing SHOULD look like, given the cards still in the box.
  *
  * Pure, and derived entirely from present state — that is what makes running

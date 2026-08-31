@@ -494,6 +494,64 @@ export async function reviseFixedPriceListing(accessToken, itemId, { imageUrls =
   return { ok: true, ack: resp.Ack, warning, pictures: pics.length, quantity: qty };
 }
 
+/**
+ * A listing's current pictures, in display order (Trading API GetItem).
+ *
+ * Needed only because `PictureURL` REPLACES the whole set: to change one
+ * picture without dropping the others, you have to know what the others are.
+ * Nothing we hold can say. `ebay_listings` stores the gallery shot alone, and
+ * eBay rehosts every upload, so even that is an `i.ebayimg.com` URL matching
+ * nothing we ever sent.
+ *
+ * `OutputSelector` holds the response down to the one field — GetItem returns
+ * the entire listing otherwise, and this is called on the path that is already
+ * about to revise it.
+ *
+ * **It THROWS on failure and never returns an empty list**, which is the whole
+ * point of the function. A source that could not answer must not be
+ * indistinguishable from a listing that genuinely has no other pictures: the
+ * caller would send the scan alone and delete them. Same rule the image
+ * backfill follows, and here the cost of getting it wrong is a photograph
+ * nobody can put back.
+ */
+export async function fetchListingPictures(accessToken, itemId) {
+  const safeItem = String(itemId).replace(/[^0-9]/g, "");
+  if (!safeItem) throw new Error("Invalid item id.");
+
+  const body =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
+    `<ItemID>${safeItem}</ItemID>` +
+    `<OutputSelector>Item.PictureDetails.PictureURL</OutputSelector>` +
+    `</GetItemRequest>`;
+
+  const res = await fetch(TRADING_URL, {
+    method: "POST",
+    headers: {
+      "X-EBAY-API-CALL-NAME": "GetItem",
+      "X-EBAY-API-SITEID": SITE_ID_UK,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
+      "X-EBAY-API-IAF-TOKEN": accessToken,
+      "Content-Type": "text/xml"
+    },
+    body
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`Could not read the listing's pictures (${res.status}).`);
+
+  const doc = parser.parse(text);
+  const resp = doc?.GetItemResponse || {};
+  if (resp.Ack !== "Success" && resp.Ack !== "Warning") {
+    const errs = resp.Errors;
+    const msg = Array.isArray(errs) ? errs[0]?.LongMessage : errs?.LongMessage;
+    throw new Error(msg || "eBay would not say what pictures the listing has.");
+  }
+  const urls = resp?.Item?.PictureDetails?.PictureURL;
+  return (Array.isArray(urls) ? urls : urls == null ? [] : [urls])
+    .map((u) => String(u || "").trim())
+    .filter(Boolean);
+}
+
 function escapeXml(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;")

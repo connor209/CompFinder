@@ -14,7 +14,8 @@
  */
 import {
   queueFor, queuesBySku, queuesByListing, pictureUrlsFor, desiredStateFor,
-  reconcile, pullPlanFor, isSellableCopy, isMissingSchema, MAX_PICTURES
+  reconcile, pullPlanFor, isSellableCopy, isMissingSchema, MAX_PICTURES,
+  extrasFromListingPictures
 } from "../apps/app/lib/copyqueue.js";
 
 let failures = 0;
@@ -210,6 +211,35 @@ ok("a missing table reads as a pending migration", isMissingSchema({ code: "42P0
 ok("so does a missing column", isMissingSchema({ code: "42703" }));
 ok("so does PostgREST's schema cache", isMissingSchema({ message: "Could not find the 'scan_url' column in the schema cache" }));
 ok("an ordinary failure is not one", !isMissingSchema({ message: "network unreachable" }));
+
+// --- 11. the listing's OTHER photographs survive a rotation ---------------
+// PictureURL replaces the whole set, so a revision carrying the scan alone
+// deletes the back-of-card shot — and deletes it from a live listing, where
+// nobody can put it back. Position 1 is the copy-scan slot; 2..n are kept.
+const EB = (n) => `https://i.ebayimg.com/${n}.jpg`;
+eq("the first picture is the slot the scan replaces; the rest are kept, in order",
+  extrasFromListingPictures([EB("front"), EB("back"), EB("corner")]),
+  [EB("back"), EB("corner")]);
+eq("a listing with one picture has no extras to keep",
+  extrasFromListingPictures([EB("front")]), []);
+eq("no pictures at all is not a crash", extrasFromListingPictures(null), []);
+eq("blanks are not pictures", extrasFromListingPictures([EB("front"), "", null, "  "]), []);
+eq("a duplicated head cannot come back as an extra beside the new scan",
+  extrasFromListingPictures([EB("a"), EB("a"), EB("b")]), [EB("b")]);
+
+// The property that has to hold on the FIFTIETH rotation, not just the first.
+// What we send puts the scan back at position 1, so the next rotation drops
+// the scan it is replacing and keeps exactly the same extras — rather than
+// stacking every copy's scan onto the listing, one per sale.
+const sent1 = pictureUrlsFor(copy(1), extrasFromListingPictures([EB("front"), EB("back")]));
+eq("the scan leads and the kept pictures follow",
+  sent1, ["https://store.example/scan-1.jpg", EB("back")]);
+const sent2 = pictureUrlsFor(copy(2), extrasFromListingPictures(sent1));
+eq("the next copy replaces the scan and never stacks a second one",
+  sent2, ["https://store.example/scan-2.jpg", EB("back")]);
+const sent3 = pictureUrlsFor(copy(3), extrasFromListingPictures(sent2));
+eq("and again, so the set never grows",
+  sent3, ["https://store.example/scan-3.jpg", EB("back")]);
 
 if (failures) {
   console.error(`\ncheck-copyqueue: ${failures} failure(s).`);
