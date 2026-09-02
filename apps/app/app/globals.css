@@ -914,6 +914,136 @@ html, body { overflow-x: clip; max-width: 100%; }
   .sd-scope .sd-counter-row .stack-title { flex:1 1 auto; min-width:0; }
   .sd-scope .sd-counter-row .sd-price { flex:none; margin-left:auto; white-space:nowrap; }
 }
+/* The digital binder — the same show stock, nine to a page.
+
+   Counter mode is a list, which is the right shape for answering "have you got
+   any gengars" and the wrong shape for what people actually do at a table:
+   flip through a binder and point. The frame is not decoration — a grid of
+   pictures is a grid of pictures, and a binder is a thing somebody recognises
+   and knows how to use without being told. */
+/* A binder page has to FIT. Nine pockets you have to scroll past is a list
+   with a frame drawn round it — the whole reason for paging is that a page is
+   a thing you take in at once. A page is three pockets tall and each is 7/5 of
+   its own width plus a label, so the width that fits a given height is a bit
+   under half of it; capped at 620px so it stays a binder rather than a wall on
+   a big monitor, and floored so a short landscape phone doesn't shrink it to
+   nothing. */
+.bn-wrap { display:flex; flex-direction:column; gap:10px; width:100%;
+  max-width:max(300px, min(620px, 46vh)); margin:0 auto; }
+.bn-frame { position:relative; border:1px solid var(--line-strong); border-radius:var(--radius);
+  background:var(--surface-2); box-shadow:var(--shadow-1) inset; padding:14px 14px 14px 30px;
+  /* The gesture is horizontal, so the browser keeps the vertical scroll and we
+     never have to preventDefault() a drag that turned out to be reading. */
+  touch-action:pan-y; user-select:none; }
+/* The rings. A spine down the left, drawn rather than pictured — it costs
+   nothing to load and it is what makes the frame read as a binder at a glance. */
+.bn-rings { position:absolute; left:11px; top:16px; bottom:16px; width:8px; border-radius:4px;
+  background:repeating-linear-gradient(to bottom, var(--line-strong) 0 10px, transparent 10px 26px); }
+/* Three across, three down, always. A fixed count is what makes a page NUMBER
+   mean anything: "it's on page four" has to be true on the phone in your
+   pocket and the tablet on the table. */
+.bn-page { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.bn-pocket { position:relative; border-radius:8px; background:var(--surface);
+  border:1px solid var(--line); display:flex; flex-direction:column; overflow:hidden; }
+/* An empty pocket needs no height of its own: a grid item stretches to its
+   row, and every row is sized by the pockets that do have a card in them. */
+.bn-pocket-empty { border-style:dashed; background:transparent; }
+.bn-card { padding:0; font:inherit; color:inherit; text-align:left; cursor:pointer; }
+.bn-card:hover { border-color:var(--accent); }
+.bn-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+/* The card shape is on the ART, and the label below it is a FIXED height.
+   Both halves of that matter: with the ratio on the pocket, a two-line name or
+   a wrapped "Ask at the table" pushes one pocket taller than its neighbours
+   and the page stops reading as a grid at all — which is what it did.
+   `contain` rather than `cover` because a gallery shot that gets cropped to
+   fill is a card with its edges cut off, and the edges are what somebody is
+   looking at the picture to see. */
+.bn-art { flex:none; width:100%; aspect-ratio:5/7; object-fit:contain; background:var(--surface-sink); }
+.bn-noart { display:flex; align-items:center; justify-content:center; background:transparent;
+  border-bottom:1px dashed var(--line-strong); color:var(--ink-faint); font-family:var(--font-body); font-size:11px; }
+/* Several copies, one pocket — said out loud, because a customer who wants two
+   should be able to ask for two. */
+.bn-copies { position:absolute; top:5px; right:5px; padding:1px 6px; border-radius:999px;
+  background:color-mix(in srgb, var(--ink) 72%, transparent); color:#fff;
+  font-family:var(--font-mono); font-size:11px; font-weight:700; }
+/* The height is the sum of the line boxes below it, not a round number that
+   looked about right: every one of these is pinned in px because a label an
+   inch too short does not overflow, it cuts a card's collector number in half
+   — and the number is the half that tells two printings apart. */
+.bn-label { flex:none; height:55px; overflow:hidden; display:flex; flex-direction:column; gap:1px;
+  padding:5px 7px; border-top:1px solid var(--line); background:var(--surface); }
+.bn-name { font-size:11px; font-weight:600; line-height:14px; height:28px; color:var(--ink);
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.bn-price { font-family:var(--font-mono); font-size:12.5px; font-weight:700; line-height:16px;
+  color:var(--conf-high); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* An ask is a label, not a figure — the same rule the counter list follows, so
+   it does not read as a price beside the pockets that carry one. */
+.bn-price-ask { font-family:var(--font-body); font-size:10.5px; font-weight:600; line-height:16px; color:var(--ink-soft); letter-spacing:0; }
+.bn-blank { margin:28px 0; text-align:center; }
+.bn-nav { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.bn-turn { font-size:17px; line-height:1; padding:8px 16px; flex:none; }
+.bn-pageno { display:flex; flex-direction:column; align-items:center; gap:1px; text-align:center;
+  font-size:13px; font-weight:600; color:var(--ink); min-width:0; }
+.bn-pageno .hint-small { margin:0; font-weight:400; }
+.bn-hint { margin:0; text-align:center; }
+/* The card, opened. Picture on the left, what we know about it on the right. */
+.bn-preview { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+  padding:20px; background:rgba(0,0,0,.86); }
+.bn-preview-inner { display:flex; gap:22px; align-items:flex-start; width:100%; max-width:900px; max-height:88vh; }
+/* The art column holds its share whether or not the picture loads. Allowed to
+   shrink, a photo eBay fails to serve collapses it to nothing and the details
+   slide into the middle of the screen — which looks like a different screen
+   rather than a missing picture. */
+.bn-preview-art { flex:0 0 42%; display:flex; align-items:center; justify-content:center; }
+.bn-preview-art img { width:100%; max-height:80vh; object-fit:contain; border-radius:8px; }
+.bn-preview-info { flex:1 1 auto; min-width:0; max-height:80vh; overflow-y:auto; color:#fff; }
+.bn-preview-name { margin:0 0 6px; font-size:22px; line-height:1.2; color:#fff; }
+.bn-preview-cond { margin:0 0 10px; font-family:var(--font-body); font-size:14px; color:rgba(255,255,255,.72); }
+.bn-preview-price { margin:0; font-family:var(--font-mono); font-size:30px; font-weight:700; color:#fff; }
+/* Scoped to the HEADLINE. Left as `.bn-preview .bn-price-ask` it also caught
+   the copy rows, and an "Ask at the table" set at headline size shouted over
+   the £25 and £30 beside it — the exact inversion the counter list's own ask
+   rule exists to prevent. */
+.bn-preview-price.bn-price-ask { font-family:var(--font-body); font-size:18px; font-weight:600; color:rgba(255,255,255,.8); }
+.bn-copy-price.bn-price-ask { font-family:var(--font-body); font-size:12.5px; font-weight:600; color:rgba(255,255,255,.62); }
+.bn-preview-count { margin:8px 0 12px !important; color:rgba(255,255,255,.6) !important; }
+.bn-copylist { display:flex; flex-direction:column; gap:2px; border-top:1px solid rgba(255,255,255,.18); }
+.bn-copy { display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid rgba(255,255,255,.1); }
+.bn-copy-n { flex:none; font-family:var(--font-mono); font-size:12px; color:rgba(255,255,255,.5); min-width:24px; }
+.bn-copy-cond { flex:1 1 auto; min-width:0; font-family:var(--font-body); font-size:13.5px; color:rgba(255,255,255,.85); }
+.bn-copy-price { flex:none; font-family:var(--font-mono); font-size:14px; font-weight:700; color:#fff; }
+.bn-copy .sd-locate { background:rgba(255,255,255,.08); border-color:rgba(255,255,255,.28); color:#fff; }
+.bn-noart-big { display:block; padding:60px 20px; text-align:center; border:1px dashed rgba(255,255,255,.3);
+  border-radius:8px; color:rgba(255,255,255,.6); font-family:var(--font-body); font-size:14px; }
+.bn-close { position:absolute; top:14px; right:16px; width:38px; height:38px; border-radius:999px;
+  border:1px solid rgba(255,255,255,.3); background:rgba(0,0,0,.4); color:#fff; font-size:22px; line-height:1; cursor:pointer; }
+.bn-close:hover { background:rgba(255,255,255,.14); }
+@media (max-width: 720px) {
+  .bn-frame { padding:10px 10px 10px 24px; }
+  .bn-rings { left:8px; width:6px; }
+  .bn-page { gap:7px; }
+  .bn-label { height:50px; padding:4px 5px; }
+  .bn-name { font-size:10px; line-height:13px; height:26px; }
+  .bn-price { font-size:11.5px; line-height:15px; }
+  /* A pocket on a phone is about 90px across. "Ask at the table" has to FIT
+     that: truncated to "Ask at the …" it reads as a bug rather than a label,
+     and it is the one thing on the page that has to be understood by somebody
+     who did not write it. Smaller is fine — an ask was never a figure. */
+  .bn-price-ask { font-size:9.5px; line-height:15px; letter-spacing:-.1px; }
+  /* The picture goes above the details rather than beside them: 42% of a phone
+     is a card too small to be worth opening, which is the one thing this
+     screen is for. */
+  .bn-preview { padding:12px; }
+  .bn-preview-inner { flex-direction:column; gap:12px; overflow-y:auto; }
+  .bn-preview-art { flex:none; width:100%; }
+  /* Small enough that the copies and their prices are on screen with the
+     card, rather than below the fold of a dialog nobody expects to scroll. */
+  .bn-preview-art img { max-height:36vh; }
+  .bn-preview-info { max-height:none; overflow:visible; }
+  .bn-preview-name { font-size:18px; }
+  .bn-preview-price { font-size:24px; }
+}
+
 /* Recommended show stock leads with the SKU, so the position sits BEHIND a
    chip whose width varies with the SKU ("A5" vs "AB123"). Without a floor on
    the chip the positions come out ragged, and a column of numbers you cannot

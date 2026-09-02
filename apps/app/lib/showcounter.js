@@ -119,12 +119,25 @@ export function conditionOf(source) {
  * route that must not cost a request per row.
  *
  * A URL that doesn't match the pattern is returned unchanged: a smaller
- * picture is a worse view, a broken one is no view at all.
+ * picture is a worse view, a broken one is no view at all. One definition of
+ * that filename rule, because a second copy of it in the binder would be a
+ * second thing to fix the day eBay changes the CDN.
  */
-export function largeImage(url) {
+export function imageAt(url, px) {
   const u = String(url || "").trim();
   if (!u) return null;
-  return /\/s-l\d+\.(jpe?g|png|webp)/i.test(u) ? u.replace(/\/s-l\d+\./i, "/s-l1600.") : u;
+  const size = Math.round(Number(px));
+  if (!Number.isFinite(size) || size <= 0) return u;
+  return /\/s-l\d+\.(jpe?g|png|webp)/i.test(u) ? u.replace(/\/s-l\d+\./i, `/s-l${size}.`) : u;
+}
+
+/**
+ * The same picture, as big as eBay serves it. The one size the counter list
+ * asks for; the binder asks for a middle one through imageAt() rather than
+ * writing the filename rule out a second time.
+ */
+export function largeImage(url) {
+  return imageAt(url, 1600);
 }
 
 /**

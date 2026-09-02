@@ -16,6 +16,10 @@ import {
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
 import { counterView, onlineMatches, inBoxSkus } from "@/lib/showcounter.js";
+import {
+  binderView, clampPage, turnPage, swipeDirection, copyLocations,
+  BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS
+} from "@/lib/binder.js";
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 import { probePoolName } from "@/lib/batch-store";
 import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
@@ -81,10 +85,26 @@ export default function ShowDesk() {
   const [stackFilter, setStackFilter] = useState("");
   const [stickerFilter, setStickerFilter] = useState("any");
   const [listingFilter, setListingFilter] = useState("any");
-  // Counter mode — the list turned round to face a customer. NOT persisted,
-  // for the same reason the search isn't: coming back tomorrow to a desk that
-  // is still in customer mode hides every button you need and looks broken.
-  const [counterMode, setCounterMode] = useState(false);
+  // Which of the three screens this is: the desk, the counter LIST, or the
+  // binder. NOT persisted, for the same reason the search isn't: coming back
+  // tomorrow to a desk that is still facing a customer hides every button you
+  // need and looks broken.
+  //
+  // One value rather than two booleans, because two booleans have a fourth
+  // state that means nothing and a screen that renders both lists at once is
+  // exactly the sort of thing that ships.
+  const [mode, setMode] = useState("desk");
+  // The binder's own controls. Its sort is separate from the desk's because
+  // they order different things — see BINDER_SORTS in lib/binder.js, which
+  // sorts POCKETS after the copies have been folded into them.
+  const [binderPage, setBinderPage] = useState(0);
+  const [binderSort, setBinderSort] = useState(DEFAULT_BINDER_SORT);
+  const [binderPrice, setBinderPrice] = useState("any");
+  const [binderCard, setBinderCard] = useState(null); // the pocket opened big
+  // Which copies have had their place revealed, by id. Same rule as the online
+  // rows' locations: never before a tap, because a SKU and a stack name say
+  // how deep the stock runs to somebody who may be holding the tablet.
+  const [binderWhere, setBinderWhere] = useState(new Set());
   const [images, setImages] = useState(new Map()); // sku -> eBay photo of THIS copy
   const [listings, setListings] = useState([]);    // live eBay stock, for the counter
   const [stackCards, setStackCards] = useState([]); // every unpulled card, for locating one
@@ -112,6 +132,14 @@ export default function ShowDesk() {
   const [plan, setPlan] = useState(null); // proposed reallocation, awaiting confirm
   const profileSettings = useRef({});
   const router = useRouter();
+
+  // `counterMode` is the LIST facing a customer and `binderMode` is the
+  // binder; `customerMode` is the question every piece of desk chrome asks —
+  // is anybody but us looking at this? Gating that chrome on `counterMode`
+  // alone is how a `£ Sold` button ends up on the binder screen.
+  const counterMode = mode === "counter";
+  const binderMode = mode === "binder";
+  const customerMode = counterMode || binderMode;
 
   const supabase = () => createClient();
 
@@ -386,6 +414,28 @@ export default function ShowDesk() {
     }, { images }),
     [open, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter, images]
   );
+  // The same stock, nine to a page. Built from `open` rather than from
+  // `visible`, for the same reason the counter list is: what reaches a
+  // stranger's eyes is an allow-list built key by key in lib/binder.js, never
+  // a desk row with the private parts hidden by CSS.
+  const binder = useMemo(
+    () => binderView(open, { query: q, sort: binderSort, price: binderPrice }, { images }),
+    [open, q, binderSort, binderPrice, images]
+  );
+  // A page that still exists, however the search just changed under it.
+  const binderAt = clampPage(binderPage, binder.pageCount);
+  // Every checkout row by id, so a pocket can be resolved back to the desk's
+  // own data on a tap. The pocket carries an id and nothing else — see
+  // copyLocations() in lib/binder.js for why that is the whole point.
+  const rowsById = useMemo(() => {
+    const m = new Map();
+    for (const co of open) if (co?.id != null) m.set(String(co.id), co);
+    return m;
+  }, [open]);
+  const binderPlaces = useMemo(
+    () => new Map(copyLocations(binderCard, { rowsById }).map((f) => [f.id, f.location])),
+    [binderCard, rowsById]
+  );
   const wantGroups = useMemo(() => wantsSummary(wants), [wants]);
   // Stock that is listed online and not in the box. Only ever on a search, and
   // never a card already in the list above it — see onlineMatches().
@@ -410,6 +460,72 @@ export default function ShowDesk() {
     const sku = skuByListingId.get(String(rowId));
     return sku ? locations.get(sku) || null : null;
   }
+  function turnBinder(dir) {
+    setBinderPage((cur) => turnPage(cur, dir, binder.pageCount));
+  }
+  /**
+   * A thumb across the binder.
+   *
+   * The touch start is a ref rather than state: it changes on every frame of a
+   * drag, and re-rendering nine card images while somebody is mid-swipe is how
+   * the gesture comes out juddery on the tablet it exists for.
+   *
+   * The direction is decided by swipeDirection(), which refuses anything
+   * mostly vertical — the binder sits in a page you scroll, and a page that
+   * turns under a customer's thumb while they are reading is unusable.
+   */
+  const touchAt = useRef(null);
+  function binderTouchStart(e) {
+    const t = e.touches?.[0];
+    touchAt.current = t ? { x: t.clientX, y: t.clientY } : null;
+  }
+  function binderTouchEnd(e) {
+    const from = touchAt.current;
+    const t = e.changedTouches?.[0];
+    touchAt.current = null;
+    if (!from || !t) return;
+    const dir = swipeDirection(t.clientX - from.x, t.clientY - from.y);
+    if (dir) turnBinder(dir);
+  }
+  function openPocket(card) {
+    setBinderCard(card);
+    // Every preview starts closed. A reveal is per copy and per opening: it is
+    // the one piece of desk data on this screen, and it should cost a tap
+    // every time rather than staying open behind the next card.
+    setBinderWhere(new Set());
+  }
+  function togglePlace(id) {
+    setBinderWhere((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+  function switchMode(next) {
+    setMode(next);
+    setSel(new Set());
+    setBinderCard(null);
+    setBinderPage(0);
+  }
+  // A new search is a new binder, so it opens at the front. clampPage() keeps
+  // the page legal on its own; this is about where you WANT to be, which is
+  // page one of what you just asked for rather than page six of what you asked
+  // for before.
+  useEffect(() => { setBinderPage(0); }, [q, binderSort, binderPrice]);
+  // The binder turns on the arrow keys too — it is used on a laptop at the
+  // desk as well as a tablet at the table. Escape closes the preview, which is
+  // the only thing on this screen that traps you.
+  useEffect(() => {
+    if (!binderMode) return;
+    function onKey(e) {
+      if (e.key === "Escape") { setBinderCard(null); return; }
+      if (binderCard) return; // the preview is on top; the arrows are not its
+      if (e.key === "ArrowLeft") turnBinder("prev");
+      if (e.key === "ArrowRight") turnBinder("next");
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
   const events = useMemo(() => facetsOf(open, "event"), [open]);
   const stackFacets = useMemo(() => facetsOf(open, "stack_name"), [open]);
   // Record what somebody just asked for. Pre-filled from the search box,
@@ -754,7 +870,7 @@ export default function ShowDesk() {
           showing them a filename, and "one-off setup needed" reads to a
           stranger like a till that is about to go down. It is the same
           allow-list discipline the counter projection follows. */}
-      {setup.length > 0 && !counterMode ? (
+      {setup.length > 0 && !customerMode ? (
         <div className="mine-banner">
           <span className="mine-ic" aria-hidden="true">⚠</span>
           <div>
@@ -774,7 +890,7 @@ export default function ShowDesk() {
       {/* Counter mode hides every screen that isn't the stock list. Not styled
           away — not rendered. A customer holding the tablet can scroll, and a
           "£ Sold" button that is merely off-palette is still a button. */}
-      {counterMode ? null : (
+      {customerMode ? null : (
       <div className="panel">
         <div className="panel-head">
           <span className="eyebrow">Check stock out</span>
@@ -841,7 +957,7 @@ export default function ShowDesk() {
       </div>
       )}
 
-      {recs !== null && !counterMode ? (
+      {recs !== null && !customerMode ? (
         <div className="panel">
           <div className="panel-head">
             <span className="eyebrow">Recommended show stock — highest value first</span>
@@ -919,9 +1035,13 @@ export default function ShowDesk() {
 
       <div className="panel">
         <div className="panel-head">
-          <h3>{counterMode ? "In stock today" : "Away at the show"}</h3>
-          <span className="badge2">{counterMode ? `${counter.shown} card${counter.shown === 1 ? "" : "s"}` : `${open.length} out`}</span>
-          {open.length > 0 && !counterMode ? (
+          <h3>{binderMode ? "The binder" : counterMode ? "In stock today" : "Away at the show"}</h3>
+          <span className="badge2">
+            {binderMode
+              ? `${binder.cardCount} card${binder.cardCount === 1 ? "" : "s"}`
+              : counterMode ? `${counter.shown} card${counter.shown === 1 ? "" : "s"}` : `${open.length} out`}
+          </span>
+          {open.length > 0 && !customerMode ? (
             <button
               className="btn btn-ghost"
               onClick={() => router.push("/panel/batch?pool=show")}
@@ -935,23 +1055,42 @@ export default function ShowDesk() {
               stock out, it vanished exactly when someone wanted to find out what
               it did — and a control you can only discover while packing for a
               show is one nobody discovers. An empty counter screen is also an
-              honest thing to hand somebody at a table that has sold out. */}
+              honest thing to hand somebody at a table that has sold out.
+
+              Three buttons rather than one toggle now that there are three
+              screens: a toggle that cycled would make the way back to the desk
+              depend on which screen you were on, and that is the one route
+              that has to be obvious with somebody waiting. */}
+          {customerMode ? (
+            <button
+              className="btn btn-primary"
+              onClick={() => switchMode("desk")}
+              title="Back to the desk — the SKUs, the eBay state and the sold/return buttons come back"
+            >
+              ✕ Back to the desk
+            </button>
+          ) : null}
           <button
             className={counterMode ? "btn btn-primary" : "btn btn-ghost"}
-            onClick={() => { setCounterMode((v) => !v); setSel(new Set()); }}
-            title={counterMode
-              ? "Back to the desk — the SKUs, the eBay state and the sold/return buttons come back"
-              : "Turn the list round to face a customer: pictures, names and prices only"}
+            onClick={() => switchMode(counterMode ? "desk" : "counter")}
+            title="Turn the list round to face a customer: pictures, names and prices only"
           >
-            {counterMode ? "✕ Back to the desk" : "👋 Show a customer"}
+            👋 Show a customer
           </button>
-          {!counterMode && !wantsMissing && wantGroups.length > 0 ? (
+          <button
+            className={binderMode ? "btn btn-primary" : "btn btn-ghost"}
+            onClick={() => switchMode(binderMode ? "desk" : "binder")}
+            title="The same stock as a binder — nine cards to a page, turned with the arrows or a thumb"
+          >
+            📒 Binder
+          </button>
+          {!customerMode && !wantsMissing && wantGroups.length > 0 ? (
             <button className="btn btn-ghost" onClick={() => setShowWants((v) => !v)} title="What people have asked for">
               🔎 Asked for ({wantGroups.length})
             </button>
           ) : null}
         </div>
-        {open.length === 0 && !counterMode ? (
+        {open.length === 0 && !customerMode ? (
           /* The desk's empty state points at the checkout form, which counter
              mode does not render — so it would be telling a customer to enter
              a SKU into a box that isn't on screen. Counter mode therefore
@@ -967,21 +1106,38 @@ export default function ShowDesk() {
                 <input
                   value={q}
                   onChange={(e) => setQ(e.target.value)}
-                  placeholder={counterMode ? "Search the stock — name or number" : "Find a card — name, SKU, number, show"}
+                  placeholder={customerMode ? "Search the stock — name or number" : "Find a card — name, SKU, number, show"}
                   aria-label="Search the show stock"
                 />
                 {q ? (
                   <button className="sd-clear" onClick={() => setQ("")} title="Clear the search" aria-label="Clear the search">×</button>
                 ) : null}
               </div>
+              {/* The binder's sorts are its own, and the difference is real:
+                  by the time the binder orders anything the copies have been
+                  folded into pockets, so "cheapest first" has to mean the
+                  cheapest COPY of each card. Sorting the rows and folding
+                  afterwards would put a card's place in the binder at the
+                  mercy of which copy happened to survive. */}
+              {binderMode ? (
+                <>
+                  <select className="sd-select" value={binderSort} onChange={(e) => setBinderSort(e.target.value)} aria-label="Order the binder">
+                    {BINDER_SORTS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+                  </select>
+                  <select className="sd-select" value={binderPrice} onChange={(e) => setBinderPrice(e.target.value)} aria-label="Filter the binder by price">
+                    {BINDER_PRICE_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                  </select>
+                </>
+              ) : (
               <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort the show stock">
                 {SHOW_SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
+              )}
               {/* Operational filters, not a customer's. "Still sellable
                   online" in particular says out loud that the card is on eBay,
                   which invites a price-check against the sticker in front of
                   them. */}
-              {counterMode ? null : (
+              {customerMode ? null : (
                 <>
               <select className="sd-select" value={stickerFilter} onChange={(e) => setStickerFilter(e.target.value)} aria-label="Filter by sticker">
                 {STICKER_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
@@ -999,20 +1155,20 @@ export default function ShowDesk() {
               )}
               {/* Only offered when there's a choice to make: one show, or one
                   stack, is not a filter — it's a dropdown with one answer. */}
-              {events.length > 1 && !counterMode ? (
+              {events.length > 1 && !customerMode ? (
                 <select className="sd-select" value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} aria-label="Filter by show">
                   <option value="">Any show</option>
                   {events.map((e) => <option key={e.value} value={e.value}>{e.value} ({e.count})</option>)}
                 </select>
               ) : null}
-              {stackFacets.length > 1 && !counterMode ? (
+              {stackFacets.length > 1 && !customerMode ? (
                 <select className="sd-select" value={stackFilter} onChange={(e) => setStackFilter(e.target.value)} aria-label="Filter by the stack it left">
                   <option value="">Any stack</option>
                   {stackFacets.map((s) => <option key={s.value} value={s.value}>{s.value} ({s.count})</option>)}
                 </select>
               ) : null}
             </div>
-            {view.filtering && !counterMode ? (
+            {view.filtering && !customerMode ? (
               /* Said out loud, because the alternative is a button that looks
                  like it does one thing and does another. A card filed while it
                  was off screen leaves nothing behind to notice. */
@@ -1023,7 +1179,7 @@ export default function ShowDesk() {
                 {" "}<button className="sd-clear-all" onClick={clearFilters}>Clear</button>
               </p>
             ) : null}
-            {counterMode ? null : (
+            {customerMode ? null : (
             <div className="sd-bulkbar">
               <label className="sd-toggle">
                 <input
@@ -1059,7 +1215,7 @@ export default function ShowDesk() {
             </div>
             )}
 
-            {plan && !counterMode ? (
+            {plan && !customerMode ? (
               <div className="sd-plan">
                 <div className="sd-plan-head">
                   <b>Filing plan for {selCount} card(s)</b>
@@ -1099,7 +1255,7 @@ export default function ShowDesk() {
               </div>
             ) : null}
 
-            {backPickerOpen && !counterMode ? (
+            {backPickerOpen && !customerMode ? (
               <div className="sd-backpicker">
                 <span className="hint-small">Add {selCount} card(s), in order, to the back of:</span>
                 {stacksWithSpace.map((s) => (
@@ -1116,7 +1272,7 @@ export default function ShowDesk() {
               </div>
             ) : null}
             {busy && progress ? <p className="hint hint-small"><span className="spinner" /> &nbsp;{progress}</p> : null}
-            {visible.length === 0 ? (
+            {!binderMode && visible.length === 0 ? (
               counterMode ? (
                 /* Three different situations, and saying the wrong one is
                    confusing rather than merely terse: nothing searched for
@@ -1152,9 +1308,12 @@ export default function ShowDesk() {
               </p>
               )
             ) : null}
-            {/* Two lists, one search. The counter list is built from
-                counterView() and never from `visible`, so nothing on this
-                branch can reach a field the projection didn't allow. */}
+            {/* Three screens, one search. The counter list and the binder
+                are both built from projections in lib/showcounter.js and
+                lib/binder.js and never from `visible`, so nothing on either
+                branch can reach a field the projection didn't allow — and both
+                sit inside the slice check-showcounter.mjs greps for desk data
+                and destructive controls. */}
             {counterMode ? (
               <div className="stack-list sd-counter">
                 {counter.rows.map((c) => (
@@ -1178,6 +1337,147 @@ export default function ShowDesk() {
                     <span className={c.pricePence == null ? "sd-price sd-price-ask" : "sd-price"}>{c.priceText}</span>
                   </div>
                 ))}
+              </div>
+            ) : binderMode ? (
+              <div className="bn-wrap">
+                {/* The frame is the product. A grid of cards is a grid of
+                    cards; a binder is a thing somebody recognises and knows
+                    how to use without being told, which is the whole reason
+                    for the rings, the page shape and the empty pockets on the
+                    last page. */}
+                <div
+                  className="bn-frame"
+                  onTouchStart={binderTouchStart}
+                  onTouchEnd={binderTouchEnd}
+                  role="group"
+                  aria-label={binder.pageCount === 0 ? "The binder, empty" : `Binder page ${binderAt + 1} of ${binder.pageCount}`}
+                >
+                  <span className="bn-rings" aria-hidden="true" />
+                  {binder.pageCount === 0 ? (
+                    <p className="dd-empty bn-blank">
+                      {q.trim() || binderPrice !== "any"
+                        ? "Nothing in the binder matches that."
+                        : "Nothing in the box yet — check some stock out and it fills up."}
+                    </p>
+                  ) : (
+                    <div className="bn-page">
+                      {(binder.pages[binderAt] || []).map((c, i) => (c ? (
+                        <button className="bn-pocket bn-card" key={c.key} onClick={() => openPocket(c)} title={`${c.name} — ${c.priceText}`}>
+                          {c.image ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img className="bn-art" src={c.image} alt="" loading="lazy" />
+                          ) : (
+                            /* A card checked out by ENDING its listing has no
+                               photo. An empty sleeve is the honest thing to
+                               draw: catalogue art would show a mint scan of a
+                               played card to the person holding it. */
+                            <span className="bn-art bn-noart" aria-hidden="true">no photo</span>
+                          )}
+                          {/* Several copies, one pocket — said out loud, because
+                              a customer who wants two should be able to ask. */}
+                          {c.count > 1 ? <span className="bn-copies" title={`${c.count} copies in the box`}>×{c.count}</span> : null}
+                          <span className="bn-label">
+                            <span className="bn-name">{c.name}</span>
+                            <span className={c.pricePence == null ? "bn-price bn-price-ask" : "bn-price"}>
+                              {c.priceFrom ? "from " : ""}{c.priceText}
+                            </span>
+                          </span>
+                        </button>
+                      ) : (
+                        /* An empty pocket, not a gap. A last page that reflowed
+                           to fit three cards would resize every card on it, so
+                           the one somebody was about to point at jumps as you
+                           turn onto it. */
+                        <span className="bn-pocket bn-pocket-empty" key={`pocket-${i}`} aria-hidden="true" />
+                      )))}
+                    </div>
+                  )}
+                </div>
+                <div className="bn-nav">
+                  <button
+                    className="btn btn-ghost bn-turn"
+                    onClick={() => turnBinder("prev")}
+                    disabled={binderAt === 0}
+                    aria-label="Previous page"
+                  >
+                    ◀
+                  </button>
+                  <span className="bn-pageno">
+                    {binder.pageCount === 0 ? "No pages" : `Page ${binderAt + 1} of ${binder.pageCount}`}
+                    {/* Nothing is folded away quietly. Four copies of one card
+                        is one pocket, which is the point — a customer flipping
+                        past the same Gengar four times is reading a duplicate
+                        — but the count has to be somewhere or stock looks
+                        missing. */}
+                    <span className="hint-small">
+                      {binder.cardCount} card{binder.cardCount === 1 ? "" : "s"}
+                      {binder.folded > 0 ? ` · ${binder.folded} duplicate cop${binder.folded === 1 ? "y" : "ies"} behind them` : ""}
+                    </span>
+                  </span>
+                  <button
+                    className="btn btn-ghost bn-turn"
+                    onClick={() => turnBinder("next")}
+                    disabled={binderAt >= binder.pageCount - 1}
+                    aria-label="Next page"
+                  >
+                    ▶
+                  </button>
+                </div>
+                <p className="hint hint-small bn-hint">Swipe the page, or use the arrows.</p>
+                {/* The card, opened. Picture on the left at the size eBay
+                    serves it, what we know about it on the right. Fixed rather
+                    than absolute so it covers the page however far down you had
+                    scrolled, and rendered inside this branch on purpose — that
+                    is what keeps it inside the slice the counter check greps. */}
+                {binderCard ? (
+                  <div className="bn-preview" role="dialog" aria-modal="true" aria-label={binderCard.name}>
+                    <button className="bn-close" onClick={() => setBinderCard(null)} aria-label="Close">×</button>
+                    <div className="bn-preview-inner">
+                      <div className="bn-preview-art">
+                        {binderCard.imageLarge ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img src={binderCard.imageLarge} alt={binderCard.name} />
+                        ) : (
+                          <span className="bn-noart bn-noart-big">No photo of this copy</span>
+                        )}
+                      </div>
+                      <div className="bn-preview-info">
+                        <h4 className="bn-preview-name">{binderCard.name}</h4>
+                        {binderCard.condition ? <p className="bn-preview-cond">{binderCard.condition}</p> : null}
+                        <p className={binderCard.pricePence == null ? "bn-preview-price bn-price-ask" : "bn-preview-price"}>
+                          {binderCard.priceFrom ? "from " : ""}{binderCard.priceText}
+                        </p>
+                        <p className="hint hint-small bn-preview-count">
+                          {binderCard.count === 1 ? "One copy in the box" : `${binderCard.count} copies in the box`}
+                        </p>
+                        <div className="bn-copylist">
+                          {binderCard.copies.map((c, i) => (
+                            <div className="bn-copy" key={c.id ?? i}>
+                              <span className="bn-copy-n">{binderCard.count > 1 ? `#${i + 1}` : "—"}</span>
+                              <span className="bn-copy-cond">{c.condition || "condition not stated"}</span>
+                              <span className={c.pricePence == null ? "bn-copy-price bn-price-ask" : "bn-copy-price"}>{c.priceText}</span>
+                              {/* Where it is, on a tap and never before one.
+                                  A card in the binder is a card in the BOX, so
+                                  the answer is the SKU on its sleeve and the
+                                  stack it was packed out of — not a live stack
+                                  position, which it no longer has. Looked up
+                                  from rows the desk already holds; the pocket
+                                  carries an id and nothing else. */}
+                              <button
+                                className="stack-pull sd-locate"
+                                onClick={() => togglePlace(c.id)}
+                                title="Where is this one?"
+                                aria-label="Where is this one?"
+                              >
+                                {binderWhere.has(c.id) ? (binderPlaces.get(c.id) || "not placed") : "⌖"}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
             <div className="stack-list">
@@ -1267,7 +1567,7 @@ export default function ShowDesk() {
             ) : null}
             {/* Someone asked, and we HAD it. Worth as much as a miss: it says
                 which cards are worth packing again, and it is the same tap. */}
-            {counterMode && !wantsMissing && q.trim() && (counter.shown > 0 || online.length > 0) ? (
+            {customerMode && !wantsMissing && q.trim() && (binderMode ? binder.cardCount > 0 : counter.shown > 0 || online.length > 0) ? (
               <p className="hint hint-small sd-find-note">
                 <button className="sd-clear-all" onClick={() => noteWant(q)} disabled={busy}>
                   Note that someone asked for “{q.trim()}”
@@ -1294,7 +1594,7 @@ export default function ShowDesk() {
       {/* The want list. Desk-only: it is a record of what we could not sell,
           which is a buying note to ourselves and nothing a customer should
           read over the counter. */}
-      {showWants && !counterMode && !wantsMissing ? (
+      {showWants && !customerMode && !wantsMissing ? (
         <div className="panel">
           <div className="panel-head">
             <span className="eyebrow">Asked for</span>
@@ -1327,7 +1627,7 @@ export default function ShowDesk() {
         </div>
       ) : null}
 
-      {history.length > 0 && !counterMode ? (
+      {history.length > 0 && !customerMode ? (
         <div className="panel">
           <div className="panel-head">
             <span className="eyebrow">Recent activity</span>

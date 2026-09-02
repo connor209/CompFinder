@@ -380,8 +380,8 @@ if (!/\.sd-scope \.ps-row\.sd-counter-row\s*\{[^}]*flex-wrap:\s*nowrap/.test(css
 // to type a SKU into a form counter mode does not render — and must not stop
 // there either: with nothing checked out the online list is the only stock
 // there is, and the search box is the only way to it.
-if (!/open\.length === 0 && !counterMode \?/.test(desk)) {
-  fail("the desk's empty state is not gated on counterMode — a customer is told to enter a SKU, or loses the search entirely");
+if (!/open\.length === 0 && !customerMode \?/.test(desk)) {
+  fail("the desk's empty state is not gated on customerMode — a customer is told to enter a SKU, or loses the search entirely");
 }
 
 // The reveal is a tap, not a default. Gated wrong, every stack name and depth
@@ -429,8 +429,23 @@ if (splitAt > 0) {
 
 // Counter mode has to REMOVE the desk, not restyle it: a customer can scroll,
 // and an off-palette "£ Sold" is still a button.
-if (!desk.includes("{counterMode ? null : (")) {
-  fail("no part of the desk is gated on counterMode — the checkout form and bulk actions still render to a customer");
+//
+// The question every piece of desk chrome asks is `customerMode`, not
+// `counterMode`. There are two customer screens now — the list and the binder
+// — and gating the checkout form on the LIST alone would render it behind the
+// binder, which is the same leak with an extra step. So the gate is asserted
+// on `customerMode`, and `counterMode` is asserted to be only half of it.
+if (!desk.includes("{customerMode ? null : (")) {
+  fail("no part of the desk is gated on customerMode — the checkout form and bulk actions still render to a customer");
+}
+if (!/const customerMode = counterMode \|\| binderMode/.test(desk)) {
+  fail("customerMode is no longer both customer screens — some desk chrome is gated on one of them alone");
+}
+// A negative gate on `counterMode` is that mistake written down: it hides
+// something from the list and shows it to the binder.
+const negatives = desk.match(/![\s]*counterMode/g) || [];
+if (negatives.length > 0) {
+  fail(`${negatives.length} piece(s) of the desk are hidden from the counter list but not the binder — gate them on customerMode`);
 }
 
 const store = readFileSync(new URL("../apps/app/lib/wants-store.js", import.meta.url), "utf8");

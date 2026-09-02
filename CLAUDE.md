@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs thirty-one table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-two table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -104,6 +104,11 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   that the projection is an allow-list rather than a filter, that no private
   value survives it, that a held price asks instead of showing a number, and a
   slice of the render itself checked for desk data or a destructive button.
+- `scripts/check-binder.mjs` — the digital binder: that a pocket is an
+  allow-list like the counter row, that four copies of one card fold into one
+  pocket while four different cards never do, that a page is nine pockets with
+  the last one padded, and — the one that costs you the screen — that a mostly
+  vertical drag is a scroll rather than a page turn.
 - `scripts/check-panelstate.mjs` — a state setter that was never declared.
   Born from a white screen: the Show Desk shipped calling `setPhoto()` with no
   `useState` behind it, which `next build` compiles, a JSX parse accepts and
@@ -1091,6 +1096,63 @@ nothing else, so the hard part is settled here, on a tablet in your own hands,
 where you can see what a customer sees. Two projections would eventually
 disagree about what is private, and the one that disagrees quietly is the one
 on the internet.
+
+## The binder is the other way of showing the same stock
+
+Counter mode is a LIST — a row each, name and price, read at arm's length.
+That is the right shape for answering "do you have any gengars" and the wrong
+shape for what people actually do at a table, which is flip through a binder
+and point at what they like. `apps/app/lib/binder.js` is the same show stock
+laid out nine to a page in card pockets, and it is a third mode on the Show
+Desk rather than a replacement for either of the other two.
+
+- **A page is nine pockets, always.** A real binder page is 3x3, and a fixed
+  count is what makes a page NUMBER mean anything: "it's on page four" has to
+  be true on the phone in your pocket and the tablet on the table. The last
+  page is padded with empty pockets rather than reflowing — a page that
+  resized to fit three cards would move the one somebody was about to point at
+  as you turned onto it. And a page has to FIT on the screen, which is what
+  the width cap on `.bn-wrap` is for: nine pockets you have to scroll past is
+  a list with a frame drawn round it.
+- **One card, one pocket.** Four copies of the same Gengar are four rows on
+  the desk — four physical cards in four stack positions, and the desk is
+  right to list them. A customer flipping past the same card four times is
+  reading a duplicate. The copies are folded in, not thrown away: the pocket
+  says `×4`, the preview lists every copy with its own condition and price,
+  and the count of what got folded is on screen beside the page number.
+  Nothing is dropped quietly here either.
+- **The headline price is the CHEAPEST copy**, with "from" in front of it
+  whenever a dearer one or an unpriced one is behind — quoting one copy's
+  price for all of them is how you argue with a customer holding the receipt.
+- **A pocket is an allow-list, exactly like `counterRow()`.** Built key by
+  key, never a checkout row with the private parts hidden by CSS, and for the
+  same reason: the leak worth designing against is the column added to
+  `stock_checkouts` a year from now, appearing on a tablet somebody is
+  holding. `check-binder.mjs` stuffs a row with every private value the desk
+  knows and searches the whole serialised pocket for each one.
+- **Where a card is comes back on a TAP, and it is a different question from
+  the one the online rows ask.** A card in the binder is a card in the BOX: it
+  has been checked out, so `stackpos.js` gives it no live position on purpose
+  and quoting the one it used to hold would send you counting to the wrong
+  card on a shelf it is not on. What finds it is the SKU on its sleeve plus
+  the stack it was packed out of — `placeOf()`. The pocket carries an id and
+  nothing else; the desk resolves its own row.
+- **A mostly vertical drag is a scroll.** `swipeDirection()` refuses anything
+  that is not clearly horizontal and past a threshold, because the binder sits
+  in a page you scroll and a page that turns under a customer's thumb while
+  they are reading is unusable — and it is exactly the sort of thing that
+  works on a mouse and fails in a hall. Arrow keys and the ◀ ▶ buttons do the
+  same job for a laptop at the desk.
+- **Desk chrome is gated on `customerMode`, never on `counterMode`.** There
+  are two customer screens now. Gating the checkout form on the LIST alone
+  renders it behind the binder, which is the same leak with an extra step;
+  `check-showcounter.mjs` fails on any surviving `!counterMode`.
+- **The picture is asked for bigger, not fetched.** `imageAt()` in
+  `showcounter.js` is the one definition of eBay's CDN filename rule —
+  `s-l500` for a pocket, `s-l1600` for the preview — so a binder page still
+  costs no API call. `contain` rather than `cover`: a gallery shot cropped to
+  fill is a card with its edges cut off, and the edges are what somebody is
+  looking at the picture to see.
 
 ## What we were asked for is the only demand signal a show gives
 
