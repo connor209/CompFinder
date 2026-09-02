@@ -31,11 +31,13 @@ import { fileURLToPath } from "node:url";
 import {
   binderView, binderPages, binderKey, binderCopy, pocketOf,
   clampPage, turnPage, swipeDirection, copyLocations, placeOf, isFiltering,
+  onlineStock, onlineItem, boxItem, BOX, ONLINE, BINDER_SCOPES, DEFAULT_SCOPE, SECTION_LABELS,
   BINDER_FIELDS, BINDER_COPY_FIELDS, BINDER_PAGE, BINDER_COLS, BINDER_ROWS,
   BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS, SWIPE_MIN_PX,
   POCKET_PX, PREVIEW_PX, ASK_TEXT
 } from "../apps/app/lib/binder.js";
 import { imageAt, largeImage } from "../apps/app/lib/showcounter.js";
+import { locationsBySku } from "../apps/app/lib/stackpos.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -258,6 +260,104 @@ eq("a copy the desk holds is placed", found.find((f) => f.id === "a").location, 
 eq("a copy the desk cannot find is not guessed at", found.find((f) => f.id === "c").location, null);
 eq("no map at all is not a crash", copyLocations(card).length, 3);
 
+// --- 9b. the eBay stock, in its own section -----------------------------
+// The box is a hundred-odd cards and the listings are the rest of the shop.
+// Both belong in a binder — table space is the cap the binder exists to lift —
+// but a card that might be at home is not a card you can put in somebody's
+// hand, so they never share a page.
+const ART = "https://i.ebayimg.com/images/g/z/s-l140.jpg";
+const LISTINGS = [
+  { ebay_item_id: "L1", sku: "CD20", title: "Charizard ex 199/165", price_value: 120, quantity: 1, image_url: ART },
+  { ebay_item_id: "L2", sku: "CD21", title: "Charizard ex 199/165 NM Holo", price_value: 140, quantity: 1 },
+  // Sold, and eBay leaves it in the ActiveList with the quantity zeroed.
+  { ebay_item_id: "L3", sku: "CD22", title: "Blastoise 009/165", price_value: 30, quantity: 0 },
+  // No quantity at all is silence, not a zero — read as sold out, real stock
+  // vanishes off the screen.
+  { ebay_item_id: "L4", sku: "CD23", title: "Venusaur 001/165", price_value: 25 },
+  // Checked out with its listing left live: it is in the box AND on eBay.
+  { ebay_item_id: "L5", sku: "AB12", title: "Gengar VMAX 020/198", price_value: 55, quantity: 1 }
+];
+const both = binderView(THREE, {}, { images: IMG, listings: LISTINGS });
+
+eq("a sold-out listing is not stock", onlineStock(LISTINGS).some((l) => l.ebay_item_id === "L3"), false);
+eq("a missing quantity is not a zero", onlineStock(LISTINGS).some((l) => l.ebay_item_id === "L4"), true);
+eq("a card already in the box is not offered twice",
+  onlineStock(LISTINGS, { inBox: new Set(["ab12"]) }).some((l) => l.ebay_item_id === "L5"), false);
+
+eq("the box section is the three Gengars, in one pocket", both.box.cardCount, 1);
+eq("the online section is what is left", both.online.cardCount, 2); // Charizard (x2 listings), Venusaur
+eq("two listings of one card share a pocket", both.cards.find((c) => c.source === ONLINE).count, 2);
+eq("every pocket says which section it is from",
+  both.cards.map((c) => c.source), [BOX, ONLINE, ONLINE]);
+
+// THE rule. Each section is paginated on its own and the pages concatenated,
+// so a mixed page is unrepresentable rather than merely avoided.
+eq("the box gets whole pages, then the online stock starts a fresh one", both.pageKinds, [BOX, ONLINE]);
+eq("the last box page is still nine pockets", both.pages[0].length, 9);
+eq("...padded rather than reflowed", both.pages[0].filter((p) => p === null).length, 8);
+for (const [i, page] of both.pages.entries()) {
+  const kinds = new Set(page.filter(Boolean).map((c) => c.source));
+  if (kinds.size > 1) fail(`page ${i + 1} mixes the box with the online stock`);
+  if (![...kinds].every((k) => k === both.pageKinds[i])) fail(`page ${i + 1} is not the section pageKinds says it is`);
+}
+
+// The same card on both sides stays two pockets. Folded into one, "×4" would
+// count cards that are not in the room, which is the promise the box section
+// makes and the online section deliberately does not.
+const SPLIT = binderView(
+  [co({ id: "a", sku: "AB12", title: "Gengar VMAX 020/198", sticker_pence: 4000 })],
+  {},
+  { listings: [{ ebay_item_id: "L9", sku: "ZZ99", title: "Gengar VMAX 020/198", price_value: 55, quantity: 1 }] }
+);
+eq("a card in the box and also listed is two pockets", SPLIT.cards.length, 2);
+eq("...one of each", SPLIT.cards.map((c) => c.source), [BOX, ONLINE]);
+eq("...and neither says it has two", SPLIT.cards.map((c) => c.count), [1, 1]);
+
+// An online pocket is the same allow-list. The SKU in particular is our shelf
+// address and must not ride out on it — the desk resolves it on a tap.
+const web = both.cards.find((c) => c.source === ONLINE);
+eq("an online pocket carries exactly the allowed keys", Object.keys(web).sort(), [...BINDER_FIELDS].sort());
+ok("an online pocket carries no SKU", !JSON.stringify(web).toLowerCase().includes("cd20"));
+eq("the online price is eBay's, unconverted", web.priceText, "£120");
+eq("...and says there is a dearer listing behind it", web.priceFrom, true);
+eq("the online art goes through the same size rule", web.image, "https://i.ebayimg.com/images/g/z/s-l500.jpg");
+
+// Scope: both by default, because half the stock being at home is the bigger
+// half of the cap a binder exists to lift.
+eq("the default is both", DEFAULT_SCOPE, "all");
+eq("only the box", binderView(THREE, { scope: BOX }, { listings: LISTINGS }).cards.map((c) => c.source), [BOX]);
+eq("only what is listed", binderView(THREE, { scope: ONLINE }, { listings: LISTINGS }).cards.map((c) => c.source), [ONLINE, ONLINE]);
+ok("every offered scope is one the view understands",
+  BINDER_SCOPES.every((sc) => Number.isFinite(binderView(THREE, { scope: sc.key }, { listings: LISTINGS }).cardCount)));
+ok("a narrowed scope counts as filtering", isFiltering({ scope: BOX }) === true);
+ok("no listings at all is not a crash", binderView(THREE, {}, {}).box.cardCount === 1);
+
+// The wording. "Ask", never "not here": not everything that travels gets
+// checked out, so a card can be in the box and absent from the box section,
+// and telling a customer we haven't got it loses a sale already made.
+for (const key of [BOX, ONLINE]) {
+  if (!SECTION_LABELS[key]?.title || !SECTION_LABELS[key]?.note) fail(`the ${key} section has no label`);
+}
+ok("the online section invites a question", /ask/i.test(SECTION_LABELS[ONLINE].note));
+if (/not here|we don't have|haven't got/i.test(SECTION_LABELS[ONLINE].note)) {
+  fail("the online section claims the card is absent — checkout is not complete enough to know that");
+}
+
+// Where an ONLINE card is, is a different question. It has not been checked
+// out, so it still has a live stack position — and that is the useful answer,
+// where the box's is the SKU on its sleeve.
+const shelf = locationsBySku(
+  [{ id: "s1", sku: "CD20", stack_id: "st", position: 1 }, { id: "s2", sku: "CD21", stack_id: "st", position: 2 }],
+  new Map([["st", "C"]])
+);
+const placed = copyLocations(web, {
+  skuByListing: new Map([["L1", "CD20"], ["L2", "CD21"]]),
+  locations: shelf
+});
+eq("a listed card has a live position", placed.find((f) => f.id === "L1").location, "C · 1 of 2");
+eq("a listed card we cannot place is not guessed at",
+  copyLocations(web, { skuByListing: new Map(), locations: shelf })[0].location, null);
+
 // --- 10. greps: the rules that live in one file only --------------------
 const binderSrc = code("apps/app/lib/binder.js");
 // The PROJECTION cannot leak what it never names. Sliced to the three
@@ -270,9 +370,9 @@ const fnBody = (name) => {
   const end = binderSrc.indexOf("\n}", at);
   return binderSrc.slice(at, end < 0 ? binderSrc.length : end);
 };
-for (const fn of ["pocketOf", "binderCopy", "binderView"]) {
+for (const fn of ["pocketOf", "binderCopy", "boxItem", "onlineItem"]) {
   const body = fnBody(fn);
-  for (const field of ["sku", "stack_name", "stack_id", "event", "hide_method", "hide_error", "sold_price_pence", "note"]) {
+  for (const field of ["sku", "stack_name", "stack_id", "event", "hide_method", "hide_error", "sold_price_pence", "note", "quantity"]) {
     if (body.includes(`.${field}`) || body.includes(`"${field}"`)) {
       fail(`${fn}() names ${field} — a pocket is supposed to be an allow-list`);
     }
@@ -302,6 +402,11 @@ if (at < 0) {
 } else {
   const branch = deskSrc.slice(at, deskSrc.indexOf("\n            ) : (", at));
   ok("the binder page is rendered from the view", /binder\.pages\[/.test(branch));
+  // The section has to be named on the page. It is the only thing separating
+  // a card you can hand over from one that may be at home, and the pockets
+  // themselves look identical.
+  ok("the page says which section it is", /SECTION_LABELS\[binder\.pageKinds\[binderAt\]\]/.test(branch));
+  ok("a listed pocket is marked as one", /c\.source === ONLINE/.test(branch));
   ok("the pockets are not built inline", !/counterRow\(|pocketOf\(/.test(branch));
   if (!/binderWhere\.has\(c\.id\) \?/.test(branch)) {
     fail("a copy's place is not gated on a tap — the SKU and the stack are on screen by default");
@@ -309,6 +414,12 @@ if (at < 0) {
   for (const forbidden of ["markSold", "returnOne", "setSticker", "toggleSel", "stack-sku", "co.sku", "stack_name"]) {
     if (branch.includes(forbidden)) fail(`the binder renders ${forbidden} — desk data or a destructive control facing a customer`);
   }
+}
+// The eBay stock has to actually reach the view, and through the view rather
+// than a second list stapled on beside it — one grouping path, or the two
+// sections eventually disagree about what counts as the same card.
+if (!/binderView\([\s\S]{0,400}?listings/.test(deskSrc)) {
+  fail("ShowDesk.js does not hand its eBay listings to binderView() — the binder is box-only again");
 }
 
 if (failures) {

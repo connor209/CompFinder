@@ -25,6 +25,17 @@
  * is handed back so the screen can say so. Nothing is dropped quietly here
  * either.
  *
+ * **The eBay stock is a SECOND SECTION, and a page is never half of each.**
+ * The counter list keeps online stock under its own heading and never merges
+ * it, because a card that might be at home is not a card you can put in
+ * somebody's hand — and the top list is the only one anybody can act on. A
+ * binder has no headings to hang that on, so the rule is carried by the PAGE:
+ * the box fills whole pages first, the last one padded, and the online stock
+ * starts on a fresh page. Each section is paginated on its own, which is what
+ * makes a mixed page unrepresentable rather than merely avoided. The page
+ * header names which one you are on, and an online pocket carries the mark as
+ * well, because one pocket photographed on its own has no header.
+ *
  * **The pocket is an ALLOW-LIST, exactly like counterRow().** Same reasoning,
  * same failure mode: the leak worth designing against is the column added to
  * `stock_checkouts` a year from now for an unrelated reason, appearing on a
@@ -38,7 +49,45 @@
  * can load it under bare node.
  */
 import { matchesQuery, normalise, hasSticker } from "./showfilter.js";
-import { counterName, conditionOf, counterPrice, counterImage, imageAt, ASK_TEXT } from "./showcounter.js";
+import { counterName, conditionOf, counterPrice, counterImage, imageAt, inBoxSkus, ASK_TEXT } from "./showcounter.js";
+import { isListingAvailable } from "./stockcheck.js";
+
+/**
+ * Where a pocket's card can be got from, and the two answers are not
+ * interchangeable: one is in the box on the table, the other is a listing that
+ * may be at home. See the file header — they never share a page.
+ */
+export const BOX = "box";
+export const ONLINE = "online";
+
+/**
+ * What each section says for itself.
+ *
+ * The online wording says "ask", never "not here", and that is load-bearing
+ * rather than polite: not everything that travels to a show gets checked out,
+ * so a card can be in the box AND absent from the box section — and telling a
+ * customer we haven't got it, while it sits in the box, loses a sale already
+ * made. What we know is that we own one; whether it is in the room is a
+ * question for the person at the table.
+ */
+export const SECTION_LABELS = {
+  [BOX]: { title: "In the box", note: "Here at the table — ask and it's yours." },
+  [ONLINE]: { title: "Also in our stock", note: "Some travel with us, some are at home. Ask and we'll check." }
+};
+
+/** Which stock the binder is showing. */
+export const BINDER_SCOPES = [
+  { key: "all", label: "Everything we have" },
+  { key: BOX, label: "Only what's in the box" },
+  { key: ONLINE, label: "Only what's listed online" }
+];
+/**
+ * Both, box first. The binder exists because table space is the cap on what
+ * anybody can see, and half our stock being at home is the bigger half of that
+ * cap — a binder that stopped at the box would be a prettier version of the
+ * list it replaces.
+ */
+export const DEFAULT_SCOPE = "all";
 
 /** A binder page: three across, three down. See the file header. */
 export const BINDER_COLS = 3;
@@ -64,7 +113,7 @@ export const PREVIEW_PX = 1600;
  * others, so adding one is a deliberate act with a test behind it.
  */
 export const BINDER_FIELDS = [
-  "key", "name", "condition", "pricePence", "priceText", "priceFrom",
+  "key", "source", "name", "condition", "pricePence", "priceText", "priceFrom",
   "image", "imageLarge", "count", "copies"
 ];
 export const BINDER_COPY_FIELDS = ["id", "condition", "pricePence", "priceText"];
@@ -131,32 +180,115 @@ export function binderKey(co) {
   return key === "card" ? "" : key;
 }
 
-/** The sticker on one physical copy, in pence, or null. */
-function penceOf(co) {
-  if (!hasSticker(co)) return null;
-  const n = Math.round(Number(co.sticker_pence));
-  return n > 0 ? n : null;
+/**
+ * One thing that can go in a pocket, from either source, in one shape.
+ *
+ * Everything below this point works on ITEMS rather than on checkout rows or
+ * eBay listings, and these two functions are the only place the difference
+ * exists. That is deliberate: a second grouping path for the online stock
+ * would eventually disagree with this one about what counts as the same card,
+ * and the disagreement shows up as a customer being told we have one of
+ * something we have four of.
+ *
+ * They are also the allow-list. A field that is not read here cannot reach a
+ * pocket, whatever gets added to `stock_checkouts` or `ebay_listings` later.
+ */
+export function boxItem(co, images) {
+  const pence = hasSticker(co) ? Math.round(Number(co.sticker_pence)) : null;
+  return {
+    id: co?.id ?? null,
+    source: BOX,
+    title: co?.title ?? "",
+    condition: conditionOf(co),
+    pence: pence != null && pence > 0 ? pence : null,
+    art: counterImage(co, images)
+  };
 }
 
 /**
- * One physical copy, as the preview may show it.
+ * A live listing as a pocket item.
+ *
+ * The price is eBay's, unconverted, which is the right number for a card that
+ * would be POSTED — the fees and the postage baked into it are costs a posted
+ * sale really does pay — and the section this lands in says as much.
+ *
+ * The id is the eBay item id, the same handle the counter list's online rows
+ * carry, and the SKU is deliberately not read: that is our shelf address, and
+ * the desk looks it up on a tap out of state it already holds.
+ *
+ * One item per LISTING. A quantity-3 listing is three physical cards (see
+ * copyqueue.js) and shows here as one — which is honest enough in a section
+ * whose whole promise is "ask and we'll check", and better than a count this
+ * file would have to guess at.
+ */
+export function onlineItem(l) {
+  const pounds = Number(l?.price_value);
+  const pence = Number.isFinite(pounds) && pounds > 0 ? Math.round(pounds * 100) : null;
+  return {
+    id: l?.ebay_item_id || l?.id || null,
+    source: ONLINE,
+    title: l?.title ?? "",
+    condition: conditionOf(l),
+    pence,
+    art: l?.image_url || null
+  };
+}
+
+/**
+ * The listings a binder may show: still sellable, and not already in the box.
+ *
+ * Both halves cost cards if you get them wrong. **A sold card is still a row
+ * in `ebay_listings`** — eBay's out-of-stock control leaves a sold fixed-price
+ * listing in the ActiveList with the quantity zeroed — so `isListingAvailable()`
+ * is the one definition of whether there is anything left to sell, and a
+ * MISSING quantity is silence rather than a zero, or real stock disappears.
+ * And a card checked out with its listing left live is in both sets: shown in
+ * both sections it reads as two copies, so the box wins, because the box is
+ * the one you can act on.
+ *
+ * Returns the listing rows rather than items, so the search can still read the
+ * SKU off them — you type what you know, and what you type is not what a
+ * customer reads.
+ */
+export function onlineStock(listings, { inBox } = {}) {
+  const skip = inBox instanceof Set ? inBox : new Set(inBox || []);
+  const seen = new Set();
+  const out = [];
+  for (const l of listings || []) {
+    if (!isListingAvailable(l)) continue;
+    const key = l?.sku ? String(l.sku).toLowerCase() : "";
+    if (key && (skip.has(key) || seen.has(key))) continue;
+    if (key) seen.add(key);
+    out.push(l);
+  }
+  return out;
+}
+
+/** What one copy costs, in pence, or null. */
+function penceOf(item) {
+  const n = item?.pence;
+  return n == null || !Number.isFinite(Number(n)) ? null : Math.round(Number(n));
+}
+
+/**
+ * One copy, as the preview may show it.
  *
  * The id is here so the desk can resolve this copy back to its own row on a
  * tap — see copyLocations(). It carries no picture: every copy of a card in
- * one pocket shares the pocket's, and a listing photo per copy would be four
+ * one pocket shares the pocket's, and a photo per copy would be four
  * near-identical thumbnails answering a question nobody asked.
  */
-export function binderCopy(co) {
-  const pence = penceOf(co);
+export function binderCopy(item) {
+  const pence = penceOf(item);
   return {
-    id: co?.id ?? null,
-    condition: conditionOf(co),
+    id: item?.id ?? null,
+    condition: item?.condition ?? null,
     pricePence: pence,
     priceText: counterPrice(pence)
   };
 }
 
-/** Cheapest priced copy first, unpriced last, packing order breaking ties. */
+/** Cheapest priced copy first, unpriced last, source order breaking ties. */
 function byPrice(a, b) {
   const x = penceOf(a);
   const y = penceOf(b);
@@ -165,62 +297,63 @@ function byPrice(a, b) {
 }
 
 /**
- * The rows folded into pockets, still carrying their checkouts.
+ * The items folded into pockets, still carrying the items themselves.
  *
- * Internal on purpose: the group knows the packing order and the copies'
- * source rows, neither of which belongs on a projected pocket. Ordering
- * happens on THESE, and only what survives pocketOf() reaches a screen.
+ * Internal on purpose: the group knows the arrival order and its own items,
+ * neither of which belongs on a projected pocket. Ordering happens on THESE,
+ * and only what survives pocketOf() reaches a screen.
  */
-function groupCopies(rows) {
+function groupItems(items) {
   const groups = new Map();
   const order = [];
-  (rows || []).filter(Boolean).forEach((co, i) => {
-    const key = binderKey(co) || `#${co?.id ?? i}`;
+  (items || []).filter(Boolean).forEach((item, i) => {
+    const key = binderKey(item) || `#${item?.id ?? i}`;
     let g = groups.get(key);
     if (!g) {
-      g = { key, name: counterName(co?.title), order: i, rows: [] };
+      g = { key, source: item.source, name: counterName(item?.title), order: i, items: [] };
       groups.set(key, g);
       order.push(g);
     }
-    g.rows.push(co);
+    g.items.push(item);
   });
   for (const g of order) {
-    g.rows = g.rows.slice().sort((a, b) => byPrice(a, b) || 0);
-    g.minPence = penceOf(g.rows[0]);
+    g.items = g.items.slice().sort((a, b) => byPrice(a, b) || 0);
+    g.minPence = penceOf(g.items[0]);
     g.sortName = normalise(g.name);
   }
   return order;
 }
 
 /**
- * One pocket. Built key by key — do not be tempted to spread the checkout and
- * delete the private parts; see the file header for why that direction fails
- * silently.
+ * One pocket. Built key by key — do not be tempted to spread the source row
+ * and delete the private parts; see the file header for why that direction
+ * fails silently.
  *
  * The headline price is the CHEAPEST copy, because that is the number a
  * customer can actually have the card for, and `priceFrom` says when there is
  * a dearer one behind it so the screen can write "from £40" rather than
  * quoting one copy's price for all of them.
  */
-export function pocketOf(group, { images } = {}) {
-  const rows = group?.rows || [];
-  const lead = rows[0];
-  const priced = rows.map(penceOf).filter((p) => p != null);
-  const art = counterImage(lead, images) || rows.map((co) => counterImage(co, images)).find(Boolean) || null;
+export function pocketOf(group) {
+  const items = group?.items || [];
+  const lead = items[0];
+  const priced = items.map(penceOf).filter((p) => p != null);
+  const art = items.map((i) => i?.art).find(Boolean) || null;
   const pence = priced.length > 0 ? priced[0] : null;
   return {
     key: group?.key ?? null,
+    source: group?.source ?? BOX,
     name: group?.name || counterName(lead?.title),
-    condition: conditionOf(lead),
+    condition: lead?.condition ?? null,
     pricePence: pence,
     priceText: counterPrice(pence),
     // True whenever the headline does not cover every copy: a dearer one
     // behind it, or one with no price at all.
-    priceFrom: rows.length > 1 && priced.length > 0 && (priced[priced.length - 1] !== pence || priced.length < rows.length),
+    priceFrom: items.length > 1 && priced.length > 0 && (priced[priced.length - 1] !== pence || priced.length < items.length),
     image: imageAt(art, POCKET_PX),
     imageLarge: imageAt(art, PREVIEW_PX),
-    count: rows.length,
-    copies: rows.map(binderCopy)
+    count: items.length,
+    copies: items.map(binderCopy)
   };
 }
 
@@ -249,9 +382,26 @@ function matchesPrice(group, price = "any") {
   return price === "priced" ? has : !has;
 }
 
+/**
+ * One section of the binder: its items grouped into pockets and ordered.
+ *
+ * Each section is built and sorted on its own, which is what stops "cheapest
+ * first" interleaving a card at home with a card on the table.
+ */
+function sectionOf(items, criteria = {}) {
+  const groups = groupItems(items).filter((g) => matchesPrice(g, criteria.price));
+  const cmp = BINDER_COMPARATORS[criteria.sort] || BINDER_COMPARATORS[DEFAULT_BINDER_SORT];
+  // The arrival order is the final tie-break, so equal pockets keep the order
+  // they came in and the binder never reshuffles under a thumb between renders
+  // on the same data.
+  const sorted = groups.slice().sort((a, b) => cmp(a, b) || a.order - b.order);
+  const copies = sorted.reduce((n, g) => n + g.items.length, 0);
+  return { cards: sorted.map(pocketOf), copies, folded: copies - sorted.length };
+}
+
 /** Is anything actually narrowing the binder? Drives the "showing x of y" line. */
-export function isFiltering({ query = "", price = "any" } = {}) {
-  return Boolean(normalise(query) || (price && price !== "any"));
+export function isFiltering({ query = "", price = "any", scope = DEFAULT_SCOPE } = {}) {
+  return Boolean(normalise(query) || (price && price !== "any") || (scope && scope !== DEFAULT_SCOPE));
 }
 
 /**
@@ -262,27 +412,39 @@ export function isFiltering({ query = "", price = "any" } = {}) {
  * reason showView() hands back `hidden` and the pricing engine hands back its
  * exclusion count: a card folded away silently looks exactly like a card that
  * was never packed.
+ *
+ * **The two sections are paginated separately and then concatenated**, which
+ * is the whole of the never-merged rule: a page belongs to one section or the
+ * other because the pages were cut that way, not because something remembered
+ * to check. `pageKinds` says which, parallel to `pages`.
  */
-export function binderView(rows, criteria = {}, { images } = {}) {
-  const all = (rows || []).filter(Boolean);
-  const matched = all.filter((co) => matchesQuery(co, criteria.query));
-  const groups = groupCopies(matched).filter((g) => matchesPrice(g, criteria.price));
-  const cmp = BINDER_COMPARATORS[criteria.sort] || BINDER_COMPARATORS[DEFAULT_BINDER_SORT];
-  // The packing order is the final tie-break, so equal pockets keep the order
-  // they arrived in and the binder never reshuffles under a thumb between
-  // renders on the same data.
-  const sorted = groups.slice().sort((a, b) => cmp(a, b) || a.order - b.order);
-  const cards = sorted.map((g) => pocketOf(g, { images }));
-  const copies = sorted.reduce((n, g) => n + g.rows.length, 0);
+export function binderView(checkouts, criteria = {}, { images, listings } = {}) {
+  const scope = criteria.scope || DEFAULT_SCOPE;
+  const boxRows = (checkouts || []).filter(Boolean);
+  const onlineRows = onlineStock(listings, { inBox: inBoxSkus(boxRows) });
+
+  const matchedBox = scope === ONLINE ? [] : boxRows.filter((co) => matchesQuery(co, criteria.query));
+  const matchedOnline = scope === BOX ? [] : onlineRows.filter((l) => matchesQuery(l, criteria.query));
+
+  const box = sectionOf(matchedBox.map((co) => boxItem(co, images)), criteria);
+  const online = sectionOf(matchedOnline.map(onlineItem), criteria);
+
+  const boxPages = binderPages(box.cards);
+  const onlinePages = binderPages(online.cards);
+  const shown = box.copies + online.copies;
+  const total = boxRows.length + onlineRows.length;
   return {
-    cards,
-    pages: binderPages(cards),
-    pageCount: Math.ceil(cards.length / BINDER_PAGE),
-    cardCount: cards.length,
-    folded: copies - cards.length,
-    total: all.length,
-    shown: copies,
-    hidden: all.length - copies,
+    cards: [...box.cards, ...online.cards],
+    pages: [...boxPages, ...onlinePages],
+    pageKinds: [...boxPages.map(() => BOX), ...onlinePages.map(() => ONLINE)],
+    pageCount: boxPages.length + onlinePages.length,
+    cardCount: box.cards.length + online.cards.length,
+    folded: box.folded + online.folded,
+    box: { cardCount: box.cards.length, copies: box.copies, folded: box.folded, pages: boxPages.length },
+    online: { cardCount: online.cards.length, copies: online.copies, folded: online.folded, pages: onlinePages.length },
+    total,
+    shown,
+    hidden: total - shown,
     filtering: isFiltering(criteria)
   };
 }
@@ -340,18 +502,22 @@ export function swipeDirection(dx, dy, { threshold = SWIPE_MIN_PX } = {}) {
 /**
  * Where each copy in a pocket physically is — asked for, never volunteered.
  *
- * **A card in the binder is a card in the BOX.** It has been checked out, so
- * it has no live position in a stack: stackpos.js gives it none on purpose,
- * and quoting the position it USED to hold would send somebody counting to the
- * wrong card on a shelf it isn't on. This is a different question from the one
- * the online rows ask, not a second answer to it. What actually finds a card
- * in a box at a show is the SKU written on its sleeve, and the stack it left
- * says which box it was packed out of.
+ * **The two sections are asked different questions, and that is the point.**
  *
- * `rowsById` is the DESK's own map of its own checkout rows. The pocket
- * carries an id and nothing else — putting the SKU on it to make this lookup
- * easier is exactly the shortcut the allow-list exists to refuse — so the desk
- * resolves the id back to the row it already holds, on a tap.
+ * A card in the BOX has been checked out, so it has no live position in a
+ * stack: stackpos.js gives it none on purpose, and quoting the position it
+ * used to hold would send somebody counting to the wrong card on a shelf it
+ * isn't on. What finds it is the SKU written on its sleeve, and the stack it
+ * left says which box it was packed out of.
+ *
+ * A card that is only LISTED is still in its stack, so it has a real live
+ * position and that is the useful answer — the same one the counter list's
+ * online rows give. Note it is where the card lives at HOME, which is only
+ * where you can walk to it if that stack travelled.
+ *
+ * Every map here is the DESK's, of its own rows. The pocket carries an id and
+ * nothing else — putting the SKU on it to make this lookup easier is exactly
+ * the shortcut the allow-list exists to refuse.
  *
  * A copy we cannot place gets `null` rather than a guess: "not somewhere I can
  * send you" is a different statement from "we have not got one", and at a
@@ -364,12 +530,20 @@ export function placeOf(co) {
   return stack ? `${sku} · from ${stack}` : sku;
 }
 
-export function copyLocations(card, { rowsById } = {}) {
-  const rows = rowsById instanceof Map ? rowsById : new Map(Object.entries(rowsById || {}));
-  return (card?.copies || []).map((c) => ({
-    id: c?.id ?? null,
-    location: c?.id == null ? null : placeOf(rows.get(String(c.id)))
-  }));
+export function copyLocations(card, { rowsById, skuByListing, locations } = {}) {
+  const asMap = (m) => (m instanceof Map ? m : new Map(Object.entries(m || {})));
+  const rows = asMap(rowsById);
+  const skus = asMap(skuByListing);
+  const where = asMap(locations);
+  const online = card?.source === ONLINE;
+  return (card?.copies || []).map((c) => {
+    if (c?.id == null) return { id: null, location: null };
+    if (online) {
+      const sku = skus.get(String(c.id));
+      return { id: c.id, location: (sku && where.get(String(sku).toLowerCase())) || null };
+    }
+    return { id: c.id, location: placeOf(rows.get(String(c.id))) };
+  });
 }
 
 export { ASK_TEXT };

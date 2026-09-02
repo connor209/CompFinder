@@ -107,7 +107,8 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-binder.mjs` — the digital binder: that a pocket is an
   allow-list like the counter row, that four copies of one card fold into one
   pocket while four different cards never do, that a page is nine pockets with
-  the last one padded, and — the one that costs you the screen — that a mostly
+  the last one padded, that the eBay stock gets its own pages and never shares
+  one with the box, and — the one that costs you the screen — that a mostly
   vertical drag is a scroll rather than a page turn.
 - `scripts/check-panelstate.mjs` — a state setter that was never declared.
   Born from a white screen: the Show Desk shipped calling `setPhoto()` with no
@@ -1114,6 +1115,19 @@ Desk rather than a replacement for either of the other two.
   as you turned onto it. And a page has to FIT on the screen, which is what
   the width cap on `.bn-wrap` is for: nine pockets you have to scroll past is
   a list with a frame drawn round it.
+- **The eBay stock is in it, and it gets its own pages.** Table space is the
+  cap the binder exists to lift, and what is at home is the bigger half of it,
+  so the binder shows both by default — box first — with a scope dropdown to
+  narrow to either. The counter list's never-merge rule holds: a card that
+  might be at home is not one you can put in somebody's hand. A binder has no
+  room for the list's heading-and-rule, so **the rule is carried by the PAGE**
+  — each section is paginated on its own and the pages concatenated, which
+  makes a mixed page unrepresentable rather than merely avoided. The page
+  header names the section and the pocket's corner badge says `ask`, because a
+  pocket seen on its own has no header above it. A card in the box AND still
+  listed appears once, in the box, since the box is the one you can act on;
+  the same card in both sections never folds into one pocket, because "×4"
+  would then count cards that are not in the room.
 - **One card, one pocket.** Four copies of the same Gengar are four rows on
   the desk — four physical cards in four stack positions, and the desk is
   right to list them. A customer flipping past the same card four times is
@@ -1130,13 +1144,16 @@ Desk rather than a replacement for either of the other two.
   `stock_checkouts` a year from now, appearing on a tablet somebody is
   holding. `check-binder.mjs` stuffs a row with every private value the desk
   knows and searches the whole serialised pocket for each one.
-- **Where a card is comes back on a TAP, and it is a different question from
-  the one the online rows ask.** A card in the binder is a card in the BOX: it
-  has been checked out, so `stackpos.js` gives it no live position on purpose
-  and quoting the one it used to hold would send you counting to the wrong
-  card on a shelf it is not on. What finds it is the SKU on its sleeve plus
-  the stack it was packed out of — `placeOf()`. The pocket carries an id and
-  nothing else; the desk resolves its own row.
+- **Where a card is comes back on a TAP, and the two sections are asked
+  different questions.** A card in the box has been checked out, so
+  `stackpos.js` gives it no live position on purpose — quoting the one it used
+  to hold would send you counting to the wrong card on a shelf it is not on.
+  What finds it is the SKU on its sleeve plus the stack it was packed out of
+  (`placeOf()`). A card that is only LISTED is still in its stack, so it has a
+  real live position and that is the useful answer — the same one the counter
+  list's online rows give, with the same caveat that it is where the card
+  lives at HOME. The pocket carries an id and nothing else; the desk resolves
+  its own row.
 - **A mostly vertical drag is a scroll.** `swipeDirection()` refuses anything
   that is not clearly horizontal and past a threshold, because the binder sits
   in a page you scroll and a page that turns under a customer's thumb while
@@ -1152,7 +1169,17 @@ Desk rather than a replacement for either of the other two.
   `s-l500` for a pocket, `s-l1600` for the preview — so a binder page still
   costs no API call. `contain` rather than `cover`: a gallery shot cropped to
   fill is a card with its edges cut off, and the edges are what somebody is
-  looking at the picture to see.
+  looking at the picture to see. The `ask` mark shares that corner badge for
+  the same reason: over the card's top-left it hides the printed name, and on
+  the price line it turns "from £825" into "from £…" in a 90px pocket.
+- **One shape, both sources.** `boxItem()` and `onlineItem()` are the only
+  place the difference between a checkout row and an eBay listing exists;
+  everything after them groups, sorts and projects items. A second grouping
+  path for the online stock would eventually disagree with the first about
+  what counts as the same card, and that shows up as a customer being told we
+  have one of something we have four of. A quantity-3 listing counts as one
+  item — honest enough in a section whose promise is "ask and we'll check",
+  and better than a number this file would have to guess at.
 
 ## What we were asked for is the only demand signal a show gives
 

@@ -18,7 +18,8 @@ import {
 import { counterView, onlineMatches, inBoxSkus } from "@/lib/showcounter.js";
 import {
   binderView, clampPage, turnPage, swipeDirection, copyLocations,
-  BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS
+  BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS,
+  BINDER_SCOPES, DEFAULT_SCOPE, SECTION_LABELS, ONLINE
 } from "@/lib/binder.js";
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 import { probePoolName } from "@/lib/batch-store";
@@ -100,6 +101,10 @@ export default function ShowDesk() {
   const [binderPage, setBinderPage] = useState(0);
   const [binderSort, setBinderSort] = useState(DEFAULT_BINDER_SORT);
   const [binderPrice, setBinderPrice] = useState("any");
+  // Which stock the binder shows. Both by default — see DEFAULT_SCOPE: table
+  // space is the cap this screen exists to lift, and what is at home is the
+  // bigger half of it.
+  const [binderScope, setBinderScope] = useState(DEFAULT_SCOPE);
   const [binderCard, setBinderCard] = useState(null); // the pocket opened big
   // Which copies have had their place revealed, by id. Same rule as the online
   // rows' locations: never before a tap, because a SKU and a stack name say
@@ -419,8 +424,12 @@ export default function ShowDesk() {
   // stranger's eyes is an allow-list built key by key in lib/binder.js, never
   // a desk row with the private parts hidden by CSS.
   const binder = useMemo(
-    () => binderView(open, { query: q, sort: binderSort, price: binderPrice }, { images }),
-    [open, q, binderSort, binderPrice, images]
+    () => binderView(
+      open,
+      { query: q, sort: binderSort, price: binderPrice, scope: binderScope },
+      { images, listings }
+    ),
+    [open, listings, q, binderSort, binderPrice, binderScope, images]
   );
   // A page that still exists, however the search just changed under it.
   const binderAt = clampPage(binderPage, binder.pageCount);
@@ -432,10 +441,6 @@ export default function ShowDesk() {
     for (const co of open) if (co?.id != null) m.set(String(co.id), co);
     return m;
   }, [open]);
-  const binderPlaces = useMemo(
-    () => new Map(copyLocations(binderCard, { rowsById }).map((f) => [f.id, f.location])),
-    [binderCard, rowsById]
-  );
   const wantGroups = useMemo(() => wantsSummary(wants), [wants]);
   // Stock that is listed online and not in the box. Only ever on a search, and
   // never a card already in the list above it — see onlineMatches().
@@ -460,6 +465,16 @@ export default function ShowDesk() {
     const sku = skuByListingId.get(String(rowId));
     return sku ? locations.get(sku) || null : null;
   }
+  // Where the copies in the open pocket are. Declared here rather than beside
+  // the binder view because it needs both of the maps above — a box copy is
+  // found by the SKU on its sleeve, a listed one by its live stack position,
+  // and copyLocations() knows which question its pocket is asking.
+  const binderPlaces = useMemo(
+    () => new Map(
+      copyLocations(binderCard, { rowsById, skuByListing: skuByListingId, locations }).map((f) => [f.id, f.location])
+    ),
+    [binderCard, rowsById, skuByListingId, locations]
+  );
   function turnBinder(dir) {
     setBinderPage((cur) => turnPage(cur, dir, binder.pageCount));
   }
@@ -511,7 +526,7 @@ export default function ShowDesk() {
   // the page legal on its own; this is about where you WANT to be, which is
   // page one of what you just asked for rather than page six of what you asked
   // for before.
-  useEffect(() => { setBinderPage(0); }, [q, binderSort, binderPrice]);
+  useEffect(() => { setBinderPage(0); }, [q, binderSort, binderPrice, binderScope]);
   // The binder turns on the arrow keys too — it is used on a laptop at the
   // desk as well as a tablet at the table. Escape closes the preview, which is
   // the only thing on this screen that traps you.
@@ -1127,6 +1142,9 @@ export default function ShowDesk() {
                   <select className="sd-select" value={binderPrice} onChange={(e) => setBinderPrice(e.target.value)} aria-label="Filter the binder by price">
                     {BINDER_PRICE_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
                   </select>
+                  <select className="sd-select" value={binderScope} onChange={(e) => setBinderScope(e.target.value)} aria-label="Which stock the binder shows">
+                    {BINDER_SCOPES.map((sc) => <option key={sc.key} value={sc.key}>{sc.label}</option>)}
+                  </select>
                 </>
               ) : (
               <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort the show stock">
@@ -1340,6 +1358,16 @@ export default function ShowDesk() {
               </div>
             ) : binderMode ? (
               <div className="bn-wrap">
+                {/* Which section this page belongs to. The binder has no room
+                    for the counter list's heading-and-rule, so the never-merge
+                    rule is carried by the PAGE — each section is paginated on
+                    its own, and this says which one you are looking at. */}
+                {binder.pageCount > 0 ? (
+                  <div className={binder.pageKinds[binderAt] === ONLINE ? "bn-section bn-section-online" : "bn-section"}>
+                    <span className="eyebrow">{SECTION_LABELS[binder.pageKinds[binderAt]]?.title}</span>
+                    <span className="hint-small">{SECTION_LABELS[binder.pageKinds[binderAt]]?.note}</span>
+                  </div>
+                ) : null}
                 {/* The frame is the product. A grid of cards is a grid of
                     cards; a binder is a thing somebody recognises and knows
                     how to use without being told, which is the whole reason
@@ -1355,14 +1383,19 @@ export default function ShowDesk() {
                   <span className="bn-rings" aria-hidden="true" />
                   {binder.pageCount === 0 ? (
                     <p className="dd-empty bn-blank">
-                      {q.trim() || binderPrice !== "any"
+                      {q.trim() || binderPrice !== "any" || binderScope !== DEFAULT_SCOPE
                         ? "Nothing in the binder matches that."
-                        : "Nothing in the box yet — check some stock out and it fills up."}
+                        : "Nothing to show yet — check some stock out, or sync your eBay listings."}
                     </p>
                   ) : (
                     <div className="bn-page">
                       {(binder.pages[binderAt] || []).map((c, i) => (c ? (
-                        <button className="bn-pocket bn-card" key={c.key} onClick={() => openPocket(c)} title={`${c.name} — ${c.priceText}`}>
+                        <button
+                          className={c.source === ONLINE ? "bn-pocket bn-card bn-card-online" : "bn-pocket bn-card"}
+                          key={`${c.source}-${c.key}`}
+                          onClick={() => openPocket(c)}
+                          title={`${c.name} — ${c.priceText}`}
+                        >
                           {c.image ? (
                             /* eslint-disable-next-line @next/next/no-img-element */
                             <img className="bn-art" src={c.image} alt="" loading="lazy" />
@@ -1375,7 +1408,18 @@ export default function ShowDesk() {
                           )}
                           {/* Several copies, one pocket — said out loud, because
                               a customer who wants two should be able to ask. */}
-                          {c.count > 1 ? <span className="bn-copies" title={`${c.count} copies in the box`}>×{c.count}</span> : null}
+                          {/* One badge, doing both jobs. A pocket seen on its
+                              own has no page header above it, so the section
+                              rides on the pocket as well — and "ask" rather
+                              than "not here", because the card may be in the
+                              box and simply never checked out. */}
+                          {c.source === ONLINE ? (
+                            <span className="bn-copies bn-flag" title={c.count > 1 ? `${c.count} listings — ask and we'll check` : "Listed online — ask and we'll check"}>
+                              {c.count > 1 ? `ask ×${c.count}` : "ask"}
+                            </span>
+                          ) : c.count > 1 ? (
+                            <span className="bn-copies" title={`${c.count} copies in the box`}>×{c.count}</span>
+                          ) : null}
                           <span className="bn-label">
                             <span className="bn-name">{c.name}</span>
                             <span className={c.pricePence == null ? "bn-price bn-price-ask" : "bn-price"}>
@@ -1410,7 +1454,8 @@ export default function ShowDesk() {
                         — but the count has to be somewhere or stock looks
                         missing. */}
                     <span className="hint-small">
-                      {binder.cardCount} card{binder.cardCount === 1 ? "" : "s"}
+                      {binder.box.cardCount} in the box
+                      {binder.online.cardCount > 0 ? ` · ${binder.online.cardCount} listed online` : ""}
                       {binder.folded > 0 ? ` · ${binder.folded} duplicate cop${binder.folded === 1 ? "y" : "ies"} behind them` : ""}
                     </span>
                   </span>
@@ -1448,7 +1493,9 @@ export default function ShowDesk() {
                           {binderCard.priceFrom ? "from " : ""}{binderCard.priceText}
                         </p>
                         <p className="hint hint-small bn-preview-count">
-                          {binderCard.count === 1 ? "One copy in the box" : `${binderCard.count} copies in the box`}
+                          {binderCard.source === ONLINE
+                            ? `${SECTION_LABELS[ONLINE].title} — ${binderCard.count === 1 ? "one listing" : `${binderCard.count} listings`}. ${SECTION_LABELS[ONLINE].note}`
+                            : binderCard.count === 1 ? "One copy in the box" : `${binderCard.count} copies in the box`}
                         </p>
                         <div className="bn-copylist">
                           {binderCard.copies.map((c, i) => (

@@ -928,6 +928,12 @@ html, body { overflow-x: clip; max-width: 100%; }
    under half of it; capped at 620px so it stays a binder rather than a wall on
    a big monitor, and floored so a short landscape phone doesn't shrink it to
    nothing. */
+/* Which section the current page belongs to. The counter list keeps its
+   online stock under a heading with a rule above it; a binder has no room for
+   that, so the never-merge rule is carried by the page and this names it. */
+.bn-section { display:flex; flex-direction:column; gap:1px; }
+.bn-section .hint-small { margin-top:0; }
+.bn-section-online .eyebrow { color:var(--warn-ink); }
 .bn-wrap { display:flex; flex-direction:column; gap:10px; width:100%;
   max-width:max(300px, min(620px, 46vh)); margin:0 auto; }
 .bn-frame { position:relative; border:1px solid var(--line-strong); border-radius:var(--radius);
@@ -963,6 +969,24 @@ html, body { overflow-x: clip; max-width: 100%; }
   border-bottom:1px dashed var(--line-strong); color:var(--ink-faint); font-family:var(--font-body); font-size:11px; }
 /* Several copies, one pocket — said out loud, because a customer who wants two
    should be able to ask for two. */
+/* A pocket photographed on its own has no page header, so the mark rides on
+   the pocket too. Deliberately the word "ask": the card may well be in the box
+   and simply never checked out, and "not here" is a claim the data cannot
+   support — said about a card that IS in the box it loses a sale already made. */
+/* The mark shares the corner badge rather than taking a place of its own.
+   Two earlier positions were wrong for reasons worth keeping: over the
+   top-LEFT of the art it covers the card's printed name, which is what
+   somebody is looking at the picture to read; on the price line it fits on a
+   desktop and turns "from £825" into "from £…" in a 90px pocket on a phone,
+   which is the one number people came for. The top-right corner is already
+   spent on the copies badge, so this costs nothing new.
+
+   --warn-soft/--warn-ink are the pair designed to go together, and they swap
+   in dark mode. A hand-mixed background with white on it inverts there — light
+   gold under white — which is the sort of thing you only find out at a show. */
+.bn-flag { background:var(--warn-soft); color:var(--warn-ink); border:1px solid var(--warn);
+  font-family:var(--font-body); letter-spacing:.02em; }
+.bn-card-online .bn-label { background:var(--surface-2); }
 .bn-copies { position:absolute; top:5px; right:5px; padding:1px 6px; border-radius:999px;
   background:color-mix(in srgb, var(--ink) 72%, transparent); color:#fff;
   font-family:var(--font-mono); font-size:11px; font-weight:700; }
