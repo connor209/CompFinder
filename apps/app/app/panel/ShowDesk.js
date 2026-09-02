@@ -19,7 +19,8 @@ import { counterView, onlineMatches, inBoxSkus } from "@/lib/showcounter.js";
 import {
   binderView, clampPage, turnPage, swipeDirection, copyLocations,
   BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS,
-  BINDER_SCOPES, DEFAULT_SCOPE, SECTION_LABELS, ONLINE
+  BINDER_SCOPES, DEFAULT_SCOPE, SECTION_LABELS, ONLINE,
+  binderSpreads, spreadIndexOf, turnSpread, BLANK_PAGE
 } from "@/lib/binder.js";
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 import { probePoolName } from "@/lib/batch-store";
@@ -105,6 +106,11 @@ export default function ShowDesk() {
   // space is the cap this screen exists to lift, and what is at home is the
   // bigger half of it.
   const [binderScope, setBinderScope] = useState(DEFAULT_SCOPE);
+  // Whether there is room to open the binder — both halves at once, the way a
+  // binder actually sits on a desk. Measured rather than guessed from CSS,
+  // because which PAGES are on screen is pagination and pagination is ours.
+  // Starts closed so the server and the first client render agree.
+  const [spread, setSpread] = useState(false);
   const [binderCard, setBinderCard] = useState(null); // the pocket opened big
   // Which copies have had their place revealed, by id. Same rule as the online
   // rows' locations: never before a tap, because a SKU and a stack name say
@@ -433,6 +439,19 @@ export default function ShowDesk() {
   );
   // A page that still exists, however the search just changed under it.
   const binderAt = clampPage(binderPage, binder.pageCount);
+  // Pages paired as an open binder shows them, never across a section
+  // boundary — see binderSpreads(). The page NUMBERS are the same on every
+  // device; a wide screen just shows two at once.
+  const spreads = useMemo(() => binderSpreads(binder.pageKinds), [binder.pageKinds]);
+  const spreadAt = spreadIndexOf(spreads, binderAt);
+  const sheetPages = spread ? [spreads[spreadAt]?.[0] ?? null, spreads[spreadAt]?.[1] ?? null] : [binderAt];
+  const atFirstPage = spread ? spreadAt === 0 : binderAt === 0;
+  const atLastPage = spread ? spreadAt >= spreads.length - 1 : binderAt >= binder.pageCount - 1;
+  const pageLabel = binder.pageCount === 0
+    ? "No pages"
+    : sheetPages[1] != null
+      ? `Pages ${sheetPages[0] + 1}–${sheetPages[1] + 1} of ${binder.pageCount}`
+      : `Page ${(sheetPages[0] ?? 0) + 1} of ${binder.pageCount}`;
   // Every checkout row by id, so a pocket can be resolved back to the desk's
   // own data on a tap. The pocket carries an id and nothing else — see
   // copyLocations() in lib/binder.js for why that is the whole point.
@@ -476,7 +495,9 @@ export default function ShowDesk() {
     [binderCard, rowsById, skuByListingId, locations]
   );
   function turnBinder(dir) {
-    setBinderPage((cur) => turnPage(cur, dir, binder.pageCount));
+    setBinderPage((cur) => (spread
+      ? turnSpread(spreads, clampPage(cur, binder.pageCount), dir)
+      : turnPage(cur, dir, binder.pageCount)));
   }
   /**
    * A thumb across the binder.
@@ -527,6 +548,14 @@ export default function ShowDesk() {
   // page one of what you just asked for rather than page six of what you asked
   // for before.
   useEffect(() => { setBinderPage(0); }, [q, binderSort, binderPrice, binderScope]);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia("(min-width: 900px)");
+    const apply = () => setSpread(mq.matches);
+    apply();
+    mq.addEventListener?.("change", apply);
+    return () => mq.removeEventListener?.("change", apply);
+  }, []);
   // The binder turns on the arrow keys too — it is used on a laptop at the
   // desk as well as a tablet at the table. Escape closes the preview, which is
   // the only thing on this screen that traps you.
@@ -1357,30 +1386,29 @@ export default function ShowDesk() {
                 ))}
               </div>
             ) : binderMode ? (
-              <div className="bn-wrap">
-                {/* Which section this page belongs to. The binder has no room
+              <div className={spread ? "bn-wrap bn-wrap-spread" : "bn-wrap"}>
+                {/* Which section these pages belong to. The binder has no room
                     for the counter list's heading-and-rule, so the never-merge
                     rule is carried by the PAGE — each section is paginated on
-                    its own, and this says which one you are looking at. */}
+                    its own, and a spread never straddles the two — and this
+                    says which one you are looking at. */}
                 {binder.pageCount > 0 ? (
                   <div className={binder.pageKinds[binderAt] === ONLINE ? "bn-section bn-section-online" : "bn-section"}>
                     <span className="eyebrow">{SECTION_LABELS[binder.pageKinds[binderAt]]?.title}</span>
                     <span className="hint-small">{SECTION_LABELS[binder.pageKinds[binderAt]]?.note}</span>
                   </div>
                 ) : null}
-                {/* The frame is the product. A grid of cards is a grid of
-                    cards; a binder is a thing somebody recognises and knows
-                    how to use without being told, which is the whole reason
-                    for the rings, the page shape and the empty pockets on the
-                    last page. */}
+                {/* The cover, and the sheets sitting on it. The frame is not
+                    decoration: a grid of pictures is a grid of pictures, and a
+                    binder is a thing somebody recognises and knows how to use
+                    without being told. */}
                 <div
-                  className="bn-frame"
+                  className={spread ? "bn-book bn-book-open" : "bn-book"}
                   onTouchStart={binderTouchStart}
                   onTouchEnd={binderTouchEnd}
                   role="group"
-                  aria-label={binder.pageCount === 0 ? "The binder, empty" : `Binder page ${binderAt + 1} of ${binder.pageCount}`}
+                  aria-label={binder.pageCount === 0 ? "The binder, empty" : pageLabel}
                 >
-                  <span className="bn-rings" aria-hidden="true" />
                   {binder.pageCount === 0 ? (
                     <p className="dd-empty bn-blank">
                       {q.trim() || binderPrice !== "any" || binderScope !== DEFAULT_SCOPE
@@ -1388,66 +1416,85 @@ export default function ShowDesk() {
                         : "Nothing to show yet — check some stock out, or sync your eBay listings."}
                     </p>
                   ) : (
-                    <div className="bn-page">
-                      {(binder.pages[binderAt] || []).map((c, i) => (c ? (
-                        <button
-                          className={c.source === ONLINE ? "bn-pocket bn-card bn-card-online" : "bn-pocket bn-card"}
-                          key={`${c.source}-${c.key}`}
-                          onClick={() => openPocket(c)}
-                          title={`${c.name} — ${c.priceText}`}
+                    <>
+                      {/* The binding. Down the left of a single page, up the
+                          middle of an open one — which is the difference
+                          between a page and a binder. */}
+                      {spread ? null : <span className="bn-rings" aria-hidden="true" />}
+                      {sheetPages.map((pageIdx, side) => (
+                        <div
+                          className={pageIdx == null ? "bn-sheet bn-sheet-blank" : "bn-sheet"}
+                          key={`sheet-${side}`}
+                          aria-hidden={pageIdx == null ? "true" : undefined}
                         >
-                          {c.image ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img className="bn-art" src={c.image} alt="" loading="lazy" />
-                          ) : (
-                            /* A card checked out by ENDING its listing has no
-                               photo. An empty sleeve is the honest thing to
-                               draw: catalogue art would show a mint scan of a
-                               played card to the person holding it. */
-                            <span className="bn-art bn-noart" aria-hidden="true">no photo</span>
-                          )}
-                          {/* Several copies, one pocket — said out loud, because
-                              a customer who wants two should be able to ask. */}
-                          {/* One badge, doing both jobs. A pocket seen on its
-                              own has no page header above it, so the section
-                              rides on the pocket as well — and "ask" rather
-                              than "not here", because the card may be in the
-                              box and simply never checked out. */}
-                          {c.source === ONLINE ? (
-                            <span className="bn-copies bn-flag" title={c.count > 1 ? `${c.count} listings — ask and we'll check` : "Listed online — ask and we'll check"}>
-                              {c.count > 1 ? `ask ×${c.count}` : "ask"}
-                            </span>
-                          ) : c.count > 1 ? (
-                            <span className="bn-copies" title={`${c.count} copies in the box`}>×{c.count}</span>
-                          ) : null}
-                          <span className="bn-label">
-                            <span className="bn-name">{c.name}</span>
-                            <span className={c.pricePence == null ? "bn-price bn-price-ask" : "bn-price"}>
-                              {c.priceFrom ? "from " : ""}{c.priceText}
-                            </span>
-                          </span>
-                        </button>
-                      ) : (
-                        /* An empty pocket, not a gap. A last page that reflowed
-                           to fit three cards would resize every card on it, so
-                           the one somebody was about to point at jumps as you
-                           turn onto it. */
-                        <span className="bn-pocket bn-pocket-empty" key={`pocket-${i}`} aria-hidden="true" />
-                      )))}
-                    </div>
+                          <div className="bn-page">
+                            {(pageIdx == null ? BLANK_PAGE : binder.pages[pageIdx] || []).map((c, i) => (c ? (
+                              <button
+                                className={c.source === ONLINE ? "bn-pocket bn-card bn-card-online" : "bn-pocket bn-card"}
+                                key={`${c.source}-${c.key}`}
+                                onClick={() => openPocket(c)}
+                                title={`${c.name} — ${c.priceText}`}
+                              >
+                                {c.image ? (
+                                  /* eslint-disable-next-line @next/next/no-img-element */
+                                  <img className="bn-art" src={c.image} alt="" loading="lazy" />
+                                ) : (
+                                  /* A card checked out by ENDING its listing has
+                                     no photo. An empty sleeve is the honest
+                                     thing to draw: catalogue art would show a
+                                     mint scan of a played card to the person
+                                     holding that card. */
+                                  <span className="bn-art bn-noart" aria-hidden="true">no photo</span>
+                                )}
+                                {/* One badge, doing both jobs. A pocket seen on
+                                    its own has no page header above it, so the
+                                    section rides on the pocket as well — and
+                                    "ask" rather than "not here", because the
+                                    card may be in the box and simply never
+                                    checked out. */}
+                                {c.source === ONLINE ? (
+                                  <span className="bn-copies bn-flag" title={c.count > 1 ? `${c.count} listings — ask and we'll check` : "Listed online — ask and we'll check"}>
+                                    {c.count > 1 ? `ask ×${c.count}` : "ask"}
+                                  </span>
+                                ) : c.count > 1 ? (
+                                  <span className="bn-copies" title={`${c.count} copies in the box`}>×{c.count}</span>
+                                ) : null}
+                                <span className="bn-label">
+                                  <span className="bn-name">{c.name}</span>
+                                  <span className={c.pricePence == null ? "bn-price bn-price-ask" : "bn-price"}>
+                                    {c.priceFrom ? "from " : ""}{c.priceText}
+                                  </span>
+                                </span>
+                              </button>
+                            ) : (
+                              /* An empty pocket, not a gap. A last page that
+                                 reflowed to fit three cards would resize every
+                                 card on it, so the one somebody was about to
+                                 point at jumps as you turn onto it. */
+                              <span className="bn-pocket bn-pocket-empty" key={`pocket-${i}`} aria-hidden="true" />
+                            )))}
+                          </div>
+                          {/* The number, in the outer corner, where a book puts
+                              it — and the reason the page count is fixed at
+                              nine in the first place. */}
+                          <span className="bn-sheetno">{pageIdx == null ? "" : pageIdx + 1}</span>
+                        </div>
+                      ))}
+                      {spread ? <span className="bn-rings bn-rings-spine" aria-hidden="true" /> : null}
+                    </>
                   )}
                 </div>
                 <div className="bn-nav">
                   <button
                     className="btn btn-ghost bn-turn"
                     onClick={() => turnBinder("prev")}
-                    disabled={binderAt === 0}
+                    disabled={atFirstPage}
                     aria-label="Previous page"
                   >
                     ◀
                   </button>
                   <span className="bn-pageno">
-                    {binder.pageCount === 0 ? "No pages" : `Page ${binderAt + 1} of ${binder.pageCount}`}
+                    {pageLabel}
                     {/* Nothing is folded away quietly. Four copies of one card
                         is one pocket, which is the point — a customer flipping
                         past the same Gengar four times is reading a duplicate
@@ -1462,7 +1509,7 @@ export default function ShowDesk() {
                   <button
                     className="btn btn-ghost bn-turn"
                     onClick={() => turnBinder("next")}
-                    disabled={binderAt >= binder.pageCount - 1}
+                    disabled={atLastPage}
                     aria-label="Next page"
                   >
                     ▶
@@ -1504,11 +1551,11 @@ export default function ShowDesk() {
                               <span className="bn-copy-cond">{c.condition || "condition not stated"}</span>
                               <span className={c.pricePence == null ? "bn-copy-price bn-price-ask" : "bn-copy-price"}>{c.priceText}</span>
                               {/* Where it is, on a tap and never before one.
-                                  A card in the binder is a card in the BOX, so
-                                  the answer is the SKU on its sleeve and the
-                                  stack it was packed out of — not a live stack
-                                  position, which it no longer has. Looked up
-                                  from rows the desk already holds; the pocket
+                                  A card in the box answers with the SKU on its
+                                  sleeve and the stack it was packed out of; one
+                                  that is only listed is still in its stack, so
+                                  it answers with its live position. Looked up
+                                  from rows the desk already holds — the pocket
                                   carries an id and nothing else. */}
                               <button
                                 className="stack-pull sd-locate"

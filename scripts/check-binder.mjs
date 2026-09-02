@@ -32,6 +32,7 @@ import {
   binderView, binderPages, binderKey, binderCopy, pocketOf,
   clampPage, turnPage, swipeDirection, copyLocations, placeOf, isFiltering,
   onlineStock, onlineItem, boxItem, BOX, ONLINE, BINDER_SCOPES, DEFAULT_SCOPE, SECTION_LABELS,
+  binderSpreads, spreadIndexOf, turnSpread, BLANK_PAGE,
   BINDER_FIELDS, BINDER_COPY_FIELDS, BINDER_PAGE, BINDER_COLS, BINDER_ROWS,
   BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS, SWIPE_MIN_PX,
   POCKET_PX, PREVIEW_PX, ASK_TEXT
@@ -358,6 +359,43 @@ eq("a listed card has a live position", placed.find((f) => f.id === "L1").locati
 eq("a listed card we cannot place is not guessed at",
   copyLocations(web, { skuByListing: new Map(), locations: shelf })[0].location, null);
 
+// --- 9c. the binder, open on a desk -------------------------------------
+// A desk has room for both halves of an open binder; a phone does not. What
+// must not change between them is the page NUMBER — "it's on page four" is the
+// whole reason a page is a fixed nine — so pairing is a way of DISPLAYING
+// pages, never a second way of cutting them.
+eq("a blank facing page is nine empty pockets", BLANK_PAGE.length, 9);
+eq("...and every one of them empty", BLANK_PAGE.filter((p) => p === null).length, 9);
+
+eq("pages pair up", binderSpreads([BOX, BOX, BOX, BOX]), [[0, 1], [2, 3]]);
+// THE rule. An open binder showing a box page facing an online page is the
+// merge this design exists to prevent, and worse than the list version because
+// the reader cannot tell which side the header is talking about. A section's
+// last spread sits on its own instead — what a real binder does at the end of
+// a run.
+eq("a spread never straddles two sections", binderSpreads([BOX, BOX, BOX, ONLINE, ONLINE]), [[0, 1], [2], [3, 4]]);
+eq("one page each never pairs", binderSpreads([BOX, ONLINE]), [[0], [1]]);
+eq("an empty binder has no spreads", binderSpreads([]), []);
+
+// The invariant behind all of it: pairing reorders and renumbers NOTHING. Page
+// 4 is the same nine cards on the phone in your pocket and the tablet on the
+// table; a wide screen just shows two at once. Padding the pagination to keep
+// sections on their own spreads would have broken exactly this.
+for (const kinds of [[BOX, BOX, BOX, ONLINE, ONLINE], [BOX], [BOX, ONLINE, ONLINE, ONLINE]]) {
+  const flat = binderSpreads(kinds).flat();
+  eq(`pairing ${kinds.length} pages renumbers none of them`, flat, kinds.map((_, i) => i));
+}
+
+const SPR = binderSpreads([BOX, BOX, BOX, ONLINE, ONLINE]);
+eq("a page knows which spread it is in", spreadIndexOf(SPR, 4), 2);
+eq("a page nobody has is the first spread", spreadIndexOf(SPR, 99), 0);
+eq("turning lands on the left-hand page of the next spread", turnSpread(SPR, 0, "next"), 2);
+eq("...and of the one before", turnSpread(SPR, 4, "prev"), 2);
+// A binder does not wrap, open or shut.
+eq("the last spread is the last spread", turnSpread(SPR, 3, "next"), 3);
+eq("the first spread is the first spread", turnSpread(SPR, 1, "prev"), 0);
+eq("no spreads is not a crash", turnSpread([], 0, "next"), 0);
+
 // --- 10. greps: the rules that live in one file only --------------------
 const binderSrc = code("apps/app/lib/binder.js");
 // The PROJECTION cannot leak what it never names. Sliced to the three
@@ -402,6 +440,11 @@ if (at < 0) {
 } else {
   const branch = deskSrc.slice(at, deskSrc.indexOf("\n            ) : (", at));
   ok("the binder page is rendered from the view", /binder\.pages\[/.test(branch));
+  // Both halves of an open binder come out of one map over the pages on show,
+  // so there is one copy of the pocket markup rather than a left and a right
+  // that drift apart.
+  ok("the sheets are one loop", /sheetPages\.map\(/.test(branch));
+  ok("a blank facing page is drawn, not skipped", /BLANK_PAGE/.test(branch));
   // The section has to be named on the page. It is the only thing separating
   // a card you can hand over from one that may be at home, and the pockets
   // themselves look identical.

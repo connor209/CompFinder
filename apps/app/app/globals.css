@@ -934,28 +934,88 @@ html, body { overflow-x: clip; max-width: 100%; }
 .bn-section { display:flex; flex-direction:column; gap:1px; }
 .bn-section .hint-small { margin-top:0; }
 .bn-section-online .eyebrow { color:var(--warn-ink); }
+
+/* A binder page has to FIT. Nine pockets you have to scroll past is a list
+   with a frame drawn round it — the whole reason for paging is that a page is
+   a thing you take in at once. A page is three pockets tall and each is 7/5 of
+   its own width plus a label, so the width that fits a given height is a bit
+   under half of it.
+
+   Open on a desk, both halves are on screen and the cap doubles: a single
+   column of nine down the middle of a 1400px panel is the "sparse" the spread
+   exists to fix. The page NUMBERS do not change with the width — see
+   binderSpreads() — only how many of them you can see at once. */
 .bn-wrap { display:flex; flex-direction:column; gap:10px; width:100%;
   max-width:max(300px, min(620px, 46vh)); margin:0 auto; }
-.bn-frame { position:relative; border:1px solid var(--line-strong); border-radius:var(--radius);
-  background:var(--surface-2); box-shadow:var(--shadow-1) inset; padding:14px 14px 14px 30px;
-  /* The gesture is horizontal, so the browser keeps the vertical scroll and we
-     never have to preventDefault() a drag that turned out to be reading. */
-  touch-action:pan-y; user-select:none; }
-/* The rings. A spine down the left, drawn rather than pictured — it costs
-   nothing to load and it is what makes the frame read as a binder at a glance. */
-.bn-rings { position:absolute; left:11px; top:16px; bottom:16px; width:8px; border-radius:4px;
-  background:repeating-linear-gradient(to bottom, var(--line-strong) 0 10px, transparent 10px 26px); }
+.bn-wrap-spread { max-width:min(1180px, 104vh); }
+
+/* The cover. Quiet — this is a working screen and the app's whole visual
+   system is "stay out of the way of the price" — but not flat: the outer
+   shell, the sheets sitting on it and the binding down the middle are what
+   make somebody hold it like a binder instead of reading it like a table.
+   The foil edge is the app's own --holo, the same one on the brand mark and
+   the primary buttons, so it follows every skin. */
+.bn-book { position:relative; display:flex; align-items:stretch; gap:0;
+  padding:14px; border-radius:16px; overflow:hidden;
+  /* The gutter is a real gap, not something the spine is drawn on top of.
+     Without it the two sheets meet in the middle and the binding lands over
+     the right-hand column of the left page — pockets half-covered by a
+     decoration, which is the worst of both. */
+  background:linear-gradient(158deg, color-mix(in srgb, var(--accent) 7%, var(--surface-sink)) 0%, var(--surface-sink) 60%);
+  border:1px solid var(--line-strong);
+  box-shadow:inset 0 1px 0 color-mix(in srgb, #fff 45%, transparent), var(--shadow-2); }
+.bn-book::before { content:""; position:absolute; inset:0 0 auto 0; height:2px; background:var(--holo); opacity:.75; }
+
+/* One page, sitting on the cover. */
+.bn-sheet { position:relative; flex:1 1 0; min-width:0; padding:11px 11px 20px;
+  border-radius:7px; background:var(--surface); box-shadow:var(--shadow-1); }
+/* The blank facing page at the end of a section. A real binder does this; the
+   alternative was padding the pagination, which would shift every later page
+   number on wide screens only and break the one promise a page number makes. */
+.bn-sheet-blank { opacity:.45; }
+.bn-book-open { gap:32px; padding:16px; }
+.bn-book-open .bn-sheet:first-of-type { border-top-right-radius:2px; border-bottom-right-radius:2px; }
+.bn-book-open .bn-sheet:last-of-type { border-top-left-radius:2px; border-bottom-left-radius:2px; }
+/* The gutter. A page curving into the spine is the single strongest cue that
+   this is an open book rather than two grids side by side. */
+.bn-book-open .bn-sheet::after { content:""; position:absolute; top:0; bottom:0; width:22px; pointer-events:none; }
+.bn-book-open .bn-sheet:first-of-type::after { right:0; border-top-right-radius:2px; border-bottom-right-radius:2px;
+  background:linear-gradient(to right, transparent, color-mix(in srgb, var(--ink) 11%, transparent)); }
+.bn-book-open .bn-sheet:last-of-type::after { left:0; border-top-left-radius:2px; border-bottom-left-radius:2px;
+  background:linear-gradient(to left, transparent, color-mix(in srgb, var(--ink) 11%, transparent)); }
+/* The number, in the outer corner where a book puts it. */
+.bn-sheetno { position:absolute; bottom:5px; right:12px; font-family:var(--font-mono); font-size:10.5px;
+  color:var(--ink-faint); }
+.bn-book-open .bn-sheet:first-of-type .bn-sheetno { right:auto; left:12px; }
+
+/* The binding: a rail down the left of a single page, up the middle of an open
+   one. Drawn rather than pictured — it costs nothing to load and it is what
+   makes the frame read as a binder at a glance. */
+.bn-rings { flex:none; width:11px; align-self:stretch; margin:6px 8px; border-radius:6px;
+  background:
+    linear-gradient(to right, transparent 42%, color-mix(in srgb, var(--ink) 16%, transparent) 42% 58%, transparent 58%),
+    repeating-linear-gradient(to bottom,
+      color-mix(in srgb, var(--ink) 30%, transparent) 0 11px,
+      transparent 11px 30px); }
+.bn-rings-spine { position:absolute; left:50%; top:16px; bottom:16px; width:13px; margin:0 0 0 -6.5px; align-self:auto; }
+
 /* Three across, three down, always. A fixed count is what makes a page NUMBER
    mean anything: "it's on page four" has to be true on the phone in your
    pocket and the tablet on the table. */
-.bn-page { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-.bn-pocket { position:relative; border-radius:8px; background:var(--surface);
-  border:1px solid var(--line); display:flex; flex-direction:column; overflow:hidden; }
+.bn-page { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
+/* The sleeve. A pocket is a pouch of clear plastic with a card in it, and the
+   inner shadow plus the diagonal glare is the whole difference between that
+   and a tile with a picture on it. */
+.bn-pocket { position:relative; border-radius:8px; background:var(--surface-2);
+  border:1px solid var(--line); display:flex; flex-direction:column; overflow:hidden;
+  box-shadow:inset 0 0 0 1px color-mix(in srgb, #fff 34%, transparent), inset 0 2px 6px color-mix(in srgb, var(--ink) 7%, transparent); }
 /* An empty pocket needs no height of its own: a grid item stretches to its
    row, and every row is sized by the pockets that do have a card in them. */
-.bn-pocket-empty { border-style:dashed; background:transparent; }
-.bn-card { padding:0; font:inherit; color:inherit; text-align:left; cursor:pointer; }
-.bn-card:hover { border-color:var(--accent); }
+.bn-pocket-empty { border-style:dashed; background:transparent; box-shadow:none; }
+.bn-card { padding:0; font:inherit; color:inherit; text-align:left; cursor:pointer; transition:transform .12s ease, border-color .12s ease; }
+.bn-card::after { content:""; position:absolute; inset:0; pointer-events:none; border-radius:7px;
+  background:linear-gradient(114deg, color-mix(in srgb, #fff 14%, transparent) 0 18%, transparent 42%); }
+.bn-card:hover { border-color:var(--accent); transform:translateY(-2px); }
 .bn-card:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 /* The card shape is on the ART, and the label below it is a FIXED height.
    Both halves of that matter: with the ratio on the pocket, a two-line name or
@@ -967,12 +1027,6 @@ html, body { overflow-x: clip; max-width: 100%; }
 .bn-art { flex:none; width:100%; aspect-ratio:5/7; object-fit:contain; background:var(--surface-sink); }
 .bn-noart { display:flex; align-items:center; justify-content:center; background:transparent;
   border-bottom:1px dashed var(--line-strong); color:var(--ink-faint); font-family:var(--font-body); font-size:11px; }
-/* Several copies, one pocket — said out loud, because a customer who wants two
-   should be able to ask for two. */
-/* A pocket photographed on its own has no page header, so the mark rides on
-   the pocket too. Deliberately the word "ask": the card may well be in the box
-   and simply never checked out, and "not here" is a claim the data cannot
-   support — said about a card that IS in the box it loses a sale already made. */
 /* The mark shares the corner badge rather than taking a place of its own.
    Two earlier positions were wrong for reasons worth keeping: over the
    top-LEFT of the art it covers the card's printed name, which is what
@@ -987,7 +1041,9 @@ html, body { overflow-x: clip; max-width: 100%; }
 .bn-flag { background:var(--warn-soft); color:var(--warn-ink); border:1px solid var(--warn);
   font-family:var(--font-body); letter-spacing:.02em; }
 .bn-card-online .bn-label { background:var(--surface-2); }
-.bn-copies { position:absolute; top:5px; right:5px; padding:1px 6px; border-radius:999px;
+/* Several copies, one pocket — said out loud, because a customer who wants two
+   should be able to ask for two. */
+.bn-copies { position:absolute; top:5px; right:5px; padding:1px 6px; border-radius:999px; z-index:1;
   background:color-mix(in srgb, var(--ink) 72%, transparent); color:#fff;
   font-family:var(--font-mono); font-size:11px; font-weight:700; }
 /* The height is the sum of the line boxes below it, not a round number that
@@ -995,15 +1051,15 @@ html, body { overflow-x: clip; max-width: 100%; }
    inch too short does not overflow, it cuts a card's collector number in half
    — and the number is the half that tells two printings apart. */
 .bn-label { flex:none; height:55px; overflow:hidden; display:flex; flex-direction:column; gap:1px;
-  padding:5px 7px; border-top:1px solid var(--line); background:var(--surface); }
+  padding:5px 7px; border-top:1px solid var(--line); background:var(--surface); position:relative; z-index:1; }
 .bn-name { font-size:11px; font-weight:600; line-height:14px; height:28px; color:var(--ink);
   display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
 .bn-price { font-family:var(--font-mono); font-size:12.5px; font-weight:700; line-height:16px;
   color:var(--conf-high); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-/* An ask is a label, not a figure — the same rule the counter list follows, so
-   it does not read as a price beside the pockets that carry one. */
+/* An ask is a label, not a figure. Set smaller and in the body face so it
+   doesn't read as a price beside the pockets that carry one. */
 .bn-price-ask { font-family:var(--font-body); font-size:10.5px; font-weight:600; line-height:16px; color:var(--ink-soft); letter-spacing:0; }
-.bn-blank { margin:28px 0; text-align:center; }
+.bn-blank { margin:28px auto; text-align:center; }
 .bn-nav { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .bn-turn { font-size:17px; line-height:1; padding:8px 16px; flex:none; }
 .bn-pageno { display:flex; flex-direction:column; align-items:center; gap:1px; text-align:center;
@@ -1043,17 +1099,32 @@ html, body { overflow-x: clip; max-width: 100%; }
   border:1px solid rgba(255,255,255,.3); background:rgba(0,0,0,.4); color:#fff; font-size:22px; line-height:1; cursor:pointer; }
 .bn-close:hover { background:rgba(255,255,255,.14); }
 @media (max-width: 720px) {
-  .bn-frame { padding:10px 10px 10px 24px; }
-  .bn-rings { left:8px; width:6px; }
-  .bn-page { gap:7px; }
-  .bn-label { height:50px; padding:4px 5px; }
-  .bn-name { font-size:10px; line-height:13px; height:26px; }
+  /* Every pixel here is pocket width, and pocket width is whether a card's
+     collector NUMBER survives on its label — the half that tells two
+     printings apart. The cover, the sheet and the rail all give some back;
+     the rail stays because on a phone it is the only thing left saying this
+     is a binder rather than a grid. */
+  .bn-book { padding:6px; border-radius:12px; }
+  .bn-sheet { padding:6px 6px 15px; }
+  .bn-rings { width:5px; margin:3px 4px; }
+  .bn-sheetno { bottom:3px; right:7px; font-size:9.5px; }
+  .bn-page { gap:6px; }
+  /* THREE lines on a phone, not two.
+     A pocket here is about 85px across, which is not enough for "Umbreon VMAX
+     215/203" in two lines — and the clamp cuts the END, so what gets lost is
+     "215/203". That is backwards: labelName() in showstock.js exists because a
+     long name loses its NAME before it loses its NUMBER, since the number is
+     what tells two printings apart and matches a stray card back. A third line
+     is cheaper than breaking that rule, and the height stays fixed so the grid
+     is still a grid. */
+  .bn-label { height:59px; padding:4px 5px; }
+  .bn-name { font-size:9.5px; line-height:12px; height:36px; letter-spacing:-.1px; -webkit-line-clamp:3; }
   .bn-price { font-size:11.5px; line-height:15px; }
   /* A pocket on a phone is about 90px across. "Ask at the table" has to FIT
      that: truncated to "Ask at the …" it reads as a bug rather than a label,
      and it is the one thing on the page that has to be understood by somebody
      who did not write it. Smaller is fine — an ask was never a figure. */
-  .bn-price-ask { font-size:9.5px; line-height:15px; letter-spacing:-.1px; }
+  .bn-price-ask { font-size:8.5px; line-height:15px; letter-spacing:-.15px; }
   /* The picture goes above the details rather than beside them: 42% of a phone
      is a card too small to be worth opening, which is the one thing this
      screen is for. */

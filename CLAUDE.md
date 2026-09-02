@@ -108,8 +108,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   allow-list like the counter row, that four copies of one card fold into one
   pocket while four different cards never do, that a page is nine pockets with
   the last one padded, that the eBay stock gets its own pages and never shares
-  one with the box, and — the one that costs you the screen — that a mostly
-  vertical drag is a scroll rather than a page turn.
+  one with the box, that opening the binder on a wide screen pairs pages
+  without renumbering any of them, and — the one that costs you the screen —
+  that a mostly vertical drag is a scroll rather than a page turn.
 - `scripts/check-panelstate.mjs` — a state setter that was never declared.
   Born from a white screen: the Show Desk shipped calling `setPhoto()` with no
   `useState` behind it, which `next build` compiles, a JSX parse accepts and
@@ -1115,6 +1116,31 @@ Desk rather than a replacement for either of the other two.
   as you turned onto it. And a page has to FIT on the screen, which is what
   the width cap on `.bn-wrap` is for: nine pockets you have to scroll past is
   a list with a frame drawn round it.
+- **A wide screen opens the binder; it does not repaginate it.** From 900px
+  the two halves are on screen at once, because a single column of nine down
+  the middle of a 1400px panel reads as sparse. `binderSpreads()` pairs
+  ADJACENT pages for display and nothing else — the flattened spreads are
+  always `0..n-1` in order, and `check-binder.mjs` pins that, because the
+  moment a page number depends on the window width the "it's on page four"
+  promise is gone. **A spread never straddles the two sections**: a box page
+  facing an online page is the merge the whole design refuses, and worse than
+  the list version because the reader cannot tell which side the header is
+  talking about, so a section's last spread sits alone with a blank facing
+  page. Padding the pagination to avoid that would have renumbered every
+  later page on wide screens only.
+- **The frame does some work.** A cover with the app's own `--holo` foil on
+  its top edge, sheets sitting on it with a gutter shadow curving into the
+  spine, the binding down the left of a single page and up the middle of an
+  open one, a page number in each outer corner, and a sleeve sheen on every
+  pocket. All CSS, no images. A grid of pictures is a grid of pictures; the
+  frame is what makes somebody hold it like a binder instead of reading it
+  like a table.
+- **On a phone the name gets THREE lines, and that is the rule not the
+  exception.** A pocket there is ~85px across, which will not hold "Umbreon
+  VMAX 215/203" in two — and a CSS clamp cuts the END, so what gets lost is
+  "215/203". That is backwards: `labelName()` exists because a long name loses
+  its NAME before it loses its NUMBER. A third line is cheaper than breaking
+  that, and the height stays fixed so the grid is still a grid.
 - **The eBay stock is in it, and it gets its own pages.** Table space is the
   cap the binder exists to lift, and what is at home is the bigger half of it,
   so the binder shows both by default — box first — with a scope dropdown to

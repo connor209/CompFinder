@@ -468,6 +468,55 @@ export function binderPages(cards, size = BINDER_PAGE) {
   return pages;
 }
 
+/** Nine empty pockets — the facing page at the end of a section. */
+export const BLANK_PAGE = Object.freeze(new Array(BINDER_PAGE).fill(null));
+
+/**
+ * Pages paired the way an open binder shows them, and NEVER across a section
+ * boundary.
+ *
+ * A desk has room for both halves of an open binder; a phone does not. What
+ * must not change between the two is the page NUMBER — "it's on page four" is
+ * the whole reason a page is a fixed nine — so the pairing is a way of
+ * DISPLAYING pages, never a second way of cutting them. Pages 3 and 4 are the
+ * same nine cards each on every device; a wide screen just shows them at once.
+ *
+ * The section rule survives the same way. An open binder showing a box page
+ * facing an online page is exactly the merge this design exists to prevent,
+ * and worse than the list version because the reader cannot tell which side
+ * the header is talking about. So a section's last spread is allowed to sit
+ * on its own with a blank facing page — which is what a real binder does at
+ * the end of a run, and cheaper than padding the pagination, since padding
+ * would shift every later page number on wide screens only.
+ */
+export function binderSpreads(pageKinds) {
+  const kinds = pageKinds || [];
+  const out = [];
+  let i = 0;
+  while (i < kinds.length) {
+    const pairs = i + 1 < kinds.length && kinds[i + 1] === kinds[i];
+    out.push(pairs ? [i, i + 1] : [i]);
+    i += pairs ? 2 : 1;
+  }
+  return out;
+}
+
+/** Which spread a page falls in, or 0 when there are none. */
+export function spreadIndexOf(spreads, page) {
+  const list = spreads || [];
+  const at = list.findIndex((s) => s.includes(page));
+  return at < 0 ? 0 : at;
+}
+
+/** Turning a spread. Lands on the left-hand page of the next one along. */
+export function turnSpread(spreads, page, dir) {
+  const list = spreads || [];
+  if (list.length === 0) return 0;
+  const at = spreadIndexOf(list, page);
+  const next = Math.min(Math.max(0, at + (dir === "next" ? 1 : dir === "prev" ? -1 : 0)), list.length - 1);
+  return list[next][0];
+}
+
 /** A page index that exists, however the binder just changed under it. */
 export function clampPage(page, pageCount) {
   const last = Math.max(0, (Number(pageCount) || 0) - 1);
