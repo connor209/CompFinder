@@ -1050,15 +1050,28 @@ html, body { overflow-x: clip; max-width: 100%; }
    looked about right: every one of these is pinned in px because a label an
    inch too short does not overflow, it cuts a card's collector number in half
    — and the number is the half that tells two printings apart. */
-.bn-label { flex:none; height:55px; overflow:hidden; display:flex; flex-direction:column; gap:1px;
-  padding:5px 7px; border-top:1px solid var(--line); background:var(--surface); position:relative; z-index:1; }
-.bn-name { font-size:11px; font-weight:600; line-height:14px; height:28px; color:var(--ink);
-  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.bn-label { flex:none; height:69px; overflow:hidden; display:flex; flex-direction:column;
+  justify-content:space-between; padding:5px 7px; border-top:1px solid var(--line);
+  background:var(--surface); position:relative; z-index:1; }
+/* THREE lines, at every width, and the height pinned in px.
+   Two lines will not hold "Umbreon VMAX 215/203" in a pocket around 100px
+   across — and a CSS clamp cuts the END, so what gets lost is "215/203".
+   That is backwards: labelName() in showstock.js exists because a long name
+   loses its NAME before it loses its NUMBER, since the number is what tells
+   two printings apart. Which pockets are that narrow depends on the window,
+   the spread and full-screen mode all at once, so this does not try to guess
+   — it is three lines always, and a name that only needs two leaves the gap
+   above the price rather than eating into it. */
+.bn-name { font-size:11px; font-weight:600; line-height:14px; max-height:42px; color:var(--ink);
+  display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .bn-price { font-family:var(--font-mono); font-size:12.5px; font-weight:700; line-height:16px;
   color:var(--conf-high); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 /* An ask is a label, not a figure. Set smaller and in the body face so it
    doesn't read as a price beside the pockets that carry one. */
 .bn-price-ask { font-family:var(--font-body); font-size:10.5px; font-weight:600; line-height:16px; color:var(--ink-soft); letter-spacing:0; }
+/* Small, body face, and it does not shout: the reader wants the figure. */
+.bn-from { font-family:var(--font-body); font-size:9px; font-weight:600; color:var(--ink-soft);
+  margin-right:3px; letter-spacing:0; }
 .bn-blank { margin:28px auto; text-align:center; }
 .bn-nav { display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .bn-turn { font-size:17px; line-height:1; padding:8px 16px; flex:none; }
@@ -1066,6 +1079,56 @@ html, body { overflow-x: clip; max-width: 100%; }
   font-size:13px; font-weight:600; color:var(--ink); min-width:0; }
 .bn-pageno .hint-small { margin:0; font-weight:400; }
 .bn-hint { margin:0; text-align:center; }
+.bn-tools { display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; }
+.bn-tool { font-size:13px; }
+/* The bar that says the page is about to move. Without it the first auto-turn
+   reads as the screen glitching. Its duration is set inline from AUTO_TURN_MS
+   — the width here is only the track. */
+.bn-tick { display:block; width:64px; height:2px; margin-top:3px; border-radius:2px;
+  background:var(--accent); transform-origin:left center; animation:bn-tick linear forwards; }
+@keyframes bn-tick { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+@media (prefers-reduced-motion: reduce) { .bn-tick { animation:none; opacity:.35; transform:scaleX(1); } }
+
+/* Display mode: the binder on a stand.
+   The overlay is the feature and the Fullscreen API is the bonus — Safari on
+   an iPad does not do element fullscreen, and an iPad is the likeliest thing
+   to be on the stand. Fixed over everything means the desk underneath is not
+   merely hidden but out of reach: there is nothing to scroll to. */
+.bn-wrap-display { position:fixed; inset:0; z-index:80; margin:0; max-width:none;
+  display:flex; flex-direction:column; align-items:center; gap:10px;
+  padding:14px; background:var(--ground); overflow:auto;
+  /* `safe center` and not plain `center`: a book taller than the screen
+     centred in a scrolling flex column has its TOP cut off and unreachable,
+     which is the one part you cannot scroll back to. Browsers without it fall
+     back to the plain `center` above. */
+  justify-content:center; justify-content:safe center; }
+/* Nothing shrinks. A flex item defaults to flex-shrink:1, and a column
+   constrained to the viewport height duly squashed the whole binder into a
+   40px strip with the nav sitting on top of it. */
+/* Sized so the WHOLE thing fits: header, book and page turners. Nobody can
+   scroll a screen on a stand, so a control below the fold is a control that
+   does not exist — which is how the first version put the stop button off the
+   bottom of an iPad. Smaller cards than the windowed spread is the right way
+   round for that trade. */
+.bn-wrap-display > *:not(.bn-exit):not(.bn-tools) { flex:none; width:100%; max-width:min(1180px, 78vh); }
+.bn-wrap-display .bn-section { align-items:center; text-align:center; }
+/* A stand shows cards, not instructions: the swipe hint is for the person
+   holding the thing, and in display mode nobody is. */
+.bn-wrap-display .bn-hint { display:none; }
+/* Up in the corner beside the way out, not a row of its own: a row costs
+   ~50px of height, and height is what the cards are short of. Quiet until
+   somebody reaches for it — this screen is pointed at customers. */
+.bn-wrap-display .bn-tools { position:absolute; top:14px; right:62px; width:auto; max-width:none;
+  opacity:.5; transition:opacity .15s ease; }
+.bn-wrap-display .bn-tools:hover, .bn-wrap-display .bn-tools:focus-within { opacity:1; }
+@media (max-width: 720px) {
+  /* No room beside the ✕ on a phone; under the header instead. */
+  .bn-wrap-display .bn-tools { position:static; opacity:1; }
+}
+.bn-exit { position:absolute; top:12px; right:14px; width:38px; height:38px; border-radius:999px;
+  border:1px solid var(--line-strong); background:var(--surface); color:var(--ink-soft);
+  font-size:18px; line-height:1; cursor:pointer; z-index:1; }
+.bn-exit:hover { color:var(--ink); border-color:var(--accent); }
 /* The card, opened. Picture on the left, what we know about it on the right. */
 .bn-preview { position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
   padding:20px; background:rgba(0,0,0,.86); }
@@ -1117,14 +1180,14 @@ html, body { overflow-x: clip; max-width: 100%; }
      what tells two printings apart and matches a stray card back. A third line
      is cheaper than breaking that rule, and the height stays fixed so the grid
      is still a grid. */
-  .bn-label { height:59px; padding:4px 5px; }
-  .bn-name { font-size:9.5px; line-height:12px; height:36px; letter-spacing:-.1px; -webkit-line-clamp:3; }
+  .bn-label { height:60px; padding:4px 5px; }
+  .bn-name { font-size:9.5px; line-height:12px; max-height:36px; letter-spacing:-.1px; }
   .bn-price { font-size:11.5px; line-height:15px; }
   /* A pocket on a phone is about 90px across. "Ask at the table" has to FIT
      that: truncated to "Ask at the …" it reads as a bug rather than a label,
      and it is the one thing on the page that has to be understood by somebody
      who did not write it. Smaller is fine — an ask was never a figure. */
-  .bn-price-ask { font-size:8.5px; line-height:15px; letter-spacing:-.15px; }
+  .bn-price-ask { font-size:9.5px; line-height:15px; }
   /* The picture goes above the details rather than beside them: 42% of a phone
      is a card too small to be worth opening, which is the one thing this
      screen is for. */
@@ -1462,7 +1525,24 @@ html, body { overflow-x: clip; max-width: 100%; }
 
 /* Tactile entrance animation — results settle down into place */
 @keyframes cf-rise { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:translateY(0); } }
-.rise-group > *, .rise-grid > * { animation:cf-rise .34s cubic-bezier(.22,.61,.36,1) both; }
+/* `backwards`, NOT `both`, and the difference is not cosmetic.
+   `both` keeps the final keyframe's value on the element for ever, and any
+   transform that is not `none` — an identity matrix included — makes that
+   element the containing block for its `position: fixed` descendants. Every
+   panel on every screen is a `.rise-group > *`, so with `both` every fixed
+   overlay inside a panel was fixed to the PANEL rather than the viewport:
+   clipped to its height, offset by its position. The counter's photo overlay
+   and the binder's card preview both shipped that way and both looked almost
+   right, because a panel happens to start near the top and be tall. The
+   binder's full-screen mode is where it stopped looking almost right — it
+   collapsed to a 140px strip with the controls on top of it.
+   `backwards` still hides the element before the animation starts, which is
+   the whole point of the fill, and then lets it return to its own style —
+   where the transform really is `none`. Writing `transform:none` in the `to`
+   keyframe does NOT work: interpolating against a translate resolves to
+   matrix(1,0,0,1,0,0), which is a containing block like any other.
+   check-binder.mjs pins this line. */
+.rise-group > *, .rise-grid > * { animation:cf-rise .34s cubic-bezier(.22,.61,.36,1) backwards; }
 .rise-group > *:nth-child(1), .rise-grid > *:nth-child(1) { animation-delay:0s; }
 .rise-group > *:nth-child(2), .rise-grid > *:nth-child(2) { animation-delay:.04s; }
 .rise-group > *:nth-child(3), .rise-grid > *:nth-child(3) { animation-delay:.08s; }

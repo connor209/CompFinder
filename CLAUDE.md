@@ -109,8 +109,9 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   pocket while four different cards never do, that a page is nine pockets with
   the last one padded, that the eBay stock gets its own pages and never shares
   one with the box, that opening the binder on a wide screen pairs pages
-  without renumbering any of them, and — the one that costs you the screen —
-  that a mostly vertical drag is a scroll rather than a page turn.
+  without renumbering any of them, that a display loop wraps where a person
+  turning pages must not, and — the one that costs you the screen — that a
+  mostly vertical drag is a scroll rather than a page turn.
 - `scripts/check-panelstate.mjs` — a state setter that was never declared.
   Born from a white screen: the Show Desk shipped calling `setPhoto()` with no
   `useState` behind it, which `next build` compiles, a JSX parse accepts and
@@ -1135,12 +1136,64 @@ Desk rather than a replacement for either of the other two.
   pocket. All CSS, no images. A grid of pictures is a grid of pictures; the
   frame is what makes somebody hold it like a binder instead of reading it
   like a table.
-- **On a phone the name gets THREE lines, and that is the rule not the
-  exception.** A pocket there is ~85px across, which will not hold "Umbreon
-  VMAX 215/203" in two — and a CSS clamp cuts the END, so what gets lost is
-  "215/203". That is backwards: `labelName()` exists because a long name loses
-  its NAME before it loses its NUMBER. A third line is cheaper than breaking
-  that, and the height stays fixed so the grid is still a grid.
+- **A name gets THREE lines, at every width, and that is the rule not the
+  exception.** Two will not hold "Umbreon VMAX 215/203" in a pocket around
+  100px across — and a CSS clamp cuts the END, so what gets lost is "215/203".
+  That is backwards: `labelName()` exists because a long name loses its NAME
+  before it loses its NUMBER. Which pockets are that narrow depends on the
+  window, the spread and full-screen mode all at once, so the rule does not
+  try to guess: three lines always, with the price pinned to the bottom of a
+  fixed-height label so the grid is still a grid. "from" is a small body-face
+  qualifier rather than part of the mono figure for the same reason — set as
+  one it turned "from £825" into "from £…" — and `POCKET_ASK` is "Ask" where a
+  row says "Ask at the table", because a truncated instruction reads as a bug.
+
+## The binder on a stand
+
+**⛶ Full screen** puts the binder over the whole screen and starts it turning
+itself, `AUTO_TURN_MS` (15s) a view. It is for a laptop or an iPad left out on
+the table doing the job nobody has a spare pair of hands for.
+
+- **The overlay is the feature; the Fullscreen API is a bonus.** `.bn-wrap`
+  goes `position: fixed` over everything, which works in every browser there
+  is; `requestFullscreen()` is then asked for and ignored if refused, because
+  Safari on an iPad does not do element fullscreen at all and an iPad is the
+  likeliest thing to be on the stand. A `wakeLock` is taken the same way —
+  best-effort, since a screen that sleeps after two minutes is not a display.
+- **The auto-turn WRAPS and the buttons do not**, and that is the whole
+  difference between `advancePage()`/`advanceSpread()` and
+  `turnPage()`/`turnSpread()`. A display has no end; a person turning pages
+  must hit one, or they go round the binder twice looking for a card that was
+  never there. Two behaviours, two functions, so neither is reachable from the
+  other's caller.
+- It pauses on an open card, never arms on a binder with one view, and the
+  timer restarts on a manual turn — a page yanked out from under you a second
+  after you turned it is worse than no timer at all. A thin bar under the page
+  number says the page is about to move: without it the first turn reads as
+  the screen glitching. Its duration is set from `AUTO_TURN_MS`, not written
+  out again in CSS.
+- **Everything has to FIT.** Nobody can scroll a screen on a stand, so the
+  display cap is sized for the header, the book and the page turners together,
+  and the ⏸/✕ controls sit in the top corner rather than in a row of their own
+  — a row costs ~50px of the height the cards are short of. Smaller cards than
+  the windowed spread is the right way round for that trade.
+
+**One CSS keyword decided whether any of it worked.** `.rise-group > *` is
+every panel on every screen, and its entry animation carried
+`animation-fill-mode: both` — so the final keyframe's `translateY(0)` stuck for
+ever, and **any transform that is not `none` makes the element the containing
+block for its `position: fixed` descendants**. Every fixed overlay inside a
+panel was therefore fixed to the PANEL rather than the viewport: clipped to its
+height, offset by its position. The counter's photo overlay and the binder's
+card preview had both shipped that way and both looked almost right, because a
+panel happens to start near the top and be tall — full-screen mode is where it
+stopped looking almost right and collapsed to a 140px strip. The fix is
+`backwards`, which still hides the element before the animation starts and then
+lets it return to its own style. Writing `transform: none` in the `to` keyframe
+does NOT work: interpolating against a translate resolves to
+`matrix(1,0,0,1,0,0)`, which is a containing block like any other.
+`check-binder.mjs` pins the fill mode and that the three overlays are still
+fixed.
 - **The eBay stock is in it, and it gets its own pages.** Table space is the
   cap the binder exists to lift, and what is at home is the bigger half of it,
   so the binder shows both by default — box first — with a scope dropdown to

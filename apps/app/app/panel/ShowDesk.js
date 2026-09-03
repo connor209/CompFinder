@@ -20,7 +20,8 @@ import {
   binderView, clampPage, turnPage, swipeDirection, copyLocations,
   BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS,
   BINDER_SCOPES, DEFAULT_SCOPE, SECTION_LABELS, ONLINE,
-  binderSpreads, spreadIndexOf, turnSpread, BLANK_PAGE
+  binderSpreads, spreadIndexOf, turnSpread, BLANK_PAGE,
+  advancePage, advanceSpread, AUTO_TURN_MS, POCKET_ASK
 } from "@/lib/binder.js";
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 import { probePoolName } from "@/lib/batch-store";
@@ -111,6 +112,13 @@ export default function ShowDesk() {
   // because which PAGES are on screen is pagination and pagination is ours.
   // Starts closed so the server and the first client render agree.
   const [spread, setSpread] = useState(false);
+  // The binder on a stand: the whole screen, nothing else, turning itself.
+  // Two separate things on purpose — you may want the screen filled while you
+  // flip it by hand, and the auto-turn is worth having without going full
+  // screen while you set the stand up. Entering display mode switches the
+  // turning on, because that is what a stand is for.
+  const [display, setDisplay] = useState(false);
+  const [autoTurn, setAutoTurn] = useState(false);
   const [binderCard, setBinderCard] = useState(null); // the pocket opened big
   // Which copies have had their place revealed, by id. Same rule as the online
   // rows' locations: never before a tap, because a SKU and a stack name say
@@ -537,7 +545,61 @@ export default function ShowDesk() {
       return n;
     });
   }
+  /**
+   * Full screen is a BONUS, never the feature.
+   *
+   * The overlay is CSS: the binder goes fixed over everything and fills the
+   * viewport, which works on every browser there is. The Fullscreen API on top
+   * of that only removes the browser's own chrome — and Safari on an iPad does
+   * not implement it for elements at all, which is precisely the device most
+   * likely to be on the stand. Ask for it, ignore a refusal, and never let the
+   * answer decide whether display mode happens.
+   */
+  const bookRef = useRef(null);
+  const wakeRef = useRef(null);
+  async function enterDisplay() {
+    setDisplay(true);
+    setAutoTurn(true);
+    setBinderCard(null);
+    try { await bookRef.current?.requestFullscreen?.(); } catch { /* iPad Safari, and that is fine */ }
+    // A screen that sleeps after two minutes is not a display. Best-effort:
+    // unsupported browsers simply keep their own timeout.
+    try { wakeRef.current = await navigator.wakeLock?.request?.("screen"); } catch { /* no wake lock */ }
+  }
+  function leaveDisplay() {
+    setDisplay(false);
+    setAutoTurn(false);
+    try { if (document.fullscreenElement) document.exitFullscreen?.(); } catch { /* already out */ }
+    try { wakeRef.current?.release?.(); } catch { /* already gone */ }
+    wakeRef.current = null;
+  }
+  // Leaving full screen by any other route — Escape, F11, the browser's own
+  // button — has to take the overlay with it, or you are left in a fixed
+  // fullscreen-shaped screen inside a normal window with no way back.
+  useEffect(() => {
+    function onFs() { if (!document.fullscreenElement && display) leaveDisplay(); }
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  });
+  // The stand turns its own pages. Paused while a card is open — somebody is
+  // reading it — and never armed on a binder with one page, where the timer
+  // would run and nothing would move.
+  useEffect(() => {
+    if (!binderMode || !autoTurn || binderCard) return;
+    const views = spread ? spreads.length : binder.pageCount;
+    if (views <= 1) return;
+    const id = setTimeout(() => {
+      setBinderPage((cur) => (spread
+        ? advanceSpread(spreads, clampPage(cur, binder.pageCount))
+        : advancePage(cur, binder.pageCount)));
+    }, AUTO_TURN_MS);
+    // binderPage is in the deps, so turning a page by hand restarts the clock
+    // rather than being yanked a second later by a timer that was already
+    // half spent.
+    return () => clearTimeout(id);
+  }, [binderMode, autoTurn, binderCard, binderPage, spread, spreads, binder.pageCount]);
   function switchMode(next) {
+    if (display) leaveDisplay();
     setMode(next);
     setSel(new Set());
     setBinderCard(null);
@@ -562,7 +624,13 @@ export default function ShowDesk() {
   useEffect(() => {
     if (!binderMode) return;
     function onKey(e) {
-      if (e.key === "Escape") { setBinderCard(null); return; }
+      if (e.key === "Escape") {
+        // The card first, then the screen: Escape should undo the last thing
+        // that covered something up, not both at once.
+        if (binderCard) { setBinderCard(null); return; }
+        if (display) leaveDisplay();
+        return;
+      }
       if (binderCard) return; // the preview is on top; the arrows are not its
       if (e.key === "ArrowLeft") turnBinder("prev");
       if (e.key === "ArrowRight") turnBinder("next");
@@ -1386,7 +1454,20 @@ export default function ShowDesk() {
                 ))}
               </div>
             ) : binderMode ? (
-              <div className={spread ? "bn-wrap bn-wrap-spread" : "bn-wrap"}>
+              <div
+                ref={bookRef}
+                className={[
+                  "bn-wrap",
+                  spread ? "bn-wrap-spread" : "",
+                  display ? "bn-wrap-display" : ""
+                ].filter(Boolean).join(" ")}
+              >
+                {/* Display mode is the binder fixed over everything, so the
+                    way out has to be ON it — a stand has no browser chrome to
+                    reach for, and Escape needs a keyboard. */}
+                {display ? (
+                  <button className="bn-exit" onClick={leaveDisplay} title="Leave full screen" aria-label="Leave full screen">✕</button>
+                ) : null}
                 {/* Which section these pages belong to. The binder has no room
                     for the counter list's heading-and-rule, so the never-merge
                     rule is carried by the PAGE — each section is paginated on
@@ -1462,7 +1543,13 @@ export default function ShowDesk() {
                                 <span className="bn-label">
                                   <span className="bn-name">{c.name}</span>
                                   <span className={c.pricePence == null ? "bn-price bn-price-ask" : "bn-price"}>
-                                    {c.priceFrom ? "from " : ""}{c.priceText}
+                                    {/* "from" is a qualifier, not part of the
+                                        figure. Set as one it cost the pocket
+                                        about 25px of mono and turned "from
+                                        £825" into "from £…" — which loses the
+                                        number for the sake of the word. */}
+                                    {c.priceFrom ? <span className="bn-from">from</span> : null}
+                                    {c.pricePence == null ? POCKET_ASK : c.priceText}
                                   </span>
                                 </span>
                               </button>
@@ -1495,6 +1582,15 @@ export default function ShowDesk() {
                   </button>
                   <span className="bn-pageno">
                     {pageLabel}
+                    {/* The bar says the page is going to move. Without it the
+                        first auto-turn reads as the screen glitching, and a
+                        customer mid-card looks up at a page they did not turn.
+                        Keyed on the view so it restarts with each one, and its
+                        duration comes from AUTO_TURN_MS rather than being
+                        written out here a second time. */}
+                    {autoTurn && (spread ? spreads.length : binder.pageCount) > 1 && !binderCard ? (
+                      <span className="bn-tick" key={binderAt} style={{ animationDuration: `${AUTO_TURN_MS}ms` }} aria-hidden="true" />
+                    ) : null}
                     {/* Nothing is folded away quietly. Four copies of one card
                         is one pocket, which is the point — a customer flipping
                         past the same Gengar four times is reading a duplicate
@@ -1514,6 +1610,31 @@ export default function ShowDesk() {
                   >
                     ▶
                   </button>
+                </div>
+                <div className="bn-tools">
+                  <button
+                    className={autoTurn ? "btn btn-primary bn-tool" : "btn btn-ghost bn-tool"}
+                    onClick={() => setAutoTurn((v) => !v)}
+                    disabled={(spread ? spreads.length : binder.pageCount) <= 1}
+                    title={autoTurn
+                      ? "Stop turning by itself"
+                      : `Turn a page every ${Math.round(AUTO_TURN_MS / 1000)} seconds — for a binder left out on a stand`}
+                  >
+                    {autoTurn ? "⏸ Stop turning" : `▶ Turn every ${Math.round(AUTO_TURN_MS / 1000)}s`}
+                  </button>
+                  {display ? (
+                    <button className="btn btn-ghost bn-tool" onClick={leaveDisplay} title="Back to the desk screen">
+                      ✕ Leave full screen
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-ghost bn-tool"
+                      onClick={enterDisplay}
+                      title="Fill the screen and start turning — for a laptop or an iPad on a stand"
+                    >
+                      ⛶ Full screen
+                    </button>
+                  )}
                 </div>
                 <p className="hint hint-small bn-hint">Swipe the page, or use the arrows.</p>
                 {/* The card, opened. Picture on the left at the size eBay

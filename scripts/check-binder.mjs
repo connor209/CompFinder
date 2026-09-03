@@ -33,6 +33,7 @@ import {
   clampPage, turnPage, swipeDirection, copyLocations, placeOf, isFiltering,
   onlineStock, onlineItem, boxItem, BOX, ONLINE, BINDER_SCOPES, DEFAULT_SCOPE, SECTION_LABELS,
   binderSpreads, spreadIndexOf, turnSpread, BLANK_PAGE,
+  advancePage, advanceSpread, AUTO_TURN_MS, POCKET_ASK,
   BINDER_FIELDS, BINDER_COPY_FIELDS, BINDER_PAGE, BINDER_COLS, BINDER_ROWS,
   BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS, SWIPE_MIN_PX,
   POCKET_PX, PREVIEW_PX, ASK_TEXT
@@ -396,6 +397,35 @@ eq("the last spread is the last spread", turnSpread(SPR, 3, "next"), 3);
 eq("the first spread is the first spread", turnSpread(SPR, 1, "prev"), 0);
 eq("no spreads is not a crash", turnSpread([], 0, "next"), 0);
 
+// --- 9d. the binder on a stand ------------------------------------------
+// A display turns its own pages, and the one thing it must do that a person
+// turning them must NOT is wrap. Stopping on the last page is a screen that
+// broke; silently returning to the front under somebody's hand is a binder you
+// cannot tell you have finished, so you go round it twice looking for a card
+// that was never there.
+eq("a display wraps at the end", advancePage(2, 3), 0);
+eq("a person does not", turnPage(2, "next", 3), 2);
+eq("...and it keeps going otherwise", advancePage(0, 3), 1);
+eq("one page has nowhere to advance to", advancePage(0, 1), 0);
+eq("no pages is not a crash", advancePage(0, 0), 0);
+
+const LOOP = binderSpreads([BOX, BOX, BOX, ONLINE, ONLINE]);
+eq("a display wraps by SPREAD too", advanceSpread(LOOP, 3), 0);
+eq("...landing on the left-hand page", advanceSpread(LOOP, 0), 2);
+eq("one spread has nowhere to go", advanceSpread([[0]], 0), 0);
+eq("no spreads is not a crash", advanceSpread([], 0), 0);
+
+// Fifteen seconds: long enough to read nine cards and their prices, short
+// enough that somebody walking past sees it move.
+eq("a view stays up for fifteen seconds", AUTO_TURN_MS, 15000);
+
+// A pocket's ask is shorter than a row's, because "Ask at the table" does not
+// fit ~70px and a truncated instruction reads as a bug. Both must ASK — "not
+// here" is a claim checkout data cannot support.
+eq("a pocket asks", POCKET_ASK, "Ask");
+ok("...and does not claim the card is absent", !/not here|don't have|haven't got/i.test(POCKET_ASK));
+ok("a row still says where", ASK_TEXT.length > POCKET_ASK.length);
+
 // --- 10. greps: the rules that live in one file only --------------------
 const binderSrc = code("apps/app/lib/binder.js");
 // The PROJECTION cannot leak what it never names. Sliced to the three
@@ -445,6 +475,14 @@ if (at < 0) {
   // that drift apart.
   ok("the sheets are one loop", /sheetPages\.map\(/.test(branch));
   ok("a blank facing page is drawn, not skipped", /BLANK_PAGE/.test(branch));
+  // The progress bar is hidden while a card is open, which is the visible half
+  // of the turning being paused — somebody is reading that card. (The pause
+  // itself is the effect's own guard; this is the part a render can show.)
+  // Its duration is generated from AUTO_TURN_MS rather than written out again
+  // in CSS, which is how a caption ends up disagreeing with what it describes.
+  ok("the progress bar goes with an open card", /autoTurn && [^\n]*!binderCard/.test(branch));
+  ok("the progress bar is timed from the constant", /animationDuration: `\$\{AUTO_TURN_MS\}ms`/.test(branch));
+  ok("full screen has a way out on the screen itself", /bn-exit/.test(branch));
   // The section has to be named on the page. It is the only thing separating
   // a card you can hand over from one that may be at home, and the pockets
   // themselves look identical.
@@ -463,6 +501,28 @@ if (at < 0) {
 // sections eventually disagree about what counts as the same card.
 if (!/binderView\([\s\S]{0,400}?listings/.test(deskSrc)) {
   fail("ShowDesk.js does not hand its eBay listings to binderView() — the binder is box-only again");
+}
+
+// A fixed overlay inside a panel, and why one CSS keyword decides whether it
+// works. `.rise-group > *` is every panel on every screen; with
+// animation-fill-mode `both` the final keyframe's transform sticks for ever,
+// and any transform that is not `none` — an identity matrix included — makes
+// that panel the containing block for its `position: fixed` children. The
+// counter's photo overlay and the binder's card preview both shipped fixed to
+// their PANEL rather than the viewport and both looked almost right; the
+// binder's full-screen mode is where it collapsed to a strip.
+const css = src("apps/app/app/globals.css");
+const rise = css.match(/\.rise-group > \*[^{]*\{([^}]*)\}/);
+if (!rise) {
+  fail("the rise animation rule is gone — check this file still guards the right code");
+} else if (/\bboth\b|\bforwards\b/.test(rise[1])) {
+  fail("the rise animation fills forwards again — every fixed overlay inside a panel is now fixed to the panel");
+}
+for (const sel of [".bn-wrap-display", ".bn-preview", ".sd-photo"]) {
+  const rule = css.match(new RegExp(`\\${sel}\\s*\\{([^}]*)\\}`));
+  if (!rule || !/position:\s*fixed/.test(rule[1])) {
+    fail(`${sel} is no longer position:fixed — it is meant to cover the viewport`);
+  }
 }
 
 if (failures) {

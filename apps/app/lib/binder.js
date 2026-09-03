@@ -154,6 +154,22 @@ export const BINDER_PRICE_FILTERS = [
   { key: "ask", label: "Ask at the table" }
 ];
 
+/**
+ * What a pocket says when there is no price on the card.
+ *
+ * Deliberately shorter than showcounter.js's ASK_TEXT ("Ask at the table"),
+ * which is right for a row with a screen's width to spend and does not fit a
+ * pocket — it came out as "Ask at th…", and a truncated instruction reads as a
+ * bug rather than a label. The preview, which has the room, still says the
+ * whole thing.
+ *
+ * It is also the truer word in the online section: a card that may be at home
+ * is not at the table, so "Ask at the table" was quietly wrong on half the
+ * binder. What both versions must keep is that they ASK — never "not here",
+ * which is a claim the data cannot support.
+ */
+export const POCKET_ASK = "Ask";
+
 /** How far a thumb must travel across before it counts as a page turn. */
 export const SWIPE_MIN_PX = 48;
 
@@ -527,6 +543,39 @@ export function clampPage(page, pageCount) {
 /** Turning a page. A binder does not wrap: the last page is the last page. */
 export function turnPage(page, dir, pageCount) {
   return clampPage(clampPage(page, pageCount) + (dir === "next" ? 1 : dir === "prev" ? -1 : 0), pageCount);
+}
+
+/**
+ * How long a view stays up when the binder is turning itself.
+ *
+ * Long enough to read nine cards and their prices, short enough that somebody
+ * walking past a stand sees it move and understands the thing is a loop rather
+ * than a poster. Anything that quotes this number — the progress bar's own
+ * duration included — is generated from it rather than written out again.
+ */
+export const AUTO_TURN_MS = 15000;
+
+/**
+ * The next view for a binder nobody is standing at. **This one WRAPS**, and
+ * that is the whole difference between it and turnPage()/turnSpread().
+ *
+ * A person turning pages must hit the end: a binder that silently returns to
+ * the front is a binder you cannot tell you have finished, and you go round it
+ * twice looking for a card that was never there. A display on a stand is the
+ * opposite — it has no end, and stopping on the last page is just a screen
+ * that broke. Two behaviours, two functions, so neither can be reached by
+ * accident from the other's caller.
+ */
+export function advancePage(page, pageCount) {
+  const n = Number(pageCount) || 0;
+  if (n <= 1) return clampPage(page, n);
+  return (clampPage(page, n) + 1) % n;
+}
+
+export function advanceSpread(spreads, page) {
+  const list = spreads || [];
+  if (list.length <= 1) return list.length === 1 ? list[0][0] : 0;
+  return list[(spreadIndexOf(list, page) + 1) % list.length][0];
 }
 
 /**
