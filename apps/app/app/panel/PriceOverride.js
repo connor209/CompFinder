@@ -17,6 +17,13 @@
  * The engine's figure never leaves the screen. An override sits in front of
  * it, marked, with what it replaced beside it and one click back — an edit you
  * cannot see and cannot undo is how a typo becomes 89 listings.
+ *
+ * A card with no price reads **£0.00**, not a dash. A dash is what the eye
+ * skips: it says "nothing to report here", which is the opposite of the truth
+ * on a row nothing has priced, and reading it that way is how a card went up
+ * on eBay at the placeholder price its CSV arrived with. £0.00 is not a cheap
+ * card and cannot be read as one — see `lib/zero-price.js`, which also stops
+ * any run carrying one from being exported.
  */
 import { useEffect, useRef, useState } from "react";
 import {
@@ -26,6 +33,7 @@ import {
   parseOverridePence,
   poundsStr
 } from "@/lib/price-override.js";
+import { UNPRICED_PENCE } from "@/lib/zero-price.js";
 
 export default function PriceOverride({ rec, onSet, compact = false, disabled = false, showValue = true }) {
   const [editing, setEditing] = useState(false);
@@ -97,7 +105,12 @@ export default function PriceOverride({ rec, onSet, compact = false, disabled = 
           control can't match — there it renders the flag and the buttons only,
           rather than printing the same number twice on one line. */}
       {showValue ? (
-        <span className={`po-value${mine ? " po-mine" : ""}`}>{price != null ? poundsStr(price) : "—"}</span>
+        <span
+          className={`po-value${mine ? " po-mine" : ""}${price == null ? " po-zero" : ""}`}
+          title={price == null ? "No price — nothing priced this card. Set one by hand, or take it out of the run: exports are blocked while any card sits at £0.00." : undefined}
+        >
+          {poundsStr(price ?? UNPRICED_PENCE)}
+        </span>
       ) : null}
       {mine ? (
         <span className="po-flag" title={was != null ? `The app worked this card out at ${poundsStr(was)}` : "The app couldn't price this card"}>

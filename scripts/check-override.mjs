@@ -188,8 +188,11 @@ eq("the eBay upload file carries your price, not the one you rejected",
   [...pricedSkuMap([{ sku: "AB11", rec: withOverride(rec(), 4000) }]).entries()], [["AB11", 4000]]);
 eq("a card the app couldn't price is uploadable once you name a price",
   [...pricedSkuMap([{ sku: "AB13", rec: withOverride(null, 500) }]).entries()], [["AB13", 500]]);
-eq("and stays out of the file until you do",
-  [...pricedSkuMap([{ sku: "AB13", rec: null }]).entries()], []);
+// It used to stay OUT of the file, which meant the row kept whatever price
+// CardUploader had put there — £2.49, indistinguishable from the engine's
+// floor. It goes in at zero instead, and check-zeroprice.mjs owns why.
+eq("and until you do it is in the file at zero, not quietly at its old price",
+  [...pricedSkuMap([{ sku: "AB13", rec: null }]).entries()], [["AB13", 0]]);
 
 // --- 5. a saved run remembers it -------------------------------------------
 // A run is re-opened days later precisely to list from, so a correction that
@@ -229,7 +232,11 @@ const MONEY_OUT = [
 ];
 for (const [file, what] of MONEY_OUT) {
   const src = read(file);
-  if (!src.includes("effectivePence")) fail(`${file} no longer reads effectivePence — ${what} can't see a price you set`);
+  // `exportPence` counts: it is `effectivePence` with the unpriced case
+  // written as zero (lib/zero-price.js), so a price you set still wins.
+  if (!/\b(effectivePence|exportPence)\s*\(/.test(src)) {
+    fail(`${file} no longer reads effectivePence — ${what} can't see a price you set`);
+  }
   for (const line of src.split("\n")) {
     if (/^\s*[*/]/.test(line)) continue; // prose about the rule is not the rule
     if (/\brec\??\.finalPence\b/.test(line) || /\brec\?\.\.?finalPence\b/.test(line)) {
@@ -245,7 +252,10 @@ for (const [file, what] of MONEY_OUT) {
 const panel = read("apps/app/app/panel/Panel.js");
 const PANEL_MUST = [
   ["pricePence: effectivePence(r.rec)", "the bulk lister would list at the price you overrode"],
-  ["const pence = effectivePence(r.rec);", "Export CSV would print the price you overrode"],
+  // exportPence is effectivePence with the unpriced case written as 0.00 —
+  // see lib/zero-price.js. A bare finalPence here would print the price you
+  // overrode; either of these prints the one you went with.
+  ["const pence = exportPence(r.rec);", "Export CSV would print the price you overrode"],
   ["recommended_pence: effectivePence(rec)", "price history would record a price you didn't go with"],
   ["effectivePence(r.rec) != null).length", "the List-on-eBay count would ignore hand-priced cards"],
   ["updateItemRec(", "a saved run would not learn about a price set after it was saved"]

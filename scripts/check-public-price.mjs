@@ -27,7 +27,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCANNED = ["apps/public/app", "apps/public/lib", "scripts"];
 const SKIP_DIRS = new Set([".next", "node_modules"]);
 
-// Eight files are exempt wholesale. This one has to name the field in code to
+// Nine files are exempt wholesale. This one has to name the field in code to
 // look for it. The other seven assert BUSINESS-app behaviour, where a
 // recommended listing price is the right answer and the whole point of the
 // screen, and none of them reads anything under apps/public:
@@ -40,7 +40,10 @@ const SKIP_DIRS = new Set([".next", "node_modules"]);
 // database verbatim; check-matching.mjs asserts the Batch screen's own rules,
 // one of which reads the ladder price by design; and check-override.mjs asserts
 // that a price typed on a result beats the ladder price everywhere it travels,
-// which it cannot do without naming both. Everywhere else may
+// which it cannot do without naming both; and check-zeroprice.mjs has to build
+// recs both with and without a ladder price, because the entire rule it pins
+// is the difference between a card priced at the £2.49 floor and a card
+// nothing priced at all. Everywhere else may
 // DISCUSS finalPence in a comment — the explanation of why we don't use it is
 // worth keeping — but must not read it.
 const EXEMPT = new Set([
@@ -51,6 +54,7 @@ const EXEMPT = new Set([
   "scripts/dump-batch.mjs",
   "scripts/check-matching.mjs",
   "scripts/check-override.mjs",
+  "scripts/check-zeroprice.mjs",
   "scripts/check-labels.mjs"
 ]);
 

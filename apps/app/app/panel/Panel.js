@@ -20,6 +20,7 @@ import {
   RETENTION_DAYS
 } from "@/lib/batch-store.js";
 import { effectivePence, isOverridden, overrideNote, withOverride } from "@/lib/price-override.js";
+import { exportGuard, exportPence, isUnpriced } from "@/lib/zero-price.js";
 import { buildPool, poolLabel, stickerRows, stickerSummary, toPoundPence, NAME_LENGTHS, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
 import SoldCompsApi from "@compfinder/core/soldcomps.js";
 import { labelFile } from "@/lib/labelexport.js";
@@ -1375,14 +1376,17 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       const lastCell = k?.history ? (k.history.match.pricePence / 100).toFixed(2) : "";
       const quote = (cells) => cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
       if (!r.rec) {
-        return quote([r.sku || "", r.title, r.query, "", "", "", "Skipped", stockCell, listedCell, lastCell, currentPrice, "", r.failed, ""]);
+        // 0.00, not blank. This sheet gets read next to the eBay upload file
+        // and the two have to agree about what a card nothing priced is worth,
+        // which is nothing — an empty cell is the thing that got scrolled past.
+        return quote([r.sku || "", r.title, r.query, "", "", "", "Skipped", stockCell, listedCell, lastCell, currentPrice, "0.00", r.failed, ""]);
       }
       // The price column is what you'd list at, so it is YOURS where you set
       // one. What the app had said moves to the last column rather than being
       // dropped — a sheet that can't show what a price replaced can't be
       // checked against the run it came from.
-      const pence = effectivePence(r.rec);
-      const price = pence != null ? (pence / 100).toFixed(2) : "";
+      const pence = exportPence(r.rec);
+      const price = (pence / 100).toFixed(2);
       const wasPrice = isOverridden(r.rec) && r.rec.finalPence != null ? (r.rec.finalPence / 100).toFixed(2) : "";
       const noteCell = [overrideNote(r.rec), r.rec.note].filter(Boolean).join(" ");
       return quote([r.sku || "", r.title, r.query, r.rec.included.length, r.rec.excluded.length, r.rec.dataSource, r.rec.confidence, stockCell, listedCell, lastCell, currentPrice, price, noteCell, wasPrice]);
@@ -1706,13 +1710,27 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     listedPence: listedByIndex[i] ?? null
   }));
   const stickerCounts = stickerSummary(stickers);
+  // Every row with no price at all — the engine's, or one you typed. The same
+  // rows exportGuard() refuses on, counted from the same function, so the
+  // warning on screen and the refusal on the button can never disagree.
+  const unpricedCount = results.filter((r) => isUnpriced(r.rec)).length;
   const listedCount = stickers.filter((r) => r.listedPence != null).length;
 
   /** Hand back the uploaded CardUploader CSV with our prices in it. */
   function exportEbayCsv() {
     if (!csvRaw) return;
+    // Nothing that spends money leaves while a card is sitting at £0.00. This
+    // is the export the £2.49 went out on: a row nothing had priced kept the
+    // placeholder price CardUploader put in the file, which is indistinguishable
+    // from a card the engine priced at its floor. See lib/zero-price.js.
+    const guard = exportGuard(results, "The eBay upload CSV");
+    if (!guard.ok) {
+      setStatus(guard.message);
+      setStatusIsError(true);
+      return;
+    }
     try {
-      const { csv, updated, missing, skipped } = repriceCardUploaderCsv(csvRaw.text, pricedSkuMap(results));
+      const { csv, updated, zeroed, missing, skipped } = repriceCardUploaderCsv(csvRaw.text, pricedSkuMap(results));
       const blob = new Blob([csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -1722,7 +1740,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       URL.revokeObjectURL(url);
       setStatus(
         `eBay upload file ready: ${updated} row(s) repriced` +
-          (skipped ? `, ${skipped} left at their original price` : "") +
+          (zeroed ? `, ${zeroed} written at 0.00 — DO NOT UPLOAD, price those by hand first` : "") +
+          (skipped ? `, ${skipped} row(s) weren't in this run and kept their original price` : "") +
           (missing.length ? `, ${missing.length} priced SKU(s) weren't in the file` : "") +
           ". Upload it in eBay Seller Hub → Reports."
       );
@@ -2163,9 +2182,27 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           <div style={{ display: "flex", gap: 8 }}>
             {(() => {
               const pricedCount = results.filter((r) => effectivePence(r.rec) != null).length;
+              // The bulk lister used to filter the unpriced rows out and say
+              // nothing, which is the same silence in a different shape: you
+              // list 87 of 89 cards and find the other two weeks later. It
+              // refuses the whole run instead, and names them.
+              const zeros = exportGuard(results, "Listing on eBay");
               return (
-                <button className="btn btn-primary" disabled={pricedCount === 0} onClick={() => setShowBulkList(true)}>
+                <button
+                  className="btn btn-primary"
+                  disabled={pricedCount === 0}
+                  title={zeros.ok ? undefined : zeros.message}
+                  onClick={() => {
+                    if (!zeros.ok) {
+                      setStatus(zeros.message);
+                      setStatusIsError(true);
+                      return;
+                    }
+                    setShowBulkList(true);
+                  }}
+                >
                   🏷️ List on eBay{pricedCount ? ` (${pricedCount})` : ""}
+                  {zeros.ok ? null : ` · ${zeros.count} at £0.00`}
                 </button>
               );
             })()}
@@ -2239,6 +2276,16 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 </>
               )}
             </p>
+            {/* Above the filters and in its own line, not folded into the
+                summary above: a run that cannot be exported has to say so
+                before you reach for the button, and the count IS the whole
+                message — every one of these is a card nothing has priced. */}
+            {unpricedCount > 0 ? (
+              <p className="hint hint-small zero-warn" role="status">
+                <strong>{unpricedCount} card{unpricedCount === 1 ? "" : "s"} at £0.00</strong> — nothing priced {unpricedCount === 1 ? "it" : "them"}, so {unpricedCount === 1 ? "it has" : "they have"} no price rather than a cheap one.
+                {" "}Listing and the eBay upload CSV are blocked until you give {unpricedCount === 1 ? "it" : "each"} a price by hand or take {unpricedCount === 1 ? "it" : "them"} out of the run.
+              </p>
+            ) : null}
             <div className="results-toolbar">
               <input type="text" placeholder="Filter by title, SKU, or query…" value={resultsSearch} onChange={(e) => setResultsSearch(e.target.value)} />
               <select value={reviewFilter} onChange={(e) => setReviewFilter(e.target.value)}>

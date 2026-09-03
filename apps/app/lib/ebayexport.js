@@ -13,7 +13,7 @@
  * wrong card at the wrong money.
  */
 import CardUploaderCsv from "./carduploader.js";
-import { effectivePence } from "./price-override.js";
+import { exportPence } from "./zero-price.js";
 
 const PRICE_COL = "*StartPrice";
 const SKU_COL = "CustomLabel";
@@ -28,10 +28,21 @@ function csvField(v) {
  * Rewrite `csvText`'s prices from `priced` — a Map (or plain object) of
  * SKU -> price in pence.
  *
- * Returns { csv, updated, missing, skipped }:
- *   updated  rows whose price was replaced
+ * Returns { csv, updated, zeroed, missing, skipped }:
+ *   updated  rows given a real price
+ *   zeroed   rows that were IN the run and came back without a price — written
+ *            as 0.00 rather than left at whatever the file already said
  *   missing  SKUs we had a price for that aren't in the file
- *   skipped  rows in the file we had no price for (left at their original price)
+ *   skipped  rows the run never saw at all (left at their original price)
+ *
+ * The zero is the correction to the fault this whole path had. A row the run
+ * could not price used to be left alone, which sounds conservative and is not:
+ * a CardUploader file arrives with a placeholder price on every row, £2.49 as
+ * often as not, so "left at its original price" meant a card nothing had
+ * checked went up at £2.49 looking exactly like a card the engine had priced
+ * at the floor. 0.00 cannot be mistaken for a price and eBay will not list at
+ * it. A row the run never saw is a different thing and still keeps what it
+ * had — the run has no opinion about a card that wasn't in it.
  */
 export function repriceCardUploaderCsv(csvText, priced) {
   const priceOf = (sku) => {
@@ -51,6 +62,7 @@ export function repriceCardUploaderCsv(csvText, priced) {
 
   const seen = new Set();
   let updated = 0;
+  let zeroed = 0;
   let skipped = 0;
   const out = [header.map(csvField).join(",")];
 
@@ -59,11 +71,14 @@ export function repriceCardUploaderCsv(csvText, priced) {
     const sku = cells[skuAt];
     if (sku) seen.add(sku);
     const pence = priceOf(sku);
-    if (pence != null && pence > 0) {
+    if (pence == null) {
+      skipped++;
+    } else if (pence > 0) {
       cells[priceAt] = (pence / 100).toFixed(2);
       updated++;
     } else {
-      skipped++;
+      cells[priceAt] = "0.00";
+      zeroed++;
     }
     out.push(cells.map(csvField).join(","));
   }
@@ -73,27 +88,32 @@ export function repriceCardUploaderCsv(csvText, priced) {
 
   // CRLF: File Exchange is specified on CRLF, and Windows Excel round-trips it
   // without adding blank lines.
-  return { csv: out.join("\r\n") + "\r\n", updated, missing, skipped };
+  return { csv: out.join("\r\n") + "\r\n", updated, zeroed, missing, skipped };
 }
 
 /**
- * The prices from a finished batch, as SKU -> pence. Rows without a SKU or
- * without a recommendation are left out — an unpriced row must keep whatever
- * price it already had rather than going up at nothing.
+ * The prices from a finished batch, as SKU -> pence. Rows without a SKU are
+ * left out; a row the run priced at nothing is IN, at zero, because the run
+ * does have something to say about it — that nothing checked it — and the
+ * whole cost of the old behaviour was that saying nothing looked identical to
+ * a card the engine had priced at the floor.
  *
- * `effectivePence`, not `finalPence`: this file is what actually reprices the
- * listings, so a row you overrode has to go up at YOUR number. Reading the
- * recommendation here would list the card at the price you rejected, which is
- * the one failure an override exists to prevent — check-override.mjs greps
- * for it.
+ * `exportPence`, which reads `effectivePence` and writes zero where there is
+ * no price: this file is what actually reprices the listings, so a row you
+ * overrode has to go up at YOUR number. Reading the recommendation here would
+ * list the card at the price you rejected, which is the one failure an
+ * override exists to prevent — check-override.mjs greps for it.
+ *
+ * A zero must never reach eBay, and this is not the place that stops it —
+ * `exportGuard()` in zero-price.js refuses the download while any row is at
+ * zero. Two layers on purpose: the guard is what a person meets, and the zero
+ * in the file is what is left if a guard is ever bypassed.
  */
 export function pricedSkuMap(results) {
   const map = new Map();
   for (const r of results || []) {
     if (!r?.sku) continue;
-    const pence = effectivePence(r?.rec);
-    if (pence == null || !(pence > 0)) continue;
-    map.set(r.sku, pence);
+    map.set(r.sku, exportPence(r?.rec));
   }
   return map;
 }

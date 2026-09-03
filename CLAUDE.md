@@ -48,7 +48,7 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 
 ## Checks
 
-`npm run check` runs thirty-two table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-three table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -119,6 +119,11 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   the recommendation is never edited, that the sticker gate lets yours through,
   and a grep over every path that spends money for a direct read of
   `finalPence`.
+- `scripts/check-zeroprice.mjs` — a card nothing priced: that it is written as
+  £0.00 rather than left blank, that the engine's own £2.49 floor is never
+  confused with it, that a run carrying one cannot be listed or exported and
+  the refusal names the cards, that a row the run never saw keeps its own
+  price, and greps keeping the zero out of `packages/core` and the public page.
 - `scripts/check-stackpos.mjs` — where a card physically is: that pulled and
   checked-out cards close the numbering up behind them, and a grep against a
   fourth copy of the rule.
@@ -888,6 +893,59 @@ possible outcome for a record. It is also the truer account, since
 should become your number the moment you set it. No migration: the engine's
 figure rides in the existing `note` column, which the History screen already
 shows.
+
+## A card we could not price is £0.00, and £0.00 stops the run leaving
+
+The engine returns `finalPence: null` for a card it cannot price — a SoldComps
+timeout, comps that were all excluded, a slab below `gradedMinComps`. That is
+the honest answer and the public page needs it. What the **app** used to do
+with it was the problem: the eBay upload export left a row it had no price for
+exactly as it found it, and a CardUploader CSV arrives with a placeholder
+`*StartPrice` on every row — **£2.49, the same figure as the engine's own
+floor**. So a card nothing had checked went up at £2.49, looking on every
+screen and in the file identical to a card the engine had genuinely priced at
+its floor. A £40 card can leave that way and the only evidence is a row that
+read as blank on a screen nobody re-read.
+
+`apps/app/lib/zero-price.js` owns the fix, and the two halves only work as a
+pair — a zero that can be exported is just a different wrong number in the
+file, and a guard with no zero behind it is a warning about nothing.
+
+- **No price is written as ZERO, not as blank.** A dash is what the eye skips:
+  it says "nothing to report here", which is the opposite of the truth on a row
+  nothing has priced. £0.00 is not a cheap card, cannot be read as one, and
+  eBay itself refuses to list at it. The poison value is the point.
+  `exportPence()` is the one place it comes from, so a caller cannot pick its
+  own fallback and teach one export the rule while the next stays quiet.
+- **Nothing that spends money leaves while a zero is in the run.**
+  `exportGuard()` refuses the eBay upload CSV and the bulk lister, and it
+  **names the cards** — three of them, then a count — because a refusal you
+  have to go hunting behind is one that gets ignored. A hard stop rather than a
+  warning: the whole class of fault here is something that was on screen and
+  did not get read.
+- **The bulk lister used to filter the unpriced rows out and say nothing**,
+  which is the same silence in a different shape — you list 87 of 89 cards and
+  find the other two weeks later. It refuses the whole run now.
+- **The diagnostic exports still go.** Export CSV and Download this run carry
+  the zeros rather than being blocked: they are how you SEE which cards are
+  wrong, and blocking the sheet that shows the problem is the one thing that
+  makes the problem harder to fix. Both write `0.00` in the price column, so
+  they and the upload file agree about what a card nothing priced is worth.
+- **A row this run never saw keeps its original price.** Only rows that were
+  IN the run and came back without one are zeroed — the run has no opinion
+  about a card that wasn't in it, and overwriting those would be the same
+  quiet damage in the other direction.
+- **`effectivePence()` still returns null, and `packages/core` is untouched.**
+  Every caller counting priced cards or holding a sticker back depends on
+  null; a zero leaking in there would read as a card priced at nothing rather
+  than a card not priced. And the public page must never render "£0.00" — that
+  is Last Comp quoting a stranger a price it does not hold.
+  `check-zeroprice.mjs` greps both boundaries.
+
+**The way out of a zero is the override.** Type a price and the row is priced,
+the guard clears, the review queue lets it go — that path was already built and
+this rule is what makes you use it. `parseOverridePence` refuses `0`, so a zero
+can only ever mean "nothing priced this".
 
 ## A show sticker is not a listing price
 
