@@ -154,6 +154,28 @@ export default function ShowDesk() {
   const counterMode = mode === "counter";
   const binderMode = mode === "binder";
   const customerMode = counterMode || binderMode;
+  /**
+   * Where the deal may be SPENT, decided explicitly rather than derived.
+   *
+   * Every other piece of desk chrome asks `customerMode`. This one is the
+   * deliberate exception: at a table you flip the binder WITH the customer,
+   * and leaving the binder to take the money is the round trip this whole
+   * feature exists to remove. So the binder gets the full bar, sell button and
+   * all.
+   *
+   * The COUNTER is still out — that is the list you hand over and walk away
+   * from, and nothing on it may move money; it gets the read-only DealTally
+   * instead. Written as a positive list of the two screens rather than as a
+   * negated counter-mode test, because negating counter mode is precisely the
+   * mistake check-showcounter.mjs refuses: it hides a thing from the list and
+   * leaves it on the binder BY ACCIDENT. Here the binder is included on
+   * purpose, so the name says so.
+   *
+   * (That check greps this file for the negated form as a literal, comments
+   * included, so it is deliberately not spelled out above — writing it out to
+   * explain the rule is enough to fail the rule.)
+   */
+  const dealMode = mode === "desk" || mode === "binder";
 
   const supabase = () => createClient();
 
@@ -1377,6 +1399,13 @@ export default function ShowDesk() {
                 branch can reach a field the projection didn't allow — and both
                 sit inside the slice check-showcounter.mjs greps for desk data
                 and destructive controls. */}
+            {/* The basket as a READOUT. This is the list you hand over and
+                walk away from, so it may show what is in the deal and must
+                never carry a way to spend it — DealTally has no drawer, no
+                line editing and no sell button, and check-deal.mjs greps it
+                for every function that writes. The binder gets the full bar
+                instead; see the note on dealMode. */}
+            {counterMode ? <DealTally deal={deal} note="Ask at the table" /> : null}
             {counterMode ? (
               <div className="stack-list sd-counter">
                 {counter.rows.map((c) => (
@@ -1532,11 +1561,6 @@ export default function ShowDesk() {
                   </button>
                 </div>
                 <p className="hint hint-small bn-hint">Swipe the page, or use the arrows.</p>
-                {/* What is in the basket, and nothing that spends it. The full
-                    bar carries £ Mark sold and is gated on customerMode below;
-                    this one is safe in front of a stranger because there is
-                    nothing on it to press. */}
-                <DealTally deal={deal} />
                 {/* The card, opened. Picture on the left at the size eBay
                     serves it, what we know about it on the right. Fixed rather
                     than absolute so it covers the page however far down you had
@@ -1798,11 +1822,12 @@ export default function ShowDesk() {
         </div>
       ) : null}
 
-      {/* The basket. Gated on customerMode like every other piece of desk
-          chrome — there are two customer screens now, and a `£ Sold` one
-          mis-tap from somebody holding the tablet is exactly what counter mode
-          exists to remove. */}
-      {customerMode ? null : <DealBar deal={deal} update={updateDeal} onSold={load} />}
+      {/* The basket, with the sell button on it. `dealMode` rather than
+          `customerMode`: the binder is in by explicit decision (see the note on
+          dealMode), the counter is out and gets DealTally instead. The drawer
+          starts closed, so selling from the binder is two deliberate taps —
+          Open deal, then £ Mark sold — never one. */}
+      {dealMode ? <DealBar deal={deal} update={updateDeal} onSold={load} /> : null}
     </div>
   );
 }

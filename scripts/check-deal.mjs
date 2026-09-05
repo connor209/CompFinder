@@ -412,9 +412,18 @@ console.log("9. one definition, and nothing app-shaped in it");
   if (/DealBar|dealAdd/.test(desk) && !/customerMode/.test(desk)) {
     fail("the desk offers the deal without gating on customerMode — counter and binder mode are pointed at a customer");
   }
-  // The full bar (the one with the sell button) renders behind the gate only.
-  if (!/customerMode \? null : <DealBar/.test(desk)) {
-    fail("the full deal bar is no longer gated `customerMode ? null : <DealBar` — the sell button can reach a customer screen");
+  // Where the deal may be SPENT. The binder carries the full bar by explicit
+  // decision — you flip it WITH the customer and leaving it to take the money
+  // was the round trip this feature removes. The COUNTER is the list you hand
+  // over and walk away from, and it must never carry a way to move money.
+  if (!/const dealMode = mode === "desk" \|\| mode === "binder"/.test(desk)) {
+    fail("dealMode is no longer the explicit desk-or-binder list — if it now includes counter mode, the sell button is on the list you hand a customer");
+  }
+  if (!/dealMode \? <DealBar/.test(desk)) {
+    fail("the full deal bar is no longer gated on dealMode — check which screens can now spend the basket");
+  }
+  if (/customerMode \? <DealBar|counterMode \? <DealBar/.test(desk)) {
+    fail("the full deal bar renders in counter mode — that is the screen handed to a customer, and £ Mark sold must not be on it");
   }
   // …and the read-only one that CAN face a customer must stay read-only. It is
   // the whole reason there are two components rather than a prop.
@@ -425,8 +434,8 @@ console.log("9. one definition, and nothing app-shaped in it");
       fail(`DealTally reaches for ${banned}() — it renders on the binder, which a customer holds, and must have nothing on it to press`);
     }
   }
-  if (!/DealTally/.test(desk)) {
-    fail("nothing on the desk renders DealTally — the binder shows no basket at all");
+  if (!/counterMode \? <DealTally/.test(desk)) {
+    fail("counter mode no longer shows the read-only DealTally — either the basket is invisible there, or something else is standing in for it");
   }
 }
 

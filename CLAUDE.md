@@ -1335,17 +1335,31 @@ changing what Last Comp tells a stranger their card is worth.
   window event rather than a provider, and `useDeal()` is called ONCE per
   screen — a hook per row is two hundred storage reads on the one screen that
   was just fixed for doing too much per row.
-- **The line is drawn at the WRITE, not at the basket.** The full bar — the one
-  carrying `£ Mark sold` — is gated on `customerMode` like every other piece of
-  desk chrome. But **adding is inert**, so `＋ Deal` on a binder pocket is safe
-  in front of a stranger and is the whole reason somebody is flipping the
-  binder with them: they point, you tap. So the binder gets `＋ Deal` per copy
-  and a READ-ONLY `DealTally` — count and total, no drawer, no line editing, no
-  sell button, nothing on it to mis-tap — and the money still moves on the
-  desk, one tap away on the mode toggle. Two components rather than a prop,
-  because a prop is one wrong default from a sell button on a customer's
-  screen; `check-deal.mjs` pins the gate on `DealBar` and greps `DealTally`
-  for every function that writes.
+- **`dealMode` is where the deal may be SPENT, and it is the one deliberate
+  exception to `customerMode`.** Every other piece of desk chrome asks "is
+  anybody but us looking at this?". This one asks a narrower question, because
+  at a table you flip the binder WITH the customer and leaving it to take the
+  money is the round trip the basket exists to remove. So the **binder carries
+  the full bar, sell button and all** — decided explicitly, against the
+  customer-screen rule, and the residual risk is real: two taps by whoever
+  holds the tablet (Open deal, then £ Mark sold) records a sale. The drawer
+  starts closed, so it is never one.
+- **The counter is still out, and gets a read-only `DealTally`** — count and
+  total, no drawer, no line editing, no sell button, nothing on it to press.
+  That is the list you hand over and walk away from. Two components rather
+  than one with a prop, because a prop is one wrong default from a sell button
+  on that screen; `check-deal.mjs` pins `dealMode` as the literal desk-or-
+  binder list, pins `dealMode ? <DealBar`, fails if the full bar appears under
+  `counterMode`, and greps `DealTally` for every function that writes.
+- **`dealMode` is written as a positive list of two screens, never as a negated
+  counter-mode test.** Negating counter mode is the mistake
+  `check-showcounter.mjs` exists to refuse — it hides a thing from the list and
+  leaves it on the binder by accident. Here the binder is included on purpose,
+  so the name says so. That check greps ShowDesk.js for the negated form as a
+  literal, comments included, so writing it out to explain the rule is enough
+  to fail the rule.
+- **Adding is inert, so `＋ Deal` is safe on any screen.** It sits on every copy
+  in an opened binder pocket, beside the ⌖ locate button: they point, you tap.
 - **A pocket carries an id and nothing else**, so `＋ Deal` in the binder
   resolves the desk's own row by that id — the same rule as the ⌖ locate
   button. A box copy's id is its `stock_checkouts` row, a listed one's is its
