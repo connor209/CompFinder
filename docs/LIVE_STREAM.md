@@ -42,8 +42,20 @@ STREAM_ALLOW_ORIGIN=https://comp-finder.vercel.app npm run stream
 It prints what it accepts on startup. A `＋ Stream` button that does nothing is
 almost always this, and the relay's own log is the fastest way to see it.
 
-Then: price a card (**Check price**), press **＋ Stream**, and it joins the
-queue. Auto-advance is ~30 seconds a lot; <kbd>space</kbd> holds, arrows move,
+**To see it move before wiring any of that up**, skip the app entirely:
+
+```
+node tools/stream-relay/demo.mjs --lot 8
+```
+
+Four lots straight into the relay through the same endpoint the app posts to.
+Its pictures are catalogue art standing in for one card's four photographs, and
+its last lot is deliberately one whose price we would hold — the case worth
+watching, because the overlay must show no value line rather than a blank where
+the last lot had a number.
+
+Then, for real: price a card (**Check price**), press **＋ Stream**, and it joins
+the queue. Auto-advance is ~30 seconds a lot; <kbd>space</kbd> holds, arrows move,
 and the desk has the same controls for a mouse.
 
 ## What eBay actually requires
