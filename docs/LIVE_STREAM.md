@@ -60,6 +60,13 @@ STREAM_ALLOW_ORIGIN=https://compfinder.gopainting.com npm run stream
 It prints what it accepts on startup and names the missing one in the 403. A
 `＋ Stream` button that does nothing is almost always this.
 
+**The relay's own pages are on that list too**, and they have to be: a browser
+sends an `Origin` header on every POST, same-origin included, so without it the
+desk's buttons are refused by the server that served them. That shipped, and
+every test passed, because curl sends no `Origin` at all — the whole desk was
+dead in a browser and green in the harness. `check-livestream.mjs` pins it now,
+along with the desk reporting a refused control instead of swallowing it.
+
 The demo lots are catalogue art standing in for one card's four photographs —
 the one thing about them that is a lie — and the last one is deliberately a card
 whose price we would hold, because that is the case worth watching: the overlay

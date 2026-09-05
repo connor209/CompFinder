@@ -229,6 +229,21 @@ console.log("6. one definition of what may be said, and one interface listened o
     }
   }
 
+  // The relay's OWN pages must be on the allow-list. A browser sends an Origin
+  // header on every POST, same-origin included — so without this the desk's
+  // buttons are refused by the server that served them. It shipped that way,
+  // and every test passed, because curl sends no Origin at all: Load demo
+  // lots, Hold, Next and Clear were dead in the browser and green in here.
+  ok("the relay allows its own pages", /`http:\/\/127\.0\.0\.1:\$\{PORT\}`/.test(relay) && /`http:\/\/localhost:\$\{PORT\}`/.test(relay));
+  // …and the desk must SAY when a control is refused. A swallowed rejection is
+  // why the above went unnoticed: a button that does nothing looks exactly
+  // like a button that was not clicked.
+  const deskSrc = file("tools/stream-relay/public/desk.html");
+  if (/fetch\("\/control"[\s\S]{0,200}?\.catch\(function \(\) \{\}\)/.test(deskSrc)) {
+    fail("the desk swallows a failed control — that is how a same-origin 403 on every button went unnoticed");
+  }
+  ok("the desk shows a refused control", /note\(j\.error/.test(deskSrc) && /id="err"/.test(deskSrc));
+
   // The machine running OBS is on hall wifi. Bound to every interface this
   // serves the queue, the stock and the prices to the rest of the venue.
   // Scoped to the bind itself rather than the file: the reason this matters

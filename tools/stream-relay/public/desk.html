@@ -64,6 +64,7 @@
   li button { padding: 4px 9px; font-size: 12px; }
   kbd { background: #1e222a; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; font-size: 12px; }
   .empty { color: var(--dim); padding: 18px 0; }
+  .errbar { background: #3a1c1f; border-bottom: 1px solid var(--bad); color: #ffc9cb; padding: 10px 22px; font-size: 13px; }
   .obs { margin-left: auto; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
   .obs code { font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: #10131a; border: 1px solid var(--line); }
   button.small { padding: 4px 10px; font-size: 12px; }
@@ -71,6 +72,8 @@
   #setup p { margin: 0 0 10px; color: var(--dim); font-size: 13px; }
   a { color: var(--accent); }
 </style>
+
+<div id="err" class="errbar" hidden></div>
 
 <header>
   <span class="dot" id="dot"></span>
@@ -137,10 +140,26 @@
   var $ = function (id) { return document.getElementById(id); };
   var snap = null;
 
+  /* A control the relay refused must SAY so. The first version swallowed both
+     the rejection and the network error, so a button that did nothing looked
+     exactly like a button that had not been clicked — which is how a
+     same-origin 403 on every control went unnoticed through a whole test
+     pass. */
   function post(action, extra) {
     var body = Object.assign({ action: action }, extra || {});
     fetch("/control", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      .catch(function () {});
+      .then(function (r) {
+        if (r.ok) { note(""); return; }
+        return r.json().then(function (j) { note(j.error || ("the relay refused that (" + r.status + ")")); },
+                             function () { note("the relay refused that (" + r.status + ")"); });
+      })
+      .catch(function () { note("couldn't reach the relay — is its window still open?"); });
+  }
+
+  function note(msg) {
+    var el = $("err");
+    el.textContent = msg || "";
+    el.hidden = !msg;
   }
 
   function elapsed(s) {

@@ -70,6 +70,14 @@ const HOST = "127.0.0.1";
  * which is the failure this repo has already paid to learn about once.
  */
 const ALLOWED = new Set([
+  // The relay's OWN pages. A browser sends an Origin header on every POST,
+  // same-origin included, so without these the desk's buttons are refused by
+  // the server that served them — and every curl test passes, because curl
+  // sends no Origin at all. That is precisely how this shipped: the demo
+  // button, Hold, Next and Clear were all dead in the browser and green in
+  // every test.
+  `http://127.0.0.1:${PORT}`,
+  `http://localhost:${PORT}`,
   "http://localhost:3000",
   "http://127.0.0.1:3000",
   ...String(process.env.STREAM_ALLOW_ORIGIN || "")

@@ -1455,6 +1455,14 @@ in `docs/LIVE_STREAM.md`.
   the host on camera. A card auctioned off a blank rectangle is the version of
   this format nobody should defend, which is why it is unrepresentable rather
   than merely discouraged.
+- **A browser sends an Origin header on same-origin POSTs too.** The desk is
+  served BY the relay and its buttons were refused by it — Load demo lots,
+  Hold, Next and Clear, all dead in a browser and all green in the harness,
+  because curl sends no Origin at all. The relay's own pages are on the
+  allow-list now, and the desk reports a refused control rather than
+  swallowing it: a button that does nothing looks exactly like a button
+  nobody clicked, which is why this survived a whole test pass. Anything
+  driving a browser UI from curl is testing a different request.
 - **127.0.0.1, and an origin allow-list on top.** The machine running OBS is on
   hall wifi; bound to every interface the relay serves the queue, the stock and
   the prices to the building. `*` for origins is the same hole one layer up —
