@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useDeferredValue } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { APP_SETTINGS } from "@/lib/matching";
@@ -99,7 +99,7 @@ function skusOf(g) {
 // Table columns for the "pick columns" view. Each cell gets (g, ctx) where
 // ctx.priced is the repricing map. `always` columns can't be hidden.
 const ALL_COLUMNS = [
-  { key: "image", label: "Image", always: false, cell: (g) => (g.image_url ? <img className="itbl-img" src={g.image_url} alt="" loading="lazy" /> : <span aria-hidden="true">🎴</span>) },
+  { key: "image", label: "Image", always: false, cell: (g) => (g.image_url ? <img className="itbl-img" src={g.image_url} alt="" width="38" height="38" loading="lazy" decoding="async" /> : <span aria-hidden="true">🎴</span>) },
   { key: "title", label: "Title", always: true, cell: (g) => <a href={g.url || "#"} target="_blank" rel="noopener noreferrer">{g.title}</a> },
   { key: "sku", label: "SKU", cell: (g) => <span className="mono">{skusOf(g)}</span> },
   { key: "price", label: "Ask", cell: (g) => <span className="mono">{priceStr(g.price_value, g.price_currency)}</span> },
@@ -202,10 +202,39 @@ const ALL_COLUMNS = [
 ];
 const DEFAULT_COLS = ["image", "title", "sku", "price", "cost", "market", "margin", "actions"];
 
+/**
+ * How many cards are rendered at once.
+ *
+ * The filter box was sticky at a show, and the images were not the reason: a
+ * keystroke re-rendered EVERY result, and an unfiltered inventory is thousands
+ * of them. Two rules keep it quick, and they only work as a pair:
+ *
+ * - The list is capped at PAGE rows with a "Show more" under it. Nobody reads
+ *   three thousand cards; rendering them costs on every keypress.
+ * - The filter feeds the row memo through useDeferredValue, so the input never
+ *   waits on the list — React paints the character first and the results
+ *   behind it.
+ *
+ * The cap is a rendering cap, so what is ON SCREEN is what a bulk action acts
+ * on — the same rule as selectionFor() on the Show desk, and it matters more
+ * here because "Price visible" spends a SoldComps request per card. The CSV is
+ * the one exception and says so: it is a file you read later, not a button
+ * that spends money.
+ */
+const PAGE = 200;
+
 export default function Inventory({ onDeepDive }) {
   const [status, setStatus] = useState({ loading: true, connected: false, configured: true });
   const [listings, setListings] = useState([]);
   const [filter, setFilter] = useState("");
+  // The typed value drives the input; the lagging one drives the list.
+  const deferredFilter = useDeferredValue(filter);
+  const [limit, setLimit] = useState(PAGE);
+  // The entrance animation is worth one play on arrival and no more: it is
+  // `.rise-grid > *` in globals.css, so every card that mounts as a filter
+  // widens replays a 0.34s rise, and the nth-child delays shift as rows
+  // reorder. Dropped once the first grid has landed.
+  const [entered, setEntered] = useState(false);
   const [sort, setSort] = useState("title");
   const [group, setGroup] = useState(true);
   const [dupOnly, setDupOnly] = useState(false);
@@ -326,7 +355,7 @@ export default function Inventory({ onDeepDive }) {
 
   // text filter → group (same title + same price) → sort → duplicates-only
   const rows = useMemo(() => {
-    const f = filter.trim().toLowerCase();
+    const f = deferredFilter.trim().toLowerCase();
     const words = f ? f.split(/\s+/).filter(Boolean) : [];
     const shown = words.length
       ? listings.filter((l) => {
@@ -369,7 +398,22 @@ export default function Inventory({ onDeepDive }) {
     groups.sort(sorters[sort] || sorters.title);
 
     return dupOnly ? groups.filter((g) => g._count > 1) : groups;
-  }, [listings, filter, sort, group, dupOnly, priced]);
+  }, [listings, deferredFilter, sort, group, dupOnly, priced]);
+
+  // What is actually on screen. Every bulk action below reads THIS, not `rows`.
+  const shown = useMemo(() => (rows.length <= limit ? rows : rows.slice(0, limit)), [rows, limit]);
+  const isStale = filter !== deferredFilter;
+
+  // A new result set starts at the top again — carrying a "show more" over
+  // from the last search would open the next one part-way down.
+  useEffect(() => { setLimit(PAGE); }, [deferredFilter, sort, group, dupOnly]);
+
+  useEffect(() => {
+    // .24s of nth-child delay plus a .34s rise; the keyframe ends on the
+    // element's resting state, so dropping the class after it is invisible.
+    const t = setTimeout(() => setEntered(true), 650);
+    return () => clearTimeout(t);
+  }, []);
 
   function toggleExpand(key) {
     setExpanded((prev) => {
@@ -488,7 +532,7 @@ export default function Inventory({ onDeepDive }) {
   // Bulk write-back: update every selected (priced) card to its market price,
   // with a single confirm and drastic-change items skipped rather than forced.
   async function updateSelectedToMarket() {
-    const targets = rows.filter((g) => {
+    const targets = shown.filter((g) => {
       if (!selected.has(g.key)) return false;
       const p = priced.get(g.key);
       const ask = g.price_value != null ? Math.round(g.price_value * 100) : null;
@@ -552,8 +596,8 @@ export default function Inventory({ onDeepDive }) {
     setPricingAll(false);
     setNote(`Priced ${todo.length} card${todo.length === 1 ? "" : "s"}.`);
   }
-  const priceAllVisible = () => priceMany(rows, `card${rows.length === 1 ? "" : "s"}`);
-  const priceSelected = () => priceMany(rows.filter((g) => selected.has(g.key)), "selected card(s)");
+  const priceAllVisible = () => priceMany(shown, `card${shown.length === 1 ? "" : "s"}`);
+  const priceSelected = () => priceMany(shown.filter((g) => selected.has(g.key)), "selected card(s)");
 
   function toggleSel(key) {
     setSelected((prev) => {
@@ -564,14 +608,21 @@ export default function Inventory({ onDeepDive }) {
     });
   }
   function toggleSelAll(allSelected) {
-    setSelected(allSelected ? new Set() : new Set(rows.map((g) => g.key)));
+    setSelected(allSelected ? new Set() : new Set(shown.map((g) => g.key)));
   }
+  // Only meaningful over the rendered page — a header tick that silently
+  // selected two thousand off-screen cards is the fault selectionFor() exists
+  // to prevent on the Show desk.
+  const allShownSelected = shown.length > 0 && shown.every((g) => selected.has(g.key));
 
   function exportCsv() {
     const esc = (v) => {
       const s = v == null ? "" : String(v);
       return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
+    // Deliberately `rows`, not `shown`: the screen cap is about rendering, and a
+    // spreadsheet that quietly stopped at 200 of 1,400 cards is worse than a
+    // long one. Nothing here spends a request.
     const header = ["Title", "SKU", "Ask", "Currency", "Qty", "Listings", "Market", "Delta", "Verdict", "URL"];
     const lines = [header.join(",")];
     for (const g of rows) {
@@ -675,11 +726,21 @@ export default function Inventory({ onDeepDive }) {
               </button>
             </>
           ) : (
-            <button className="btn btn-ghost" onClick={priceAllVisible} disabled={pricingAll || rows.length === 0}>
-              {pricingAll ? "Pricing…" : "💷 Price visible"}
+            <button
+              className="btn btn-ghost"
+              onClick={priceAllVisible}
+              disabled={pricingAll || shown.length === 0}
+              title={`Price the ${shown.length} card(s) on screen — one SoldComps request each`}
+            >
+              {pricingAll ? "Pricing…" : `💷 Price visible${shown.length ? ` (${shown.length})` : ""}`}
             </button>
           )}
-          <button className="btn btn-ghost" onClick={exportCsv} disabled={rows.length === 0}>⤓ CSV</button>
+          <button
+            className="btn btn-ghost"
+            onClick={exportCsv}
+            disabled={rows.length === 0}
+            title={`Every card matching the filter (${rows.length}), not just the ones on screen`}
+          >⤓ CSV</button>
           <button className="btn btn-ghost" aria-pressed={showActivity} onClick={() => setShowActivity((s) => !s)}>🕘 Activity</button>
           <button className="btn btn-ghost" onClick={handleSync} disabled={syncing}>
             {syncing ? "Syncing…" : "↻ Sync"}
@@ -707,6 +768,7 @@ export default function Inventory({ onDeepDive }) {
         <span className="inv-summary">
           {rows.length} {group || dupOnly ? "card(s)" : "listing(s)"}
           {(group || dupOnly) && totalShownListings !== rows.length ? ` · ${totalShownListings} listings` : ""}
+          {shown.length < rows.length ? ` · showing ${shown.length}` : ""}
         </span>
         <div className="view-toggle" role="group" aria-label="Inventory view">
           <button aria-pressed={view === "cards"} onClick={() => setView("cards")}>▦ Cards</button>
@@ -732,7 +794,7 @@ export default function Inventory({ onDeepDive }) {
           </p>
         </div>
       ) : view === "table" ? (
-        <div className="table-wrap">
+        <div className="table-wrap" style={isStale ? { opacity: 0.55 } : undefined}>
           <table className="itbl">
             <thead>
               <tr>
@@ -740,8 +802,8 @@ export default function Inventory({ onDeepDive }) {
                   <input
                     type="checkbox"
                     aria-label="Select all"
-                    checked={rows.length > 0 && rows.every((g) => selected.has(g.key))}
-                    onChange={() => toggleSelAll(rows.length > 0 && rows.every((g) => selected.has(g.key)))}
+                    checked={allShownSelected}
+                    onChange={() => toggleSelAll(allShownSelected)}
                   />
                 </th>
                 {visibleCols(ALL_COLUMNS).map((c) => (
@@ -750,7 +812,7 @@ export default function Inventory({ onDeepDive }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((g) => (
+              {shown.map((g) => (
                 <tr key={g.key} className={selected.has(g.key) ? "is-sel" : ""}>
                   <td className="itbl-selcol">
                     <input type="checkbox" aria-label="Select row" checked={selected.has(g.key)} onChange={() => toggleSel(g.key)} />
@@ -766,8 +828,8 @@ export default function Inventory({ onDeepDive }) {
           </table>
         </div>
       ) : (
-        <div className="inv-grid rise-grid">
-          {rows.map((g) => {
+        <div className={`inv-grid${entered ? "" : " rise-grid"}`} style={isStale ? { opacity: 0.55 } : undefined}>
+          {shown.map((g) => {
             const isOpen = expanded.has(g.key);
             const p = priced.get(g.key);
             const askPence = g.price_value != null ? Math.round(g.price_value * 100) : null;
@@ -775,7 +837,7 @@ export default function Inventory({ onDeepDive }) {
             return (
               <div className="inv-card" key={g.key}>
                 <div className="inv-thumb">
-                  {g.image_url ? <img src={g.image_url} alt="" loading="lazy" /> : <span aria-hidden="true">🎴</span>}
+                  {g.image_url ? <img src={g.image_url} alt="" width="140" height="140" loading="lazy" decoding="async" /> : <span aria-hidden="true">🎴</span>}
                   {g._count > 1 ? <span className="inv-count" title={`${g._count} listings at this price`}>×{g._count}</span> : null}
                 </div>
                 <div className="inv-body">
@@ -854,6 +916,17 @@ export default function Inventory({ onDeepDive }) {
           })}
         </div>
       )}
+
+      {shown.length < rows.length ? (
+        <div className="inv-more">
+          <button className="btn btn-ghost" onClick={() => setLimit((n) => n + PAGE)}>
+            Show {Math.min(PAGE, rows.length - shown.length)} more
+          </button>
+          <span className="hint hint-small">
+            {shown.length} of {rows.length} on screen — keep typing to narrow it instead.
+          </span>
+        </div>
+      ) : null}
     </>
   );
 }

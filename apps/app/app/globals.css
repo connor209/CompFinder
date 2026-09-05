@@ -1860,3 +1860,13 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 /* A deep-dive headline showing a price you set rather than one worked out. */
 .dd-price-mine { color:var(--accent-2); }
 .dd-sub-mine { color:var(--accent-2); font-weight:600; margin-top:8px; }
+
+/* ---- My listings: the rendering cap ----
+ * The list is capped at PAGE rows (Inventory.js) — this is the footer under it.
+ * `content-visibility` lets the browser skip layout and paint for cards that
+ * are scrolled out of view; `contain-intrinsic-size` keeps the scrollbar
+ * honest while they are skipped. Ignored by older Safari, which simply gets
+ * what it got before. */
+.inv-more { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:center; padding:18px 0 4px; }
+.inv-more .hint-small { margin:0; }
+.inv-card { content-visibility:auto; contain-intrinsic-size:auto 320px; }
