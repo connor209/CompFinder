@@ -1,0 +1,223 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Comp Finder — stream desk</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  The host's screen — a second monitor, not the broadcast. It exists because
+  the person talking needs to know three things the overlay deliberately does
+  not say: what is coming next, how long the lot on air has left, and which
+  lots are going out with NO figure on them.
+
+  That last one is the point. livestream.js holds back a price it cannot stand
+  behind, and the rule is that nothing is held QUIETLY — a lot marked "no
+  figure" here is the host's cue to talk about the card rather than read a
+  number off the screen. The audience never sees an empty box where the last
+  lot had a price, and the host is never surprised by one.
+
+  Controls are ordinary POSTs. The relay owns the clock, so a control pressed
+  here and the picture on air can never disagree about which lot is live.
+-->
+<style>
+  :root {
+    --bg: #0e0f12; --card: #16181d; --line: #262a33; --ink: #eceef2;
+    --dim: #9aa1ad; --accent: #7ee0c4; --warn: #f0b866; --bad: #e2686d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); min-height: 100vh;
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  header { padding: 18px 22px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: 0.02em; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); }
+  .dot.live { background: var(--accent); }
+  .muted { color: var(--dim); font-size: 13px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); gap: 22px; padding: 22px; align-items: start; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .eyebrow { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
+  #onair { display: flex; gap: 16px; margin-top: 10px; }
+  #onair img { width: 96px; height: 134px; object-fit: contain; background: #0a0b0e; border-radius: 8px; border: 1px solid var(--line); }
+  #onairName { font-size: 24px; font-weight: 700; line-height: 1.15; }
+  #onairMeta { margin-top: 6px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .tag { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  .tag.held { border-color: var(--warn); color: var(--warn); }
+  .tag.val { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  #progress { height: 5px; background: #0a0b0e; border-radius: 3px; margin-top: 14px; overflow: hidden; }
+  #bar { height: 100%; width: 0; background: var(--accent); transition: width 200ms linear; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+  button {
+    font: inherit; color: var(--ink); background: #1e222a; border: 1px solid var(--line);
+    border-radius: 8px; padding: 9px 14px; cursor: pointer;
+  }
+  button:hover { border-color: #3a4150; }
+  button.primary { background: var(--accent); color: #0b0d10; border-color: var(--accent); font-weight: 650; }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
+  ol { list-style: none; margin: 12px 0 0; padding: 0; }
+  li { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; border: 1px solid transparent; }
+  li.on { background: #1b2b28; border-color: var(--accent); }
+  li .n { color: var(--dim); font-variant-numeric: tabular-nums; min-width: 22px; font-size: 13px; }
+  li .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li .px { font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+  li .px.held { color: var(--warn); }
+  li button { padding: 4px 9px; font-size: 12px; }
+  kbd { background: #1e222a; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; font-size: 12px; }
+  .empty { color: var(--dim); padding: 18px 0; }
+  a { color: var(--accent); }
+</style>
+
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>Live stream desk</h1>
+  <span class="muted" id="conn">connecting…</span>
+  <span class="muted" style="margin-left:auto">OBS browser source → <a href="/overlay" target="_blank">/overlay</a></span>
+</header>
+
+<main>
+  <section class="panel">
+    <span class="eyebrow">On air</span>
+    <div id="onair">
+      <img id="onairArt" alt="">
+      <div style="min-width:0">
+        <div id="onairName">Nothing queued</div>
+        <div id="onairMeta"></div>
+      </div>
+    </div>
+    <div id="progress"><div id="bar"></div></div>
+    <div class="row">
+      <button id="prev">◀ Previous</button>
+      <button id="hold" class="primary">Hold</button>
+      <button id="next">Next ▶</button>
+      <button id="restart">Restart lot</button>
+    </div>
+    <div class="row">
+      <span class="muted">
+        Lot length
+        <button data-ms="20000">20s</button>
+        <button data-ms="30000">30s</button>
+        <button data-ms="45000">45s</button>
+        <button data-ms="60000">60s</button>
+        <span id="lotms"></span>
+      </span>
+    </div>
+    <p class="muted" style="margin-bottom:0">
+      <kbd>space</kbd> hold · <kbd>→</kbd> next · <kbd>←</kbd> previous · <kbd>r</kbd> restart
+    </p>
+  </section>
+
+  <section class="panel">
+    <span class="eyebrow">Queue · <span id="count">0</span></span>
+    <ol id="queue"></ol>
+    <p class="empty" id="emptyNote">Nothing queued. Send cards from the app — Show desk or My listings.</p>
+    <div class="row"><button id="clear" class="danger">Clear the queue</button></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var snap = null;
+
+  function post(action, extra) {
+    var body = Object.assign({ action: action }, extra || {});
+    fetch("/control", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      .catch(function () {});
+  }
+
+  function elapsed(s) {
+    return s.elapsedMs + (s.runningSince === null ? 0 : Date.now() - s.runningSince);
+  }
+
+  function render() {
+    if (!snap) return;
+    var lot = snap.lot;
+    $("count").textContent = snap.count;
+    $("hold").textContent = snap.holding ? "Resume" : "Hold";
+    $("lotms").textContent = " · now " + Math.round(snap.lotMs / 1000) + "s";
+
+    if (lot) {
+      $("onairName").textContent = lot.name;
+      $("onairArt").src = lot.images[0] || "";
+      $("onairArt").style.visibility = lot.images.length ? "visible" : "hidden";
+      var meta = [];
+      if (lot.condition) meta.push('<span class="tag">' + esc(lot.condition) + "</span>");
+      /* The held cue. The audience sees no value line at all; the host sees
+         WHY, so the lot gets talked about instead of read out. */
+      meta.push(lot.valueHeld
+        ? '<span class="tag held">no figure on screen — talk it up</span>'
+        : '<span class="tag val">' + esc(lot.valueLabel + " " + lot.valueText) + "</span>");
+      meta.push('<span class="tag">' + lot.imageCount + " picture" + (lot.imageCount === 1 ? "" : "s") + "</span>");
+      $("onairMeta").innerHTML = meta.join("");
+    } else {
+      $("onairName").textContent = snap.count ? "Nothing on air" : "Nothing queued";
+      $("onairMeta").innerHTML = "";
+      $("onairArt").style.visibility = "hidden";
+    }
+
+    var q = $("queue");
+    q.innerHTML = "";
+    (snap.queue || []).forEach(function (item) {
+      var li = document.createElement("li");
+      if (item.i === snap.at) li.className = "on";
+      li.innerHTML =
+        '<span class="n">' + (item.i + 1) + "</span>" +
+        '<span class="nm">' + esc(item.name) + "</span>" +
+        '<span class="px' + (item.held ? " held" : "") + '">' + (item.held ? "no figure" : esc(item.valueText || "")) + "</span>";
+      var play = document.createElement("button");
+      play.textContent = "Air";
+      play.onclick = function () { post("select", { index: item.i }); };
+      var rm = document.createElement("button");
+      rm.textContent = "✕";
+      rm.className = "danger";
+      rm.onclick = function () { post("remove", { index: item.i }); };
+      li.appendChild(play);
+      li.appendChild(rm);
+      q.appendChild(li);
+    });
+    $("emptyNote").style.display = snap.count ? "none" : "block";
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function tickBar() {
+    if (!snap || !snap.lot) { $("bar").style.width = "0"; return; }
+    var pct = Math.min(100, (elapsed(snap) / snap.lotMs) * 100);
+    $("bar").style.width = pct + "%";
+  }
+
+  var src = new EventSource("/events");
+  src.onmessage = function (ev) {
+    try { snap = JSON.parse(ev.data); } catch (e) { return; }
+    $("dot").className = "dot live";
+    $("conn").textContent = "connected";
+    render();
+  };
+  src.onerror = function () {
+    $("dot").className = "dot";
+    $("conn").textContent = "relay unreachable — reconnecting";
+  };
+
+  $("next").onclick = function () { post("next"); };
+  $("prev").onclick = function () { post("prev"); };
+  $("restart").onclick = function () { post("restart"); };
+  $("hold").onclick = function () { post(snap && snap.holding ? "resume" : "hold"); };
+  $("clear").onclick = function () { if (confirm("Clear the whole queue?")) post("clear"); };
+  Array.prototype.forEach.call(document.querySelectorAll("[data-ms]"), function (b) {
+    b.onclick = function () { post("lotMs", { ms: Number(b.dataset.ms) }); };
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.target && /input|textarea/i.test(e.target.tagName)) return;
+    if (e.key === " ") { e.preventDefault(); post(snap && snap.holding ? "resume" : "hold"); }
+    else if (e.key === "ArrowRight") post("next");
+    else if (e.key === "ArrowLeft") post("prev");
+    else if (e.key === "r" || e.key === "R") post("restart");
+  });
+
+  setInterval(tickBar, 150);
+})();
+</script>

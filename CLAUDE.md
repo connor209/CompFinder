@@ -10,6 +10,7 @@ editing anything** — the words below are the agreed shorthand.
 | **the app**, **Pro** | `apps/app` | `comp-finder` | us, daily, for the business |
 | **Last Comp**, **the public page** | `apps/public` | `compfinder-public` | anonymous visitors |
 | **core** | `packages/core` | — | both of the above |
+| **the relay** | `tools/stream-relay` | — | OBS, on the machine running a stream |
 
 The public page is called **Last Comp** as of 2026-08-23 — the Vercel project
 and the repo keep the old name, so "CompFinder" in a path is the codebase and
@@ -37,6 +38,8 @@ is what keeps it shareable; breaking it breaks both apps.
 packages/core/   pricing · soldcomps · cardname · marketplace · epn · catalog · setmatch
 apps/app/        the business tool — eBay OAuth, inventory, batch, scan
 apps/public/     the free price page — no accounts, shared key, cached
+tools/           stream-relay: a local server OBS points at during an eBay Live
+                 auction. Not deployed, no dependencies, not a workspace.
 supabase/        migrations, shared by both
 docs/            research reports; MARKETING.md is the current acquisition plan
                  HOW_PRICING_WORKS.md is the app's pricing in plain English
@@ -44,11 +47,12 @@ docs/            research reports; MARKETING.md is the current acquisition plan
 ```
 
 Run everything from the repo root: `npm run dev` / `npm run build` (the app),
-`npm run dev:public` / `npm run build:public` (the public page).
+`npm run dev:public` / `npm run build:public` (the public page), `npm run
+stream` (the relay, only while streaming).
 
 ## Checks
 
-`npm run check` runs thirty-three table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-four table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -149,6 +153,13 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
   listing is ended once rather than hidden then ended, that a checkout already
   resolved elsewhere is refused rather than counted twice, and that a basket
   does not survive the night. Supabase and eBay are both faked.
+- `scripts/check-livestream.mjs` — what may be said on a broadcast: that a lot
+  is an allow-list carrying no SKU, cost or note; that a price the Show Desk
+  would hold back from a sticker is never read out as a figure; that the figure
+  is the engine's own rather than the sticker's laddered one; that the relay
+  strips a figure off a held lot arriving with one; that four pictures come off
+  the listing in the listing's order; and greps keeping the relay from ever
+  building a lot itself or binding anything but loopback.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -1382,6 +1393,94 @@ changing what Last Comp tells a stranger their card is worth.
   reason the two buttons stack rather than sit side by side under 560px:
   squeezed into a row the primary shrinks below its label and `.btn-primary`
   clips rather than wrapping, so it read "Mark 4 sold — £100.0".
+
+## A broadcast is a sticker nobody can peel off
+
+We auction on eBay Live from the photographs already on the listings, with a
+host talking through each lot. The card stays in its stack until it sells.
+Every card here is already pulled once, scanned, conditioned, SKU'd and priced;
+pulling all of them again to wave each at a lens is that work twice, on the one
+evening you are also trying to talk to a room.
+
+Three pieces. `apps/app/lib/livestream.js` owns the LOT and is the only
+definition of what may go on air. `tools/stream-relay` is a dependency-free
+local server OBS points a Browser Source at. My listings grows a `＋ Stream`
+button beside `＋ Deal`. `packages/core` is untouched: what a card fetches on a
+Thursday night stream has no business changing what Last Comp tells a stranger
+their card is worth. The eBay Live policy reading and the run instructions are
+in `docs/LIVE_STREAM.md`.
+
+- **A lot is an ALLOW-LIST**, built key by key — the same discipline as
+  `counterRow()` and `dealLine()`, for a harder reason than either. Those face
+  one customer across a table; this is broadcast, and a broadcast is recorded.
+  The leak worth designing against is still the column added to `ebay_listings`
+  a year from now for an unrelated reason, and here it arrives on a stream.
+  `check-livestream.mjs` stuffs a row with every private value the app knows —
+  SKU, stack, cost, note, takings — and searches the serialised lot for each.
+- **A price we would not stand behind is never read out.** eBay's own rule is
+  that a seller makes no misleading claim about condition, authenticity or
+  value, and this repo already knows which of its prices are too thin to print:
+  `stickerFor()` holds back low and no-confidence prices, and prices built from
+  ASKING prices rather than sales. Every one of those reasons is stronger in
+  front of a camera than on a sticker, which at least gets peeled off in front
+  of one person. A held lot goes out with **no value line at all** — not a
+  hedge and not an empty box where the last lot had a number.
+- **`stickerFor()` decides WHETHER; `effectivePence()` decides WHAT.** That
+  split is a bug this file shipped with: reading the figure off the sticker too
+  put "£85 recent sold" on air for an £84 card, because the sticker rounds onto
+  a £1/£5/£10 cash ladder for somebody handing over notes. Rounding is how you
+  make a false statement about value without ever meaning to.
+- **Nothing is held quietly**, and the reason goes to the HOST — in prose, at
+  the moment the lot is queued, on the screen they are standing at. Never to
+  the relay, never to the overlay. The audience sees no figure; the person
+  about to talk over the card for thirty seconds knows why.
+- **The pictures are the LISTING's pictures.** Not catalogue art, not a scan
+  store of our own. eBay requires that what is shown live matches the listing,
+  and this is the cheapest way to be certain of it — it also settles the real
+  exposure of the whole format, which is dispute rather than policy: a buyer
+  claiming the card was not as described is looking at the same photographs the
+  stream showed them. `fetchItemPictures()` is one GetItem per lot, affordable
+  precisely here because a lot is queued by hand seconds before a host talks
+  over it, and it is deliberately on no path that renders a list.
+- **The relay never builds a lot.** `sanitiseLot()` is a bouncer: it strips the
+  figure off a lot marked held, drops any field nobody allowed, and refuses a
+  lot outright rather than half-rendering one. Two ends written on different
+  days need the rule at both, and the check greps the relay for any sign of it
+  deciding anything — `lotFrom`, `counterName`, `stickerFor` and the rest.
+- **A lot with no pictures is refused, and standby renders nothing.** eBay
+  reads an empty or placeholder screen as an abandoned stream, so the overlay
+  is transparent and draws nothing between lots; the honest picture there is
+  the host on camera. A card auctioned off a blank rectangle is the version of
+  this format nobody should defend, which is why it is unrepresentable rather
+  than merely discouraged.
+- **127.0.0.1, and an origin allow-list on top.** The machine running OBS is on
+  hall wifi; bound to every interface the relay serves the queue, the stock and
+  the prices to the building. `*` for origins is the same hole one layer up —
+  any page open in that browser could read the queue. The relay prints what it
+  accepts at startup, because a `＋ Stream` button that silently does nothing is
+  the failure this repo has already paid to learn about once.
+- **The queue is in memory and does not wrap.** A queue is a session: re-added
+  in seconds, and restored after a crash it is a list of cards that may already
+  have sold. Running off the end parks on nothing rather than starting again,
+  because a stream that quietly restarts its list auctions the same card twice
+  — and a lot queued after that airs THAT lot, not the front of the queue,
+  which was the first version's bug.
+- **SSE, not a WebSocket.** The one deviation from the brief. Traffic is
+  one-directional and the host's controls are ordinary POSTs, so a socket buys
+  nothing and costs a dependency or a hand-rolled frame parser. `EventSource`
+  reconnects on its own, forever, with no code — and OBS routinely opens a
+  browser source before the relay is running.
+- **The producer is the app, not a browser extension.** The brief described an
+  extension reading the item number off an open eBay listing page, and the
+  contract in `docs/LIVE_STREAM.md` still allows one. It is not what shipped
+  because the name, condition and value are not on that page in a form worth
+  trusting — they are in Supabase behind the app's login, so an extension needs
+  a second auth surface for data the app already has open.
+- **Which picture is showing comes from the relay's clock.** The overlay
+  derives it from the lot's elapsed time rather than running a timer of its
+  own, so a browser source that reconnects mid-lot lands where the desk says it
+  is instead of restarting the cycle under a host who has already done the
+  front of the card.
 
 ## My listings: a keystroke used to render the whole inventory
 

@@ -27,7 +27,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SCANNED = ["apps/public/app", "apps/public/lib", "scripts"];
 const SKIP_DIRS = new Set([".next", "node_modules"]);
 
-// Nine files are exempt wholesale. This one has to name the field in code to
+// Ten files are exempt wholesale. This one has to name the field in code to
 // look for it. The other seven assert BUSINESS-app behaviour, where a
 // recommended listing price is the right answer and the whole point of the
 // screen, and none of them reads anything under apps/public:
@@ -43,7 +43,11 @@ const SKIP_DIRS = new Set([".next", "node_modules"]);
 // which it cannot do without naming both; and check-zeroprice.mjs has to build
 // recs both with and without a ladder price, because the entire rule it pins
 // is the difference between a card priced at the £2.49 floor and a card
-// nothing priced at all. Everywhere else may
+// nothing priced at all; and check-livestream.mjs builds recommendations to
+// assert what an eBay Live lot may say about a card's value, which is a
+// business-app question about our own listings and never reaches the public
+// page — indeed the rule it pins is stricter than this one, since a lot with
+// a price we would not stand behind carries no figure at all. Everywhere else may
 // DISCUSS finalPence in a comment — the explanation of why we don't use it is
 // worth keeping — but must not read it.
 const EXEMPT = new Set([
@@ -55,7 +59,8 @@ const EXEMPT = new Set([
   "scripts/check-matching.mjs",
   "scripts/check-override.mjs",
   "scripts/check-zeroprice.mjs",
-  "scripts/check-labels.mjs"
+  "scripts/check-labels.mjs",
+  "scripts/check-livestream.mjs"
 ]);
 
 /** Strips line comments and whole-line block-comment bodies. */

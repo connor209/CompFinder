@@ -1,0 +1,220 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Comp Finder — stream overlay</title>
+<!--
+  The OBS browser source. Point a Browser Source at http://127.0.0.1:4455/overlay
+  at 1920x1080 and place it in the scene wherever the card should sit.
+
+  Three things here are deliberate.
+
+  **The background is transparent, and standby renders NOTHING.** OBS
+  composites this over the host's camera, so an idle overlay should be absent
+  rather than a holding card — eBay reads an empty or placeholder screen as an
+  abandoned stream, and the honest state between lots is the host on camera
+  talking, not a box saying "standing by". The desk page is where the operator
+  checks the overlay is alive.
+
+  **Which picture is showing is derived from the lot's elapsed time**, handed
+  down by the relay, rather than from a timer started when this page loaded.
+  A browser source that reconnects mid-lot — OBS restarted, relay restarted,
+  scene re-added — then lands on the picture the desk says is showing instead
+  of beginning the cycle again under a host who has already talked through the
+  front of the card.
+
+  **Both the next picture and the next LOT's pictures are preloaded.** These
+  are eBay's full-size images; swapping the <img> src and hoping is how a
+  quarter of a second of blank rectangle gets broadcast on every change.
+-->
+<style>
+  :root {
+    --ink: #f7f7f8;
+    --panel: rgba(14, 15, 18, 0.82);
+    --line: rgba(255, 255, 255, 0.14);
+    --accent: #7ee0c4;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: transparent;           /* OBS composites this over the scene */
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    overflow: hidden;
+  }
+  #stage { position: absolute; inset: 0; display: none; }
+  #stage.on { display: block; }
+
+  /* The card. Two stacked layers so one can fade in over the other — a hard
+     swap on a 4K-ish photograph reads as a glitch at broadcast frame rates. */
+  /* Breathing room, so a tall card never sits flush against the top of the
+     browser source — against a scene background that reads as a crop.
+     In the INSET rather than as padding: the picture is absolutely positioned,
+     and an absolutely positioned child resolves `inset: 0` against its
+     containing block's PADDING box, so padding here moved nothing at all. */
+  #art { position: absolute; inset: 26px 26px 168px; }
+  #art img {
+    position: absolute; inset: 0; margin: auto;
+    /* FILL the box, don't merely fit inside it. `max-width/max-height` never
+       scale a picture UP, so a listing whose photographs are modest rendered
+       as a postage stamp in the middle of the source — and an OBS operator
+       cannot fix that by resizing the source, because that scales the bar
+       with it. eBay's s-l1600 is 1600px, so this is upscaling in the rare
+       case and filling in the usual one. */
+    width: 100%; height: 100%;
+    object-fit: contain;               /* never crop: the edges are the point */
+    opacity: 0; transition: opacity 220ms ease;
+    filter: drop-shadow(0 18px 40px rgba(0,0,0,0.55));
+  }
+  #art img.show { opacity: 1; }
+
+  /* Which of the four. Small, because it is for the viewer's orientation and
+     not a thing to read. */
+  #pips { position: absolute; left: 0; right: 0; bottom: 148px; display: flex; gap: 8px; justify-content: center; }
+  #pips i { width: 34px; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.28); }
+  #pips i.on { background: var(--accent); }
+
+  #bar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 132px;
+    display: flex; align-items: center; gap: 28px;
+    padding: 0 44px;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    backdrop-filter: blur(6px);
+  }
+  #name {
+    flex: 1 1 auto; min-width: 0;
+    /* 44px over two lines is 95px inside a 132px bar. It was 52px, which is
+       109px, and a long name — "Umbreon VMAX 215/203 Alternate Art Secret
+       Rare" — pushed its second line off the bottom of the screen. The bar is
+       a fixed pixel height rather than a proportion, so this arithmetic holds
+       at every browser-source size somebody sets. */
+    font-size: 44px; font-weight: 750; letter-spacing: -0.01em; line-height: 1.08;
+    /* Two lines, then cut. A name is the one thing here allowed to shrink;
+       everything else on this bar is a fact with a fixed width. */
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  #cond {
+    flex: 0 0 auto;
+    font-size: 26px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 10px 18px; border: 1px solid var(--line); border-radius: 10px;
+    background: rgba(255,255,255,0.05);
+  }
+  #value { flex: 0 0 auto; text-align: right; }
+  #valueLabel {
+    font-size: 18px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgba(247,247,248,0.62);
+  }
+  #valueText { font-size: 58px; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+  .hidden { display: none !important; }
+</style>
+
+<div id="stage">
+  <div id="art"><img id="a" alt=""><img id="b" alt=""></div>
+  <div id="pips"></div>
+  <div id="bar">
+    <div id="name"></div>
+    <div id="cond" class="hidden"></div>
+    <div id="value" class="hidden">
+      <div id="valueLabel"></div>
+      <div id="valueText"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var stage = document.getElementById("stage");
+  var layers = [document.getElementById("a"), document.getElementById("b")];
+  var pips = document.getElementById("pips");
+  var nameEl = document.getElementById("name");
+  var condEl = document.getElementById("cond");
+  var valueEl = document.getElementById("value");
+  var valueLabelEl = document.getElementById("valueLabel");
+  var valueTextEl = document.getElementById("valueText");
+
+  var snap = null;      // the relay's last word
+  var lotId = null;     // what is currently drawn
+  var front = 0;        // which layer is visible
+  var shownIdx = -1;
+  var warmed = {};      // preloaded Image objects, keyed by url
+
+  function preload(urls) {
+    (urls || []).forEach(function (u) {
+      if (warmed[u]) return;
+      var img = new Image();
+      img.decoding = "async";
+      img.src = u;
+      warmed[u] = img;
+    });
+  }
+
+  /* Draw the lot's fixed parts. Called once per lot, not once per tick. */
+  function drawLot(lot) {
+    nameEl.textContent = lot.name || "";
+    if (lot.condition) { condEl.textContent = lot.condition; condEl.classList.remove("hidden"); }
+    else condEl.classList.add("hidden");
+
+    /* A held price is not a hedged price: the relay has already stripped the
+       figure, and there is no line here to fill in. See the value rules in
+       apps/app/lib/livestream.js — this is the end of that chain, and the one
+       screen where getting it wrong is permanent. */
+    if (lot.valueText) {
+      valueLabelEl.textContent = lot.valueLabel || "";
+      valueTextEl.textContent = lot.valueText;
+      valueEl.classList.remove("hidden");
+    } else {
+      valueEl.classList.add("hidden");
+    }
+
+    pips.innerHTML = "";
+    for (var i = 0; i < lot.images.length; i++) pips.appendChild(document.createElement("i"));
+
+    preload(lot.images);
+    shownIdx = -1;
+    layers[0].classList.remove("show");
+    layers[1].classList.remove("show");
+  }
+
+  function showImage(lot, idx) {
+    if (idx === shownIdx) return;
+    var next = (front + 1) % 2;
+    layers[next].src = lot.images[idx];
+    layers[next].classList.add("show");
+    layers[front].classList.remove("show");
+    front = next;
+    shownIdx = idx;
+    for (var i = 0; i < pips.children.length; i++) pips.children[i].className = i === idx ? "on" : "";
+  }
+
+  /* Elapsed time on the lot, holds excluded — the relay's clock, not ours.
+     Both processes are on this machine, so the two Date.now()s agree. */
+  function elapsed(s) {
+    return s.elapsedMs + (s.runningSince === null ? 0 : Date.now() - s.runningSince);
+  }
+
+  function tick() {
+    if (!snap || !snap.lot || !snap.lot.images.length) { stage.classList.remove("on"); return; }
+    stage.classList.add("on");
+    var lot = snap.lot;
+    if (lot.id !== lotId) { lotId = lot.id; drawLot(lot); }
+    var per = snap.perImageMs || 7500;
+    var idx = Math.floor(elapsed(snap) / per) % lot.images.length;
+    showImage(lot, idx);
+  }
+
+  var src = new EventSource("/events");
+  src.onmessage = function (ev) {
+    try { snap = JSON.parse(ev.data); } catch (e) { return; }
+    tick();
+    /* The lot after this one, warmed while the host is still talking about
+       this one. Four full-size eBay pictures is most of a megabyte, and the
+       relay sends them for exactly this. */
+    preload(snap.nextImages);
+  };
+  /* EventSource reconnects by itself, forever. Nothing to do here but keep
+     drawing the last state we had, which is what a viewer should see if the
+     relay is restarted mid-lot. */
+  src.onerror = function () {};
+
+  setInterval(tick, 200);
+})();
+</script>

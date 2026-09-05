@@ -655,6 +655,74 @@ export async function endListing(accessToken, itemId, reason = "NotAvailable") {
 }
 
 /**
+ * Every picture on one listing, in the listing's own order (Trading API
+ * GetItem).
+ *
+ * The listing sync stores `PictureDetails.GalleryURL` and nothing else, which
+ * is one picture — right for a 44px thumbnail in a table, and not enough for
+ * the live stream, where a lot is four photographs of one card. GetMyeBaySelling
+ * does not return the full set at all, so this is a call per lot rather than a
+ * column we could have been filling all along.
+ *
+ * A call per lot is affordable HERE and would not be anywhere else in this
+ * app: a lot is queued by hand, seconds before a host talks over it for half a
+ * minute. It is deliberately not on any path that renders a list.
+ *
+ * `OutputSelector` cuts the response down to the pictures. GetItem otherwise
+ * returns the description, the item specifics and the whole selling status,
+ * which is several hundred kilobytes to find four URLs in.
+ *
+ * The order is the seller's upload order and is passed through untouched —
+ * front, back, edges, corners is OUR convention when listing, and the stream
+ * never labels a picture with what it claims to be. Returns `[]` rather than
+ * throwing when a listing has no pictures: that is a lot the host cannot
+ * stream, and lotBlockers() says so in prose.
+ */
+export async function fetchItemPictures(accessToken, itemId) {
+  const safeItem = String(itemId).replace(/[^0-9]/g, "");
+  if (!safeItem) throw new Error("Invalid item id.");
+
+  const body =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
+    `<ItemID>${safeItem}</ItemID>` +
+    `<OutputSelector>Item.PictureDetails.PictureURL</OutputSelector>` +
+    `<OutputSelector>Item.PictureDetails.GalleryURL</OutputSelector>` +
+    `<OutputSelector>Item.Title</OutputSelector>` +
+    `</GetItemRequest>`;
+
+  const res = await fetch(TRADING_URL, {
+    method: "POST",
+    headers: {
+      "X-EBAY-API-CALL-NAME": "GetItem",
+      "X-EBAY-API-SITEID": SITE_ID_UK,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
+      "X-EBAY-API-IAF-TOKEN": accessToken,
+      "Content-Type": "text/xml"
+    },
+    body
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`eBay picture fetch failed (${res.status}).`);
+
+  const doc = parser.parse(text);
+  const resp = doc?.GetItemResponse || {};
+  if (resp.Ack !== "Success" && resp.Ack !== "Warning") {
+    const errs = resp.Errors;
+    const msg = Array.isArray(errs) ? errs[0]?.LongMessage : errs?.LongMessage;
+    throw new Error(msg || "eBay rejected the picture request.");
+  }
+  const details = resp.Item?.PictureDetails || {};
+  // One picture comes back as a string, several as an array — the XML parser
+  // cannot know which, and a single-picture listing reading as a string of
+  // characters is a classic way to end up cycling 47 one-letter "urls".
+  const raw = details.PictureURL == null ? [] : Array.isArray(details.PictureURL) ? details.PictureURL : [details.PictureURL];
+  const urls = raw.map((u) => String(u)).filter(Boolean);
+  if (!urls.length && details.GalleryURL) urls.push(String(details.GalleryURL));
+  return { pictures: urls, title: resp.Item?.Title != null ? String(resp.Item.Title) : null };
+}
+
+/**
  * Relist a previously-ended fixed-price listing (Trading API
  * RelistFixedPriceItem). Returns the NEW item id eBay assigns.
  */
