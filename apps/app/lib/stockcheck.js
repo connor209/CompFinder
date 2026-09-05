@@ -195,6 +195,64 @@ export function availableSkus(listings) {
 }
 
 /**
+ * Index the checkouts that are still OUT, for the question below.
+ * `checkouts` are `stock_checkouts` rows; resolved ones are ignored, because
+ * a card that came home or was sold at the table is not away any more.
+ *
+ * By item id first and SKU second: the item id is what we actually zeroed, and
+ * it survives a SKU that was typed differently on the sleeve.
+ */
+export function awayIndex(checkouts) {
+  const byItem = new Map();
+  const bySku = new Map();
+  for (const co of checkouts || []) {
+    if (!co || co.resolved_at) continue;
+    if (co.ebay_item_id) byItem.set(String(co.ebay_item_id), co);
+    if (co.sku) bySku.set(String(co.sku).toLowerCase(), co);
+  }
+  return { byItem, bySku };
+}
+
+/**
+ * WHY is this listing at quantity zero?
+ *
+ * There are two completely different answers and they want opposite
+ * treatment, which is the whole reason this function exists:
+ *
+ * - **We zeroed it ourselves**, checking the card out to a show (migration
+ *   016, `hide_method: "quantity"`). The card is in a box on a table and is
+ *   very much still ours. Hiding that row would hide the stock you are
+ *   standing next to.
+ * - **eBay zeroed it**, because the card sold. The listing is a shell of one
+ *   and the card left the building months ago. That row is noise in a list of
+ *   what you have to sell.
+ *
+ * Returns `{ state, checkout, suspect }` where state is:
+ *   "live"    — buyable, or quantity unknown. Unknown is never sold out; see
+ *               isListingAvailable().
+ *   "show"    — zero, and an open checkout explains it.
+ *   "gone"    — zero, and nothing explains it.
+ *   "unknown" — zero, and we could not ask (no checkout data). NOT "gone":
+ *               a probe that failed is not evidence, and guessing wrong in
+ *               that direction hides real stock.
+ *
+ * `suspect` is set when an open checkout matched but we are NOT the ones who
+ * zeroed it — the card was checked out with the listing left alone, or ended
+ * outright, so a zero on it is eBay's doing. The card is away AND something
+ * happened to the listing, which is the double-sale case the desk warns about
+ * ("it could still sell online while you're away"). Worth a second look
+ * rather than a confident chip.
+ */
+export function listingStock(listing, away) {
+  if (isListingAvailable(listing)) return { state: "live", checkout: null, suspect: false };
+  if (!away) return { state: "unknown", checkout: null, suspect: false };
+  const byId = listing?.ebay_item_id != null ? away.byItem.get(String(listing.ebay_item_id)) : null;
+  const co = byId || (listing?.sku ? away.bySku.get(String(listing.sku).toLowerCase()) : null);
+  if (!co) return { state: "gone", checkout: null, suspect: false };
+  return { state: "show", checkout: co, suspect: co.hide_method !== "quantity" };
+}
+
+/**
  * The lowercased SKUs that are still listed but sold out — the ones a card
  * count based on `ebay_listings` alone gets wrong.
  *

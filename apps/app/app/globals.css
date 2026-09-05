@@ -2019,3 +2019,14 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
    figure. */
 .deal-quiet-note { font-size:12.5px; color:var(--ink-faint); }
 @media (max-width:560px) { .deal-quiet-note { display:none; } }
+
+/* Why a listing is at quantity zero. "At a show" is a fact about where the
+ * card is, so it reads as information; the suspect case is a question, so it
+ * borrows the warning colour rather than the accent. */
+.inv-away { display:inline-flex; align-items:center; gap:4px; margin-top:5px;
+  font-family:var(--font-mono); font-size:10.5px; padding:2px 7px;
+  border-radius:var(--radius-pill); border:1px solid var(--accent);
+  color:var(--accent-2); background:var(--accent-soft); white-space:nowrap; }
+.inv-away.is-suspect { border-color:var(--warn); color:var(--warn-ink); background:var(--warn-soft); }
+:root[data-theme="dark"] .inv-away, :root[data-theme="dark"] .inv-away.is-suspect { background:transparent; }
+.itbl-title .inv-away { margin-top:0; margin-left:8px; }

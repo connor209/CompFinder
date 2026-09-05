@@ -8,6 +8,7 @@ import EbayActivity from "./EbayActivity";
 import MarketLinks from "./MarketLinks";
 import ColumnPicker, { useColumns } from "./ColumnPicker";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
+import { awayIndex, listingStock } from "@/lib/stockcheck.js";
 import DealBar, { DealButton, useDeal } from "./DealBar";
 import { listingLine } from "@/lib/deal.js";
 
@@ -107,6 +108,36 @@ function dealLineFor(g, priced) {
   return listingLine(g._items[0] || g, { marketPence: p && !p.error ? p.recPence ?? null : null });
 }
 
+/**
+ * The chip on a row that is at quantity zero because WE zeroed it.
+ *
+ * It says where the card is, because "quantity 0" on its own reads as sold and
+ * that is the one thing this row is not. `suspect` is the case where a
+ * checkout matched but we did not zero the listing ourselves — the card is
+ * away AND something else happened to it, which is the double-sale the desk
+ * warns about; it gets a question rather than a confident answer.
+ */
+function AwayChip({ away }) {
+  if (!away || away.length === 0) return null;
+  const co = away[0].checkout;
+  const suspect = away.some((a) => a.suspect);
+  const where = co?.event || co?.stack_name || null;
+  const n = away.length;
+  return (
+    <span
+      className={suspect ? "inv-away is-suspect" : "inv-away"}
+      title={suspect
+        ? "This card is checked out to a show, but the listing was not the one we zeroed — it may have sold online while it was away. Worth checking on eBay before you sell it at the table."
+        : "Quantity 0 because the card is checked out to a show — not because it sold. It comes back when the card is checked in."}
+    >
+      {suspect ? "⚠ " : "🏷 "}
+      {n > 1 ? `${n} at a show` : "at a show"}
+      {where ? ` · ${where}` : ""}
+      {suspect ? " · check eBay" : ""}
+    </span>
+  );
+}
+
 function skusOf(g) {
   const s = g._items.map((i) => i.sku).filter(Boolean);
   return s.length ? s.join(", ") : "—";
@@ -116,7 +147,17 @@ function skusOf(g) {
 // ctx.priced is the repricing map. `always` columns can't be hidden.
 const ALL_COLUMNS = [
   { key: "image", label: "Image", always: false, cell: (g) => (g.image_url ? <img className="itbl-img" src={g.image_url} alt="" width="38" height="38" loading="lazy" decoding="async" /> : <span aria-hidden="true">🎴</span>) },
-  { key: "title", label: "Title", always: true, cell: (g) => <a href={g.url || "#"} target="_blank" rel="noopener noreferrer">{g.title}</a> },
+  {
+    key: "title",
+    label: "Title",
+    always: true,
+    cell: (g) => (
+      <>
+        <a href={g.url || "#"} target="_blank" rel="noopener noreferrer">{g.title}</a>
+        <AwayChip away={g._away} />
+      </>
+    )
+  },
   { key: "sku", label: "SKU", cell: (g) => <span className="mono">{skusOf(g)}</span> },
   { key: "price", label: "Ask", cell: (g) => <span className="mono">{priceStr(g.price_value, g.price_currency)}</span> },
   { key: "qty", label: "Qty", cell: (g) => g._qty },
@@ -255,6 +296,11 @@ export default function Inventory({ onDeepDive }) {
   const [sort, setSort] = useState("title");
   const [group, setGroup] = useState(true);
   const [dupOnly, setDupOnly] = useState(false);
+  // The cards checked out to a show, so a zeroed listing can say WHY it is
+  // zero. `null` means we could not ask — see loadAway(); that is not the same
+  // as "none are away", and nothing is hidden on the strength of it.
+  const [away, setAway] = useState(null);
+  const [showGone, setShowGone] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   const [priced, setPriced] = useState(() => new Map()); // key -> { loading, recPence, error }
   const [costs, setCosts] = useState(() => new Map()); // ebay_item_id -> cost_pence
@@ -304,6 +350,28 @@ export default function Inventory({ onDeepDive }) {
     setListings(all);
   }
 
+  /**
+   * Which cards are out at a show right now.
+   *
+   * A probe that fails is not an empty box. If `stock_checkouts` is
+   * unreachable — migration 016 not applied, RLS, a dropped connection — we
+   * leave `away` null and hide NOTHING, because the failure mode of guessing
+   * is a card you are standing next to disappearing from your own inventory.
+   * Same rule as desk-setup.js.
+   */
+  async function loadAway() {
+    try {
+      const { data, error } = await createClient()
+        .from("stock_checkouts")
+        .select("id,sku,ebay_item_id,hide_method,event,stack_name,resolved_at")
+        .is("resolved_at", null);
+      if (error) { setAway(null); return; }
+      setAway(awayIndex(data || []));
+    } catch {
+      setAway(null);
+    }
+  }
+
   async function loadCosts() {
     const supabase = createClient();
     const { data } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
@@ -338,6 +406,7 @@ export default function Inventory({ onDeepDive }) {
       if (s.connected) {
         loadListings();
         loadCosts();
+        loadAway();
       }
     })();
   }, []);
@@ -353,6 +422,7 @@ export default function Inventory({ onDeepDive }) {
         await loadStatus();
         await loadListings();
         await loadCosts();
+        await loadAway();
       } else {
         setNote(res.error || "Sync failed.");
       }
@@ -362,28 +432,66 @@ export default function Inventory({ onDeepDive }) {
     setSyncing(false);
   }
 
-  // --- portfolio stats (over the full, unfiltered inventory) ---
+  /**
+   * Why each zeroed listing is zeroed, and what that means for this screen.
+   *
+   * eBay leaves a SOLD fixed-price listing in the ActiveList at quantity 0 —
+   * same item id, same price, still "active" to the API. So `ebay_listings`
+   * carries rows for cards that left the building months ago, and they were
+   * padding out a list of what there is to sell.
+   *
+   * But we zero listings ourselves too, checking a card out to a show. Those
+   * rows are cards in a box on a table, and hiding them would hide the stock
+   * you are standing next to. listingStock() in stockcheck.js is the one place
+   * that tells the two apart.
+   *
+   * `unknown` — zero, and the checkout probe could not answer — is shown, not
+   * hidden. A probe that failed is not evidence.
+   */
+  const stock = useMemo(() => {
+    const m = new Map();
+    for (const l of listings) m.set(l.ebay_item_id, listingStock(l, away));
+    return m;
+  }, [listings, away]);
+
+  const goneCount = useMemo(
+    () => listings.reduce((n, l) => n + (stock.get(l.ebay_item_id)?.state === "gone" ? 1 : 0), 0),
+    [listings, stock]
+  );
+  const awayCount = useMemo(
+    () => listings.reduce((n, l) => n + (stock.get(l.ebay_item_id)?.state === "show" ? 1 : 0), 0),
+    [listings, stock]
+  );
+
+  // What this screen is a list OF. Sold-out shells are out unless asked for.
+  const sellable = useMemo(
+    () => (showGone ? listings : listings.filter((l) => stock.get(l.ebay_item_id)?.state !== "gone")),
+    [listings, stock, showGone]
+  );
+
+  // --- portfolio stats (over the whole inventory, minus what has sold) ---
   const stats = useMemo(() => {
     let value = 0;
     let gbp = true;
-    for (const l of listings) {
+    for (const l of listings.filter((x) => stock.get(x.ebay_item_id)?.state !== "gone")) {
       if (l.price_currency && l.price_currency !== "GBP") gbp = false;
       value += (Number(l.price_value) || 0) * (l.quantity || 1);
     }
-    const uniqueCards = new Set(listings.map((l) => normTitle(l.title))).size;
-    return { count: listings.length, value, uniqueCards, gbp };
-  }, [listings]);
+    const kept = listings.filter((x) => stock.get(x.ebay_item_id)?.state !== "gone");
+    const uniqueCards = new Set(kept.map((l) => normTitle(l.title))).size;
+    return { count: kept.length, value, uniqueCards, gbp };
+  }, [listings, stock]);
 
   // text filter → group (same title + same price) → sort → duplicates-only
   const rows = useMemo(() => {
     const f = deferredFilter.trim().toLowerCase();
     const words = f ? f.split(/\s+/).filter(Boolean) : [];
     const shown = words.length
-      ? listings.filter((l) => {
+      ? sellable.filter((l) => {
           const t = (l.title || "").toLowerCase();
           return words.every((w) => t.includes(w));
         })
-      : listings;
+      : sellable;
 
     const useGroup = group || dupOnly;
     let groups;
@@ -391,15 +499,20 @@ export default function Inventory({ onDeepDive }) {
       const map = new Map();
       for (const l of shown) {
         const key = `${normTitle(l.title)}|${l.price_value}|${l.price_currency}`;
-        if (!map.has(key)) map.set(key, { key, ...l, _count: 0, _qty: 0, _items: [] });
+        if (!map.has(key)) map.set(key, { key, ...l, _count: 0, _qty: 0, _items: [], _away: [] });
         const g = map.get(key);
         g._count += 1;
         g._qty += l.quantity || 0;
         g._items.push(l);
+        const st = stock.get(l.ebay_item_id);
+        if (st?.state === "show") g._away.push(st);
       }
       groups = [...map.values()];
     } else {
-      groups = shown.map((l) => ({ key: l.ebay_item_id, ...l, _count: 1, _qty: l.quantity || 0, _items: [l] }));
+      groups = shown.map((l) => {
+        const st = stock.get(l.ebay_item_id);
+        return { key: l.ebay_item_id, ...l, _count: 1, _qty: l.quantity || 0, _items: [l], _away: st?.state === "show" ? [st] : [] };
+      });
     }
 
     const num = (v) => (v == null ? -Infinity : Number(v));
@@ -419,7 +532,7 @@ export default function Inventory({ onDeepDive }) {
     groups.sort(sorters[sort] || sorters.title);
 
     return dupOnly ? groups.filter((g) => g._count > 1) : groups;
-  }, [listings, deferredFilter, sort, group, dupOnly, priced]);
+  }, [sellable, stock, deferredFilter, sort, group, dupOnly, priced]);
 
   // What is actually on screen. Every bulk action below reads THIS, not `rows`.
   const shown = useMemo(() => (rows.length <= limit ? rows : rows.slice(0, limit)), [rows, limit]);
@@ -547,6 +660,10 @@ export default function Inventory({ onDeepDive }) {
       else { errs.push(`${sku}: ${r.error}`); if (r.needsMigration) break; }
     }
     setUpdating((prev) => { const n = new Map(prev); n.delete(g.key); return n; });
+    // The row is now at a show, and its quantity is now zero. Without this the
+    // chip explaining why only turns up on the next reload — and until then
+    // the row reads as a card that just sold.
+    if (ok > 0) await loadAway();
     setNote(`Checked out ${ok} card(s) to the Show desk.${errs.length ? ` ⚠ ${errs.join(" · ")}` : ""}`);
   }
 
@@ -786,10 +903,21 @@ export default function Inventory({ onDeepDive }) {
           <input type="checkbox" checked={dupOnly} onChange={(e) => setDupOnly(e.target.checked)} />
           Duplicates only
         </label>
+        {/* Nothing is dropped quietly. A sold-out shell is noise in a list of
+            what there is to sell, but a row that vanished with no count looks
+            exactly like a card we never had — and this is the list you would
+            go looking in to find out. */}
+        {goneCount > 0 ? (
+          <label className="inv-check" title="eBay leaves a SOLD listing in the active list at quantity 0. These are those — cards that have already gone, not cards at a show.">
+            <input type="checkbox" checked={showGone} onChange={(e) => setShowGone(e.target.checked)} />
+            Show {goneCount} sold out
+          </label>
+        ) : null}
         <span className="inv-summary">
           {rows.length} {group || dupOnly ? "card(s)" : "listing(s)"}
           {(group || dupOnly) && totalShownListings !== rows.length ? ` · ${totalShownListings} listings` : ""}
           {shown.length < rows.length ? ` · showing ${shown.length}` : ""}
+          {awayCount > 0 ? ` · ${awayCount} at a show` : ""}
         </span>
         <div className="view-toggle" role="group" aria-label="Inventory view">
           <button aria-pressed={view === "cards"} onClick={() => setView("cards")}>▦ Cards</button>
@@ -874,6 +1002,7 @@ export default function Inventory({ onDeepDive }) {
                     ) : null}
                   </div>
                   {g._count === 1 && g.sku ? <div className="inv-sku">SKU {g.sku}</div> : null}
+                  <AwayChip away={g._away} />
 
                   {/* Repricing intelligence */}
                   {p?.loading ? (
@@ -967,6 +1096,8 @@ export default function Inventory({ onDeepDive }) {
           const gone = new Set((res?.results || []).filter((r) => r.ok && r.itemId).map((r) => String(r.itemId)));
           if (gone.size === 0) return;
           setListings((prev) => prev.filter((l) => !gone.has(String(l.ebay_item_id))));
+          // Those checkouts are resolved now, so nothing is away that was.
+          loadAway();
           setNote(`Sold ${gone.size} card${gone.size === 1 ? "" : "s"} at the table — removed from your listings here.`);
         }}
       />

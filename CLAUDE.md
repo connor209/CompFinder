@@ -1404,6 +1404,32 @@ The `.rise-grid` entrance animation now plays once on arrival and is then
 dropped — it is `.rise-grid > *`, so every card that mounted as a filter
 widened replayed a .34s rise, and the `nth-child` delays shift as rows reorder.
 
+**A quantity of zero has two causes, and they want opposite treatment.** eBay
+zeroes a listing when the card SELLS and leaves the shell in the ActiveList;
+we zero one ourselves when the card is checked out to a show. Same field, same
+value. `listingStock()` in `stockcheck.js` is the one place that tells them
+apart, against the open `stock_checkouts` rows: a sold shell is **hidden** from
+My listings (it is noise in a list of what there is to sell, and it was padding
+out the inventory value), and a card at a show is **kept and labelled** with
+where it is, because hiding that one would hide the stock you are standing next
+to. `check-instock.mjs` pins both directions.
+
+Three things about it that are the point rather than detail:
+
+- **A failed probe is not an empty box.** If `stock_checkouts` is unreachable
+  the index is left null, `listingStock` answers `unknown`, and NOTHING is
+  hidden — the same rule as `desk-setup.js`. Guessing the other way makes a
+  card you are standing next to vanish from your own inventory.
+- **A checkout we did not make the zero for is `suspect`, not confidently
+  "at a show".** Checked out with `hide_method` anything but `quantity`, a
+  zero is eBay's doing, so the card is away AND something happened to the
+  listing — the double-sale the desk warns about. It gets a question and a
+  "check eBay", not a reassuring chip.
+- **Nothing is dropped quietly.** The count of hidden sold-out rows is a
+  checkbox that brings them back, and the count of cards at a show is in the
+  summary. A row that vanished with no count looks exactly like a card we never
+  had, in the one list you would go looking in to find out.
+
 ## What we were asked for is the only demand signal a show gives
 
 "Do you have any gengars" is a **want**, and until migration 026 nothing

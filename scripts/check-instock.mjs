@@ -25,7 +25,7 @@
  * - Too loose, and you drive to a show looking for cards that aren't there.
  */
 import { readFileSync } from "node:fs";
-import { isListingAvailable, availableSkus, soldOutSkus } from "../apps/app/lib/stockcheck.js";
+import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock } from "../apps/app/lib/stockcheck.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -68,6 +68,54 @@ eq("the SKUs that are listed but gone", [...soldOutSkus(LISTINGS)].sort(), ["b12
 eq("a SKU with a live second listing is NOT reported gone", soldOutSkus(LISTINGS).has("d9"), false);
 eq("SKUs are matched case-insensitively, as everywhere else", availableSkus([{ sku: "A50", quantity: 1 }]).has("a50"), true);
 eq("empty input is empty, not a crash", [[...availableSkus(null)], [...soldOutSkus(undefined)]], [[], []]);
+
+// --- 2b. a zero has two causes, and they want opposite treatment -----------
+// eBay zeroes a listing when the card SELLS. We zero it ourselves when the
+// card is checked out to a show. Same field, same value, and the difference is
+// the difference between "already gone" and "in a box on the table in front of
+// you". My listings hides the first and labels the second, so getting this
+// backwards either buries real stock or pads the list with cards that left
+// months ago.
+{
+  const CHECKOUTS = [
+    { id: "co-1", sku: "AB11", ebay_item_id: "111", hide_method: "quantity", event: "Glasgow", resolved_at: null },
+    { id: "co-2", sku: "C4", ebay_item_id: null, hide_method: "quantity", event: "Glasgow", resolved_at: null },
+    { id: "co-3", sku: "D9", ebay_item_id: "333", hide_method: "none", event: "Glasgow", resolved_at: null },
+    // Came home again — it explains nothing about a zero today.
+    { id: "co-4", sku: "E1", ebay_item_id: "444", hide_method: "quantity", resolved_at: "2026-09-01T10:00:00Z" }
+  ];
+  const away = awayIndex(CHECKOUTS);
+  const st = (l) => listingStock(l, away);
+
+  eq("a stocked listing is live, checkout or not",
+    st({ ebay_item_id: "111", sku: "AB11", quantity: 3 }).state, "live");
+  eq("zero + an open checkout on the same item id is AT A SHOW",
+    st({ ebay_item_id: "111", sku: "AB11", quantity: 0 }).state, "show");
+  eq("...and it carries the checkout, so the row can say where",
+    st({ ebay_item_id: "111", sku: "AB11", quantity: 0 }).checkout.event, "Glasgow");
+  eq("matched on SKU when the checkout predates the listing link",
+    st({ ebay_item_id: "999", sku: "c4", quantity: 0 }).state, "show");
+  eq("zero with nothing to explain it is GONE — the card sold",
+    st({ ebay_item_id: "222", sku: "T21", quantity: 0 }).state, "gone");
+  eq("a RESOLVED checkout explains nothing — that card came home",
+    st({ ebay_item_id: "444", sku: "E1", quantity: 0 }).state, "gone");
+
+  // The double-sale case: the card is away, but we are not the ones who zeroed
+  // the listing, so something else did. Away AND suspect, never confidently
+  // one or the other.
+  const odd = st({ ebay_item_id: "333", sku: "D9", quantity: 0 });
+  eq("checked out with the listing left alone, then zeroed by eBay", [odd.state, odd.suspect], ["show", true]);
+  eq("a listing we zeroed ourselves is not suspect",
+    st({ ebay_item_id: "111", sku: "AB11", quantity: 0 }).suspect, false);
+
+  // The two ways of not knowing. Neither may be read as "sold".
+  eq("a missing quantity is not a zero, so it never reaches the question",
+    st({ ebay_item_id: "222", sku: "T21", quantity: null }).state, "live");
+  eq("no checkout data at all is UNKNOWN, never gone — a failed probe is not evidence",
+    listingStock({ ebay_item_id: "222", sku: "T21", quantity: 0 }, null).state, "unknown");
+  eq("and unknown stays visible, which is what the screen keys off",
+    listingStock({ quantity: 0 }, null).state !== "gone", true);
+}
 
 // --- 3. nobody derives this a second time ----------------------------------
 // The rule was written out nowhere and assumed in two places; it now lives in
@@ -112,8 +160,33 @@ if (!/outofstock/.test(read("apps/app/app/panel/Stacks.js"))) {
   fail("Stacks.js no longer distinguishes a sold-out listing from an unlisted one");
 }
 
+// My listings is the third screen that asks, and it is the one that HIDES rows
+// on the answer — so it has to go through the same module, and it has to say
+// how many it hid. A row that vanished with no count looks exactly like a card
+// we never had, in the one list you would go looking in to find out.
+{
+  const inv = read("apps/app/app/panel/Inventory.js");
+  if (!/listingStock|awayIndex/.test(inv)) {
+    fail("Inventory.js decides what a zeroed listing means on its own — that is the second definition stockcheck.js exists to prevent");
+  }
+  if (/\bl\.quantity\s*(>|>=|===|!==|==|<|<=)/.test(inv)) {
+    fail("Inventory.js tests a listing quantity by hand");
+  }
+  if (!/goneCount/.test(inv)) {
+    fail("Inventory.js hides sold-out listings without reporting how many — nothing here drops rows quietly");
+  }
+  if (!/awayCount/.test(inv)) {
+    fail("Inventory.js no longer says how many of its cards are out at a show");
+  }
+  // The failed-probe direction. Hiding on a lookup that never answered is how
+  // a card you are standing next to disappears from your own inventory.
+  if (!/setAway\(null\)/.test(inv)) {
+    fail("Inventory.js has no path that leaves the checkout lookup unanswered — a failed probe must not read as 'nothing is at a show'");
+  }
+}
+
 if (failures) {
   console.error(`\ncheck-instock: ${failures} failure(s)\n`);
   process.exit(1);
 }
-console.log("check-instock: OK — a zeroed listing is a card that has gone, and both screens know it.");
+console.log("check-instock: OK — a zero is a sold card or a card at a show, and the three screens agree which.");
