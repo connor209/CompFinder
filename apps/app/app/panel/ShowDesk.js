@@ -8,7 +8,8 @@ import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/sta
 import { isListingAvailable, soldOutSkus } from "@/lib/stockcheck.js";
 import {
   checkoutStackCard, unhideListing, nextStackName, planReallocation,
-  DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode
+  DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode,
+  getShowEvent, setShowEvent
 } from "@/lib/checkout";
 import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
 import {
@@ -25,6 +26,8 @@ import {
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 import { probePoolName } from "@/lib/batch-store";
 import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
+import DealBar, { DealButton, useDeal } from "./DealBar";
+import { checkoutLine, sellLine } from "@/lib/deal.js";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -34,8 +37,6 @@ import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
  * listing ended) or check it back in: to its old spot, to the back of a
  * chosen stack, or into a freshly allocated stack.
  */
-
-const EVENT_KEY = "cf-show-event";
 
 const pounds = (pence) => `£${((pence || 0) / 100).toFixed(2)}`;
 
@@ -138,6 +139,8 @@ export default function ShowDesk() {
   const [recSel, setRecSel] = useState(new Set());
   const [recCount, setRecCount] = useState(20);
   const [recSkipped, setRecSkipped] = useState(0); // in a stack, but sold out on eBay
+  // Once for the desk, then handed down — see the note on useDeal().
+  const [deal, updateDeal] = useDeal();
   const [usedByStack, setUsedByStack] = useState(new Map());
   const [capacity, setCapacity] = useState(DEFAULT_STACK_CAPACITY);
   const [plan, setPlan] = useState(null); // proposed reallocation, awaiting confirm
@@ -156,13 +159,13 @@ export default function ShowDesk() {
 
   useEffect(() => {
     try {
-      setEvent(localStorage.getItem(EVENT_KEY) || "");
+      setEvent(getShowEvent());
     } catch { /* storage unavailable */ }
     setHideModeState(getHideMode());
   }, []);
   function saveEvent(v) {
     setEvent(v);
-    try { localStorage.setItem(EVENT_KEY, v); } catch { /* best-effort */ }
+    setShowEvent(v);
   }
   function saveHideMode(v) {
     setHideModeState(v);
@@ -841,36 +844,17 @@ export default function ShowDesk() {
     const pence = parsePricePence(raw);
     setBusy(true);
     setMsg("");
-    const sb = supabase();
-    const warnings = [];
-
-    if (co.stack_card_id) {
-      await sb.from("stack_cards").update({ pulled_at: new Date().toISOString(), checked_out_at: null }).eq("id", co.stack_card_id);
-    }
-
-    // The listing must go for good. Quantity-hidden or still-live → end it now;
-    // already-ended needs nothing.
-    if (co.ebay_item_id && co.hide_method !== "ended") {
-      try {
-        const res = await fetch("/api/ebay/end-listing", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ itemId: co.ebay_item_id })
-        }).then((r) => r.json());
-        if (!res.ok) warnings.push(`listing not ended: ${res.error || "unknown error"} — end it on eBay by hand.`);
-      } catch {
-        warnings.push("couldn't reach eBay to end the listing — end it by hand.");
-      }
-    }
-
-    await sb.from("stock_checkouts").update({
-      resolved_at: new Date().toISOString(),
-      resolution: "sold",
-      sold_price_pence: pence
-    }).eq("id", co.id);
-
+    // One definition of selling a card, shared with the Current Deal — see
+    // sellLine() in lib/deal.js. It resolves the checkout, pulls the stack
+    // card and ends the listing once, in that order, and never rolls the money
+    // back because eBay didn't answer.
+    const r = await sellLine(supabase(), checkoutLine(co), pence, { event: co.event || event || null });
     setBusy(false);
-    setMsg(`Marked ${co.sku || "card"} sold${pence != null ? ` for ${pounds(pence)}` : ""}.${warnings.length ? ` ⚠ ${warnings.join(" ")}` : ""}`);
+    setMsg(
+      r.ok
+        ? `Marked ${co.sku || "card"} sold${pence != null ? ` for ${pounds(pence)}` : ""}.${r.warning ? ` ⚠ ${r.warning} — end it on eBay by hand.` : ""}`
+        : `That sale couldn't be recorded: ${r.error}`
+    );
     await load();
   }
 
@@ -893,6 +877,16 @@ export default function ShowDesk() {
         </div>
       </div>
     );
+  }
+
+  // What the same card is asking on eBay, read out of the listings the desk
+  // already loaded — the middle of the Current Deal's price chain, and the
+  // same rows checkRow() uses, so there is no second SKU match to drift.
+  function listedPenceFor(sku) {
+    if (!sku) return null;
+    const k = String(sku).toLowerCase();
+    const l = listings.find((x) => x.sku && String(x.sku).toLowerCase() === k && isListingAvailable(x));
+    return l && l.price_value != null ? Math.round(Number(l.price_value) * 100) : null;
   }
 
   const soldRows = history.filter((h) => h.resolution === "sold");
@@ -1595,6 +1589,16 @@ export default function ShowDesk() {
                     <span className="hint-small" style={{ color: chip.color, flex: "none" }} title={chip.title}>{chip.text}</span>
                     <span className="sd-rowacts">
                       <button className="stack-pull" onClick={(e) => { e.preventDefault(); setSticker(co); }} disabled={busy} title={co.sticker_pence != null ? "Change this card's sticker price" : "Put a sticker price on this card"}>{co.sticker_pence != null ? "✎ £" : "🏷 £"}</button>
+                      {/* Into the basket rather than sold on the spot: the
+                          customer is usually holding three more. Inert — see
+                          lib/deal.js. */}
+                      <DealButton
+                        className="stack-pull"
+                        preventDefault
+                        deal={deal}
+                        update={updateDeal}
+                        line={checkoutLine(co, { listedPence: listedPenceFor(co.sku) })}
+                      />
                       <button className="stack-pull" style={{ color: "var(--conf-high)", borderColor: "var(--line-strong)" }} onClick={(e) => { e.preventDefault(); markSold(co); }} disabled={busy}>£ Sold</button>
                       <button className="stack-pull" onClick={(e) => { e.preventDefault(); returnOne(co); }} disabled={busy}>↩ Return</button>
                     </span>
@@ -1754,6 +1758,12 @@ export default function ShowDesk() {
           </div>
         </div>
       ) : null}
+
+      {/* The basket. Gated on customerMode like every other piece of desk
+          chrome — there are two customer screens now, and a `£ Sold` one
+          mis-tap from somebody holding the tablet is exactly what counter mode
+          exists to remove. */}
+      {customerMode ? null : <DealBar deal={deal} update={updateDeal} onSold={load} />}
     </div>
   );
 }

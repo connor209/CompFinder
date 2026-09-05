@@ -143,6 +143,12 @@ Run everything from the repo root: `npm run dev` / `npm run build` (the app),
 - `scripts/check-desksetup.mjs` — what the Show Desk says is still to run, and
   mostly what it refuses to say: a probe that fails on venue wifi is never
   reported as a missing migration.
+- `scripts/check-deal.mjs` — the basket at the table: that an agreed lot price
+  splits back over the cards and sums to the penny, that a card with no price
+  cannot be sold, that a failed eBay call never rolls the money back, that a
+  listing is ended once rather than hidden then ended, that a checkout already
+  resolved elsewhere is refused rather than counted twice, and that a basket
+  does not survive the night. Supabase and eBay are both faked.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -1264,6 +1270,95 @@ Desk rather than a replacement for either of the other two.
   have one of something we have four of. A quantity-3 listing counts as one
   item — honest enough in a section whose promise is "ask and we'll check",
   and better than a number this file would have to guess at.
+
+## A deal is one basket, one customer, one number
+
+Day one at Glasgow, 2026-09-05: cards were being sold one at a time across two
+screens. Mark a card **⤴ Show** in My listings — which checks it out and HIDES
+the eBay listing — then walk to the Show Desk and mark it **£ Sold**, which
+ENDS the same listing. Two eBay calls per card, in two places, while a customer
+holds three more.
+
+`apps/app/lib/deal.js` is the basket over that, and `DealBar.js` is the screen.
+`packages/core` is untouched: what a lot goes for at a table has no business
+changing what Last Comp tells a stranger their card is worth.
+
+- **Adding is inert, and that is the trade.** No eBay call, no checkout, no
+  write — a line in a list on this device. A customer who changes their mind
+  costs one tap, which matters because on venue wifi you cannot reliably
+  un-hide a listing you hid by mistake. The cost is a few minutes where the
+  card is still live online, and that window already existed while they were
+  deciding.
+- **Selling does the whole job in one pass and ends the listing ONCE.** A card
+  already in the box is the desk's existing path — resolve the checkout, pull
+  the stack card, end the listing. A card still live on eBay gets a
+  `stock_checkouts` row written ALREADY resolved, which is what saves the
+  second call: checking out only to sell a moment later spends a hide and an
+  end to reach the same place. **No migration** — 016 and 024 are enough.
+- **A card with no SKU still sells**, recorded against no stack card. `⤴ Show`
+  refuses it today, which at a table means refusing money over bookkeeping.
+- **The money is written before the eBay calls, and a failed call never rolls a
+  sale back.** A hall with bad wifi is exactly when you are busiest: a lost
+  sale is unrecoverable, an un-ended listing is a retry. The failure goes on
+  the row (`hide_error`) as well as on screen, and the retry only ever touches
+  eBay.
+- **The price is a fallback chain — sticker, then our eBay ask, then market —
+  and the row says which.** A sticker is a decision somebody made holding the
+  card; a market figure is the engine guessing. Quoting the wrong end of that
+  without saying so is how you argue with a customer holding the receipt.
+- **An agreed lot price splits back over the cards in proportion, and the last
+  line absorbs the rounding.** Both halves matter. Proportional keeps each
+  card's `sold_price_pence` honest, so per-card takings and margin survive a
+  deal; summing to exactly what changed hands is what stops the day's takings
+  disagreeing with the tin by a penny a deal, for ever, in a way nobody ever
+  finds. Typing over a line price CLEARS the lot total — you have gone back to
+  pricing card by card, and a total that no longer equals its parts is worse
+  than none.
+- **A card with no price blocks the sale, and the refusal names it.** Same rule
+  as `exportGuard()` in `zero-price.js` and for the same reason: the whole
+  class of fault here is something that was on screen and did not get read.
+  Unticking a line keeps it in the basket, which is how you sell three of four.
+- **A checkout already resolved elsewhere is refused.** The basket can sit on
+  the counter while the same card is sold or returned from the desk, and
+  resolving it twice would count the takings twice — silently, because both
+  writes succeed and the row looks identical afterwards. The update is guarded
+  on `resolved_at is null` and reads back the row it changed.
+- **A basket does not survive the night** (`DEAL_TTL_MS`, 12 hours). A deal
+  ends when the money changes hands or they walk off; neither leaves anything
+  worth keeping until tomorrow, and the rows in a stale one have moved on.
+- **A line is an allow-list**, built key by key, exactly like `counterRow()` —
+  because the leak worth designing against is the column added to
+  `stock_checkouts` a year from now, and a basket is one short step from a
+  screen a customer can see.
+- **localStorage, not Supabase.** One device, one deal. The one moment this has
+  to work is the moment the venue wifi is worst. Two screens share it through a
+  window event rather than a provider, and `useDeal()` is called ONCE per
+  screen — a hook per row is two hundred storage reads on the one screen that
+  was just fixed for doing too much per row.
+- **It renders nowhere a customer can see**, gated on `customerMode` like every
+  other piece of desk chrome. A basket with a `£ Sold` in it must not be one
+  mis-tap away from somebody holding the tablet.
+
+## My listings: a keystroke used to render the whole inventory
+
+The filter box was sticky at the show, and the images were not the reason. A
+keystroke re-ran the row memo over every listing and then re-rendered EVERY
+result; the filter-and-group half measures 10–18ms over 3–8k rows on a desktop
+and the render around it is the rest, on a tablet several times slower again.
+The thumbnails are 10KB `s-l140` files loading lazily — they add paint cost and
+they are not what blocks the keystroke.
+
+The list is capped at `PAGE` (200) with a **Show more** under it, and the
+filter feeds the memo through `useDeferredValue` so the input never waits on
+the list. **The cap is a rendering cap, so what is on screen is what a bulk
+action acts on** — the same rule as `selectionFor()` on the Show Desk, and it
+matters more here because "Price visible" spends a SoldComps request per card.
+The CSV is the one exception and says so in its tooltip: it is a file you read
+later, not a button that spends money.
+
+The `.rise-grid` entrance animation now plays once on arrival and is then
+dropped — it is `.rise-grid > *`, so every card that mounted as a filter
+widened replayed a .34s rise, and the `nth-child` delays shift as rows reorder.
 
 ## What we were asked for is the only demand signal a show gives
 

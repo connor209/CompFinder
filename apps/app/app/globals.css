@@ -1870,3 +1870,101 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .inv-more { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:center; padding:18px 0 4px; }
 .inv-more .hint-small { margin:0; }
 .inv-card { content-visibility:auto; contain-intrinsic-size:auto 320px; }
+
+/* ================= The Current Deal =================
+ * One basket at the table: the docked bar, and the drawer behind it. Docked
+ * rather than fixed on purpose — the screen under it is a list you scroll with
+ * a thumb, and a permanently fixed bar is a permanent bite out of a phone.
+ */
+.deal-wrap { display:flex; flex-direction:column; gap:12px; margin-top:16px; }
+
+.deal-bar {
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:11px 14px; border-radius:var(--panel-radius);
+  background:var(--surface); border:1px solid var(--accent);
+  box-shadow:var(--shadow-2); position:relative; overflow:hidden;
+}
+/* The foil edge is the app's own signature material, spent here because this
+   is the one strip that has to be findable mid-conversation. */
+.deal-bar::before { content:""; position:absolute; inset:0 0 auto 0; height:var(--btn-holo-h); background:var(--holo); }
+.deal-k { font-family:var(--font-display); font-size:11px; font-weight:var(--label-weight);
+  letter-spacing:var(--label-spacing); text-transform:var(--label-transform); color:var(--ink-faint); }
+.deal-count { font-family:var(--font-mono); font-size:13px; color:var(--ink-soft); }
+.deal-sum { font-family:var(--num-font); font-size:20px; font-weight:600; margin-left:auto;
+  font-variant-numeric:tabular-nums; }
+
+.deal-panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--panel-radius);
+  box-shadow:var(--shadow-2); overflow:hidden; }
+.deal-head { display:flex; align-items:center; gap:12px; padding:13px 16px;
+  border-bottom:1px solid var(--line); background:var(--surface-2); position:relative; }
+.deal-head::before { content:""; position:absolute; inset:0 0 auto 0; height:var(--btn-holo-h); background:var(--holo); }
+.deal-head h3 { font-family:var(--font-display); font-size:16px; font-weight:600; margin:0; }
+.deal-who { font-size:13px; color:var(--ink-faint); }
+.deal-head .btn-ghost { margin-left:auto; }
+.deal-x { background:none; border:0; color:var(--ink-faint); font-size:15px; cursor:pointer;
+  padding:4px 6px; border-radius:6px; line-height:1; }
+.deal-x:hover { color:var(--ink); background:var(--surface-sink); }
+
+.deal-line { display:grid; grid-template-columns:26px 40px minmax(0,1fr) auto; gap:12px;
+  align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); }
+.deal-line.is-off { opacity:.45; }
+.deal-line input[type=checkbox] { width:17px; height:17px; accent-color:var(--accent); margin:0; cursor:pointer; }
+.deal-thumb { width:40px; height:54px; border-radius:6px; background:var(--surface-sink);
+  border:1px solid var(--line); display:flex; align-items:center; justify-content:center;
+  font-size:17px; overflow:hidden; }
+.deal-thumb img { width:100%; height:100%; object-fit:contain; }
+.deal-name { font-weight:600; font-size:14.5px; line-height:1.3; overflow-wrap:anywhere; }
+.deal-meta { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:3px;
+  font-size:11.5px; color:var(--ink-faint); }
+.deal-src { font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); }
+.deal-chip { font-family:var(--font-mono); font-size:10.5px; padding:1px 7px; border-radius:var(--radius-pill);
+  border:1px solid var(--line-strong); color:var(--ink-soft); white-space:nowrap; }
+.deal-chip.is-box { border-color:var(--accent); color:var(--accent-2); }
+.deal-chip.is-live { border-color:var(--warn); color:var(--warn-ink); }
+
+.deal-right { display:flex; align-items:center; gap:8px; }
+.deal-was { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint);
+  min-width:72px; text-align:right; font-variant-numeric:tabular-nums; }
+.deal-pin { width:82px; text-align:right; font-family:var(--font-mono); font-size:14.5px;
+  font-weight:600; font-variant-numeric:tabular-nums; border:1px solid transparent;
+  border-radius:var(--input-radius); padding:5px 7px; background:var(--surface-sink); color:var(--ink); }
+.deal-pin:hover { border-color:var(--line-strong); }
+.deal-pin:focus { border-color:var(--accent); background:var(--surface); outline:none; }
+/* A card nothing has priced is coloured, not blank: a dash is what the eye
+   skips, and this one refuses the sale. Same reasoning as zero-price.js. */
+.deal-pin.is-empty { border-color:var(--bad); color:var(--bad-ink); }
+
+.deal-tally { padding:14px 16px; border-top:1px solid var(--line-strong); background:var(--surface-2);
+  display:flex; flex-direction:column; gap:9px; }
+.deal-tl { display:flex; align-items:center; gap:12px; font-size:14px; color:var(--ink-soft); }
+.deal-tl > :last-child { margin-left:auto; font-weight:600; color:var(--ink); }
+.deal-tl.is-big { font-size:16px; color:var(--ink); }
+.deal-tl.is-disc > :last-child { color:var(--warn-ink); }
+.deal-total-in { width:124px; text-align:right; font-family:var(--num-font); font-size:19px;
+  font-weight:600; font-variant-numeric:tabular-nums; border:1px solid var(--accent);
+  border-radius:var(--input-radius); padding:5px 9px; background:var(--surface); color:var(--ink); }
+.deal-total-in:focus { outline:none; box-shadow:0 0 0 3px var(--accent-soft); }
+.deal-blocked { margin:0; font-size:13px; color:var(--bad-ink); background:var(--bad-soft);
+  border:1px solid var(--bad); border-radius:var(--radius-sm); padding:8px 11px; }
+.deal-acts { display:flex; gap:9px; flex-wrap:wrap; padding-top:2px; }
+.deal-acts .btn { flex:1; min-width:150px; }
+
+.deal-receipt { display:flex; flex-direction:column; }
+.deal-rc { display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:11px; align-items:start;
+  padding:10px 16px; border-bottom:1px solid var(--line); font-size:14px; }
+.deal-tick { font-family:var(--font-mono); font-weight:600; }
+.deal-rc.is-good .deal-tick { color:var(--conf-high); }
+.deal-rc.is-warn .deal-tick { color:var(--conf-medium); }
+.deal-rc.is-bad .deal-tick { color:var(--conf-low); }
+.deal-did { font-family:var(--font-mono); font-size:11.5px; color:var(--ink-faint); margin-top:3px;
+  line-height:1.5; overflow-wrap:anywhere; }
+.deal-amt { font-weight:600; font-variant-numeric:tabular-nums; }
+.deal-foot { display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:13px 16px;
+  border-top:1px solid var(--line-strong); background:var(--surface-2); }
+.deal-foot .btn { margin-left:auto; }
+
+@media (max-width:560px) {
+  .deal-line { grid-template-columns:24px minmax(0,1fr); row-gap:8px; }
+  .deal-thumb { display:none; }
+  .deal-right { grid-column:1 / -1; justify-content:flex-end; }
+}

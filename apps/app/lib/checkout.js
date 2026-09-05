@@ -32,6 +32,25 @@ export function setHideMode(mode) {
   try { localStorage.setItem(HIDE_MODE_KEY, mode); } catch { /* best-effort */ }
 }
 
+/**
+ * Which show we are at. Remembered so the desk opens on the same trip, and
+ * read by the Current Deal so a sale made from My listings lands with the
+ * event on it — the same trip the desk would have stamped.
+ *
+ * Here rather than in ShowDesk.js because it now has two readers, and a
+ * second copy of a localStorage key is the sort of thing that agrees for a
+ * year and then quietly doesn't.
+ */
+const EVENT_KEY = "cf-show-event";
+
+export function getShowEvent() {
+  try { return localStorage.getItem(EVENT_KEY) || ""; } catch { return ""; }
+}
+
+export function setShowEvent(name) {
+  try { localStorage.setItem(EVENT_KEY, name == null ? "" : String(name)); } catch { /* best-effort */ }
+}
+
 /** Find the active eBay item id for a SKU from the synced listings cache. */
 export async function findItemIdForSku(sb, sku) {
   if (!sku) return null;
