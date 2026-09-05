@@ -1335,9 +1335,22 @@ changing what Last Comp tells a stranger their card is worth.
   window event rather than a provider, and `useDeal()` is called ONCE per
   screen — a hook per row is two hundred storage reads on the one screen that
   was just fixed for doing too much per row.
-- **It renders nowhere a customer can see**, gated on `customerMode` like every
-  other piece of desk chrome. A basket with a `£ Sold` in it must not be one
-  mis-tap away from somebody holding the tablet.
+- **The line is drawn at the WRITE, not at the basket.** The full bar — the one
+  carrying `£ Mark sold` — is gated on `customerMode` like every other piece of
+  desk chrome. But **adding is inert**, so `＋ Deal` on a binder pocket is safe
+  in front of a stranger and is the whole reason somebody is flipping the
+  binder with them: they point, you tap. So the binder gets `＋ Deal` per copy
+  and a READ-ONLY `DealTally` — count and total, no drawer, no line editing, no
+  sell button, nothing on it to mis-tap — and the money still moves on the
+  desk, one tap away on the mode toggle. Two components rather than a prop,
+  because a prop is one wrong default from a sell button on a customer's
+  screen; `check-deal.mjs` pins the gate on `DealBar` and greps `DealTally`
+  for every function that writes.
+- **A pocket carries an id and nothing else**, so `＋ Deal` in the binder
+  resolves the desk's own row by that id — the same rule as the ⌖ locate
+  button. A box copy's id is its `stock_checkouts` row, a listed one's is its
+  eBay item id. Putting either row on the projected pocket to make the lookup
+  easier is the shortcut `check-showcounter.mjs` exists to refuse.
 - **The bar STICKS to the bottom of the viewport.** It shipped merely docked at
   the end of the screen, reasoning that a fixed bar is a permanent bite out of
   a phone. Wrong twice: My listings is a long single column on a phone, so "the

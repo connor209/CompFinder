@@ -93,6 +93,38 @@ export function DealButton({ deal, update, line, className = "inv-act", title, p
   );
 }
 
+/**
+ * The basket, read-only — for a screen a customer may be holding.
+ *
+ * The binder is one of the two customer screens, so the full bar cannot go on
+ * it: `£ Mark sold` there is one mis-tap from a stranger recording a sale.
+ * But **adding is inert** (rule 1 in lib/deal.js — no eBay call, no checkout,
+ * no write), so `＋ Deal` on a pocket is safe and is the whole reason somebody
+ * is flipping the binder with a customer in the first place.
+ *
+ * So the line is drawn at the write: a customer screen may PUT cards in the
+ * basket and see what is in it; the money is moved on the desk, one tap away
+ * on the mode toggle. No drawer, no line editing, no sell button — there is
+ * nothing here to mis-tap.
+ */
+export function DealTally({ deal, note = "Sell it at the desk" }) {
+  if (!deal || deal.lines.length === 0) return null;
+  const summary = dealSummary(deal);
+  return (
+    <div className="deal-wrap">
+      <div className="deal-bar is-quiet">
+        <span className="deal-k">Current deal</span>
+        <span className="deal-count">
+          {summary.count} card{summary.count === 1 ? "" : "s"}
+          {summary.count !== summary.total ? ` of ${summary.total}` : ""}
+        </span>
+        <span className="deal-sum mono">{poundsStr(summary.payablePence)}</span>
+        <span className="deal-quiet-note">{note}</span>
+      </div>
+    </div>
+  );
+}
+
 function LineRow({ line, pence, onToggle, onPrice, onRemove }) {
   const moved = line.on && pence != null && pence !== line.price;
   return (

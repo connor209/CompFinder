@@ -401,10 +401,32 @@ console.log("9. one definition, and nothing app-shaped in it");
   if (!/sellLine\(/.test(files["apps/app/app/panel/ShowDesk.js"])) {
     fail("ShowDesk no longer sells through sellLine() — the desk and the deal would be two definitions of selling a card");
   }
-  // The basket must never render on a screen a customer is holding.
+  // ---- what may reach a customer screen -----------------------------------
+  // The line is drawn at the WRITE, not at the basket. Adding is inert (rule 1
+  // at the top of deal.js), so ＋ Deal on a binder pocket is safe and is the
+  // whole reason somebody is flipping the binder with a customer. £ Mark sold
+  // is not: one mis-tap by a stranger records a sale and ends a listing.
   const desk = files["apps/app/app/panel/ShowDesk.js"];
+  const bar = files["apps/app/app/panel/DealBar.js"];
+
   if (/DealBar|dealAdd/.test(desk) && !/customerMode/.test(desk)) {
     fail("the desk offers the deal without gating on customerMode — counter and binder mode are pointed at a customer");
+  }
+  // The full bar (the one with the sell button) renders behind the gate only.
+  if (!/customerMode \? null : <DealBar/.test(desk)) {
+    fail("the full deal bar is no longer gated `customerMode ? null : <DealBar` — the sell button can reach a customer screen");
+  }
+  // …and the read-only one that CAN face a customer must stay read-only. It is
+  // the whole reason there are two components rather than a prop.
+  const tally = bar.slice(bar.indexOf("export function DealTally"));
+  const tallyBody = tally.slice(0, tally.indexOf("\nfunction ") + 1 || undefined);
+  for (const banned of ["sellDeal", "sellLine", "retryEnds", "setLinePrice", "setDealTotal", "removeLine", "clearDeal"]) {
+    if (tallyBody.includes(banned)) {
+      fail(`DealTally reaches for ${banned}() — it renders on the binder, which a customer holds, and must have nothing on it to press`);
+    }
+  }
+  if (!/DealTally/.test(desk)) {
+    fail("nothing on the desk renders DealTally — the binder shows no basket at all");
   }
 }
 

@@ -26,8 +26,8 @@ import {
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
 import { probePoolName } from "@/lib/batch-store";
 import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
-import DealBar, { DealButton, useDeal } from "./DealBar";
-import { checkoutLine, sellLine } from "@/lib/deal.js";
+import DealBar, { DealButton, DealTally, useDeal } from "./DealBar";
+import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -478,11 +478,33 @@ export default function ShowDesk() {
   // of state it already holds. Putting the SKU on the row to make the lookup
   // easier is exactly the shortcut check-showcounter.mjs exists to refuse.
   const locations = useMemo(() => locationsBySku(stackCards, stackName), [stackCards, stackName]);
+  const listingById = useMemo(() => {
+    const m = new Map();
+    for (const l of listings) if (l?.ebay_item_id) m.set(String(l.ebay_item_id), l);
+    return m;
+  }, [listings]);
   const skuByListingId = useMemo(() => {
     const m = new Map();
     for (const l of listings) if (l?.ebay_item_id && l?.sku) m.set(String(l.ebay_item_id), String(l.sku).toLowerCase());
     return m;
   }, [listings]);
+  /**
+   * The deal line for one copy in an open pocket.
+   *
+   * A pocket carries an id and nothing else — the desk resolves its own row,
+   * exactly the way the ⌖ locate button does. A box copy's id is its
+   * `stock_checkouts` row; a listed one's is its eBay item id. Putting either
+   * row on the projected pocket to make this easier is the shortcut
+   * check-showcounter.mjs exists to refuse.
+   */
+  function dealLineForCopy(id) {
+    if (id == null) return null;
+    const co = rowsById.get(String(id));
+    if (co) return checkoutLine(co, { listedPence: listedPenceFor(co.sku) });
+    const l = listingById.get(String(id));
+    return l ? listingLine(l) : null;
+  }
+
   function locationFor(rowId) {
     const sku = skuByListingId.get(String(rowId));
     return sku ? locations.get(sku) || null : null;
@@ -1510,6 +1532,11 @@ export default function ShowDesk() {
                   </button>
                 </div>
                 <p className="hint hint-small bn-hint">Swipe the page, or use the arrows.</p>
+                {/* What is in the basket, and nothing that spends it. The full
+                    bar carries £ Mark sold and is gated on customerMode below;
+                    this one is safe in front of a stranger because there is
+                    nothing on it to press. */}
+                <DealTally deal={deal} />
                 {/* The card, opened. Picture on the left at the size eBay
                     serves it, what we know about it on the right. Fixed rather
                     than absolute so it covers the page however far down you had
@@ -1559,6 +1586,18 @@ export default function ShowDesk() {
                               >
                                 {binderWhere.has(c.id) ? (binderPlaces.get(c.id) || "not placed") : "⌖"}
                               </button>
+                              {/* Safe on a customer screen because adding is
+                                  INERT — no eBay call, no checkout, no write
+                                  (rule 1 in lib/deal.js). Flipping the binder
+                                  with somebody and tapping what they point at
+                                  is the whole reason this screen exists; the
+                                  money still moves on the desk. */}
+                              <DealButton
+                                className="stack-pull sd-locate"
+                                deal={deal}
+                                update={updateDeal}
+                                line={dealLineForCopy(c.id)}
+                              />
                             </div>
                           ))}
                         </div>

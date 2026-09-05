@@ -2008,3 +2008,14 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
      thing you want with a customer waiting. */
   .deal-acts .btn { flex:0 0 auto; min-width:0; width:100%; }
 }
+
+/* The basket on a customer screen: what is in it, and nothing that spends it.
+ * Quieter than the working bar — it is a readout, not a control, so it drops
+ * the accent border and the foil edge that mark the bar as pressable. */
+.deal-bar.is-quiet { border-color:var(--line-strong); box-shadow:var(--shadow-1); }
+.deal-bar.is-quiet::before { display:none; }
+/* No margin-left:auto here — .deal-sum already claims the free space, and a
+   second auto margin in the same row gets none of it. The note trails the
+   figure. */
+.deal-quiet-note { font-size:12.5px; color:var(--ink-faint); }
+@media (max-width:560px) { .deal-quiet-note { display:none; } }
