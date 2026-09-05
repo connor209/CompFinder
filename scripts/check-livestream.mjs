@@ -358,6 +358,27 @@ console.log("10. setting up a scene");
     ok(`${name} names the deployed app so ＋ Stream can reach the relay`, /STREAM_ALLOW_ORIGIN/.test(sh));
     ok(`${name} holds the window open when the relay stops`, /pause|read -r -p/.test(sh));
   }
+  // The launcher updates the checkout, so that double-clicking it is the only
+  // thing anybody has to do. Three properties, and the third is the one that
+  // matters at a venue.
+  for (const name of ["Start Stream Relay.command", "Start Stream Relay.cmd"]) {
+    const sh = file(name);
+    // Can never stop on a merge or a conflict.
+    ok(`${name} pulls fast-forward only`, /git pull --ff-only/.test(sh));
+    // A stream night is not when to find out somebody was mid-edit.
+    ok(`${name} leaves a dirty checkout alone`, /git status --porcelain/.test(sh));
+    // And an update it could not fetch is a shrug, not a stop: the one evening
+    // this has to work is the evening the venue's wifi is worst.
+    ok(`${name} still starts when the pull fails`, /carrying on with the code|carrying on with what/.test(sh));
+    ok(`${name} reinstalls when the dependencies moved`, /package-lock\.json/.test(sh));
+  }
+  // `git pull | sed` reports SED's status, so a `||` fallback on that pipeline
+  // never runs and a venue with no network gets git's raw error instead of a
+  // sentence. It shipped that way once.
+  if (/git pull[^\n]*\|[^\n]*\|\|/.test(file("Start Stream Relay.command"))) {
+    fail("the pull's failure branch hangs off a pipeline — that tests the last command's status, not git's");
+  }
+
   // cmd.exe mis-parses an LF-only batch file, and the failure is a window that
   // flashes and closes with nothing readable in it.
   ok("the Windows launcher is CRLF", readFileSync(new URL("../Start Stream Relay.cmd", import.meta.url)).includes("\r\n"));

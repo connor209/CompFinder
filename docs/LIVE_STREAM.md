@@ -18,9 +18,17 @@ My listings ──＋ Stream──▶ relay (127.0.0.1:4455) ──SSE──▶ 
 ## Running one
 
 **Double-click `Start Stream Relay.command`** (macOS) or **`Start Stream Relay.cmd`**
-(Windows) at the repo root. It installs on a first run, starts the relay, and
-opens the host's desk in your browser. Leave the window open; closing it stops
-the relay. From a terminal it is `npm run stream`, which does the same thing.
+(Windows) at the repo root. It updates the checkout, installs anything new,
+starts the relay, and opens the host's desk in your browser. Leave the window
+open; closing it stops the relay. From a terminal it is `npm run stream`, which
+starts the relay without the update step.
+
+The update is deliberately timid, because it runs on a laptop minutes before a
+stream: fast-forward only so it can never stop on a conflict, skipped entirely
+if the working tree is dirty, and a failure is a shrug rather than a stop —
+no network, GitHub down, a checkout with no remote, and it carries on with the
+code that is already there. The one evening this has to work is the evening
+the venue's wifi is worst.
 
 The desk has the OBS URL with a **Copy** button on it, and — while the queue is
 empty — a **Load demo lots** button, so a scene can be laid out with no app, no

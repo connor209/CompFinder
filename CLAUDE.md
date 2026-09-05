@@ -1478,9 +1478,15 @@ in `docs/LIVE_STREAM.md`.
   because the name, condition and value are not on that page in a form worth
   trusting — they are in Supabase behind the app's login, so an extension needs
   a second auth surface for data the app already has open.
-- **The relay is started by double-clicking a file.** `Start Stream Relay.cmd`
-  and `.command` at the repo root install on a first run, start the relay and
-  open the host's desk; the desk carries the OBS URL with a copy button and,
+- **The relay is started by double-clicking a file, and that file is the only
+  thing anybody has to touch.** `Start Stream Relay.cmd` and `.command` at the
+  repo root pull, install anything new, start the relay and open the host's
+  desk. The update is timid on purpose, because it runs on a laptop minutes
+  before a stream: `--ff-only` so it can never stop on a conflict, skipped
+  entirely on a dirty tree, and a failure is a shrug rather than a stop — the
+  one evening this has to work is the evening the wifi is worst. `git pull |
+  sed` reports SED's status, so the first version's `|| fallback` was dead
+  code and an offline venue got git's raw error instead of a sentence; the desk carries the OBS URL with a copy button and,
   while the queue is EMPTY, a button that loads demo lots so a scene can be
   laid out with no app, no eBay account and no database in the way. The relay
   refuses those once anything is queued rather than trusting the page to hide
