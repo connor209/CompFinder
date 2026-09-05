@@ -96,7 +96,10 @@ REM comp-finder.vercel.app 307s to the custom domain, so a page opened at
 REM either reports the one it ended up on. Both are listed for that reason.
 REM The relay prints what it accepts on startup, and names the missing one in
 REM the 403.
-if "%STREAM_ALLOW_ORIGIN%"=="" set STREAM_ALLOW_ORIGIN=https://compfinder.gopainting.com,https://comp-finder.vercel.app
+REM All three hostnames the app answers on. Add another by putting it on the
+REM end of this line, comma-separated - when + Stream says the relay is not
+REM reachable, the address it prints is the one to paste in.
+if "%STREAM_ALLOW_ORIGIN%"=="" set STREAM_ALLOW_ORIGIN=https://comp-finder-alpha.vercel.app,https://compfinder.gopainting.com,https://comp-finder.vercel.app
 
 node tools\stream-relay\server.mjs
 
