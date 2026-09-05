@@ -1338,6 +1338,23 @@ changing what Last Comp tells a stranger their card is worth.
 - **It renders nowhere a customer can see**, gated on `customerMode` like every
   other piece of desk chrome. A basket with a `£ Sold` in it must not be one
   mis-tap away from somebody holding the tablet.
+- **The bar STICKS to the bottom of the viewport.** It shipped merely docked at
+  the end of the screen, reasoning that a fixed bar is a permanent bite out of
+  a phone. Wrong twice: My listings is a long single column on a phone, so "the
+  end of the screen" is a thousand pixels below the fold — you added a card,
+  got no acknowledgement, and scrolled past two hundred rows to reach the
+  basket. And the bite is not permanent, because the bar only exists while a
+  deal is open, which is exactly when it has to be one thumb away. `sticky`
+  rather than `fixed` keeps the content column's width and still comes to rest
+  at the end of the page — and it works only because `#app` and `body` clip on
+  the X axis with `overflow-x: clip` rather than `hidden`, which makes no
+  scroll container. Changing either to `hidden` un-sticks it silently.
+- **The drawer is a sheet: only the lines scroll.** The total and `£ Mark sold`
+  are pinned, because an eight-card basket must not push the button that says
+  how much money is changing hands off the bottom of a phone. For the same
+  reason the two buttons stack rather than sit side by side under 560px:
+  squeezed into a row the primary shrinks below its label and `.btn-primary`
+  clips rather than wrapping, so it read "Mark 4 sold — £100.0".
 
 ## My listings: a keystroke used to render the whole inventory
 

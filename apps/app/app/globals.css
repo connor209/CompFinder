@@ -1876,7 +1876,26 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
  * rather than fixed on purpose — the screen under it is a list you scroll with
  * a thumb, and a permanently fixed bar is a permanent bite out of a phone.
  */
-.deal-wrap { display:flex; flex-direction:column; gap:12px; margin-top:16px; }
+/* Sticky, not merely docked. It shipped docked at the end of the screen and
+ * on a phone that is a thousand pixels below the fold — you added a card, got
+ * no acknowledgement, and had to scroll past two hundred rows to reach the
+ * basket. `sticky` keeps the content column's width (no centring maths, no
+ * second breakpoint) and still comes to rest at the end of the page.
+ *
+ * Sticky survives here because `#app` and `body` clip on the X axis with
+ * `overflow-x: clip` rather than `hidden` — `clip` makes no scroll container,
+ * which is the whole difference. Changing either to `hidden` un-sticks this.
+ *
+ * z-index 10: above the list, below every overlay in this file — the lowest of
+ * those is .col-menu-backdrop at 20. */
+.deal-wrap {
+  display:flex; flex-direction:column; gap:10px;
+  position:sticky; bottom:0; z-index:10;
+  margin-top:16px; padding:10px 0 max(10px, env(safe-area-inset-bottom));
+  /* The page ground, so rows scrolling under the gap between the drawer and
+     the bar are covered rather than showing through it. */
+  background:var(--ground);
+}
 
 .deal-bar {
   display:flex; align-items:center; gap:12px; flex-wrap:wrap;
@@ -1893,8 +1912,13 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .deal-sum { font-family:var(--num-font); font-size:20px; font-weight:600; margin-left:auto;
   font-variant-numeric:tabular-nums; }
 
+/* A sheet: the header and the totals are pinned and only the lines scroll, so
+ * an eight-card basket on a phone cannot push £ Mark sold off the screen. */
 .deal-panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--panel-radius);
-  box-shadow:var(--shadow-2); overflow:hidden; }
+  box-shadow:var(--shadow-2); overflow:hidden;
+  display:flex; flex-direction:column; max-height:min(72vh, 620px); }
+.deal-lines, .deal-receipt { flex:1 1 auto; min-height:0; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+.deal-head, .deal-tally, .deal-foot { flex:none; }
 .deal-head { display:flex; align-items:center; gap:12px; padding:13px 16px;
   border-bottom:1px solid var(--line); background:var(--surface-2); position:relative; }
 .deal-head::before { content:""; position:absolute; inset:0 0 auto 0; height:var(--btn-holo-h); background:var(--holo); }
@@ -1950,6 +1974,8 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .deal-acts .btn { flex:1; min-width:150px; }
 
 .deal-receipt { display:flex; flex-direction:column; }
+/* The receipt's own panel has no tally under it, so it may run taller. */
+.deal-panel:has(.deal-receipt) { max-height:min(78vh, 680px); }
 .deal-rc { display:grid; grid-template-columns:20px minmax(0,1fr) auto; gap:11px; align-items:start;
   padding:10px 16px; border-bottom:1px solid var(--line); font-size:14px; }
 .deal-tick { font-family:var(--font-mono); font-weight:600; }
@@ -1967,4 +1993,18 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
   .deal-line { grid-template-columns:24px minmax(0,1fr); row-gap:8px; }
   .deal-thumb { display:none; }
   .deal-right { grid-column:1 / -1; justify-content:flex-end; }
+  /* The strip has to fit one line on a phone: the eyebrow is the one part
+     that says nothing the figures beside it don't. */
+  .deal-k { display:none; }
+  .deal-bar { gap:10px; padding:10px 12px; }
+  .deal-sum { font-size:18px; }
+  /* Stacked, not squeezed. Side by side at this width the primary shrinks
+     below its label, and .btn-primary clips (overflow:hidden) rather than
+     wrapping — so the one button that says how much money is about to change
+     hands read "Mark 4 sold — £100.0". */
+  .deal-acts { flex-direction:column; }
+  /* flex:1 from the base rule means "share the space" — down a COLUMN that
+     shrinks the buttons vertically, and a squashed tap target is the last
+     thing you want with a customer waiting. */
+  .deal-acts .btn { flex:0 0 auto; min-width:0; width:100%; }
 }

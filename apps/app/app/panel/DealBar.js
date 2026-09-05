@@ -19,10 +19,19 @@ import {
  *
  * Two things about the shape of it:
  *
- * - **The bar is docked, not floating.** It sits at the end of the screen it
- *   belongs to rather than over the content, because the screen under it is a
- *   list you scroll with a thumb and a fixed bar is a permanent bite out of a
- *   phone.
+ * - **The bar sticks to the bottom of the viewport.** It shipped merely docked
+ *   at the end of the screen, on the reasoning that a fixed bar is a permanent
+ *   bite out of a phone — which was wrong twice over. My listings is a long
+ *   single column on a phone, so "the end of the screen" is a thousand pixels
+ *   below the fold: you added a card, got no acknowledgement, and had to
+ *   scroll past two hundred rows to reach the basket. And the bite is not
+ *   permanent, because the bar only exists while a deal is open, which is
+ *   exactly the moment it needs to be one thumb away. `position: sticky`
+ *   rather than `fixed` so it keeps the content column's width and still
+ *   comes to rest at the end of the page.
+ * - **The drawer is a sheet, and the total and the sell button never scroll
+ *   away.** Only the lines scroll: an eight-card basket on a phone must not
+ *   push `£ Mark sold` off the bottom of the screen.
  * - **It renders nowhere a customer can see.** The desk gates it on
  *   `customerMode`, the same flag that removes the checkout form and the bulk
  *   bar — see the note in ShowDesk.js. A basket with a `£ Sold` in it is
@@ -237,16 +246,18 @@ export default function DealBar({ deal, update, onSold }) {
             <button className="deal-x" onClick={() => setOpen(false)} aria-label="Close the deal">✕</button>
           </div>
 
-          {deal.lines.map((l) => (
-            <LineRow
-              key={l.id}
-              line={l}
-              pence={prices.get(l.id)}
-              onToggle={(id, on) => update(setLineOn(deal, id, on))}
-              onPrice={setPrice}
-              onRemove={(id) => update(removeLine(deal, id))}
-            />
-          ))}
+          <div className="deal-lines">
+            {deal.lines.map((l) => (
+              <LineRow
+                key={l.id}
+                line={l}
+                pence={prices.get(l.id)}
+                onToggle={(id, on) => update(setLineOn(deal, id, on))}
+                onPrice={setPrice}
+                onRemove={(id) => update(removeLine(deal, id))}
+              />
+            ))}
+          </div>
 
           <div className="deal-tally">
             <div className="deal-tl">
