@@ -33,6 +33,19 @@ REM block has its %VARS% substituted when the block is PARSED, so a variable
 REM set inside one reads as its old value everywhere else in it.
 set "CF_BEFORE="
 set "CF_DIRTY="
+set "CF_GIT="
+if exist .git (
+  where git >nul 2>nul
+  if not errorlevel 1 set CF_GIT=1
+)
+REM Cloned with GitHub Desktop, which bundles its own git and does not put it
+REM on the PATH. Say so: a skip nobody can see is indistinguishable from an
+REM update that ran and found nothing, and the remedy is a different button.
+if not defined CF_GIT (
+  echo   No git on this machine, so no update check.
+  echo   Use Pull origin in GitHub Desktop if you need the latest code.
+  echo.
+)
 if exist .git (
   where git >nul 2>nul
   if not errorlevel 1 (

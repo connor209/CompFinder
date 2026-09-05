@@ -27,7 +27,13 @@ fi
 #     with no remote — carry on with the code that is already here. The one
 #     evening this has to work is the evening the wifi is worst.
 BEFORE=""
-if [ -d .git ] && command -v git >/dev/null 2>&1; then
+if [ ! -d .git ] || ! command -v git >/dev/null 2>&1; then
+  # Cloned with GitHub Desktop, which bundles its own git and does not put it
+  # on the PATH. Say so: a skip nobody can see is indistinguishable from an
+  # update that ran and found nothing, and the remedy is a different button.
+  printf '  No git on this machine, so no update check.\n'
+  printf '  Use Pull origin in GitHub Desktop if you need the latest code.\n\n'
+elif [ -d .git ] && command -v git >/dev/null 2>&1; then
   if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
     printf '  Local changes here, so leaving the code alone.\n\n'
   else
