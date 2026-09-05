@@ -34,10 +34,13 @@ if not exist node_modules (
   )
 )
 
-REM STREAM_ALLOW_ORIGIN: the deployed app's address, so + Stream can reach the
-REM relay from a page served over https. Edit this line if it ever changes;
-REM the relay prints what it accepts when it starts.
-if "%STREAM_ALLOW_ORIGIN%"=="" set STREAM_ALLOW_ORIGIN=https://comp-finder.vercel.app
+REM STREAM_ALLOW_ORIGIN: the addresses + Stream may reach the relay FROM. It is
+REM the browser's origin that counts, not where you think the app lives - and
+REM comp-finder.vercel.app 307s to the custom domain, so a page opened at
+REM either reports the one it ended up on. Both are listed for that reason.
+REM The relay prints what it accepts on startup, and names the missing one in
+REM the 403.
+if "%STREAM_ALLOW_ORIGIN%"=="" set STREAM_ALLOW_ORIGIN=https://compfinder.gopainting.com,https://comp-finder.vercel.app
 
 node tools\stream-relay\server.mjs
 

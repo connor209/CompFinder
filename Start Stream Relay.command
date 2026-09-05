@@ -28,10 +28,12 @@ if [ ! -d node_modules ]; then
   fi
 fi
 
-# STREAM_ALLOW_ORIGIN: the deployed app's address, so ＋ Stream can reach the
-# relay from a page served over https. Edit the line below to your own if it
-# ever changes; the relay prints what it accepts when it starts.
-export STREAM_ALLOW_ORIGIN="${STREAM_ALLOW_ORIGIN:-https://comp-finder.vercel.app}"
+# STREAM_ALLOW_ORIGIN: the addresses ＋ Stream may reach the relay FROM. It is
+# the browser's origin that counts, not where you think the app lives — and
+# comp-finder.vercel.app 307s to the custom domain, so a page opened at either
+# reports the one it ended up on. Both are listed for that reason. The relay
+# prints what it accepts when it starts, and names the missing one in the 403.
+export STREAM_ALLOW_ORIGIN="${STREAM_ALLOW_ORIGIN:-https://compfinder.gopainting.com,https://comp-finder.vercel.app}"
 
 node tools/stream-relay/server.mjs
 

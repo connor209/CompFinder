@@ -39,15 +39,18 @@ Then, once:
   the relay is up and repeats the OBS URL.
 
 The relay only accepts requests from origins it knows. `http://localhost:3000`
-and `http://127.0.0.1:3000` are built in; for the deployed app, start it with
-the origin:
+and `http://127.0.0.1:3000` are built in, and the launchers add the deployed
+app. **It is the browser's origin that counts, not where you think the app
+lives**: `comp-finder.vercel.app` 307s to `compfinder.gopainting.com`, so a
+page opened at either reports the one it ended up on — which is why both are
+listed. From a terminal:
 
 ```
-STREAM_ALLOW_ORIGIN=https://comp-finder.vercel.app npm run stream
+STREAM_ALLOW_ORIGIN=https://compfinder.gopainting.com npm run stream
 ```
 
-It prints what it accepts on startup. A `＋ Stream` button that does nothing is
-almost always this, and the relay's own log is the fastest way to see it.
+It prints what it accepts on startup and names the missing one in the 403. A
+`＋ Stream` button that does nothing is almost always this.
 
 The demo lots are catalogue art standing in for one card's four photographs —
 the one thing about them that is a lie — and the last one is deliberately a card
