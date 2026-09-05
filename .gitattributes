@@ -1,0 +1,5 @@
+# Line endings for the double-click launchers. cmd.exe mis-parses an LF-only
+# batch file, and a .command with CRLF fails on macOS with a bad-interpreter
+# error — so neither may be left to a checkout's own normalisation.
+*.cmd      text eol=crlf
+*.command  text eol=lf

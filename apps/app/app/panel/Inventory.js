@@ -10,6 +10,7 @@ import ColumnPicker, { useColumns } from "./ColumnPicker";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { awayIndex, listingStock } from "@/lib/stockcheck.js";
 import DealBar, { DealButton, useDeal } from "./DealBar";
+import { StreamBar, StreamButton, useRelay } from "./StreamBar";
 import { listingLine } from "@/lib/deal.js";
 
 const settings = APP_SETTINGS;
@@ -106,6 +107,30 @@ function ageDays(startTime) {
 function dealLineFor(g, priced) {
   const p = priced && priced.get(g.key);
   return listingLine(g._items[0] || g, { marketPence: p && !p.error ? p.recPence ?? null : null });
+}
+
+/**
+ * The live-stream lot this row would queue.
+ *
+ * ONE listing, like a deal line and for a related reason: an auction lot is a
+ * card, and a quantity-3 listing streamed as one lot would auction a card that
+ * two other people have also just bought.
+ *
+ * The whole `rec` goes across rather than its figure, because streamValue()
+ * has to decide whether this is a price we would say out loud on a broadcast
+ * — a question about confidence and where the number came from, not about the
+ * number. A row nobody has priced yet streams with no figure and says so.
+ */
+function streamItemFor(g, priced) {
+  const p = priced && priced.get(g.key);
+  const first = g._items?.[0] || g;
+  return {
+    itemId: first.ebay_item_id,
+    title: g.title,
+    source: first,
+    rec: p && !p.error && !p.loading ? p.rec || null : null,
+    graded: CompFinderPricing.subjectGradeFrom(g.title || "") != null
+  };
 }
 
 /**
@@ -252,6 +277,7 @@ const ALL_COLUMNS = [
             <button className="itbl-set" onClick={() => ctx.onUpdate(g)} title="Update eBay price to market">↳ {pounds(p.recPence)}</button>
           ) : null}
           <DealButton className="itbl-check" deal={ctx.deal} update={ctx.onDeal} line={dealLineFor(g, ctx.priced)} />
+          <StreamButton className="itbl-check" relay={ctx.relay} item={streamItemFor(g, ctx.priced)} />
           <button className="itbl-end" onClick={() => ctx.onEnd(g)} title="End (delist) on eBay">End</button>
         </span>
       );
@@ -302,7 +328,11 @@ export default function Inventory({ onDeepDive }) {
   const [away, setAway] = useState(null);
   const [showGone, setShowGone] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
-  const [priced, setPriced] = useState(() => new Map()); // key -> { loading, recPence, error }
+  // key -> { loading, recPence, used, rec, error }. `rec` is the whole
+  // recommendation and not just its figure: the live stream has to ask
+  // streamValue() whether this is a price we would say out loud, and that
+  // question needs the confidence and the data source, not the number.
+  const [priced, setPriced] = useState(() => new Map());
   const [costs, setCosts] = useState(() => new Map()); // ebay_item_id -> cost_pence
   const [updating, setUpdating] = useState(() => new Map()); // key -> { loading, done, error }
   const [syncing, setSyncing] = useState(false);
@@ -316,6 +346,9 @@ export default function Inventory({ onDeepDive }) {
   // See the note on useDeal(): a hook per row is what this screen was just
   // fixed for doing.
   const [deal, updateDeal] = useDeal();
+  // Once for the screen and handed down, the same rule useDeal() runs on: a
+  // hook per row is a timer per row on the list this screen was fixed for.
+  const relay = useRelay();
   const pricedRef = useRef(priced);
   pricedRef.current = priced;
 
@@ -562,7 +595,7 @@ export default function Inventory({ onDeepDive }) {
     setPriced((prev) => new Map(prev).set(g.key, { loading: true }));
     try {
       const rec = await priceForTitle(g.title);
-      setPriced((prev) => new Map(prev).set(g.key, { loading: false, recPence: rec.finalPence ?? null, used: rec.included?.length || 0 }));
+      setPriced((prev) => new Map(prev).set(g.key, { loading: false, recPence: rec.finalPence ?? null, used: rec.included?.length || 0, rec }));
     } catch (err) {
       setPriced((prev) => new Map(prev).set(g.key, { loading: false, error: err.message || "Failed" }));
     }
@@ -843,6 +876,8 @@ export default function Inventory({ onDeepDive }) {
         <div className="stat"><div className="k">Last synced</div><div className="v" style={{ fontSize: 13 }}>{fmtWhen(status.lastSynced)}</div></div>
       </div>
 
+      <StreamBar relay={relay} />
+
       <div className="inv-bar">
         <div className="inv-inp">
           <span className="mag" aria-hidden="true">🔍</span>
@@ -968,7 +1003,7 @@ export default function Inventory({ onDeepDive }) {
                   </td>
                   {visibleCols(ALL_COLUMNS).map((c) => (
                     <td key={c.key} className={`itbl-${c.key}`}>
-                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, costs, onSetCost: setCost, deal, onDeal: updateDeal })}
+                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay })}
                     </td>
                   ))}
                 </tr>
@@ -1040,6 +1075,7 @@ export default function Inventory({ onDeepDive }) {
                         ? "Adds ONE copy to the current deal — untick “Group duplicates” to add another"
                         : "Add to the current deal — nothing happens on eBay until it sells"}
                     />
+                    <StreamButton relay={relay} item={streamItemFor(g, priced)} />
                     <button className="inv-act" onClick={() => showOut(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
                     <MarketLinks query={g.title} gameSlug="pokemon" label={g.title} />
                   </div>

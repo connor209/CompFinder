@@ -1,0 +1,9 @@
+{
+  "name": "@compfinder/stream-relay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local relay between the app and an OBS browser source, for eBay Live auctions.",
+  "type": "module",
+  "main": "server.mjs",
+  "scripts": { "start": "node server.mjs" }
+}
