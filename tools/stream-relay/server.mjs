@@ -48,6 +48,7 @@
  * no npm install behind it.
  */
 import { createServer } from "node:http";
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize } from "node:path";
@@ -174,6 +175,37 @@ function setHold(holding) {
   publish();
 }
 
+/**
+ * Take lots into the queue, whoever sent them.
+ *
+ * The one path in. Everything arriving here has already been through
+ * sanitiseLot(), which is the bouncer — this decides only about the QUEUE:
+ * duplicates, the cap, and what goes on air as a result.
+ */
+function acceptLots(incoming) {
+  const firstNew = state.queue.length;
+  const accepted = [];
+  const refused = [];
+  for (const raw of incoming || []) {
+    const lot = sanitiseLot(raw);
+    if (!lot) { refused.push(raw?.name || raw?.id || "a lot"); continue; }
+    // One card, one place in the queue. Re-sending a lot MOVES nothing — the
+    // host may have it queued deliberately behind another card.
+    if (state.queue.some((l) => l.id === lot.id)) { refused.push(`${lot.name} (already queued)`); continue; }
+    if (state.queue.length >= MAX_QUEUE) { refused.push(`${lot.name} (queue full)`); continue; }
+    state.queue.push(lot);
+    accepted.push(lot.name);
+  }
+  // Nothing on air and something just arrived: air THAT, not index 0. A relay
+  // that waited to be told is one more thing to remember with a stream
+  // running — but the first version aired the front of the queue, so a lot
+  // added after the queue had run off the end re-auctioned the card the
+  // stream opened with. What is new is what goes up.
+  if (state.at < 0 && accepted.length) go(firstNew);
+  else publish();
+  return { accepted, refused, count: state.queue.length };
+}
+
 /* ------------------------------------------------------------------- HTTP */
 
 function cors(req, res) {
@@ -268,27 +300,8 @@ const server = createServer(async (req, res) => {
     let body;
     try { body = await readBody(req); } catch { return json(res, 400, { ok: false, error: "bad body" }); }
     const incoming = Array.isArray(body.lots) ? body.lots : [body.lot ?? body];
-    const firstNew = state.queue.length;
-    const accepted = [];
-    const refused = [];
-    for (const raw of incoming) {
-      const lot = sanitiseLot(raw);
-      if (!lot) { refused.push(raw?.name || raw?.id || "a lot"); continue; }
-      // One card, one place in the queue. Re-sending a lot MOVES nothing —
-      // the host may have it queued deliberately behind another card.
-      if (state.queue.some((l) => l.id === lot.id)) { refused.push(`${lot.name} (already queued)`); continue; }
-      if (state.queue.length >= MAX_QUEUE) { refused.push(`${lot.name} (queue full)`); continue; }
-      state.queue.push(lot);
-      accepted.push(lot.name);
-    }
-    // Nothing on air and something just arrived: air THAT, not index 0. A
-    // relay that waited to be told is one more thing to remember with a
-    // stream running — but the first version aired the front of the queue,
-    // so a lot added after the queue had run off the end re-auctioned the
-    // card the stream opened with. What is new is what goes up.
-    if (state.at < 0 && accepted.length) go(firstNew);
-    else publish();
-    return json(res, accepted.length ? 200 : 400, { ok: accepted.length > 0, accepted, refused, count: state.queue.length });
+    const out = acceptLots(incoming);
+    return json(res, out.accepted.length ? 200 : 400, { ok: out.accepted.length > 0, ...out });
   }
 
   if (req.method === "POST" && path === "/control") {
@@ -314,6 +327,28 @@ const server = createServer(async (req, res) => {
         break;
       }
       case "clear": state.queue = []; go(-1); break;
+      case "demo": {
+        /**
+         * Fill the queue with fixtures, so an OBS scene can be laid out with
+         * no app, no eBay account and no database in the way.
+         *
+         * Refused once anything is queued, which is the whole safety story:
+         * during a stream there is always something in the queue, so this can
+         * never put four fake cards in front of an audience. The desk hides
+         * the button then too, but the rule lives here rather than in the
+         * page, because a page is one stale tab away from not having it.
+         *
+         * The fixtures are demo.mjs's, imported rather than written out — one
+         * definition — and they go in through acceptLots() like anything
+         * else, so sanitiseLot() vets them exactly as it vets a real lot.
+         */
+        if (state.queue.length) {
+          return json(res, 409, { ok: false, error: "there is already something queued — clear it first" });
+        }
+        const { DEMO_LOTS } = await import("./demo.mjs");
+        acceptLots(DEMO_LOTS);
+        break;
+      }
       case "lotMs": {
         const ms = Number(body.ms);
         if (Number.isFinite(ms) && ms >= 3000 && ms <= 600_000) state.lotMs = Math.round(ms);
@@ -329,13 +364,36 @@ const server = createServer(async (req, res) => {
   json(res, 404, { ok: false, error: "not found" });
 });
 
+/**
+ * Open the host's desk in the default browser.
+ *
+ * The relay is started by double-clicking a file, by somebody who does not
+ * want to be in a terminal — so the thing they actually need next should be
+ * on screen rather than in a line of console output they have to copy. Purely
+ * best-effort: no browser, no display, a locked-down machine, all fine, the
+ * URL is printed anyway. `STREAM_NO_OPEN=1` turns it off.
+ */
+function openDesk(url) {
+  if (process.env.STREAM_NO_OPEN === "1") return;
+  const cmd = process.platform === "darwin" ? ["open", [url]]
+    : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]]
+    : ["xdg-open", [url]];
+  try {
+    const child = spawn(cmd[0], cmd[1], { detached: true, stdio: "ignore" });
+    child.on("error", () => { /* no browser here; the URL is printed above */ });
+    child.unref();
+  } catch { /* same */ }
+}
+
 server.listen(PORT, HOST, () => {
   console.log(`\n  Comp Finder live stream relay`);
   console.log(`  ─────────────────────────────`);
   console.log(`  host's desk    http://${HOST}:${PORT}/`);
   console.log(`  OBS source     http://${HOST}:${PORT}/overlay`);
   console.log(`  accepts from   ${[...ALLOWED].join("  ")}`);
-  console.log(`\n  Add an origin with STREAM_ALLOW_ORIGIN=https://your-app.vercel.app\n`);
+  console.log(`\n  Add an origin with STREAM_ALLOW_ORIGIN=https://your-app.vercel.app`);
+  console.log(`  Leave this window open while you stream. Close it to stop.\n`);
+  openDesk(`http://${HOST}:${PORT}/`);
 });
 
 server.on("error", (err) => {

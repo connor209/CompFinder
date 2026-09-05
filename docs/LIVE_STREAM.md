@@ -17,9 +17,16 @@ My listings ──＋ Stream──▶ relay (127.0.0.1:4455) ──SSE──▶ 
 
 ## Running one
 
-```
-npm run stream                       # the relay; leave it up for the stream
-```
+**Double-click `Start Stream Relay.command`** (macOS) or **`Start Stream Relay.cmd`**
+(Windows) at the repo root. It installs on a first run, starts the relay, and
+opens the host's desk in your browser. Leave the window open; closing it stops
+the relay. From a terminal it is `npm run stream`, which does the same thing.
+
+The desk has the OBS URL with a **Copy** button on it, and — while the queue is
+empty — a **Load demo lots** button, so a scene can be laid out with no app, no
+eBay account and no database in the way. That button is refused once anything
+is queued, by the relay and not just the page: during a stream there is always
+something in the queue, so demo cards can never reach an audience.
 
 Then, once:
 
@@ -42,17 +49,12 @@ STREAM_ALLOW_ORIGIN=https://comp-finder.vercel.app npm run stream
 It prints what it accepts on startup. A `＋ Stream` button that does nothing is
 almost always this, and the relay's own log is the fastest way to see it.
 
-**To see it move before wiring any of that up**, skip the app entirely:
-
-```
-node tools/stream-relay/demo.mjs --lot 8
-```
-
-Four lots straight into the relay through the same endpoint the app posts to.
-Its pictures are catalogue art standing in for one card's four photographs, and
-its last lot is deliberately one whose price we would hold — the case worth
-watching, because the overlay must show no value line rather than a blank where
-the last lot had a number.
+The demo lots are catalogue art standing in for one card's four photographs —
+the one thing about them that is a lie — and the last one is deliberately a card
+whose price we would hold, because that is the case worth watching: the overlay
+must show no value line rather than a blank where the last lot had a number.
+`node tools/stream-relay/demo.mjs --lot 8` does the same from a terminal, with
+shorter lots so it turns over while you watch.
 
 Then, for real: price a card (**Check price**), press **＋ Stream**, and it joins
 the queue. Auto-advance is ~30 seconds a lot; <kbd>space</kbd> holds, arrows move,

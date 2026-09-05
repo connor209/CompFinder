@@ -37,6 +37,7 @@
   .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
   .eyebrow { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--dim); }
   #onair { display: flex; gap: 16px; margin-top: 10px; }
+  #onair img[hidden] { display: none; }
   #onair img { width: 96px; height: 134px; object-fit: contain; background: #0a0b0e; border-radius: 8px; border: 1px solid var(--line); }
   #onairName { font-size: 24px; font-weight: 700; line-height: 1.15; }
   #onairMeta { margin-top: 6px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
@@ -63,6 +64,11 @@
   li button { padding: 4px 9px; font-size: 12px; }
   kbd { background: #1e222a; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; font-size: 12px; }
   .empty { color: var(--dim); padding: 18px 0; }
+  .obs { margin-left: auto; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .obs code { font-size: 12.5px; padding: 3px 8px; border-radius: 6px; background: #10131a; border: 1px solid var(--line); }
+  button.small { padding: 4px 10px; font-size: 12px; }
+  #setup { margin-top: 12px; padding: 14px; border: 1px dashed var(--line); border-radius: 10px; }
+  #setup p { margin: 0 0 10px; color: var(--dim); font-size: 13px; }
   a { color: var(--accent); }
 </style>
 
@@ -70,7 +76,12 @@
   <span class="dot" id="dot"></span>
   <h1>Live stream desk</h1>
   <span class="muted" id="conn">connecting…</span>
-  <span class="muted" style="margin-left:auto">OBS browser source → <a href="/overlay" target="_blank">/overlay</a></span>
+  <span class="obs">
+    <span class="muted">OBS browser source</span>
+    <code id="obsUrl"></code>
+    <button id="copy" class="small">Copy</button>
+    <a class="muted" href="/overlay" target="_blank" rel="noreferrer">open it</a>
+  </span>
 </header>
 
 <main>
@@ -108,7 +119,15 @@
   <section class="panel">
     <span class="eyebrow">Queue · <span id="count">0</span></span>
     <ol id="queue"></ol>
-    <p class="empty" id="emptyNote">Nothing queued. Send cards from the app — Show desk or My listings.</p>
+    <p class="empty" id="emptyNote">Nothing queued. Send cards from the app — press ＋ Stream in My listings.</p>
+    <!-- Setting up a scene should not need the app, an eBay account or a
+         database. The button is offered only while the queue is EMPTY, and the
+         relay refuses it too — during a stream there is always something
+         queued, so four fake cards can never land in front of an audience. -->
+    <div id="setup" hidden>
+      <p>Setting up your OBS scene? Load four demo lots to see the overlay move. Catalogue art, standing in for one card&rsquo;s four photographs.</p>
+      <button id="demo">Load demo lots</button>
+    </div>
     <div class="row"><button id="clear" class="danger">Clear the queue</button></div>
   </section>
 </main>
@@ -138,7 +157,7 @@
     if (lot) {
       $("onairName").textContent = lot.name;
       $("onairArt").src = lot.images[0] || "";
-      $("onairArt").style.visibility = lot.images.length ? "visible" : "hidden";
+      $("onairArt").hidden = lot.images.length === 0;
       var meta = [];
       if (lot.condition) meta.push('<span class="tag">' + esc(lot.condition) + "</span>");
       /* The held cue. The audience sees no value line at all; the host sees
@@ -151,7 +170,7 @@
     } else {
       $("onairName").textContent = snap.count ? "Nothing on air" : "Nothing queued";
       $("onairMeta").innerHTML = "";
-      $("onairArt").style.visibility = "hidden";
+      $("onairArt").hidden = true;
     }
 
     var q = $("queue");
@@ -175,6 +194,8 @@
       q.appendChild(li);
     });
     $("emptyNote").style.display = snap.count ? "none" : "block";
+    $("setup").hidden = snap.count > 0;
+    $("clear").style.display = snap.count ? "" : "none";
   }
 
   function esc(s) {
@@ -206,6 +227,28 @@
   $("restart").onclick = function () { post("restart"); };
   $("hold").onclick = function () { post(snap && snap.holding ? "resume" : "hold"); };
   $("clear").onclick = function () { if (confirm("Clear the whole queue?")) post("clear"); };
+  $("demo").onclick = function () { post("demo"); };
+
+  // The one string somebody has to get into OBS. Selecting it by hand out of a
+  // line of console output is exactly the faff this page exists to remove.
+  var obs = location.origin + "/overlay";
+  $("obsUrl").textContent = obs;
+  $("copy").onclick = function () {
+    var done = function () { $("copy").textContent = "Copied"; setTimeout(function () { $("copy").textContent = "Copy"; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(obs).then(done, fallback);
+    else fallback();
+    function fallback() {
+      // No clipboard permission (or an insecure context): select it instead,
+      // so Ctrl-C still works rather than the button doing nothing.
+      var r = document.createRange();
+      r.selectNodeContents($("obsUrl"));
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+      $("copy").textContent = "Press Ctrl-C";
+      setTimeout(function () { $("copy").textContent = "Copy"; }, 2600);
+    }
+  };
   Array.prototype.forEach.call(document.querySelectorAll("[data-ms]"), function (b) {
     b.onclick = function () { post("lotMs", { ms: Number(b.dataset.ms) }); };
   });

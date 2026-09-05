@@ -40,6 +40,8 @@ apps/app/        the business tool — eBay OAuth, inventory, batch, scan
 apps/public/     the free price page — no accounts, shared key, cached
 tools/           stream-relay: a local server OBS points at during an eBay Live
                  auction. Not deployed, no dependencies, not a workspace.
+Start Stream…    double-click launchers for the relay, at the root because the
+                 point of them is not having to find a folder
 supabase/        migrations, shared by both
 docs/            research reports; MARKETING.md is the current acquisition plan
                  HOW_PRICING_WORKS.md is the app's pricing in plain English
@@ -1476,6 +1478,16 @@ in `docs/LIVE_STREAM.md`.
   because the name, condition and value are not on that page in a form worth
   trusting — they are in Supabase behind the app's login, so an extension needs
   a second auth surface for data the app already has open.
+- **The relay is started by double-clicking a file.** `Start Stream Relay.cmd`
+  and `.command` at the repo root install on a first run, start the relay and
+  open the host's desk; the desk carries the OBS URL with a copy button and,
+  while the queue is EMPTY, a button that loads demo lots so a scene can be
+  laid out with no app, no eBay account and no database in the way. The relay
+  refuses those once anything is queued rather than trusting the page to hide
+  the button — during a stream there is always something in the queue, which
+  makes demo cards in front of an audience unrepresentable rather than
+  unlikely. They are demo.mjs's own fixtures and they go in through the same
+  door as a real lot, so `sanitiseLot()` vets them identically.
 - **Which picture is showing comes from the relay's clock.** The overlay
   derives it from the lot's elapsed time rather than running a timer of its
   own, so a browser source that reconnects mid-lot lands where the desk says it

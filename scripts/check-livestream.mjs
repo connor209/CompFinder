@@ -314,6 +314,55 @@ console.log("9. addresses");
   eq("pounds", [poundsText(8400), poundsText(24999), poundsText(0), poundsText(null)], ["£84", "£249.99", null, null]);
 }
 
+/* ----------------------------------------------------------------- 10
+ * Setting up an OBS scene, without the terminal.
+ *
+ * The relay is started by double-clicking a file, by somebody who does not
+ * want to be in a terminal. Two things about that have to hold: the demo lots
+ * can never reach an audience, and the launcher cannot leave a half-installed
+ * checkout looking like a broken relay.
+ */
+console.log("10. setting up a scene");
+{
+  const relay = file("tools/stream-relay/server.mjs");
+  const desk = file("tools/stream-relay/public/desk.html");
+  const demo = file("tools/stream-relay/demo.mjs");
+
+  // The demo lots are fixtures for laying out a scene. During a stream there
+  // is ALWAYS something queued, so refusing them on a non-empty queue is what
+  // makes four fake cards in front of an audience unrepresentable rather than
+  // merely unlikely. In the relay, not just the page: a page is one stale tab
+  // away from not having the rule.
+  ok("the demo lots are refused once anything is queued", /if \(state\.queue\.length\) \{[\s\S]{0,220}already something queued/.test(relay));
+  // …and they go in through the same door as a real lot, so sanitiseLot() vets
+  // them identically. A second insertion path is a way round the bouncer.
+  ok("the demo lots go through acceptLots()", /acceptLots\(DEMO_LOTS\)/.test(relay));
+  ok("and there is one definition of them", /import\("\.\/demo\.mjs"\)/.test(relay) && /export const DEMO_LOTS/.test(demo));
+  // Recognisable on sight, on the desk and in the queue, so nobody mistakes a
+  // fixture for stock.
+  for (const m of demo.matchAll(/id: "([^"]+)"/g)) {
+    if (!m[1].startsWith("demo-")) fail(`demo lot id ${JSON.stringify(m[1])} is not marked as a demo`);
+  }
+  ok("the desk only offers them on an empty queue", /\$\("setup"\)\.hidden = snap\.count > 0/.test(desk));
+
+  // The one string that has to reach OBS. Selecting it by hand out of console
+  // output is the faff the desk exists to remove.
+  ok("the desk offers the OBS url to copy", /obsUrl/.test(desk) && /\/overlay/.test(desk));
+
+  // The launchers. A relay started from a checkout with no node_modules fails
+  // on an import several screens later, which reads as a broken build.
+  for (const name of ["Start Stream Relay.command", "Start Stream Relay.cmd"]) {
+    const sh = file(name);
+    ok(`${name} installs on a fresh checkout`, /node_modules/.test(sh) && /npm install/.test(sh));
+    ok(`${name} runs from its own folder`, /%~dp0|dirname/.test(sh));
+    ok(`${name} names the deployed app so ＋ Stream can reach the relay`, /STREAM_ALLOW_ORIGIN/.test(sh));
+    ok(`${name} holds the window open when the relay stops`, /pause|read -r -p/.test(sh));
+  }
+  // cmd.exe mis-parses an LF-only batch file, and the failure is a window that
+  // flashes and closes with nothing readable in it.
+  ok("the Windows launcher is CRLF", readFileSync(new URL("../Start Stream Relay.cmd", import.meta.url)).includes("\r\n"));
+}
+
 if (failures) {
   console.error(`\ncheck-livestream: ${failures} failure(s)\n`);
   process.exit(1);

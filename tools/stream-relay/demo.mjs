@@ -21,14 +21,11 @@
  * rather than an empty box where the last lot had a number.
  */
 const ORIGIN = process.env.STREAM_ORIGIN || "http://127.0.0.1:4455";
-const args = process.argv.slice(2);
-const lotArg = args.indexOf("--lot");
-const lotSeconds = lotArg >= 0 ? Number(args[lotArg + 1]) : null;
 
 const art = (path) => `https://assets.tcgdex.net/en/${path}/high.png`;
 const FOUR = [art("swsh/swsh7/215"), art("swsh/swsh6/20"), art("sv/sv03.5/151"), art("swsh/swsh12.5/160")];
 
-const lots = [
+export const DEMO_LOTS = [
   {
     id: "demo-1", name: "Umbreon VMAX 215/203", condition: "Near Mint",
     valuePence: 83748, valueText: "£837.48", valueLabel: "Recent sold", valueHeld: false,
@@ -66,11 +63,19 @@ async function post(path, body) {
   return res.json();
 }
 
-try {
+/* Also imported by the relay, for the desk's "demo lots" button — one
+ * definition of the fixtures, kept out of the relay's serving logic. Only the
+ * command-line half runs when this file is executed directly. */
+const invokedDirectly = process.argv[1] && process.argv[1].endsWith("demo.mjs");
+if (invokedDirectly) {
+  const args = process.argv.slice(2);
+  const lotArg = args.indexOf("--lot");
+  const lotSeconds = lotArg >= 0 ? Number(args[lotArg + 1]) : null;
+  try {
   if (Number.isFinite(lotSeconds) && lotSeconds >= 3) {
     await post("/control", { action: "lotMs", ms: Math.round(lotSeconds * 1000) });
   }
-  const out = await post("/queue", { lots });
+  const out = await post("/queue", { lots: DEMO_LOTS });
   console.log(`\n  queued ${out.accepted?.length ?? 0} lot(s)${out.refused?.length ? `, refused ${out.refused.length}` : ""}`);
   (out.accepted || []).forEach((n) => console.log(`    · ${n}`));
   (out.refused || []).forEach((n) => console.log(`    ✕ ${n}`));
@@ -78,8 +83,9 @@ try {
   console.log(`  the host's desk      ${ORIGIN}/`);
   console.log(`\n  Clear it again from the desk, or:`);
   console.log(`    curl -X POST ${ORIGIN}/control -H 'content-type: application/json' -d '{"action":"clear"}'\n`);
-} catch (err) {
-  console.error(`\n  Couldn't reach the relay at ${ORIGIN}.`);
-  console.error(`  Start it first, in another terminal:  npm run stream\n`);
-  process.exit(1);
+  } catch (err) {
+    console.error(`\n  Couldn't reach the relay at ${ORIGIN}.`);
+    console.error(`  Start it first:  npm run stream  (or the Start Stream Relay shortcut)\n`);
+    process.exit(1);
+  }
 }
