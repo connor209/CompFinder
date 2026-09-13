@@ -312,13 +312,20 @@ const CardUploaderCsv = (() => {
       if (setIsUsable) parts.push(item.set.trim());
       const language = languageInTitle(item.title);
       if (language) parts.push(language);
+      // A stamped copy, when the title says so. Into the QUERY only — the
+      // comment above says why that distinction is what makes these safe —
+      // because sellers spell a stamp several ways and nameTokensMatch would
+      // demand this exact word. Whether a returned listing IS a stamped copy
+      // is settled once, by classifyExclusion, against one pattern.
+      const stamp = CompFinderPricing.subjectStampFrom(item.title || "");
+      if (stamp) parts.push(stamp.kind);
       if (options.includeCondition && item.condition && item.condition !== "Unknown") {
         parts.push(item.condition);
       }
       query = parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
     }
 
-    return { query, nameTokens, wantsReverseHolo, set: setIsUsable ? item.set : null };
+    return { query, nameTokens, wantsReverseHolo, stamped: !!CompFinderPricing.subjectStampFrom(item.title || ""), set: setIsUsable ? item.set : null };
   }
 
   return { parseCsv, rowsToObjects, mapConditionLabel, extractItems, splitPicUrls, itemSpecifics, buildQueryFromItem, languageInTitle, GENERIC_SET_VALUES };

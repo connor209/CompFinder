@@ -32,6 +32,23 @@ const CompFinderPricing = (() => {
     // evidence about a different object. Same number as the app's
     // MIN_SOLD_COMPS_TO_PRICE, for the same reason — two comps is not a price.
     gradedMinComps: 3,
+    // THE CARD BEING PRICED, when its particular copy carries a STAMP — a
+    // prerelease, staff or event stamp. Null for an ordinary copy, which is
+    // almost every card. Set it with subjectStampFrom(title).
+    //
+    // A fact about one copy rather than about the card, which is why it is
+    // read off a title the same way a grade is: Shedinja 14/107 is an ordinary
+    // Deoxys common, and the prerelease-stamped Shedinja 14/107 in your hand
+    // is not. The public page's isPromoCard() answers a different question —
+    // "is this card a promo PRINTING", off the catalogue — and correctly says
+    // no to exactly these cards.
+    subjectStamp: null,
+    // How many stamped comps a stamped card needs before its price is
+    // published. Below it there is NO price and never a fall back to the
+    // ordinary copies, for the same reason gradedMinComps refuses to fall back
+    // to the raw market: evidence about a different object does not add up to
+    // a thin answer about this one, it adds up to a wrong one.
+    stampedMinComps: 3,
     freePostage: true,        // add buyer's postage to seller's item price for a fair "total price" comp
     interItemDelayMs: 1500,   // pause between items in a batch — gentler pacing, and doubles as
                               // a diagnostic: if a "breaks after ~N items" issue disappears at a
@@ -838,9 +855,10 @@ const CompFinderPricing = (() => {
    * and an empty pool here means no price at all. Worth revisiting with a
    * corpus behind it; not worth guessing at.
    */
-  function classifyExclusion(listingTitle, excludeKeywords = DEFAULT_SETTINGS.excludeKeywords, nameTokens = null, cardNumber = null, subjectGrade = null) {
+  function classifyExclusion(listingTitle, excludeKeywords = DEFAULT_SETTINGS.excludeKeywords, nameTokens = null, cardNumber = null, subjectGrade = null, subjectStamp = null) {
     const t = listingTitle || "";
     const pricingASlab = !!(subjectGrade && subjectGrade.graded);
+    const pricingAStamp = !!(subjectStamp && subjectStamp.stamped);
     if (!nameTokensMatch(t, nameTokens)) return "nameMismatch";
     // Reverse Holo is a distinct, separately-priced variant (see simplifyTitle
     // comments). nameTokens only checks required words ARE present, which
@@ -857,6 +875,11 @@ const CompFinderPricing = (() => {
     } else if (GRADED_NUMBER_PATTERN.test(t)) {
       return "graded";
     }
+    // The same inversion, one axis along. Pricing a stamped copy, it is the
+    // ORDINARY ones that are the wrong object — and they are the overwhelming
+    // majority of what any search for this card returns, so without this the
+    // stamped copy is priced off them every single time.
+    if (pricingAStamp && !isStampedTitle(t)) return "plainPrinting";
     if (NOT_A_CARD_PATTERN.test(t)) return "notACard";
     if (COUNTED_LOT_PATTERN.test(t) || PLUS_JOINED_NAMES.test(t)) return "bundle";
     if (looksLikeNamedMultiCardLot(t, cardNumber)) return "multiCardLot";
@@ -866,6 +889,13 @@ const CompFinderPricing = (() => {
       // nothing at all. It is the same rule as the pattern, so it stands down
       // in the same case.
       if (reason === "graded" && pricingASlab) continue;
+      // Same trap, and the one that actually cost money: "prerelease" sits in
+      // the promoVariant list, so a stamped comp survived the inversion above
+      // and was thrown out one loop later as a promo printing — leaving a
+      // stamped card priced from nothing but plain copies. Anything here that
+      // is NOT stamped has already gone as plainPrinting, so standing this
+      // group down cannot let an ordinary promo in.
+      if (reason === "promoVariant" && pricingAStamp) continue;
       if (words.some((w) => wordBoundaryMatch(t, w))) return reason;
     }
     return null; // not excluded
@@ -1002,7 +1032,7 @@ const CompFinderPricing = (() => {
     const excluded = [];
 
     for (const comp of comps) {
-      const reason = classifyExclusion(comp.title, settings.excludeKeywords, nameTokens, cardNumber, settings.subjectGrade);
+      const reason = classifyExclusion(comp.title, settings.excludeKeywords, nameTokens, cardNumber, settings.subjectGrade, settings.subjectStamp);
       if (reason) {
         excluded.push({ ...comp, exclusionReason: reason });
       } else {
@@ -1081,6 +1111,25 @@ const CompFinderPricing = (() => {
         priceHeld: true,
         dataSource,
         note: `This is a graded card, and only ${included.length} ${dataSource === "active" ? "listed" : "sold"} slab(s) at ${tierName} were found — too few to price from. The raw copies were NOT used to make up the difference: a raw card and a slab are different objects at different prices, so a price built from the wrong one is worse than no price. Any graded sales that were found are below.`,
+        included,
+        excluded,
+        graded: gradedBreakdown(comps, settings, nameTokens)
+      };
+    }
+
+    // The stamped equivalent of the block above, and it exists for the same
+    // reason: the ordinary copies of this card are not soft evidence about the
+    // stamped one, they are evidence about a different object. Three cards
+    // sold under market on 13 Sep 2026 because the engine quietly used them.
+    const pricingAStamp = !!(settings.subjectStamp && settings.subjectStamp.stamped);
+    if (pricingAStamp && included.length < settings.stampedMinComps) {
+      return {
+        rawPence: null,
+        finalPence: null,
+        confidence: included.length === 0 ? "None" : "Low",
+        priceHeld: true,
+        dataSource,
+        note: `This is a ${settings.subjectStamp.kind === "stamped" ? "stamped" : settings.subjectStamp.kind} copy, and only ${included.length} ${dataSource === "active" ? "listed" : "sold"} stamped copy(s) were found — too few to price from. The ordinary copies were NOT used to make up the difference: a stamped copy is a different printing at a different price, and pricing one from the other is how a card goes out under market. Set a price by hand if you know what it is worth.`,
         included,
         excluded,
         graded: gradedBreakdown(comps, settings, nameTokens)
@@ -1219,6 +1268,51 @@ const CompFinderPricing = (() => {
    * a visitor typed — and two parsers would eventually disagree about whether
    * the same card was a slab.
    */
+  /**
+   * A STAMPED copy — a prerelease, staff or event stamp on an otherwise
+   * ordinary card.
+   *
+   * Written narrowly on purpose, because this is a SUBJECT test and the
+   * subject is where the blast radius is: a false positive on a comp costs one
+   * comp out of forty, and a false positive here throws away every comp that
+   * is the card and then prices it off the ones that aren't. That is precisely
+   * the fault the graded rule was built to stop, and it is how a stamped
+   * Shedinja 14/107 came out at £7.49 off five ordinary reverse holos.
+   *
+   * - `staff` needs a stamp word after it. Bare "staff" is a Magic card name
+   *   several times over (Staff of Nin, Staff of Domination) and this engine
+   *   prices every game in the app.
+   * - `stamp`/`stamped` is refused in front of "addressed"/"envelope"/"sae",
+   *   which is a UK seller describing POSTAGE. Lookahead, never lookbehind:
+   *   core ships to a browser and Safari only learned lookbehind in 16.4 —
+   *   see check-corebrowser.mjs.
+   * - "prerelease" is already in excludeKeywords.promoVariant, which is what
+   *   made this expensive: the engine was throwing those comps away and had no
+   *   idea it might be holding one.
+   */
+  const STAMP_PATTERN = /\bpre[\s-]?release\b|\bstamp(?:ed)?\b(?!\s+(?:addressed|envelope|sae))|\bstaff\s+(?:stamp|promo|pre)/i;
+
+  /** A seller saying the copy is NOT stamped. Applied on both sides here,
+   *  unlike NOT_GRADED_PATTERN which is subject-only: stamped pools are thin
+   *  enough that dropping one real comp matters as much as gaining a wrong one. */
+  const NOT_STAMPED_PATTERN = /\b(?:not|non|un)[\s-]?stamped\b|\bno\s+stamp\b/i;
+
+  function isStampedTitle(text) {
+    const t = String(text || "");
+    if (NOT_STAMPED_PATTERN.test(t)) return false;
+    return STAMP_PATTERN.test(t);
+  }
+
+  /**
+   * The copy WE are pricing, read off its own title, for settings.subjectStamp.
+   */
+  function subjectStampFrom(text) {
+    const t = String(text || "");
+    if (!isStampedTitle(t)) return null;
+    const kind = /\bpre[\s-]?release\b/i.test(t) ? "prerelease" : /\bstaff\b/i.test(t) ? "staff" : "stamped";
+    return { stamped: true, kind };
+  }
+
   function subjectGradeFrom(text) {
     const t = String(text || "");
     // A seller saying what the card ISN'T. On a comp this never mattered —
@@ -1330,13 +1424,21 @@ const CompFinderPricing = (() => {
 
     const queryWords = nameWords.slice(0, number ? 2 : 3);
     const nameTokens = nameWords.slice(0, number ? 1 : 2);
-    const query = [queryWords.join(" "), number].filter(Boolean).join(" ").trim();
+    // A stamp reaches the QUERY and never nameTokens, and that distinction is
+    // the whole reason it is safe: nameTokensMatch demands every token
+    // literally, and sellers spell this several ways ("prerelease", "staff
+    // stamped", "stamp"). Asking SoldComps for the word finds the listings;
+    // deciding which of them ARE stamped copies is classifyExclusion's job,
+    // where one pattern covers every spelling.
+    const stamp = subjectStampFrom(title);
+    const query = [queryWords.join(" "), number, stamp ? stamp.kind : ""].filter(Boolean).join(" ").trim();
 
     return {
       query: query || simplified,
       nameTokens: nameTokens.length ? nameTokens : extractNameTokens(simplified),
       number,
       graded,
+      stamped: !!stamp,
       lot
     };
   }
@@ -1349,6 +1451,8 @@ const CompFinderPricing = (() => {
     isGradedTitle,
     parseGrade,
     subjectGradeFrom,
+    subjectStampFrom,
+    isStampedTitle,
     stripGradeMarkers,
     gradedBreakdown,
     isBundleTitle,

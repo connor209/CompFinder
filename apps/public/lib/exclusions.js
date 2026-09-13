@@ -30,6 +30,7 @@ export const EXCLUSION_LABELS = {
   catalogMismatch: "Different product",
   catalogSignal: "Different product",
   promoVariant: "A promo printing, not this one",
+  plainPrinting: "An ordinary copy — you asked about a stamped one",
   priceOutlier: "Price far above the rest",
   priceOutlierLow: "Price far below the rest",
   postageOutlier: "Postage out of line with the item",

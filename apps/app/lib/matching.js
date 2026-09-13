@@ -130,11 +130,17 @@ export const FOREIGN_LANGUAGE = [
 export function settingsForText(text) {
   const t = String(text || "");
   const subjectGrade = CompFinderPricing.subjectGradeFrom(t);
+  // A stamped copy is a fact about the card in your hand, read off the title
+  // exactly as a grade is — and, like a grade, it inverts an exclusion rather
+  // than standing it down. Without it a prerelease-stamped card is priced from
+  // the ordinary copies, which is how three went out under market.
+  const subjectStamp = CompFinderPricing.subjectStampFrom(t);
   const namesALanguage = FOREIGN_LANGUAGE.some((l) => new RegExp(`\\b${l}\\b`, "i").test(t));
-  if (namesALanguage) return { ...APP_SETTINGS, subjectGrade };   // not an English card — leave the pool alone
+  if (namesALanguage) return { ...APP_SETTINGS, subjectGrade, subjectStamp };   // not an English card — leave the pool alone
   return {
     ...APP_SETTINGS,
     subjectGrade,
+    subjectStamp,
     excludeKeywords: { ...APP_SETTINGS.excludeKeywords, foreignPrint: FOREIGN_LANGUAGE }
   };
 }

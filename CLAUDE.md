@@ -62,8 +62,9 @@ stream` (the relay, only while streaming).
   ("60 HP" is a stat, "Reverse Holo" is not "Holo") that the lookbehind-free
   rewrites had to preserve.
 - `scripts/check-exclusions.mjs` — which comps the pricing engine excludes,
-  and — since the rule inverts when the card being priced is itself a slab —
-  which card we are holding.
+  and — since the rule inverts when the card being priced is itself a slab, or
+  a stamped copy — which card we are holding. The stamped half also pins that
+  the search ASKS for the stamp, and the four titles that must not read as one.
 - `scripts/check-resolve.mjs` — what the resolver parses and how it ranks.
 - `scripts/check-public-price.mjs` — a grep: no charm ladder on the public side.
 - `scripts/check-turnstile.mjs` — pass forgery, client binding, expiry, off-switch.
@@ -392,6 +393,63 @@ ninety days, and the listing price is a decision already made about that exact
 copy with the grade on the label. A raw card is untouched by it — the ladder
 and the gate are right there. The sticker box still beats both, and every row
 says which of the three it is.
+
+## A stamped copy is not the card underneath it either
+
+Shedinja 14/107, Slugma 75/107 and Wingull 70/100 all sold under market on
+2026-09-13. Each was a prerelease-stamped copy, and the engine did to them
+exactly what it used to do to a slab: **excluded every comp that WAS the card,
+then priced them from the ordinary copies underneath.** Shedinja came out at
+£7.49 off five plain reverse holos, and nothing on the row said so.
+
+Three faults, stacked, and all three had to close:
+
+- **The file never said.** CardUploader wrote "Reverse Holo" and left
+  `*C:Speciality` blank, so the app priced the card it was told about. The
+  Imports screen is where that gets corrected now, before the run.
+- **Saying it changed nothing.** `buildQueryFromItem` and `buildCardQuery`
+  composed from name + number + set, so a stamp in the title produced a
+  byte-identical query. The search could never ask for the card.
+- **`promoVariant` threw the evidence away.** "prerelease" is in that keyword
+  list, so any genuine comp was excluded as *"A promo printing, not this one"* —
+  the same shape as excluding every graded comp without asking whether the card
+  in hand is a slab.
+
+`subjectStampFrom()` (one definition, `packages/core/pricing.js`) is what was
+missing, and the exclusion **inverts** on it rather than standing down: pricing
+a stamped copy, the ordinary ones go as `plainPrinting`, and the `promoVariant`
+keyword group stands down the same way the `graded` group does for a slab —
+without that, a stamped comp survives the inversion and dies one loop later,
+which is the half that actually cost money.
+
+- **Below `stampedMinComps` there is NO price, and never a fall back to the
+  ordinary market.** That fall back is the original fault in both bugs, and it
+  is silent. The row is held with a note saying why, which on the app means
+  £0.00 and an export the guard refuses until you type a price.
+- **The stamp reaches the QUERY and never `nameTokens`.** Sellers write
+  "prerelease", "pre-release", "staff stamped", "stamp"; `nameTokensMatch`
+  demands a literal word. One pattern in `classifyExclusion` covers every
+  spelling, and asking SoldComps for one of them is enough to get the listings
+  back. Same distinction `carduploader.js` already documents for set names.
+- **The subject test is where the blast radius is**, so it is written narrowly:
+  bare "staff" is a Magic card name several times over (Staff of Nin, Staff of
+  Domination) and needs a stamp word after it, "stamped addressed envelope" is
+  a UK seller describing postage and is refused by lookahead, and "unstamped"
+  reads as ordinary. `check-exclusions.mjs` pins all four as raw a second time
+  on the subject side, exactly as it does for ACE SPEC and TAG TEAM.
+- **`isPromoCard()` on the public page answers a different question** — is the
+  CARD a promo printing, off the catalogue — and correctly says no to a stamped
+  main-set common. Both now travel in settings, and neither replaces the other.
+- **It is the third axis on `printingOf()`** in `stockcheck.js` too: a stamped
+  copy on the shelf is no more evidence about the plain one in the run than a
+  slab is about a raw card.
+
+**Still unmeasured, deliberately.** A stamped comp can still contaminate an
+ORDINARY card's price upward, which is this bug's mirror. Closing that changes
+every card in both products rather than only the broken ones, so it wants
+`CORPUS_OUT=corpus.json node scripts/probe-rules.mjs` and the audit harness
+first — the rule this repo already has for exactly this situation. The same run
+is what should settle how sellers actually spell a stamp.
 
 ## Measure before adding a pricing rule
 

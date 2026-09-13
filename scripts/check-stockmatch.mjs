@@ -36,27 +36,31 @@ const eq = (label, got, want) => {
 // --- 1. which printing is this title talking about? ------------------------
 // [title, { reverse, graded, grade }, why this case is here]
 const TITLES = [
-  ["Shedinja 14/107 Deoxys Pokemon Reverse Holo NM", { reverse: true, graded: false, grade: null },
+  ["Shedinja 14/107 Deoxys Prerelease Stamped Reverse Holo NM", { reverse: true, stamped: true, graded: false, grade: null },
+    "the card that started the stamped rule — sold under market priced off plain copies"],
+  ["Staff of Nin Mirrodin Besieged NM", { reverse: false, stamped: false, graded: false, grade: null },
+    "a Magic card NAMED Staff — the app prices every game"],
+  ["Shedinja 14/107 Deoxys Pokemon Reverse Holo NM", { reverse: true, stamped: false, graded: false, grade: null },
     "THE case — a CardUploader title, and what the batch row carries"],
-  ["Shedinja 14/107 Deoxys Pokemon NM", { reverse: false, graded: false, grade: null },
+  ["Shedinja 14/107 Deoxys Pokemon NM", { reverse: false, stamped: false, graded: false, grade: null },
     "...and the copy on the shelf that was answering for it"],
-  ["Barboach 60/110 Holon Phantoms Pokemon Reverse Holo NM", { reverse: true, graded: false, grade: null },
+  ["Barboach 60/110 Holon Phantoms Pokemon Reverse Holo NM", { reverse: true, stamped: false, graded: false, grade: null },
     "the second row on the screenshot that started this"],
-  ["Pikachu 58/102 Base Set Holo Rare", { reverse: false, graded: false, grade: null },
+  ["Pikachu 58/102 Base Set Holo Rare", { reverse: false, stamped: false, graded: false, grade: null },
     "plain Holo is NOT Reverse Holo — the rule core learned the hard way"],
-  ["Umbreon VMAX 215/203 Evolving Skies Reverse  Holo", { reverse: true, graded: false, grade: null },
+  ["Umbreon VMAX 215/203 Evolving Skies Reverse  Holo", { reverse: true, stamped: false, graded: false, grade: null },
     "the two words with whatever spacing a seller typed"],
-  ["Reversal Energy 192/182 Paradox Rift", { reverse: false, graded: false, grade: null },
+  ["Reversal Energy 192/182 Paradox Rift", { reverse: false, stamped: false, graded: false, grade: null },
     "a card NAMED Reversal is not a reverse holo — word boundary, not substring"],
-  ["Charizard 4/102 Base Set PSA 10 GEM MINT", { reverse: false, graded: true, grade: 10 },
+  ["Charizard 4/102 Base Set PSA 10 GEM MINT", { reverse: false, stamped: false, graded: true, grade: 10 },
     "a slab is a different object at a different price, same as a variant"],
-  ["Charizard 4/102 Base Set CGC 9", { reverse: false, graded: true, grade: 9 },
+  ["Charizard 4/102 Base Set CGC 9", { reverse: false, stamped: false, graded: true, grade: 9 },
     "companies are pooled, grades are kept apart — the engine's own split"],
-  ["Charizard 4/102 Base Set — not graded, raw", { reverse: false, graded: false, grade: null },
+  ["Charizard 4/102 Base Set — not graded, raw", { reverse: false, stamped: false, graded: false, grade: null },
     "a seller saying what it ISN'T. Reading this as a slab inverts everything"],
-  ["Blastoise 2/102 Reverse Holo PSA 9", { reverse: true, graded: true, grade: 9 },
+  ["Blastoise 2/102 Reverse Holo PSA 9", { reverse: true, stamped: false, graded: true, grade: 9 },
     "both axes at once, and they are independent"],
-  ["", { reverse: false, graded: false, grade: null }, "nothing to read is not a variant"]
+  ["", { reverse: false, stamped: false, graded: false, grade: null }, "nothing to read is not a variant"]
 ];
 for (const [title, want, why] of TITLES) {
   eq(`printingOf(${JSON.stringify(title)}) — ${why}`, printingOf(title), want);
@@ -67,7 +71,7 @@ const rev = printingOf("Shedinja 14/107 Reverse Holo");
 const plain = printingOf("Shedinja 14/107");
 const psa10 = printingOf("Shedinja 14/107 PSA 10");
 const psa9 = printingOf("Shedinja 14/107 PSA 9");
-const gradedNoNumber = { reverse: false, graded: true, grade: null };
+const gradedNoNumber = { reverse: false, stamped: false, graded: true, grade: null };
 
 eq("a reverse holo is not the plain copy", samePrinting(rev, plain), false);
 eq("...and it is not one-way — the plain copy is not the reverse either", samePrinting(plain, rev), false);
@@ -80,6 +84,13 @@ eq("nothing known about one side never splits a match", samePrinting(null, rev),
 
 // --- 3. and it says WHICH, in words ---------------------------------------
 eq("pricing the reverse, holding the plain copy", printingDiff(rev, plain), "non-reverse");
+{
+  const stamped = printingOf("Shedinja 14/107 Deoxys Prerelease Stamped");
+  const ordinary = printingOf("Shedinja 14/107 Deoxys");
+  eq("a stamped copy is not the ordinary one", samePrinting(stamped, ordinary), false);
+  eq("...and it says which", printingDiff(stamped, ordinary), "unstamped");
+  eq("holding the stamp while pricing the ordinary card", printingDiff(ordinary, stamped), "stamped");
+}
 eq("pricing the plain copy, holding the reverse", printingDiff(plain, rev), "reverse holo");
 eq("pricing a raw card, holding a slab", printingDiff(plain, psa10), "graded 10");
 eq("pricing a slab, holding the raw card", printingDiff(psa10, plain), "raw");

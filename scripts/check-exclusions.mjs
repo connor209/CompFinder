@@ -462,8 +462,118 @@ for (const [title, number, want] of NUMBERED_CASES) {
   }
 }
 
+// --- The subject test, one axis along: a STAMPED copy ---------------------
+//
+// Shedinja 14/107, Slugma 75/107 and Wingull 70/100 all sold under market on
+// 13 Sep 2026. Each was a prerelease-stamped copy, and the engine did to them
+// exactly what it used to do to a slab: excluded every comp that WAS the card
+// — "prerelease" sits in excludeKeywords.promoVariant — and priced them from
+// the ordinary copies underneath. Shedinja came out at £7.49 off five plain
+// reverse holos, with nothing on the row to say so.
+//
+// The pairs are the point here too: the same title is evidence in one column
+// and contamination in the other.
+{
+  const SUBJECT = "Shedinja 14/107 EX Deoxys Prerelease Stamped NM";
+  const stamped = { ...DEFAULT_SETTINGS, subjectStamp: CompFinderPricing.subjectStampFrom(SUBJECT) };
+  const check = (title, settings, want, label) => {
+    const rec = recommend([{ title, itemPricePence: 5000, postagePence: 0 }], settings, null, "sold", null, null);
+    const got = (rec.excluded || [])[0]?.exclusionReason ?? null;
+    if (got !== want) {
+      failed++;
+      console.error(`FAIL  ${label}: want ${String(want)}, got ${String(got)}\n      ${title}`);
+    }
+  };
+
+  const STAMPED = "Shedinja 14/107 EX Deoxys Prerelease Stamped";
+  const STAMP_ONLY = "Shedinja 14/107 Deoxys Stamped NM";
+  const PLAIN = "Shedinja 14/107 EX Deoxys NM";
+
+  // Holding an ordinary copy: unchanged from before any of this.
+  check(PLAIN, DEFAULT_SETTINGS, null, "ordinary subject keeps ordinary comps");
+  check(STAMPED, DEFAULT_SETTINGS, "promoVariant", "ordinary subject still drops a prerelease");
+
+  // Holding the stamped copy: the same titles, read the other way round.
+  check(STAMPED, stamped, null, "stamped subject keeps its own printing");
+  check(PLAIN, stamped, "plainPrinting", "stamped subject drops the ordinary copies — THE bug");
+  // "prerelease" is a promoVariant keyword, so without standing that group
+  // down the comp survives the inversion and dies one loop later. That is the
+  // half that actually cost money, and it is invisible on a row: the price
+  // still appears, built from the wrong printing.
+  check(STAMPED, stamped, null, "the promoVariant keyword must not undo the inversion");
+  check(STAMP_ONLY, stamped, null, "a seller who wrote only 'stamped' is still the same printing");
+
+  // The subject test is where the blast radius is: a false positive here
+  // throws away every comp that IS the card. These are the ones that have to
+  // read as ordinary.
+  const NOT_STAMPS = [
+    ["Staff of Nin Mirrodin Besieged NM", "a Magic card NAMED Staff — this engine prices every game"],
+    ["Charizard 4/102 Base Set — sent in a stamped addressed envelope", "a seller describing postage"],
+    ["Umbreon VMAX 215/203 Evolving Skies unstamped", "a seller saying it is NOT one"],
+    ["Pikachu 58/102 Base Set Holo Rare", "an ordinary card, which is nearly all of them"]
+  ];
+  for (const [title, why] of NOT_STAMPS) {
+    if (CompFinderPricing.subjectStampFrom(title)) {
+      failed++;
+      console.error(`FAIL  subjectStampFrom read a stamp where there is none (${why})\n      ${title}`);
+    }
+  }
+  const STAMPS = [
+    ["Shedinja 14/107 Deoxys Prerelease Stamped Reverse Holo", "prerelease"],
+    ["Wingull 70/100 Crystal Guardians Pre-Release Stamp", "prerelease"],
+    ["Slugma 75/107 Deoxys Staff Stamped Promo", "staff"],
+    ["Charizard 4/102 Base Set Stamped", "stamped"]
+  ];
+  for (const [title, kind] of STAMPS) {
+    const got = CompFinderPricing.subjectStampFrom(title);
+    if (!got || got.kind !== kind) {
+      failed++;
+      console.error(`FAIL  subjectStampFrom(${JSON.stringify(title)}) want ${kind}, got ${JSON.stringify(got)}`);
+    }
+  }
+
+  // The search has to ASK for it, or none of the above ever gets the chance:
+  // the query that priced Shedinja at £7.49 was byte-identical with and
+  // without the stamp in its title. Into the query and never into nameTokens,
+  // which demands a literal word sellers spell several ways.
+  const q = CompFinderPricing.buildCardQuery(SUBJECT);
+  if (!/prerelease/i.test(q.query)) {
+    failed++;
+    console.error(`FAIL  the query must ask SoldComps for the stamp, got ${JSON.stringify(q.query)}`);
+  }
+  if ((q.nameTokens || []).some((t) => /prerelease|stamp/i.test(t))) {
+    failed++;
+    console.error("FAIL  the stamp must not become a required token — sellers spell it several ways");
+  }
+  if (/prerelease|stamp/i.test(CompFinderPricing.buildCardQuery(PLAIN).query)) {
+    failed++;
+    console.error("FAIL  an ordinary card's query must be untouched by any of this");
+  }
+
+  // Too few stamped comps is NO price — never a quiet fall back to the
+  // ordinary copies, which is the whole shape of the original fault.
+  const PLAIN_POOL = [1, 2, 3, 4, 5].map((i) => ({
+    title: PLAIN, itemPricePence: 700 + i, postagePence: 0, soldDate: "2026-09-01"
+  }));
+  const held = recommend(PLAIN_POOL, stamped, ["shedinja"], "sold", "14/107", null);
+  if (held.rawPence !== null || !held.priceHeld) {
+    failed++;
+    console.error(`FAIL  a stamped card with only ordinary comps must hold, got ${held.rawPence}`);
+  }
+  if (!/stamped/i.test(held.note || "")) {
+    failed++;
+    console.error("FAIL  a held stamped card must say why on the row");
+  }
+  // And the ordinary card built from the same pool is untouched by all of it.
+  const ordinary = recommend(PLAIN_POOL, DEFAULT_SETTINGS, ["shedinja"], "sold", "14/107", null);
+  if (!(ordinary.rawPence > 0)) {
+    failed++;
+    console.error(`FAIL  an ordinary card must still price from ordinary comps, got ${ordinary.rawPence}`);
+  }
+}
+
 if (failed) {
   console.error(`\n${failed} exclusion checks failed.`);
   process.exit(1);
 }
-console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier, foreign-print and graded-subject cases pass.`);
+console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier, foreign-print, graded-subject and stamped-subject cases pass.`);

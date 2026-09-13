@@ -86,8 +86,15 @@ export function printingOf(title) {
   // and all. Both sides here are titles of cards we hold, which is exactly
   // the question it answers.
   const graded = CompFinderPricing.subjectGradeFrom(t);
+  // The third axis, and it arrived the expensive way: Shedinja 14/107, Slugma
+  // 75/107 and Wingull 70/100 all sold under market as stamped copies priced
+  // from ordinary ones. Same rule as core's, through core's own reading — a
+  // stamped copy on the shelf is no more evidence about the plain one in the
+  // run than a slab is about a raw card.
+  const stamp = CompFinderPricing.subjectStampFrom(t);
   return {
     reverse: REVERSE_HOLO_PATTERN.test(t),
+    stamped: !!stamp,
     graded: !!graded,
     // Grades kept apart, companies pooled — the same split the engine makes
     // on its comps. PSA over CGC is a real premium and nothing like the gap
@@ -107,6 +114,7 @@ export function printingOf(title) {
 export function samePrinting(a, b) {
   if (!a || !b) return true;
   if (a.reverse !== b.reverse) return false;
+  if (a.stamped !== b.stamped) return false;
   if (a.graded !== b.graded) return false;
   if (a.graded && b.graded && a.grade != null && b.grade != null && a.grade !== b.grade) return false;
   return true;
@@ -126,6 +134,7 @@ export function printingDiff(want, other) {
   if (!want || !other) return "";
   const parts = [];
   if (want.reverse !== other.reverse) parts.push(other.reverse ? "reverse holo" : "non-reverse");
+  if (want.stamped !== other.stamped) parts.push(other.stamped ? "stamped" : "unstamped");
   if (want.graded !== other.graded) {
     parts.push(other.graded ? (other.grade != null ? `graded ${other.grade}` : "graded") : "raw");
   } else if (want.graded && other.graded && want.grade != null && other.grade != null && want.grade !== other.grade) {
@@ -168,7 +177,7 @@ export function buildStockIndex(listings) {
 
 /** A printing, flattened to something a Map can key on. */
 function printingSig(p) {
-  return `${p.reverse ? "rev" : "-"}|${p.graded ? (p.grade != null ? `g${p.grade}` : "g") : "raw"}`;
+  return `${p.reverse ? "rev" : "-"}|${p.stamped ? "stamp" : "-"}|${p.graded ? (p.grade != null ? `g${p.grade}` : "g") : "raw"}`;
 }
 
 /**

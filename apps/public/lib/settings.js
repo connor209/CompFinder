@@ -92,7 +92,17 @@ export function settingsForCard(card, { includeForeign = false } = {}) {
   // rendered on the server has no visitor text at all, which is correct: a
   // published card page is about the raw card.
   const subjectGrade = CompFinderPricing.subjectGradeFrom((card && (card.asked || card.q)) || "");
-  if (!promo && !english) return subjectGrade ? { ...base, subjectGrade } : base;
+  // A stamp rides in on the same text and for the same reason: it is a fact
+  // about one COPY, so the catalogue cannot know it and `q` has had it
+  // normalised away. Somebody typing "prerelease stamped Shedinja 14/107" is
+  // asking what the stamped copy fetches, and answering with the ordinary
+  // card's price is answering a different question in the largest type on the
+  // page. isPromoCard() above is a different question again — whether the CARD
+  // is a promo printing — and correctly says no to a stamped main-set common.
+  const subjectStamp = CompFinderPricing.subjectStampFrom((card && (card.asked || card.q)) || "");
+  if (!promo && !english) {
+    return subjectGrade || subjectStamp ? { ...base, subjectGrade, subjectStamp } : base;
+  }
 
   const excludeKeywords = { ...base.excludeKeywords };
   if (promo) {
@@ -102,7 +112,7 @@ export function settingsForCard(card, { includeForeign = false } = {}) {
     excludeKeywords.promoVariant = base.excludeKeywords.promoVariant.filter((w) => w !== "promo");
   }
   if (english) excludeKeywords.foreignPrint = FOREIGN_LANGUAGE;
-  return { ...base, excludeKeywords, subjectGrade };
+  return { ...base, excludeKeywords, subjectGrade, subjectStamp };
 }
 
 export default { isPromoCard, settingsForCard, foreignCount, FOREIGN_LANGUAGE };
