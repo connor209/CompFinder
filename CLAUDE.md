@@ -54,7 +54,7 @@ stream` (the relay, only while streaming).
 
 ## Checks
 
-`npm run check` runs thirty-seven table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-eight table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -104,6 +104,11 @@ stream` (the relay, only while streaming).
   and migration 028 declare the same columns, that `title_original` is not
   writable from a patch, that a batch run prices the EDITED title, and a grep
   keeping the two tables named in one file.
+- `scripts/check-searchpasses.mjs` — asking one card several ways: the four
+  rungs and the queries they send, that a card with nothing to drop collapses
+  to one search rather than paying for four identical ones, that a sale found
+  by two passes is counted once, that a FULL page stops the ladder, and that a
+  widened QUERY never becomes a widened CARD.
 - `scripts/check-showstock.mjs` — the show pool and the price that reaches a
   label: the cash ladder as a table, which prices are held back, that a graded
   card starts from our own eBay price while a raw one never does, and that a
@@ -572,6 +577,61 @@ under five), and the filter kept 8 of them. **Half that run was thin because the
 search found little, not because the rules threw much away.** That is the honest
 ceiling on this population, and it matches what `wideset.json` already measured:
 commons median 5 comps against a chase card's 15+.
+
+## Asking the same card more than one way
+
+One query per card is one sample, and the measured shape of that sample is
+poor on cheap cards: over a 50-card reverse-holo commons run SoldComps
+**returned** a median of 11 listings per card — six cards under five — while
+the filter kept 8 of the 11. **The loss is upstream of the rules.** And there
+is no time lever, because SoldComps holds no data far enough back for a wider
+window to reach.
+
+So `apps/app/lib/searchpasses.js` asks differently instead. **Search depth** on
+the Batch screen runs up to four passes per card, narrowest first:
+
+| rung | query | why |
+|---|---|---|
+| exact | `Emboar Reverse Holo 33/236 Cosmic Eclipse` | what the file describes |
+| noset | `Emboar Reverse Holo 33/236` | the number is the anchor; the set was steering, and it is the term sellers spell most variously — CardUploader writes Cardmarket's names, and nobody titles a listing "Deck Exclusives" |
+| noprinting | `Emboar 33/236 Cosmic Eclipse` | finds the "Rev Holo" and "Reverse Foil" listings the literal words never return |
+| bare | `Emboar 33/236` | the widest ask |
+
+- **A wider search is not a wider CARD.** Every pass is filtered against the
+  real card's `cardSettings`, so a pass that dropped "Reverse Holo" from the
+  SEARCH is still pricing a reverse holo and the plain copies it drags in go
+  out as `variantMismatch`. Reading the printing off the widened text would
+  pool the two printings, which is what three cards sold under market for;
+  `check-searchpasses.mjs` greps the cross-reference for a `settingsForText`
+  of its own.
+- **Every rung is a change to the ITEM, never a query string of its own**, so
+  all four go through `buildQueryFromItem`. A second query builder would drift,
+  and the drift reads as passes searching for something the app does not think
+  they search for.
+- **A rung that repeats a query is dropped.** A card with no set has nothing to
+  drop and collapses to one search — paying twice for one string is the one
+  thing a multi-pass search must never do.
+- **A FULL page stops the ladder.** SoldComps returns one page newest-first, so
+  a capped card has no more sales waiting behind a wider query — it has a
+  different, wider page, which on a reverse holo is a page of plain copies.
+  Widening a card that is already full spends a request to make the sample
+  worse.
+- **Each sale is counted once**, keyed on the item id, then the URL, then
+  title+total+date. The same listing counted twice weights the median toward
+  whatever the easy searches found, which is precisely the bias more passes
+  exist to remove.
+- **Agreement is the point, not just more comps.** Each pass is priced on its
+  OWN comps — free, the comps are already in hand — and searches that found
+  DIFFERENT listings and landed on the same figure are evidence one search
+  cannot give. Disagreement says the narrow search was a BIASED sample rather
+  than a small one, and nothing else in this app can tell those apart, so it
+  goes on the row with a ⚠ rather than being averaged away.
+- **`AGREE_WITHIN_PCT` (25) and `ENOUGH_COMPS` (12) are judgements, not
+  measurements.** They are in one file so they are one number rather than a
+  feeling scattered through the UI, and the audit harness is how they should
+  be settled.
+
+Depth 1 is the default and is exactly what the app has always done.
 
 ## Measure before adding a pricing rule
 

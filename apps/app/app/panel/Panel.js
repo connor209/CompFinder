@@ -9,7 +9,8 @@ import { createGate, runPool, SOLDCOMPS_GAP_MS, BROWSE_GAP_MS, BATCH_CONCURRENCY
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { loadImport, batchItemsFrom, saveImport, updateItem as updateImportItem } from "@/lib/import-store.js";
-import { SpecificsEditor, TitleEditor, StockFields, changesTheSearch } from "./CardFields";
+import { SpecificsEditor, TitleEditor, StockFields } from "./CardFields";
+import { passesFor, mergeComps, needsAnotherPass, agreementOf, agreementNote, MAX_DEPTH } from "@/lib/searchpasses.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
 import {
   saveBatch,
@@ -311,6 +312,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const [itemLocation, setItemLocation] = useState("domestic");
   const [itemCondition, setItemCondition] = useState("any");
   const [soldWithin, setSoldWithin] = useState("90");
+  // How many different ways to ask SoldComps about each card. One is what this
+  // app has always done. Each extra pass is one more request PER CARD that
+  // needs it, which is why the control says so out loud.
+  const [searchDepth, setSearchDepth] = useState(1);
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [includeCondition, setIncludeCondition] = useState(false);
@@ -1006,6 +1011,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
 
       let query, nameTokens, set, csvItem, cardNumber;
       let soldComps, apiDiagnostic, fromCache = false;
+      let passRuns = null, passAdded = null;
       try {
         // Inside the try on purpose: a single malformed row must fail that
         // row like any other error, not reject out of runBatch and leave the
@@ -1016,11 +1022,33 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           throw new Error(`Sold-listing lookup skipped — it failed on the first ${SOLD_DOWN_STREAK} cards of this run.`);
         }
 
-        const result = await fetchSoldCompsWithRetry(query, searchOptions, (attempt, delay) =>
-          setStatus(`Item ${i + 1} of ${items.length}: SoldComps rate limit — retry ${attempt} in ${Math.round(delay / 1000)}s…`)
-        );
-        soldComps = result.comps;
-        fromCache = !!result.cached;
+        // Ask the same card more than one way, narrowest first. Every pass is
+        // filtered against the REAL card's settings below, so a wider search
+        // can only add comps that would have passed anyway — widening the
+        // search is not widening what counts.
+        const ladder = csvItem
+          ? passesFor(csvItem, { includeCondition, useFullTitle }, searchDepth, (it, o) => CardUploaderCsv.buildQueryFromItem(it, o))
+          : [{ key: "exact", query, nameTokens }];
+        const passResults = [];
+        let result = null;
+        for (const pass of ladder) {
+          if (passResults.length && !needsAnotherPass(result)) break;
+          if (passResults.length) {
+            setStatus(`Item ${i + 1} of ${items.length}: asking again — ${pass.label.toLowerCase()}…`);
+          }
+          result = await fetchSoldCompsWithRetry(pass.query, searchOptions, (attempt, delay) =>
+            setStatus(`Item ${i + 1} of ${items.length}: SoldComps rate limit — retry ${attempt} in ${Math.round(delay / 1000)}s…`)
+          );
+          passResults.push({ key: pass.key, label: pass.label, query: pass.query, comps: result.comps, cached: !!result.cached });
+        }
+        const merged = mergeComps(passResults);
+        soldComps = merged.comps;
+        passRuns = passResults;
+        passAdded = merged.addedBy;
+        // "Free" only if EVERY pass was a cache hit — one paid request in a
+        // ladder is still a paid run, and saying otherwise makes the budget
+        // estimate flatter than the bill.
+        fromCache = passResults.every((p) => p.cached);
         if (result.comps.length === 0) {
           apiDiagnostic =
             result.rawItemCount > 0
@@ -1103,6 +1131,32 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       const { comps: ukPostageComps, changed: postageDropped } = dropForeignPostage(applyNumberGuards(soldComps, cardNumber));
 
       let rec = CompFinderPricing.recommend(ukPostageComps, cardSettings, nameTokens, "sold", cardNumber, set);
+
+      // Cross-reference the passes. Each one is priced on its OWN comps,
+      // through the same preprocessing and the same card settings — so the
+      // only difference between them is which listings the search found. Costs
+      // no requests: the comps are already in hand.
+      //
+      // `cardSettings` throughout, never settings read off a pass's widened
+      // query: a pass that dropped "Reverse Holo" from the SEARCH is still
+      // pricing a reverse holo, and reading the printing off the widened text
+      // would pool the two — which is the bug three cards sold under market
+      // for.
+      if (passRuns && passRuns.length > 1) {
+        const passPrices = passRuns.map((p) => {
+          const { comps: own } = dropForeignPostage(applyNumberGuards(p.comps, cardNumber));
+          const r = CompFinderPricing.recommend(own, cardSettings, nameTokens, "sold", cardNumber, set);
+          return { key: p.key, label: p.label, query: p.query, pence: r.rawPence ?? 0, used: (r.included || []).length };
+        });
+        const agreement = agreementOf(passPrices);
+        rec = {
+          ...rec,
+          passes: passPrices,
+          passAdded,
+          agreement,
+          note: [rec.note, agreementNote(agreement, passAdded || {})].filter(Boolean).join(" ")
+        };
+      }
 
       // Condition, over the comps that survived identity — never over the raw
       // pool. Near-mint sells for about twice lightly-played (measured across
@@ -2182,6 +2236,23 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               </select>
             </label>
             <label className="field">
+              <span>Search depth</span>
+              <select value={searchDepth} onChange={(e) => setSearchDepth(Number(e.target.value))}>
+                <option value={1}>1 — as the file describes it</option>
+                <option value={2}>2 — also without the set</option>
+                <option value={3}>3 — also without the printing</option>
+                <option value={4}>4 — also name and number alone</option>
+              </select>
+            </label>
+            {searchDepth > 1 ? (
+              <p className="hint hint-small" style={{ flexBasis: "100%", margin: 0 }}>
+                Up to <b>{searchDepth}</b> SoldComps requests per card — but only for cards that need them:
+                a card that comes back with a full page, or with enough sales already, stops early. Passes that
+                would repeat a query it has already run are skipped. Every pass is filtered against this card,
+                so a wider search can only find comps that would have counted anyway.
+              </p>
+            ) : null}
+            <label className="field">
               <span>Sold within</span>
               <select value={soldWithin} onChange={(e) => setSoldWithin(e.target.value)}>
                 <option value="30">Last 30 days</option>
@@ -3039,6 +3110,18 @@ function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, o
             unreadable for exactly this, which is how it got noticed. */}
         {showDetails && reasonBreakdown ? (
           <span className="rs-reasons" title={reasonBreakdown}>{reasonBreakdown}</span>
+        ) : null}
+        {/* What each way of asking came back with. The point of running more
+            than one search is not only more comps — it is whether searches
+            that found DIFFERENT listings land on the same figure. */}
+        {showDetails && rec?.passes?.length > 1 ? (
+          <span className={`rs-passes${rec.agreement?.corroborated ? " ok" : " off"}`}>
+            {rec.passes.map((p) => (
+              <span key={p.key} title={p.query}>
+                {p.label}: {p.pence > 0 ? CompFinderPricing.toPoundsStr(p.pence) : "—"} <i>({p.used})</i>
+              </span>
+            ))}
+          </span>
         ) : null}
         <ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} />
         <div className="rs-links">
