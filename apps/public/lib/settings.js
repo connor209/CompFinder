@@ -80,29 +80,28 @@ export function settingsForCard(card, { includeForeign = false } = {}) {
   const promo = isPromoCard(card);
   const english = wantsEnglishComps(card) && !includeForeign;
   // Read off what the visitor TYPED (`asked`), not off the catalogue row and
-  // not off `q`: the catalogue knows about cards, and a grade is a fact about
-  // one particular copy of one. `q` is no good either — once a card resolves
-  // it holds the canonical "name number set" the cache is keyed on, with the
-  // grade already stripped out of it, so reading the grade from there would
-  // find one only on a search that failed to resolve.
+  // not off `q`: the catalogue knows about cards, and every one of these is a
+  // fact about one particular COPY of one. `q` is no good either — once a card
+  // resolves it holds the canonical "name number set" the cache is keyed on,
+  // with the grade already stripped out of it.
   //
   // Someone who searches "PSA 10 Charizard 4/102" is asking what the slab is
   // worth, and answering with the raw card's price is answering a different
-  // question — confidently, in the largest type on the page. A card page
-  // rendered on the server has no visitor text at all, which is correct: a
-  // published card page is about the raw card.
-  const subjectGrade = CompFinderPricing.subjectGradeFrom((card && (card.asked || card.q)) || "");
-  // A stamp rides in on the same text and for the same reason: it is a fact
-  // about one COPY, so the catalogue cannot know it and `q` has had it
-  // normalised away. Somebody typing "prerelease stamped Shedinja 14/107" is
-  // asking what the stamped copy fetches, and answering with the ordinary
-  // card's price is answering a different question in the largest type on the
-  // page. isPromoCard() above is a different question again — whether the CARD
-  // is a promo printing — and correctly says no to a stamped main-set common.
-  const subjectStamp = CompFinderPricing.subjectStampFrom((card && (card.asked || card.q)) || "");
-  if (!promo && !english) {
-    return subjectGrade || subjectStamp ? { ...base, subjectGrade, subjectStamp } : base;
-  }
+  // question — confidently, in the largest type on the page. Same for a
+  // prerelease stamp, and same for a reverse holo, which matters more here
+  // than anywhere else: the free-text path produces no "reverse" token at all,
+  // so until this landed a visitor pricing a reverse holo had EVERY reverse
+  // comp thrown out as a variant mismatch and got the plain card's price back.
+  //
+  // A card page rendered on the server has no visitor text at all, which is
+  // correct: a published card page is about the plain, ungraded card.
+  //
+  // isPromoCard() above is a different question again — whether the CARD is a
+  // promo printing, off the catalogue — and correctly says no to a stamped
+  // main-set common. Both travel; neither replaces the other.
+  const facts = CompFinderPricing.subjectFactsFrom((card && (card.asked || card.q)) || "");
+  const saysSomething = facts.subjectGrade || facts.subjectStamp || facts.subjectReverse;
+  if (!promo && !english) return saysSomething ? { ...base, ...facts } : base;
 
   const excludeKeywords = { ...base.excludeKeywords };
   if (promo) {
@@ -112,7 +111,7 @@ export function settingsForCard(card, { includeForeign = false } = {}) {
     excludeKeywords.promoVariant = base.excludeKeywords.promoVariant.filter((w) => w !== "promo");
   }
   if (english) excludeKeywords.foreignPrint = FOREIGN_LANGUAGE;
-  return { ...base, excludeKeywords, subjectGrade, subjectStamp };
+  return { ...base, excludeKeywords, ...facts };
 }
 
 export default { isPromoCard, settingsForCard, foreignCount, FOREIGN_LANGUAGE };

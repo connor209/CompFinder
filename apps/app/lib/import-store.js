@@ -250,6 +250,25 @@ export async function loadImport(supabase, id) {
  * but real reason that a patch built by spreading the row would write back
  * `title_original` and quietly erase the only record of what the file said.
  */
+/**
+ * The specifics a person may correct, and the column each lives in.
+ *
+ * An allow-list rather than a loop over the patch, for the reason the whole
+ * file is built this way: `title_original` is one careless spread away from
+ * being overwritten, and it is the only record of what the file said.
+ */
+export const SPECIFIC_COLUMNS = {
+  cardName: "card_name",
+  cardNumber: "card_number",
+  set: "set_name",
+  rarity: "rarity",
+  year: "year",
+  illustrator: "illustrator",
+  cardType: "card_type",
+  stage: "stage",
+  language: "language"
+};
+
 export async function updateItem(supabase, itemId, patch = {}) {
   const writable = {};
   if (patch.title !== undefined) {
@@ -259,6 +278,13 @@ export async function updateItem(supabase, itemId, patch = {}) {
   if (patch.sku !== undefined) writable.sku = storableText(patch.sku) || null;
   if (patch.condition !== undefined) writable.condition = storableText(patch.condition) || null;
   if (patch.quantity !== undefined) writable.quantity = toInt(patch.quantity);
+  // The card specifics. Three of these are not decoration: cardName,
+  // cardNumber and set are what buildQueryFromItem searches on, so correcting
+  // a set CardUploader got wrong changes which comps come back. The rest are
+  // what the row shows you while you decide.
+  for (const [key, column] of Object.entries(SPECIFIC_COLUMNS)) {
+    if (patch[key] !== undefined) writable[column] = storableText(patch[key]) || null;
+  }
   if (Object.keys(writable).length === 0) return { ok: true, unchanged: true };
   try {
     const { error } = await supabase.from("card_import_items").update(writable).eq("id", itemId);

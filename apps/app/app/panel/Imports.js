@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import {
-  saveImport, listImports, loadImport, updateItem, revertTitle, deleteImport, isEdited
+  saveImport, listImports, loadImport, updateItem, revertTitle, deleteImport, isEdited, SPECIFIC_COLUMNS
 } from "@/lib/import-store.js";
 
 /**
@@ -302,9 +302,29 @@ export default function Imports({ onPrice }) {
 const TITLE_MAX = 80;
 const CONDITIONS = ["NM", "LP", "MP", "HP", "DMG"];
 
+/** The specifics that can be corrected, in the order CardUploader shows them.
+ *  Keyed to the store's own allow-list, so a field cannot be offered here that
+ *  the store would silently refuse to write. */
+const SPECIFIC_LABELS = {
+  cardName: "Card name",
+  cardNumber: "Number",
+  set: "Set",
+  cardType: "Type",
+  year: "Year",
+  rarity: "Rarity",
+  stage: "Stage",
+  illustrator: "Illustrator",
+  language: "Language"
+};
+const SPECIFIC_FIELDS = Object.keys(SPECIFIC_COLUMNS)
+  .filter((key) => SPECIFIC_LABELS[key])
+  .sort((a, b) => Object.keys(SPECIFIC_LABELS).indexOf(a) - Object.keys(SPECIFIC_LABELS).indexOf(b))
+  .map((key) => ({ key, label: SPECIFIC_LABELS[key] }));
+
 function ImportCard({ item, onPatch, onUndo, onView }) {
   const [title, setTitle] = useState(item.title);
   useEffect(() => { setTitle(item.title); }, [item.title]);
+  const [editing, setEditing] = useState(false);
   const specifics = CardUploaderCsv.itemSpecifics(item);
   const edited = isEdited(item);
   const over = title.length > TITLE_MAX;
@@ -354,14 +374,40 @@ function ImportCard({ item, onPatch, onUndo, onView }) {
           </div>
         ) : null}
 
-        <dl className="ci-specs">
-          {specifics.map((s) => (
-            <div key={s.label} className="ci-spec">
-              <dt>{s.label}</dt>
-              <dd>{s.value}</dd>
-            </div>
-          ))}
-        </dl>
+        {editing ? (
+          /* The three at the top are not decoration: the name, the number and
+             the set are what the query is built from, so a set CardUploader
+             got wrong is a search looking for the wrong card. The rest are
+             what you read while deciding. */
+          <div className="ci-edit">
+            {SPECIFIC_FIELDS.map(({ key, label }) => (
+              <label key={key} className="ci-field">
+                <span>{label}</span>
+                <input
+                  defaultValue={item[key] || ""}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v !== (item[key] || "")) onPatch({ [key]: v });
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        ) : specifics.length ? (
+          <dl className="ci-specs">
+            {specifics.map((s) => (
+              <div key={s.label} className="ci-spec">
+                <dt>{s.label}</dt>
+                <dd>{s.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : (
+          <p className="hint hint-small">No card details in the file for this row.</p>
+        )}
+        <button type="button" className="comps-toggle" onClick={() => setEditing((o) => !o)}>
+          {editing ? "▾ Done" : "✎ Edit details"}
+        </button>
       </div>
 
       <div className="ci-fields">

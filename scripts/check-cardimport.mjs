@@ -25,7 +25,7 @@ import { readFileSync } from "node:fs";
 import CardUploaderCsv from "../apps/app/lib/carduploader.js";
 import {
   importRows, restoreItems, isEdited, batchItemsFrom, labelFor, priceToPence,
-  isMissingTable, updateItem
+  isMissingTable, updateItem, SPECIFIC_COLUMNS
 } from "../apps/app/lib/import-store.js";
 
 let failures = 0;
@@ -141,6 +141,30 @@ eq("an empty field is dropped, not rendered as a labelled blank",
   eq("the file's wording is not writable from a patch", sent?.title_original, undefined);
   eq("nor is the owner", sent?.user_id, undefined);
   eq("a quantity arrives as a number", sent?.quantity, 3);
+
+  // The card specifics are editable too — the name, the number and the set are
+  // what the query is built from, so correcting a set CardUploader got wrong
+  // changes which comps come back. Still an allow-list, still key by key.
+  sent = null;
+  await updateItem(fakeSupabase, "row-1", {
+    set: "EX Deoxys", cardNumber: "14/107", rarity: "Rare", illustrator: "kawayoo",
+    title_original: "HACKED", user_id: "someone-else", images: ["x"], position: 99
+  });
+  eq("a specifics patch writes the columns it names and nothing else",
+    Object.keys(sent || {}).sort(), ["card_number", "illustrator", "rarity", "set_name"]);
+  eq("and still cannot reach the file's own title", sent?.title_original, undefined);
+  eq("...or the owner, or the row's place in the file",
+    [sent?.user_id, sent?.position], [undefined, undefined]);
+
+  // Every field the screen offers must be one the store accepts, or editing it
+  // looks like it worked and silently changes nothing.
+  const offered = readFileSync(new URL("../apps/app/app/panel/Imports.js", import.meta.url), "utf8");
+  const labelled = [...offered.matchAll(/^  (\w+): "/gm)].map((m) => m[1]);
+  for (const key of labelled) {
+    if (!Object.prototype.hasOwnProperty.call(SPECIFIC_COLUMNS, key)) {
+      fail(`Imports.js offers "${key}" for editing and import-store.js would not write it`);
+    }
+  }
 
   const nothing = await updateItem(fakeSupabase, "row-1", {});
   eq("a patch with nothing in it writes nothing", nothing, { ok: true, unchanged: true });

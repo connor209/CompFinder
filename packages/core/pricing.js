@@ -43,6 +43,19 @@ const CompFinderPricing = (() => {
     // "is this card a promo PRINTING", off the catalogue — and correctly says
     // no to exactly these cards.
     subjectStamp: null,
+    // THE CARD BEING PRICED, when it is a reverse holo. False for a plain
+    // copy. Set it with subjectReverseFrom(title) — or better, take all three
+    // subject facts at once from subjectFactsFrom().
+    //
+    // It used to be inferred from nameTokens carrying the literal word
+    // "Reverse", which was wrong in both directions at once: the app demanded
+    // "Reverse" AND "Holo" in every comp title (so "Rev Holo" and "Reverse
+    // Foil" were dropped as nameMismatch — six of thirteen comps on one real
+    // row), while the public page's free-text path produced no such token at
+    // all, so a visitor pricing a reverse holo had every reverse comp thrown
+    // out as a variant mismatch. Intent belongs in settings, where the other
+    // two subject facts already live; the TOKENS are for the card's name.
+    subjectReverse: false,
     // How many stamped comps a stamped card needs before its price is
     // published. Below it there is NO price and never a fall back to the
     // ordinary copies, for the same reason gradedMinComps refuses to fall back
@@ -855,7 +868,7 @@ const CompFinderPricing = (() => {
    * and an empty pool here means no price at all. Worth revisiting with a
    * corpus behind it; not worth guessing at.
    */
-  function classifyExclusion(listingTitle, excludeKeywords = DEFAULT_SETTINGS.excludeKeywords, nameTokens = null, cardNumber = null, subjectGrade = null, subjectStamp = null) {
+  function classifyExclusion(listingTitle, excludeKeywords = DEFAULT_SETTINGS.excludeKeywords, nameTokens = null, cardNumber = null, subjectGrade = null, subjectStamp = null, subjectReverse = false) {
     const t = listingTitle || "";
     const pricingASlab = !!(subjectGrade && subjectGrade.graded);
     const pricingAStamp = !!(subjectStamp && subjectStamp.stamped);
@@ -866,8 +879,6 @@ const CompFinderPricing = (() => {
     // not the reverse case: a plain search pulling in a reverse-holo comp.
     // Confirmed live: without this, a £7.97 Reverse Holo listing pooled
     // straight into a £2.34-£3.48 regular-printing comp set.
-    const queryWantsReverseHolo = (nameTokens || []).some((tok) => /^reverse$/i.test(tok));
-    if (!queryWantsReverseHolo && /\breverse\s*holo\b/i.test(t)) return "variantMismatch";
     if (pricingASlab) {
       if (!isGradedTitle(t)) return "rawCopy";
       const compGrade = parseGrade(t);
@@ -875,11 +886,6 @@ const CompFinderPricing = (() => {
     } else if (GRADED_NUMBER_PATTERN.test(t)) {
       return "graded";
     }
-    // The same inversion, one axis along. Pricing a stamped copy, it is the
-    // ORDINARY ones that are the wrong object — and they are the overwhelming
-    // majority of what any search for this card returns, so without this the
-    // stamped copy is priced off them every single time.
-    if (pricingAStamp && !isStampedTitle(t)) return "plainPrinting";
     if (NOT_A_CARD_PATTERN.test(t)) return "notACard";
     if (COUNTED_LOT_PATTERN.test(t) || PLUS_JOINED_NAMES.test(t)) return "bundle";
     if (looksLikeNamedMultiCardLot(t, cardNumber)) return "multiCardLot";
@@ -898,6 +904,21 @@ const CompFinderPricing = (() => {
       if (reason === "promoVariant" && pricingAStamp) continue;
       if (words.some((w) => wordBoundaryMatch(t, w))) return reason;
     }
+    // The PRINTING tests come last, after everything structural. A "Choose
+    // Your Pikachu | Holo/Reverse" pick-list is a pick-list first: labelling
+    // it a variant mismatch answers the wrong question about why it went.
+    //
+    // Pricing a stamped copy, it is the ORDINARY ones that are the wrong
+    // object — and they are the overwhelming majority of what a search for
+    // this card returns, so without this a stamped copy is priced off them
+    // every single time.
+    if (pricingAStamp && !isStampedTitle(t)) return "plainPrinting";
+    // Reverse holo, both directions, off the subject rather than off a token:
+    // a reverse in a plain card's comps drags the price up (a £7.97 reverse
+    // landed in a £2.34-£3.48 set, which is why this rule exists at all), and
+    // a plain copy in a reverse holo's comps drags it down, which is the half
+    // that was missing.
+    if (!!subjectReverse !== isReverseHoloTitle(t)) return "variantMismatch";
     return null; // not excluded
   }
 
@@ -1032,7 +1053,7 @@ const CompFinderPricing = (() => {
     const excluded = [];
 
     for (const comp of comps) {
-      const reason = classifyExclusion(comp.title, settings.excludeKeywords, nameTokens, cardNumber, settings.subjectGrade, settings.subjectStamp);
+      const reason = classifyExclusion(comp.title, settings.excludeKeywords, nameTokens, cardNumber, settings.subjectGrade, settings.subjectStamp, settings.subjectReverse);
       if (reason) {
         excluded.push({ ...comp, exclusionReason: reason });
       } else {
@@ -1313,6 +1334,46 @@ const CompFinderPricing = (() => {
     return { stamped: true, kind };
   }
 
+  /**
+   * A REVERSE HOLO, in the two readings this needs.
+   *
+   * The comp side is tolerant, because it is reading what a stranger typed:
+   * "reverse holo", "rev holo", "reverse foil", "rev-holofoil", and bare
+   * "reverse", which on a TCG single means this and nothing else. A stray
+   * match here costs one comp out of forty, and the name test has already run.
+   *
+   * The subject side REQUIRES the finish word, because a false positive there
+   * throws away every comp that is the card — and "Reverse Valley" is a real
+   * Pokémon stadium card. Same asymmetry, same reason, as NOT_GRADED_PATTERN
+   * being a subject-side guard.
+   */
+  const REVERSE_COMP_PATTERN = /\brev(?:erse)?\b[\s.\-]*(?:holo(?:foil)?|foil)\b|\breverse\b/i;
+  const REVERSE_SUBJECT_PATTERN = /\brev(?:erse)?\b[\s.\-]*(?:holo(?:foil)?|foil)\b/i;
+
+  function isReverseHoloTitle(text) {
+    return REVERSE_COMP_PATTERN.test(String(text || ""));
+  }
+
+  function subjectReverseFrom(text) {
+    return REVERSE_SUBJECT_PATTERN.test(String(text || ""));
+  }
+
+  /**
+   * Everything a title says about the COPY in hand, in one call.
+   *
+   * Three facts, three exclusions that invert on them, and — before this —
+   * three places building settings by hand and getting a different subset
+   * each: Arbitrage and My listings set the grade and knew nothing about a
+   * stamp. One function so a fourth fact reaches every screen at once.
+   */
+  function subjectFactsFrom(text) {
+    return {
+      subjectGrade: subjectGradeFrom(text),
+      subjectStamp: subjectStampFrom(text),
+      subjectReverse: subjectReverseFrom(text)
+    };
+  }
+
   function subjectGradeFrom(text) {
     const t = String(text || "");
     // A seller saying what the card ISN'T. On a comp this never mattered —
@@ -1431,7 +1492,9 @@ const CompFinderPricing = (() => {
     // deciding which of them ARE stamped copies is classifyExclusion's job,
     // where one pattern covers every spelling.
     const stamp = subjectStampFrom(title);
-    const query = [queryWords.join(" "), number, stamp ? stamp.kind : ""].filter(Boolean).join(" ").trim();
+    const reverse = subjectReverseFrom(title);
+    const query = [queryWords.join(" "), number, reverse ? "reverse holo" : "", stamp ? stamp.kind : ""]
+      .filter(Boolean).join(" ").trim();
 
     return {
       query: query || simplified,
@@ -1439,6 +1502,7 @@ const CompFinderPricing = (() => {
       number,
       graded,
       stamped: !!stamp,
+      reverse,
       lot
     };
   }
@@ -1453,6 +1517,9 @@ const CompFinderPricing = (() => {
     subjectGradeFrom,
     subjectStampFrom,
     isStampedTitle,
+    subjectReverseFrom,
+    isReverseHoloTitle,
+    subjectFactsFrom,
     stripGradeMarkers,
     gradedBreakdown,
     isBundleTitle,

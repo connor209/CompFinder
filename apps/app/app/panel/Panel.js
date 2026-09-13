@@ -322,7 +322,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const [reviewFilter, setReviewFilter] = useState("");
   const [reasonFilter, setReasonFilter] = useState("");
   const [showCurrentPrice, setShowCurrentPrice] = useState(false);
-  const [resultsView, setResultsView] = useState("cards");
+  // The sheet is the default: it is the one that shows the card. The grid of
+  // cards is for reading one closely, which is the rarer thing to be doing
+  // with a finished run.
+  const [resultsView, setResultsView] = useState("table");
   // Defaults to ON. Off is a choice somebody makes about their own screen;
   // shipping it off would hide the engine's caveats from a run nobody had
   // asked to compact, which is the one thing this screen must not do.
@@ -2460,8 +2463,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               </select>
               <span className="hint-small">{filteredResults.length === results.length ? `${results.length} row(s)` : `${filteredResults.length} of ${results.length} row(s) shown`}</span>
               <div className="view-toggle" role="group" aria-label="Results view">
-                <button aria-pressed={resultsView === "cards"} onClick={() => setResultsView("cards")}>▦ Cards</button>
                 <button aria-pressed={resultsView === "table"} onClick={() => setResultsView("table")}>☰ Table</button>
+                <button aria-pressed={resultsView === "cards"} onClick={() => setResultsView("cards")}>▦ Cards</button>
               </div>
             </div>
 

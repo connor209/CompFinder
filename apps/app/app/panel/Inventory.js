@@ -76,7 +76,10 @@ async function priceForTitle(title) {
   if (!res || !res.ok) throw new Error((res && res.error) || "Pricing request failed.");
   // A graded listing of ours is priced against graded sales — otherwise the
   // "above market" verdict on a £200 slab is measured against the raw card.
-  const cardSettings = { ...settings, subjectGrade: CompFinderPricing.subjectGradeFrom(title || "") };
+  // All three subject facts, not just the grade: this used to name subjectGrade
+  // by hand and so knew nothing about a stamped copy or a reverse holo, which
+  // are the same class of mistake one axis along.
+  const cardSettings = { ...settings, ...CompFinderPricing.subjectFactsFrom(title || "") };
   return CompFinderPricing.recommend(res.comps || [], cardSettings, nameTokens, "sold", number || null, null);
 }
 

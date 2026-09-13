@@ -277,8 +277,16 @@ const CardUploaderCsv = (() => {
     // plenty of sellers write it and eBay's search should see that — but the
     // prefix is stripped out of the match TOKENS, where it is not a fact about
     // the card. This CSV column is where "No. 178" enters the app at all.
+    // "Reverse Holo" is NOT a required token, and putting it here was the
+    // expensive mistake: nameTokensMatch demands every token literally, so a
+    // seller writing "Rev Holo" or "Reverse Foil" was dropped as a name
+    // mismatch — six of thirteen comps on one real row, which then left the
+    // card too thin to price and it fell through to asking prices. The words
+    // still go in the QUERY below, where they steer the search; whether a
+    // returned listing IS a reverse holo is settled once, by classifyExclusion
+    // against settings.subjectReverse.
     const nameTokens = appNameTokens(
-      [item.cardName, wantsReverseHolo ? "Reverse Holo" : "", stripNumberingPrefix(item.cardNumber)].filter(Boolean).join(" ")
+      [item.cardName, stripNumberingPrefix(item.cardNumber)].filter(Boolean).join(" ")
     );
 
     let query;

@@ -10,6 +10,7 @@
  * "obvious" widening of a pattern fails loudly instead of quietly costing
  * good comps.
  */
+import { readFileSync } from "node:fs";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { settingsForCard } from "../apps/public/lib/settings.js";
 
@@ -572,8 +573,139 @@ for (const [title, number, want] of NUMBERED_CASES) {
   }
 }
 
+// --- Reverse holo: the intent is a SUBJECT fact, not a required token -----
+//
+// It used to be inferred from nameTokens carrying the literal word "Reverse",
+// which was wrong in both directions at once. The app put "Reverse Holo" in
+// the token list, and nameTokensMatch demands every token literally — so a
+// seller writing "Rev Holo" or "Reverse Foil" was thrown out as a NAME
+// mismatch (six of thirteen comps on one real Emboar row, which then left it
+// too thin to price and it fell through to asking prices). Meanwhile the
+// public page's free-text path produced no such token at all, so a visitor
+// pricing a reverse holo had every reverse comp excluded as a variant
+// mismatch and got the plain card's price back.
+{
+  const REVERSE = "Emboar 33/236 Cosmic Eclipse Pokemon Reverse Holo NM";
+  const PLAIN = "Emboar 33/236 Cosmic Eclipse Pokemon NM";
+  const rev = { ...DEFAULT_SETTINGS, ...CompFinderPricing.subjectFactsFrom(REVERSE) };
+  const plain = { ...DEFAULT_SETTINGS, ...CompFinderPricing.subjectFactsFrom(PLAIN) };
+  const check = (title, settings, want, label) => {
+    const rec = recommend([{ title, itemPricePence: 5000, postagePence: 0 }], settings, null, "sold", null, null);
+    const got = (rec.excluded || [])[0]?.exclusionReason ?? null;
+    if (got !== want) {
+      failed++;
+      console.error(`FAIL  ${label}: want ${String(want)}, got ${String(got)}\n      ${title}`);
+    }
+  };
+
+  // Every spelling a seller actually uses is the same printing. These are the
+  // comps the old rule threw away as nameMismatch.
+  const SPELLINGS = [
+    "Emboar 33/236 Cosmic Eclipse Reverse Holo NM",
+    "Emboar 33/236 Cosmic Eclipse Rev Holo",
+    "Emboar 33/236 Cosmic Eclipse Reverse Foil LP",
+    "Emboar 33/236 Cosmic Eclipse reverse-holofoil",
+    "Emboar 33/236 Cosmic Eclipse Reverse"
+  ];
+  for (const title of SPELLINGS) {
+    check(title, rev, null, "a reverse holo keeps every spelling of itself");
+    check(title, plain, "variantMismatch", "a plain card drops all of them");
+  }
+  // Both directions. The second was missing entirely: a plain copy in a
+  // reverse holo's comps drags the price DOWN, which is the expensive way.
+  check("Emboar 33/236 Cosmic Eclipse NM", plain, null, "a plain card keeps plain comps");
+  check("Emboar 33/236 Cosmic Eclipse NM", rev, "variantMismatch", "a reverse holo drops the plain copies");
+  check("Emboar 33/236 Cosmic Eclipse Holo", rev, "variantMismatch", "plain HOLO is not reverse holo — the rule core learned the hard way");
+
+  // The subject test is the narrow one, because a false positive there throws
+  // away every comp that is the card. Reverse Valley is a real stadium card.
+  if (CompFinderPricing.subjectReverseFrom("Reverse Valley HS Triumphant 99/102")) {
+    failed++;
+    console.error("FAIL  a card NAMED Reverse read as a reverse holo — that empties its own comp pool");
+  }
+  if (!CompFinderPricing.subjectReverseFrom("Emboar 33/236 Rev Foil")) {
+    failed++;
+    console.error("FAIL  the subject test must accept the spellings a seller uses");
+  }
+  // ...while the comp side is tolerant, because a stray drop there costs one
+  // comp out of forty and the name test has already run.
+  if (!CompFinderPricing.isReverseHoloTitle("Emboar 33/236 Reverse")) {
+    failed++;
+    console.error("FAIL  bare 'reverse' on a comp is a reverse holo — the name test already ran");
+  }
+
+  // The search has to ask for it, on BOTH paths. The free-text one is the
+  // public page, where a reverse holo query was identical to a plain one.
+  if (!/reverse holo/i.test(CompFinderPricing.buildCardQuery(REVERSE).query)) {
+    failed++;
+    console.error("FAIL  the free-text query must ask for the reverse holo");
+  }
+  if (/reverse/i.test(CompFinderPricing.buildCardQuery(PLAIN).query)) {
+    failed++;
+    console.error("FAIL  a plain card's query must not ask for one");
+  }
+  if ((CompFinderPricing.buildCardQuery(REVERSE).nameTokens || []).some((t) => /reverse|holo/i.test(t))) {
+    failed++;
+    console.error("FAIL  the printing must not become a required token — that is the bug this fixes");
+  }
+
+  // End to end, on the row that prompted it: five spellings in, two plain
+  // copies out, and the plain card reading the same pool the other way.
+  const POOL = [
+    ...SPELLINGS.map((title, i) => ({ title, itemPricePence: 700 + i * 20, postagePence: 0, soldDate: "2026-09-01" })),
+    { title: "Emboar 33/236 Cosmic Eclipse NM", itemPricePence: 300, postagePence: 0, soldDate: "2026-09-01" },
+    { title: "Emboar 33/236 Cosmic Eclipse Holo", itemPricePence: 320, postagePence: 0, soldDate: "2026-09-01" }
+  ];
+  const asReverse = recommend(POOL, rev, ["Emboar"], "sold", "33/236", "Cosmic Eclipse");
+  const asPlain = recommend(POOL, plain, ["Emboar"], "sold", "33/236", "Cosmic Eclipse");
+  if (asReverse.included.length !== 5) {
+    failed++;
+    console.error(`FAIL  the reverse holo must price off all five spellings, used ${asReverse.included.length}`);
+  }
+  if (asPlain.included.length !== 2) {
+    failed++;
+    console.error(`FAIL  the plain card must price off the two plain comps, used ${asPlain.included.length}`);
+  }
+  if (!(asReverse.rawPence > asPlain.rawPence)) {
+    failed++;
+    console.error(`FAIL  the reverse holo is the dearer printing here and must come out dearer (${asReverse.rawPence} vs ${asPlain.rawPence})`);
+  }
+
+  // And a pick-list is a pick-list first. The printing tests run last, after
+  // everything structural, or "Choose Your Pikachu | Holo/Reverse" comes back
+  // labelled a variant mismatch and tells you the wrong thing about why.
+  check("Pokemon TCG - Choose Your Pikachu | Holo/Reverse EX VMAX Full Art Cards | NM",
+    plain, "pickYourOwn", "a pick-list is a pick-list before it is a printing");
+}
+
+// One place decides what a title says about the copy in hand. Three screens
+// used to build settings by hand and each got a different subset — Arbitrage
+// and My listings set the grade and knew nothing about a stamp or a reverse.
+{
+  const facts = CompFinderPricing.subjectFactsFrom("PSA 10 Shedinja 14/107 Deoxys Prerelease Stamped Reverse Holo");
+  const want = ["subjectGrade", "subjectStamp", "subjectReverse"];
+  for (const key of want) {
+    if (!facts[key]) {
+      failed++;
+      console.error(`FAIL  subjectFactsFrom did not read ${key} — a screen using it would silently price the wrong object`);
+    }
+  }
+  const readsFacts = (file) => /subjectFactsFrom\(/.test(readFileSync(new URL(`../${file}`, import.meta.url), "utf8"));
+  for (const file of [
+    "apps/app/lib/matching.js",
+    "apps/app/app/panel/Arbitrage.js",
+    "apps/app/app/panel/Inventory.js",
+    "apps/public/lib/settings.js"
+  ]) {
+    if (!readsFacts(file)) {
+      failed++;
+      console.error(`FAIL  ${file} builds its own subject settings — that is how one screen prices a slab and the next prices the raw card`);
+    }
+  }
+}
+
 if (failed) {
   console.error(`\n${failed} exclusion checks failed.`);
   process.exit(1);
 }
-console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier, foreign-print, graded-subject and stamped-subject cases pass.`);
+console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier, foreign-print, graded-subject, stamped-subject and reverse-holo cases pass.`);

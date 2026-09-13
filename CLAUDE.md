@@ -394,6 +394,53 @@ copy with the grade on the label. A raw card is untouched by it — the ladder
 and the gate are right there. The sticker box still beats both, and every row
 says which of the three it is.
 
+## Reverse holo is a subject fact, not a required word
+
+The engine knew a card was a reverse holo by looking for the literal token
+"Reverse" in `nameTokens`. That was wrong in both directions at once, and the
+two halves cancelled out into "it seems roughly fine":
+
+- **The app put "Reverse Holo" in the token list**, and `nameTokensMatch`
+  demands every token literally. A seller writing "Rev Holo" or "Reverse Foil"
+  was dropped as a NAME mismatch — six of thirteen comps on one real Emboar
+  row, which then left it too thin to price and it fell through to asking
+  prices at £3.49. Eleven of thirty-three rows in that run were on asking
+  prices.
+- **The public page's free-text path produced no such token at all.**
+  `buildCardQuery` takes the first two name words plus the number, so a reverse
+  holo and a plain card generated an identical query and identical tokens —
+  meaning `queryWantsReverseHolo` was permanently false there, and EVERY
+  reverse comp was thrown out as a variant mismatch while the visitor was shown
+  the plain card's price.
+
+`settings.subjectReverse` is where the intent belongs, beside `subjectGrade`
+and `subjectStamp`. Tokens are for the card's NAME.
+
+- **Both directions now.** A reverse in a plain card's comps drags the price up
+  — the £7.97 reverse in a £2.34–£3.48 set that prompted the original rule —
+  and a plain copy in a reverse holo's comps drags it down, which is the half
+  that was missing entirely.
+- **Two readings, deliberately asymmetric.** The comp side is tolerant
+  ("reverse holo", "rev holo", "reverse foil", "rev-holofoil", and bare
+  "reverse") because a stray drop costs one comp out of forty and the name test
+  has already run. The subject side REQUIRES the finish word, because a false
+  positive there empties the pool — and **Reverse Valley is a real card**.
+- **The printing tests run LAST**, after everything structural. "Choose Your
+  Pikachu | Holo/Reverse" is a pick-list first, and labelling it a variant
+  mismatch answers the wrong question about why it went.
+- **`subjectFactsFrom()` is the one place a title is read.** Three screens used
+  to build settings by hand — Arbitrage and My listings named `subjectGrade`
+  and so knew nothing about a stamp or a reverse holo. One call, so a fourth
+  fact reaches every screen at once. `check-exclusions.mjs` greps all four
+  callers.
+- **The query asks for it on both paths.** A search that never mentions the
+  printing cannot return it, which was the public page's whole problem.
+
+**Not yet measured against a corpus.** This widens what counts as a comp on
+every reverse holo in both products, which is most of a bulk run — the audit
+harness (`audit-big.mjs`, then `diff-runs.mjs`) is how that gets checked, and
+the number to watch is cards that LOST a price rather than cards that moved.
+
 ## A stamped copy is not the card underneath it either
 
 Shedinja 14/107, Slugma 75/107 and Wingull 70/100 all sold under market on
@@ -940,6 +987,12 @@ screen, `lib/import-store.js` owns the tables, and migration 028 is
   somebody holding a played one. A row with no scan says "no scan"; a gap is
   honest and a perfect picture of a different copy is not. `check-cardimport`
   greps the screen to keep it that way.
+- **The card details are editable too, not just the title.** Three of them are
+  not decoration: `cardName`, `cardNumber` and `set` are what
+  `buildQueryFromItem` searches on, so correcting a set CardUploader got wrong
+  changes which comps come back. `SPECIFIC_COLUMNS` in `import-store.js` is the
+  allow-list, and `check-cardimport.mjs` fails if the screen offers a field the
+  store would silently refuse to write.
 - **Editing the title is the point, not a convenience.** The title is what the
   engine searches on and — since `*C:Finish` is blank on 49 of 50 reverse holos
   — it is also what decides which PRINTING gets priced. So a correction changes
@@ -1015,6 +1068,10 @@ compacting a row must not do is unrepresentable rather than merely avoided.
 
 Default ON because off is a choice about your own screen; shipping it off would
 hide the engine's caveats from somebody who never asked for a quieter one.
+
+**The sheet is the default view**, and the card grid is the alternative. The
+sheet is the one that shows the card; the grid is for reading one closely,
+which is the rarer thing to be doing with a finished run.
 
 **The results are a sheet, not a table.** Ten columns whose titles wrapped to
 four lines made every row 130px tall, so a 33-card run was a long scroll and a

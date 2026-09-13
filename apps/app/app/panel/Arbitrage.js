@@ -54,7 +54,10 @@ async function soldPriceForTitle(title, resolved) {
   // The title decides whether this is a slab, and a slab is priced against
   // slabs. Before this the row carried a "priced vs raw comps" warning and the
   // number underneath it was still the raw card's — a warning is not a fix.
-  const cardSettings = { ...settings, subjectGrade: CompFinderPricing.subjectGradeFrom(title || "") };
+  // All three subject facts, not just the grade: this used to name subjectGrade
+  // by hand and so knew nothing about a stamped copy or a reverse holo, which
+  // are the same class of mistake one axis along.
+  const cardSettings = { ...settings, ...CompFinderPricing.subjectFactsFrom(title || "") };
   const rec = CompFinderPricing.recommend(res.comps || [], cardSettings, nameTokens, "sold", number || null, null);
   return {
     recPence: rec.finalPence ?? null,
