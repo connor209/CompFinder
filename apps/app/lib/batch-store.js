@@ -446,6 +446,42 @@ export async function updateItemActive(supabase, batchId, position, rec) {
  * A failure is worth showing rather than swallowing — the whole promise of a
  * saved run is that it comes back as you left it.
  */
+/**
+ * One row's CARD, corrected by hand on the results screen.
+ *
+ * Separate from updateItemRec because it changes a different thing: that one
+ * records what the card is worth, this one records what the card IS. The
+ * columns here are the ones a query is built from, so a run re-opened after a
+ * correction searches the corrected card rather than the one the file named.
+ *
+ * The saved run is patched row by row for the same reason an override is:
+ * saving creates a NEW run, and an afternoon of corrections would leave a
+ * saved-runs list of near-identical megabyte copies.
+ */
+export async function updateItemCard(supabase, batchId, position, { title, sku, csvItem } = {}) {
+  const patch = {};
+  if (title !== undefined) patch.title = storableText(title) || "";
+  if (sku !== undefined) patch.sku = storableText(sku) || null;
+  if (csvItem !== undefined) {
+    patch.csv_item = csvItem || null;
+    // These two are columns in their own right as well as fields on the CSV
+    // row — the run reads them back when it re-checks active listings — so a
+    // correction that updated only the jsonb would leave the row disagreeing
+    // with itself about which card it is.
+    if (csvItem) {
+      patch.card_number = storableText(csvItem.cardNumber) || null;
+      patch.set_name = storableText(csvItem.set) || null;
+    }
+  }
+  if (Object.keys(patch).length === 0) return;
+  const { error } = await supabase
+    .from("price_batch_items")
+    .update(patch)
+    .eq("batch_id", batchId)
+    .eq("position", position);
+  if (error) throw error;
+}
+
 export async function updateItemRec(supabase, batchId, position, rec) {
   const { error } = await supabase
     .from("price_batch_items")

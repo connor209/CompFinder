@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import {
-  saveImport, listImports, loadImport, updateItem, revertTitle, deleteImport, isEdited, SPECIFIC_COLUMNS
+  saveImport, listImports, loadImport, updateItem, revertTitle, deleteImport, isEdited
 } from "@/lib/import-store.js";
+import { SpecificsEditor, TitleEditor, StockFields } from "./CardFields";
 
 /**
  * Imports — a CardUploader export, brought in whole.
@@ -296,44 +297,10 @@ export default function Imports({ onPrice }) {
   );
 }
 
-/** eBay's own limit. Shown because a CardUploader title runs close to it and a
- *  correction is exactly the thing that pushes one over — at which point eBay
- *  refuses the upload rather than trimming it for you. */
-const TITLE_MAX = 80;
-const CONDITIONS = ["NM", "LP", "MP", "HP", "DMG"];
-
-/** The specifics that can be corrected, in the order CardUploader shows them.
- *  Keyed to the store's own allow-list, so a field cannot be offered here that
- *  the store would silently refuse to write. */
-const SPECIFIC_LABELS = {
-  cardName: "Card name",
-  cardNumber: "Number",
-  set: "Set",
-  cardType: "Type",
-  year: "Year",
-  rarity: "Rarity",
-  stage: "Stage",
-  illustrator: "Illustrator",
-  language: "Language"
-};
-const SPECIFIC_FIELDS = Object.keys(SPECIFIC_COLUMNS)
-  .filter((key) => SPECIFIC_LABELS[key])
-  .sort((a, b) => Object.keys(SPECIFIC_LABELS).indexOf(a) - Object.keys(SPECIFIC_LABELS).indexOf(b))
-  .map((key) => ({ key, label: SPECIFIC_LABELS[key] }));
-
 function ImportCard({ item, onPatch, onUndo, onView }) {
-  const [title, setTitle] = useState(item.title);
-  useEffect(() => { setTitle(item.title); }, [item.title]);
   const [editing, setEditing] = useState(false);
   const specifics = CardUploaderCsv.itemSpecifics(item);
   const edited = isEdited(item);
-  const over = title.length > TITLE_MAX;
-
-  const commit = () => {
-    const next = title.trim();
-    if (next && next !== item.title) onPatch({ title: next });
-    else setTitle(item.title);
-  };
 
   return (
     <div className={`ci-row${edited ? " ci-row-edited" : ""}`}>
@@ -356,43 +323,19 @@ function ImportCard({ item, onPatch, onUndo, onView }) {
       </div>
 
       <div className="ci-body">
-        <div className="ci-titlerow">
-          <input
-            className={`ci-title${over ? " ci-title-over" : ""}`}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); if (e.key === "Escape") setTitle(item.title); }}
-            aria-label="eBay title"
-          />
-          <span className={`ci-count${over ? " ci-count-over" : ""}`}>{title.length}/{TITLE_MAX}</span>
-        </div>
+        <TitleEditor value={item.title} onCommit={(title) => onPatch({ title })} />
         {edited ? (
           <div className="ci-was">
             Was &ldquo;{item.titleOriginal}&rdquo;
             <button type="button" className="comps-toggle" onClick={onUndo}>put it back</button>
           </div>
         ) : null}
-
         {editing ? (
           /* The three at the top are not decoration: the name, the number and
              the set are what the query is built from, so a set CardUploader
              got wrong is a search looking for the wrong card. The rest are
              what you read while deciding. */
-          <div className="ci-edit">
-            {SPECIFIC_FIELDS.map(({ key, label }) => (
-              <label key={key} className="ci-field">
-                <span>{label}</span>
-                <input
-                  defaultValue={item[key] || ""}
-                  onBlur={(e) => {
-                    const v = e.target.value.trim();
-                    if (v !== (item[key] || "")) onPatch({ [key]: v });
-                  }}
-                />
-              </label>
-            ))}
-          </div>
+          <SpecificsEditor item={item} onPatch={onPatch} />
         ) : specifics.length ? (
           <dl className="ci-specs">
             {specifics.map((s) => (
@@ -411,27 +354,7 @@ function ImportCard({ item, onPatch, onUndo, onView }) {
       </div>
 
       <div className="ci-fields">
-        <label className="ci-field">
-          <span>SKU</span>
-          <input
-            defaultValue={item.sku}
-            onBlur={(e) => { const v = e.target.value.trim(); if (v !== item.sku) onPatch({ sku: v }); }}
-          />
-        </label>
-        <label className="ci-field">
-          <span>Condition</span>
-          <select value={item.condition || ""} onChange={(e) => onPatch({ condition: e.target.value })}>
-            {CONDITIONS.includes(item.condition) ? null : <option value={item.condition || ""}>{item.condition || "—"}</option>}
-            {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </label>
-        <label className="ci-field">
-          <span>Quantity</span>
-          <input
-            type="number" min="1" defaultValue={item.quantity ?? 1}
-            onBlur={(e) => onPatch({ quantity: e.target.value })}
-          />
-        </label>
+        <StockFields item={item} onPatch={onPatch} />
         {/* The file's own asking price, shown and not editable: on a
             CardUploader export it is the £2.49 placeholder on every row, and
             the price this card should carry is the engine's job, one screen

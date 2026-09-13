@@ -552,6 +552,27 @@ every card in both products rather than only the broken ones, so it wants
 first — the rule this repo already has for exactly this situation. The same run
 is what should settle how sellers actually spell a stamp.
 
+## The sold window is 90 days because that is all there is
+
+The Batch screen's **Sold within** dropdown offers 30, 60, 90, 180 and 365, and
+`soldAfterDays` becomes a plain `soldAfter=YYYY-MM-DD` filter — so on the face
+of it, widening the window is the obvious fix for a thin comp set, and it has a
+property nothing else does: SoldComps returns one page newest-first, so a card
+that already fills a page gets the same page at any window and cannot be hurt.
+
+**It does not work, and the reason is upstream: SoldComps does not hold data
+that far back.** Confirmed 2026-09-13. The long options are inert — they ask
+for a window the source cannot serve, and the answer comes back the same ~40
+results. Anything above 90 is a promise the dropdown cannot keep.
+
+So for cheap commons there is no time lever, which leaves only the query and
+the filter — and the filter is not where the loss is. Measured on a 50-card
+reverse-holo commons run: SoldComps RETURNED a median of 11 per card (six cards
+under five), and the filter kept 8 of them. **Half that run was thin because the
+search found little, not because the rules threw much away.** That is the honest
+ceiling on this population, and it matches what `wideset.json` already measured:
+commons median 5 comps against a chase card's 15+.
+
 ## Measure before adding a pricing rule
 
 The audit harness exists so a rule is judged on data rather than on the two
@@ -1047,6 +1068,27 @@ screen, `lib/import-store.js` owns the tables, and migration 028 is
   changes which comps come back. `SPECIFIC_COLUMNS` in `import-store.js` is the
   allow-list, and `check-cardimport.mjs` fails if the screen offers a field the
   store would silently refuse to write.
+- **The same editor is on the BATCH results**, because the moment you notice a
+  wrong set is when you are looking at the price it produced, not when you are
+  looking at the file. `CardFields.js` is the one definition of what may be
+  corrected — two copies would drift about which fields are editable, and that
+  drift is invisible: the input renders, the edit does nothing. A correction
+  there reaches four copies, because the one you list from is whichever you
+  reach for next: React state, the `cf-batch-live` sessionStorage copy, the
+  saved run (`updateItemCard`), and the IMPORT the cards came from — that last
+  one because a fix that never reaches the record is a fix you make again on
+  the next run off the same file.
+- **A corrected card says its price predates the correction.** The row records
+  the `query` it was priced with, so the test is to rebuild one from the card
+  as it now stands and see whether they still agree — no stored flag to
+  round-trip and lose, and it catches a corrected SET (which changes the query)
+  as readily as a corrected title. Built with the RUN's own filters, or a run
+  made with "include condition" would call every one of its rows stale. The
+  count is at the top of the results, because a run you are listing from has to
+  say how many of its prices no longer describe their card.
+- **The price is not silently recomputed.** This screen cannot spend a
+  SoldComps request behind your back; what it can do is stop the figure
+  pretending it knows about the edit.
 - **Editing the title is the point, not a convenience.** The title is what the
   engine searches on and — since `*C:Finish` is blank on 49 of 50 reverse holos
   — it is also what decides which PRINTING gets priced. So a correction changes

@@ -157,13 +157,45 @@ eq("an empty field is dropped, not rendered as a labelled blank",
     [sent?.user_id, sent?.position], [undefined, undefined]);
 
   // Every field the screen offers must be one the store accepts, or editing it
-  // looks like it worked and silently changes nothing.
-  const offered = readFileSync(new URL("../apps/app/app/panel/Imports.js", import.meta.url), "utf8");
+  // looks like it worked and silently changes nothing. The list lives in
+  // CardFields.js — one editor, shared by the Imports row and the Batch
+  // results row, because two copies would drift about what may be corrected
+  // and the drift is invisible: the field renders, the edit does nothing.
+  const offered = readFileSync(new URL("../apps/app/app/panel/CardFields.js", import.meta.url), "utf8");
   const labelled = [...offered.matchAll(/^  (\w+): "/gm)].map((m) => m[1]);
+  if (labelled.length < 5) {
+    fail("CardFields.js no longer declares the editable specifics — this check was reading an empty list and passing");
+  }
   for (const key of labelled) {
     if (!Object.prototype.hasOwnProperty.call(SPECIFIC_COLUMNS, key)) {
-      fail(`Imports.js offers "${key}" for editing and import-store.js would not write it`);
+      fail(`CardFields.js offers "${key}" for editing and import-store.js would not write it`);
     }
+  }
+
+  // Both screens go through the shared editor rather than growing a second
+  // copy of the field list.
+  for (const screen of ["apps/app/app/panel/Imports.js", "apps/app/app/panel/Panel.js"]) {
+    const src = readFileSync(new URL(`../${screen}`, import.meta.url), "utf8");
+    if (!/from "\.\/CardFields"/.test(src)) {
+      fail(`${screen} does not use the shared card editor — a second copy is how the two screens start disagreeing about what can be corrected`);
+    }
+  }
+
+  // A correction on the results screen must reach the RECORD as well as the
+  // run, or the next run off the same file reproduces the mistake.
+  const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
+  for (const [pattern, why] of [
+    [/updateItemCard\(\s*supabase/, "the saved run is not patched, so re-opening it shows the card the file named"],
+    [/updateImportItem\(\s*supabase/, "the import is not patched, so the fix is lost on the next run off that file"],
+    [/const staleCount = results\.filter\(priceIsStale\)/, "nothing counts the rows whose price no longer describes their card"],
+    [/stale=\{priceIsStale\(r\)\}/, "the row is never told its price is stale, so a corrected card quietly keeps the old figure"]
+  ]) {
+    if (!pattern.test(panel)) fail(`Panel.js: ${why}`);
+  }
+  // Staleness is DERIVED from the query the row was priced with, not stored.
+  // A stored flag is one more thing to round-trip and lose.
+  if (!/buildQueryFromItem\(r\.csvItem, \{ includeCondition, useFullTitle \}\)/.test(panel)) {
+    fail("the stale test no longer rebuilds the query with the run's own filters — built with defaults it calls every row of a condition-filtered run stale");
   }
 
   const nothing = await updateItem(fakeSupabase, "row-1", {});

@@ -8,7 +8,8 @@ import { APP_SETTINGS, appNameTokens, applyConditionPreference, applyNumberGuard
 import { createGate, runPool, SOLDCOMPS_GAP_MS, BROWSE_GAP_MS, BATCH_CONCURRENCY } from "@/lib/pace";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
-import { loadImport, batchItemsFrom, saveImport } from "@/lib/import-store.js";
+import { loadImport, batchItemsFrom, saveImport, updateItem as updateImportItem } from "@/lib/import-store.js";
+import { SpecificsEditor, TitleEditor, StockFields, changesTheSearch } from "./CardFields";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
 import {
   saveBatch,
@@ -17,6 +18,7 @@ import {
   restoreResults,
   updateItemActive,
   updateItemRec,
+  updateItemCard,
   FILTER_KEYS,
   RETENTION_DAYS
 } from "@/lib/batch-store.js";
@@ -236,6 +238,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // nothing about which card is on the bench. It holds the scan and the title
   // rather than an index, because the item list is a local of the run.
   const [pricingNow, setPricingNow] = useState([]);
+  // The import this run's cards came from. Kept so a card corrected on the
+  // results screen is corrected in the RECORD too — otherwise the next run off
+  // the same file reproduces the mistake you just fixed, and you fix it twice.
+  const [runImport, setRunImport] = useState(null); // { id, itemIds }
   const [identifying, setIdentifying] = useState(false);
   const [budget, setBudget] = useState({ count: 0 });
   const [stream, setStream] = useState(SLUG_STREAM[initialSection] || "dashboard");
@@ -595,6 +601,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           setImportError(`Couldn't open that import: ${res.error}`);
         } else {
           setImported({ items: batchItemsFrom(res.items), label: res.imported.label });
+          setRunImport({ id: res.imported.id, itemIds: res.items.map((it) => it.id) });
         }
       } catch (err) {
         if (!cancelled) setImportError(`Couldn't open that import: ${err.message}`);
@@ -743,7 +750,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             const supabase = createClient();
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
-            await saveImport(supabase, user.id, { fileName: file.name, items, csvText: String(reader.result) });
+            const saved = await saveImport(supabase, user.id, { fileName: file.name, items, csvText: String(reader.result) });
+            if (saved?.ok) {
+              const opened = await loadImport(supabase, saved.id);
+              if (opened.ok) {
+                setRunImport({ id: saved.id, itemIds: opened.items.map((it) => it.id) });
+              }
+            }
           } catch { /* the run is the thing that matters here */ }
         })();
         const repairedCount = items.filter((i) => i.cardNumberRepaired).length;
@@ -1376,6 +1389,49 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     }
   }
 
+  /**
+   * One row's CARD, corrected on the results screen.
+   *
+   * The same shape as setOverrideFor above, and for the same reason: the copy
+   * you list from is whichever you reach for next, so a correction has to
+   * reach all of them. Here that is four — React state, the sessionStorage
+   * copy (through liveRef), the saved run, and the IMPORT the cards came from,
+   * because a fix that does not reach the record is a fix you make again on
+   * the next run off the same file.
+   *
+   * The price is deliberately NOT recomputed. It was worked out from the old
+   * query and this screen cannot spend a SoldComps request behind your back;
+   * what it can do is stop the number pretending it knows about the edit —
+   * see `edited` on the row.
+   */
+  async function setCardFieldsFor(index, patch) {
+    const row = results[index];
+    if (!row || !patch || Object.keys(patch).length === 0) return;
+    const nextCsv = { ...(row.csvItem || {}), ...patch };
+    const nextRow = {
+      ...row,
+      title: patch.title !== undefined ? patch.title : row.title,
+      sku: patch.sku !== undefined ? patch.sku : row.sku,
+      csvItem: nextCsv,
+      cardNumber: nextCsv.cardNumber || row.cardNumber,
+      set: nextCsv.set || row.set
+    };
+    setResults((prev) => prev.map((r, i) => (i === index ? nextRow : r)));
+    setOverrideNonce((n) => n + 1); // drives the sessionStorage write
+
+    const supabase = createClient();
+    if (openBatch?.id) {
+      updateItemCard(supabase, openBatch.id, index, {
+        title: nextRow.title, sku: nextRow.sku, csvItem: nextCsv
+      }).catch((err) => {
+        setBatchNoticeIsError(true);
+        setBatchNotice(`"${row.title}" is corrected on screen, but this saved run could not be updated: ${err.message}`);
+      });
+    }
+    const itemId = runImport?.itemIds?.[index];
+    if (itemId) updateImportItem(supabase, itemId, patch).catch(() => { /* the run is the copy that matters here */ });
+  }
+
   /** Persist a finished run — every card, with the comps behind it and the
    *  filters it ran under. saveHistory above keeps the flat prices for the
    *  History screen; this keeps the working, which is the part that costs
@@ -1768,6 +1824,26 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         (reviewFilter === "needs" ? v.needsReview : reviewFilter === "asking" ? !!v.basis : !v.needsReview);
       return matchesSearch && matchesConfidence && matchesReason && matchesStock && matchesReview;
     });
+  /**
+   * Was this row priced as the card it now says it is?
+   *
+   * The row already records the `query` it was priced with, so the test is to
+   * rebuild one from the card as it stands and see if they still agree — no
+   * extra state, survives a saved run for free, and it catches a corrected SET
+   * (which changes the query) as readily as a corrected title. Built with the
+   * run's OWN filters, or a run that used "include condition" would call every
+   * row stale.
+   */
+  const priceIsStale = (r) => {
+    if (!r?.csvItem || !r.query) return false;
+    try {
+      return CardUploaderCsv.buildQueryFromItem(r.csvItem, { includeCondition, useFullTitle }).query !== r.query;
+    } catch {
+      return false; // a card we cannot rebuild a query for is not evidence of anything
+    }
+  };
+  const staleCount = results.filter(priceIsStale).length;
+
   const inStockCount = known ? results.filter((r) => stockedMatch(knownFor(r))).length : 0;
   // Rows where the only listing under this card's name and number is a
   // different printing of it. Counted and said out loud: a row that used to
@@ -2437,6 +2513,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 summary above: a run that cannot be exported has to say so
                 before you reach for the button, and the count IS the whole
                 message — every one of these is a card nothing has priced. */}
+            {staleCount > 0 ? (
+              <p className="hint hint-small zero-warn" role="status">
+                <strong>{staleCount} card{staleCount === 1 ? "" : "s"} corrected since pricing</strong> — {staleCount === 1 ? "its" : "their"}
+                {" "}figure{staleCount === 1 ? " was" : "s were"} worked out from the card as the file described it. Re-price the run to
+                bring {staleCount === 1 ? "it" : "them"} in line, or set {staleCount === 1 ? "a price" : "prices"} by hand.
+              </p>
+            ) : null}
             {unpricedCount > 0 ? (
               <p className="hint hint-small zero-warn" role="status">
                 <strong>{unpricedCount} card{unpricedCount === 1 ? "" : "s"} at £0.00</strong> — nothing priced {unpricedCount === 1 ? "it" : "them"}, so {unpricedCount === 1 ? "it has" : "they have"} no price rather than a cheap one.
@@ -2530,6 +2613,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 onCheckActive={() => fetchActiveFor(r, origIndex)}
                 onDeepDive={deepDiveCard}
                 onOverride={(pence) => setOverrideFor(origIndex, pence)}
+                onEditCard={(patch) => setCardFieldsFor(origIndex, patch)}
+                stale={priceIsStale(r)}
               />
             ))}
           </div>
@@ -2546,6 +2631,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 onCheckActive={() => fetchActiveFor(r, origIndex)}
                 onDeepDive={deepDiveCard}
                 onOverride={(pence) => setOverrideFor(origIndex, pence)}
+                onEditCard={(patch) => setCardFieldsFor(origIndex, patch)}
+                stale={priceIsStale(r)}
               />
             ))}
           </div>
@@ -2846,8 +2933,9 @@ function ResultRow({ r, known, showCurrentPrice, showDetails = true, active, onC
  * narrow screen, and the old header-and-nth-child hiding is what made adding
  * the "In stock" column silently hide the wrong one.
  */
-function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride }) {
+function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride, onEditCard, stale = false }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const rec = r.rec;
   const specs = r.csvItem ? CardUploaderCsv.itemSpecifics(r.csvItem) : [];
   const verdict = reviewVerdict(rec);
@@ -2872,17 +2960,42 @@ function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, o
       </div>
 
       <div className="rs-main">
-        <div className="rs-titlerow">
-          <span className="rs-title" title={r.title}>{r.title}</span>
-          {r.sku ? <span className="rs-sku">{r.sku}</span> : null}
-          {!showDetails && rec && noteIsCaveat(rec) ? <span className="note-warn" title={rec.note}>⚠</span> : null}
-        </div>
-        {specs.length ? (
+        {editing ? (
+          <TitleEditor value={r.title} onCommit={(title) => onEditCard({ title })} />
+        ) : (
+          <div className="rs-titlerow">
+            <span className="rs-title" title={r.title}>{r.title}</span>
+            {r.sku ? <span className="rs-sku">{r.sku}</span> : null}
+            {!showDetails && rec && noteIsCaveat(rec) ? <span className="note-warn" title={rec.note}>⚠</span> : null}
+          </div>
+        )}
+        {/* The figure below was worked out from a different search. Saying so
+            is the whole job: a price that quietly carries on under a corrected
+            card is exactly the wrong number this app exists to stop. */}
+        {stale ? (
+          <div className="rs-stale">
+            Priced as <b>&ldquo;{r.query}&rdquo;</b> — your corrections since would search for
+            something else, so this figure is from the old card. Re-price to bring it in line.
+          </div>
+        ) : null}
+        {editing ? (
+          <>
+            <SpecificsEditor item={r.csvItem || {}} onPatch={onEditCard} />
+            <div className="ci-edit">
+              <StockFields item={{ ...(r.csvItem || {}), sku: r.sku }} onPatch={onEditCard} />
+            </div>
+          </>
+        ) : specs.length ? (
           <dl className="ci-specs">
             {specs.map((sp) => (
               <div key={sp.label} className="ci-spec"><dt>{sp.label}</dt><dd>{sp.value}</dd></div>
             ))}
           </dl>
+        ) : null}
+        {onEditCard && r.csvItem ? (
+          <button type="button" className="comps-toggle" onClick={() => setEditing((o) => !o)}>
+            {editing ? "▾ Done" : "✎ Edit card"}
+          </button>
         ) : null}
         {showDetails ? <div className="rs-q" title={r.query}>“{r.query}”</div> : null}
         {known?.stock || known?.history ? <KnownCell known={known} rec={rec} /> : null}
