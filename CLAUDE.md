@@ -394,6 +394,37 @@ copy with the grade on the label. A raw card is untouched by it — the ladder
 and the gate are right there. The sticker box still beats both, and every row
 says which of the three it is.
 
+## A required word that can never match anything
+
+Found by printing a 50-card run to PDF to compare two builds. Three cards came
+back at **£0.00**, and one of them had thrown away **all 27 of its comps**:
+Imakuni? 63/83, Mr. Mime 97/162, Exp. Share 118/149.
+
+`nameTokensMatch` wrapped every token in `\b…\b`, and a word boundary next to
+a NON-word character demands a word character — so `\bImakuni\?\b` matches
+nothing at all, **including "Imakuni? 63/83 Generations", the card's own
+title**. It is every card whose name word ends in `.` or `?` — Mr. Mime, Mrs.,
+Prof., Exp. Share, Imakuni? — and it fails the way this repo cares about most:
+silently, at zero, looking exactly like a card nobody has ever sold. The
+£0.00 rule is the only reason it was visible at all.
+
+The boundary now goes on only where it means something, and **an
+abbreviation's dot is dropped** because sellers type it both ways ("Mr. Mime",
+"Mr Mime").
+
+**The first fix was worse than the bug**, and the test caught it: trimming
+trailing punctuation instead made `Nidoran♀` match `Nidoran♂` — two different
+cards pooled into one price, which is the exact merge the image matcher was
+bitten by once already. Espeon☆ and a plain Espeon are the same hazard.
+`check-exclusions.mjs` pins both genders, both Espeons, and that a token
+reducing to nothing constrains nothing rather than becoming an empty pattern
+that matches every title ever written.
+
+A side effect worth knowing about: core's raw `No.` token now matches
+"Xatu No. 178" as well as "Xatu No.178", so `check-matching.mjs`'s historical
+baseline moved from one spelling of four to two. The point it makes is
+unchanged — the app's prefix stripping is what gets all four.
+
 ## Reverse holo is a subject fact, not a required word
 
 The engine knew a card was a reverse holo by looking for the literal token
@@ -1098,6 +1129,13 @@ flight (three, BATCH_CONCURRENCY) with their scans — which is also the moment
 you would most like to notice that the wrong file went in. It is cleared in a
 `finally` around `priceOne`, never inside it: that function exits from half a
 dozen places and a missed one leaves a card on the bench for ever.
+
+**WHY a comp was dropped goes on the row, not in a tooltip.** The sheet shipped
+with `7 / 6` and the reason breakdown as a hover `title`, which reads fine on
+the screen it was written on and vanishes from a screenshot, a printout and a
+glance — and "6 excluded" without the reason is the one number on that row
+nobody can act on. It was caught the expensive way: a run printed to PDF to
+compare two builds could not answer the question it was printed for.
 
 **The positional column hiding went with the table, and good riddance.** It is
 what made adding an "In stock" column silently hide the Current one for months.

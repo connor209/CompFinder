@@ -704,8 +704,59 @@ for (const [title, number, want] of NUMBERED_CASES) {
   }
 }
 
+// --- A required name token that can never match anything -----------------
+//
+// Found in a real 50-card run: three cards came back at £0.00 and one of them
+// had thrown away all 27 of its comps. `nameTokensMatch` wrapped every token
+// in \b…\b, and a word boundary next to a NON-word character demands a word
+// character — so `\bImakuni\?\b` matches nothing at all, including
+// "Imakuni? 63/83 Generations", the card's own title.
+//
+// It is every card whose name word ends in "." or "?" — Mr. Mime, Mrs., Prof.,
+// Exp. Share, Imakuni? — and it fails the way this repo cares about most:
+// silently, at zero, looking exactly like a card nobody has ever sold.
+//
+// The false-positive half matters more, as ever. Trimming the punctuation
+// instead of dropping the boundary would make Nidoran♀ match Nidoran♂ — two
+// different cards pooled into one price — which is the same merge the image
+// matcher was bitten by once already.
+{
+  const NAME_CASES = [
+    [["Imakuni?"], "Imakuni? 63/83 Generations Pokemon Reverse Holo LP", true,
+      "THE case — a card must match its own title"],
+    [["Imakuni?"], "Pikachu 58/102 Base Set", false,
+      "...and still reject a different card"],
+    [["Mr."], "Mr. Mime 97/162 BREAKthrough Reverse Holo", true, "with the dot"],
+    [["Mr."], "Mr Mime 97/162 BREAKthrough Reverse Holo", true,
+      "and without it — sellers type it both ways, so the dot is optional"],
+    [["Exp."], "Exp. Share 118/149 SM Base Set Reverse Holo", true,
+      "an abbreviated trainer card"],
+    [["Nidoran♀"], "Nidoran♀ 55/102 Base Set", true, "her own card"],
+    [["Nidoran♀"], "Nidoran♂ 55/102 Base Set", false,
+      "NOT his — two cards at two prices, and the trimming fix merged them"],
+    [["Nidoran♂"], "Nidoran♀ 55/102 Base Set", false, "nor the other way round"],
+    [["Espeon☆"], "Espeon☆ 17/17 POP Series 5", true, "a Gold Star"],
+    [["Espeon☆"], "Espeon 17/17 POP Series 5", false,
+      "a plain Espeon is not a Gold Star, and the symbol is the only thing saying so"],
+    [["Emboar"], "Emboar 33/236 Cosmic Eclipse Reverse Holo", true,
+      "the ordinary token, which must compile to exactly the regex it always did"],
+    [["Emboar"], "Pikachu 58/102 Base Set", false, "...including its rejections"],
+    [["?"], "Imakuni? 63/83 Generations", true,
+      "a lone symbol is still matched where it appears — it is satisfiable, so it is not the bug"],
+    [["."], "anything at all", true,
+      "a token that reduces to NOTHING is not a name. It must not constrain, and it must not become an empty pattern matching every title ever written — the two ways this could have gone wrong"]
+  ];
+  for (const [tokens, title, want, why] of NAME_CASES) {
+    const got = CompFinderPricing.nameTokensMatch(title, tokens);
+    if (got !== want) {
+      failed++;
+      console.error(`FAIL  name token ${JSON.stringify(tokens)} vs ${JSON.stringify(title)}: want ${want}, got ${got}\n      ${why}`);
+    }
+  }
+}
+
 if (failed) {
   console.error(`\n${failed} exclusion checks failed.`);
   process.exit(1);
 }
-console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier, foreign-print, graded-subject, stamped-subject and reverse-holo cases pass.`);
+console.log(`exclusions: ${CASES.length + NUMBERED_CASES.length} titles + postage, low-outlier, foreign-print, graded-subject, stamped-subject, reverse-holo and name-token cases pass.`);

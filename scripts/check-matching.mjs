@@ -90,9 +90,15 @@ const SPELLINGS = ["Xatu No.178 Neo Genesis Japanese", "Xatu No. 178 Neo Genesis
 check("every spelling of the number now matches in the app",
   SPELLINGS.map((t) => recommend([comp(t)], APP_SETTINGS, appNameTokens("Xatu No. 178"), "sold").included.length),
   [1, 1, 1, 1]);
-check("...and only one of them did before",
+// Two of four on core's raw tokens, which is still the point: the app's prefix
+// stripping is what makes EVERY spelling reach the same price. It was one of
+// four until the name-token boundary fix — `No.` used to compile to
+// `\bNo\.\b`, which matched "No.178" and not "No. 178", because a word
+// boundary after a full stop demands a word character. Fixing that (the bug
+// that had Imakuni? throwing away all 27 of its comps) lifted this one too.
+check("...and only two of them did before",
   SPELLINGS.map((t) => recommend([comp(t)], CORE, extractNameTokens("Xatu No. 178"), "sold").included.length),
-  [1, 0, 0, 0]);
+  [1, 1, 0, 0]);
 
 // ── 3. A confirmed set excludes even when it WINS its own vote ──────────────
 // The guard fired only when the set-matching comps were a minority, so a Neo

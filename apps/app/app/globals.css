@@ -1566,6 +1566,7 @@ html, body { overflow-x: clip; max-width: 100%; }
 .rs-was { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
 .rs-meta { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
 .rs-links { display:flex; align-items:center; gap:6px; }
+.rs-reasons { font-size:11px; color:var(--ink-faint); line-height:1.35; }
 .rs-detail { grid-column:1 / -1; margin-top:6px; }
 
 /* The cards being priced right now */

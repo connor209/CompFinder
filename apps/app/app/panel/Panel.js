@@ -2918,6 +2918,15 @@ function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, o
             <span className="hint-small">{rec.included.length} / {rec.excluded.length}</span>
           )
         ) : null}
+        {/* WHY comps were dropped, on the row rather than in a tooltip.
+            It shipped as a hover title, which reads fine on the screen it was
+            written on and vanishes from a screenshot, a printout and a glance
+            — and "6 excluded" without the reason is the one number here that
+            cannot be acted on. A run printed to PDF to compare two builds was
+            unreadable for exactly this, which is how it got noticed. */}
+        {showDetails && reasonBreakdown ? (
+          <span className="rs-reasons" title={reasonBreakdown}>{reasonBreakdown}</span>
+        ) : null}
         <ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} />
         <div className="rs-links">
           <MarketLinks query={r.query || r.title} gameSlug="pokemon" />

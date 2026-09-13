@@ -228,6 +228,9 @@ eq("the same printing has nothing to say", printingDiff(plain, plain), "");
   if (!/showDetails && rec\?\.note \? <div className="rc-note">/.test(panel)) {
     fail("the sheet row no longer folds the engine's note away with the rest of the working");
   }
+  if (!/showDetails && reasonBreakdown \?/.test(panel)) {
+    fail("the exclusion reasons are hover-only again — 6 excluded without the why is the one number on this row nobody can act on, and a tooltip is gone the moment the screen is printed or screenshotted");
+  }
   if (!/!showDetails && rec && noteIsCaveat\(rec\)/.test(panel)) {
     fail("a note carrying a ⚠ loses its mark on the sheet row when the working is hidden");
   }

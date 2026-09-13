@@ -818,8 +818,27 @@ const CompFinderPricing = (() => {
         const stripped = tok.replace(/^0+(?=\d)/, "");
         return new RegExp(`\\b0*${stripped}\\b`, "i").test(t);
       }
-      const escaped = tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      return new RegExp(`\\b${escaped}\\b`, "i").test(t);
+      // A word boundary only means something next to a WORD character.
+      // `\bImakuni\?\b` matches nothing at all — including "Imakuni? 63/83",
+      // the card's own title — because \b after "?" demands a word character
+      // and there is a space. Three cards in one 50-card run came back at
+      // £0.00 on this: Imakuni? dropped all 27 of its comps, Mr. Mime all 10,
+      // Exp. Share found none. It is every card whose name word ends in "." or
+      // "?", and it fails the way this repo cares about most: silently, at
+      // zero, looking exactly like a card nobody has ever sold.
+      //
+      // An abbreviation's dot is dropped because sellers type it both ways
+      // ("Mr. Mime", "Mr Mime"). Every OTHER trailing symbol is kept and the
+      // boundary simply left off that end — trimming those instead would make
+      // Nidoran♀ match Nidoran♂, which is two different cards pooled into one
+      // price, and this repo has already been bitten by that exact merge once
+      // in the image matcher.
+      const bare = tok.replace(/\.+$/, "");
+      if (!bare) return true; // all punctuation is not a name, and an empty pattern matches everything
+      const escaped = bare.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const open = /^[\p{L}\p{N}]/u.test(bare) ? "\\b" : "";
+      const close = /[\p{L}\p{N}]$/u.test(bare) ? "\\b" : "";
+      return new RegExp(`${open}${escaped}${close}`, "i").test(t);
     });
   }
 
