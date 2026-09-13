@@ -1016,11 +1016,37 @@ compacting a row must not do is unrepresentable rather than merely avoided.
 Default ON because off is a choice about your own screen; shipping it off would
 hide the engine's caveats from somebody who never asked for a quieter one.
 
-**The table hides columns by nth-child, and that had already gone wrong.**
-Adding the "In stock" column left `.hide-current-price` hiding position 6,
-so unticking *show current price* hid the in-stock chips and left the empty
-Current column standing. `check-stockmatch.mjs` now reads the header out of
-`Panel.js` and fails if the two disagree.
+**The results are a sheet, not a table.** Ten columns whose titles wrapped to
+four lines made every row 130px tall, so a 33-card run was a long scroll and a
+200-card one was unreadable — a table that cannot be scanned is a card list
+wearing a table's clothes. `ResultSheet` lays a row out the way CardUploader
+does: the scan of THIS copy on the left, what the card is beside it, the
+numbers on the right.
+
+**The scan was already on the row and nothing drew it.** `csvItem` carries
+`images[]` from either upload path, and the saved run keeps it in `csv_item`,
+so a picture costs nothing — no fetch, no catalogue lookup. A row with no scan
+draws nothing: catalogue art there would show a mint card where a played one
+is, which is the rule counter mode settled.
+
+**Both upload buttons now keep the file.** The Batch screen's own CSV upload
+used to price the cards and keep nothing, so the scans inside a file existed
+only as long as the tab — and an import only appeared if you had used the other
+button. One upload path, one record; the save is fire-and-forget, because a
+failure there may cost the record and must never cost the run.
+
+**A run says what is on the bench.** Pricing 33 cards is several minutes during
+which the only thing that moved was a counter. `pricingNow` holds the cards in
+flight (three, BATCH_CONCURRENCY) with their scans — which is also the moment
+you would most like to notice that the wrong file went in. It is cleared in a
+`finally` around `priceOne`, never inside it: that function exits from half a
+dozen places and a missed one leaves a card on the bench for ever.
+
+**The positional column hiding went with the table, and good riddance.** It is
+what made adding an "In stock" column silently hide the Current one for months.
+`check-stockmatch.mjs` now pins what a row may DROP — the working goes, the
+answer, the ⚠ and an override note stay — rather than a header order against
+a stylesheet.
 
 **Saved runs is folded shut by default.** The argument for listing it above the
 Batch screen was that the moment you want a run is the moment you are looking

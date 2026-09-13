@@ -537,21 +537,12 @@ html, body { overflow-x: clip; max-width: 100%; }
 #compfinder-results td { padding:9px 11px; border-bottom:1px solid var(--line); vertical-align:top; max-width:280px; }
 #compfinder-results tr:last-child td { border-bottom:none; }
 #compfinder-results tr:hover td { background:var(--surface-2); }
-#compfinder-results td:nth-child(7), #compfinder-results td:nth-child(8) { font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; font-weight:600; }
 .compfinder-big-delta td { background:var(--warn-soft); }
-/* These hide COLUMNS BY POSITION, so they are pinned to the header order:
-   1 SKU · 2 Title · 3 Query used · 4 Comps · 5 Confidence · 6 In stock ·
-   7 Current · 8 Recommended · 9 Active · 10 Note. Add a column in the middle
-   and the wrong one disappears — which is exactly what happened when "In
-   stock" went in and this rule went on hiding nth-child(6): unticking "show
-   current price" hid the in-stock chips and left the empty Current column
-   standing. check-stockmatch.mjs reads the header out of Panel.js and fails
-   if the two ever disagree again. */
-#compfinder-results.hide-current-price th:nth-child(7), #compfinder-results.hide-current-price td:nth-child(7) { display:none; }
-/* The working: the query it searched on, and the engine's note. A ⚠ in a note
-   is lifted onto the confidence cell before this hides it. */
-#compfinder-results.hide-working th:nth-child(3), #compfinder-results.hide-working td:nth-child(3),
-#compfinder-results.hide-working th:nth-child(10), #compfinder-results.hide-working td:nth-child(10) { display:none; }
+/* The batch results are no longer a table — see ResultSheet in Panel.js. What
+   is left of #compfinder-results here is the History screen, which still is
+   one. The positional hiding that used to live here went with the table, and
+   good riddance: it is what made adding an "In stock" column hide the wrong
+   one for months. */
 .note-warn { margin-left:6px; color:var(--warn-ink); font-size:12px; cursor:help; }
 .row-hidden { display:none; }
 
@@ -1552,6 +1543,45 @@ html, body { overflow-x: clip; max-width: 100%; }
 @media (max-width: 640px) {
   .sb-row { flex-wrap:wrap; }
   .sb-left { order:3; }
+}
+
+/* ---------- Batch results — the CardUploader-style sheet ---------- */
+.rs-list { display:flex; flex-direction:column; gap:8px; margin-top:14px; }
+.rs-row {
+  display:grid; grid-template-columns:76px minmax(0,1fr) 150px 190px; gap:14px; align-items:start;
+  background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:12px 14px;
+}
+.rs-row-delta { border-color:color-mix(in srgb,var(--warn) 55%,var(--line)); }
+.rs-row-skip { opacity:.8; }
+.rs-scan { display:flex; justify-content:center; }
+.rs-scan .rr-scan { float:none; margin:0; }
+.rs-main { min-width:0; display:flex; flex-direction:column; gap:6px; }
+.rs-titlerow { display:flex; align-items:baseline; gap:8px; flex-wrap:wrap; }
+.rs-title { font-family:var(--font-display); font-weight:600; font-size:14.5px; line-height:1.3; color:var(--ink); }
+.rs-sku { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+.rs-q { font-size:12px; color:var(--ink-soft); font-style:italic; }
+.rs-price { display:flex; flex-direction:column; gap:2px; }
+.rs-price .k { font-family:var(--font-body); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); }
+.rs-price .v.big { font-family:var(--font-mono); font-size:19px; font-weight:700; color:var(--ink); }
+.rs-was { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); }
+.rs-meta { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+.rs-links { display:flex; align-items:center; gap:6px; }
+.rs-detail { grid-column:1 / -1; margin-top:6px; }
+
+/* The cards being priced right now */
+.rs-bench { margin:10px 0 4px; }
+.rs-bench-row { display:flex; gap:10px; margin-top:6px; flex-wrap:wrap; }
+.rs-bench-card { display:flex; align-items:center; gap:8px; max-width:280px; padding:6px 10px 6px 6px;
+  border:1px solid var(--line); border-radius:10px; background:var(--surface-2); }
+.rs-bench-card img { width:34px; height:48px; object-fit:contain; border-radius:4px; background:var(--surface-sink); }
+.rs-bench-empty { width:34px; height:48px; display:flex; align-items:center; justify-content:center;
+  border:1px dashed var(--line-strong); border-radius:4px; font-size:8px; color:var(--ink-faint); text-align:center; }
+.rs-bench-name { font-size:11.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+
+@media (max-width: 900px) {
+  .rs-row { grid-template-columns:64px minmax(0,1fr); }
+  .rs-price, .rs-meta { grid-column:2; flex-direction:row; align-items:center; flex-wrap:wrap; gap:10px; }
 }
 
 /* ---------- Card imports — a CardUploader export, with its scans ---------- */

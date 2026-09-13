@@ -8,7 +8,7 @@ import { APP_SETTINGS, appNameTokens, applyConditionPreference, applyNumberGuard
 import { createGate, runPool, SOLDCOMPS_GAP_MS, BROWSE_GAP_MS, BATCH_CONCURRENCY } from "@/lib/pace";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
-import { loadImport, batchItemsFrom } from "@/lib/import-store.js";
+import { loadImport, batchItemsFrom, saveImport } from "@/lib/import-store.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
 import {
   saveBatch,
@@ -231,6 +231,11 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const [status, setStatus] = useState("");
   const [statusIsError, setStatusIsError] = useState(false);
   const [running, setRunning] = useState(false);
+  // The cards being priced RIGHT NOW — up to BATCH_CONCURRENCY of them. A run
+  // is several minutes of a status line reading "Pricing 3 of 33", which says
+  // nothing about which card is on the bench. It holds the scan and the title
+  // rather than an index, because the item list is a local of the run.
+  const [pricingNow, setPricingNow] = useState([]);
   const [identifying, setIdentifying] = useState(false);
   const [budget, setBudget] = useState({ count: 0 });
   const [stream, setStream] = useState(SLUG_STREAM[initialSection] || "dashboard");
@@ -725,6 +730,19 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         }
         const loaded = items.map((item) => ({ sku: item.sku, title: item.title, source: "csv", csvItem: item }));
         setCsvItems(loaded);
+        // Keep the file as an import too. Two upload buttons that did
+        // different things was the seam here: this one priced the cards and
+        // kept nothing, so the scans inside the file existed only as long as
+        // the tab did. Fire-and-forget on purpose — a batch run must not wait
+        // on it, and a failure costs the record, never the run.
+        (async () => {
+          try {
+            const supabase = createClient();
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            await saveImport(supabase, user.id, { fileName: file.name, items, csvText: String(reader.result) });
+          } catch { /* the run is the thing that matters here */ }
+        })();
         const repairedCount = items.filter((i) => i.cardNumberRepaired).length;
         setCsvSummary(
           `Loaded ${items.length} card(s) from ${file.name}.` +
@@ -955,6 +973,15 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     // order the list was given however the cards actually complete.
     let done = 0;
     const priceOne = async (i) => {
+      const started = { i, title: items[i].title, image: items[i].csvItem?.images?.[0] || null };
+      setPricingNow((cur) => [...cur, started]);
+      try {
+        return await priceOneInner(i);
+      } finally {
+        setPricingNow((cur) => cur.filter((c) => c.i !== i));
+      }
+    };
+    const priceOneInner = async (i) => {
       const item = items[i];
       const { title, sku } = item;
 
@@ -1181,6 +1208,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     collected.length = 0;
     collected.push(...finished);
     setResults(finished);
+    setPricingNow([]); // belt and braces: nothing stays on the bench after a run
 
     setRunning(false);
     saveHistory(collected);
@@ -2127,6 +2155,30 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
 
       {status && <div className={statusIsError ? "compfinder-error" : ""} id="compfinder-status">{status}</div>}
 
+      {/* What is actually on the bench. A run is several minutes during which
+          the only thing that moves is a counter, and the cards it is spending
+          money on were invisible — which is also the moment you would most
+          like to spot that the wrong file went in. Three at a time, because
+          that is BATCH_CONCURRENCY. */}
+      {running && pricingNow.length ? (
+        <div className="rs-bench">
+          <span className="eyebrow">Pricing now</span>
+          <div className="rs-bench-row">
+            {pricingNow.map((c) => (
+              <div key={c.i} className="rs-bench-card" title={c.title}>
+                {c.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={c.image} alt="" loading="lazy" />
+                ) : (
+                  <div className="rs-bench-empty">no scan</div>
+                )}
+                <span className="rs-bench-name">{c.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {poolRun && stickers.length > 0 ? (
         <section className="panel">
           <div className="panel-head">
@@ -2479,32 +2531,20 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             ))}
           </div>
         ) : (
-          <div className="table-wrap">
-            <table
-              id="compfinder-results"
-              className={[showCurrentPrice ? "" : "hide-current-price", showDetails ? "" : "hide-working"].filter(Boolean).join(" ")}
-            >
-              <thead>
-                <tr>
-                  <th>SKU</th><th>Title</th><th>Query used</th><th>Comps</th>
-                  <th>Confidence</th><th>In stock</th><th>Current</th><th>Recommended</th><th>Active</th><th>Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredResults.map(({ r, origIndex, known: k }) => (
-                  <ResultRow
-                    key={origIndex}
-                    r={r}
-                    known={k}
-                    showCurrentPrice={showCurrentPrice}
-                    showDetails={showDetails}
-                    active={activeByIndex[origIndex]}
-                    onCheckActive={() => fetchActiveFor(r, origIndex)}
-                    onOverride={(pence) => setOverrideFor(origIndex, pence)}
-                  />
-                ))}
-              </tbody>
-            </table>
+          <div className="rs-list">
+            {filteredResults.map(({ r, origIndex, known: k }) => (
+              <ResultSheet
+                key={origIndex}
+                r={r}
+                known={k}
+                showCurrentPrice={showCurrentPrice}
+                showDetails={showDetails}
+                active={activeByIndex[origIndex]}
+                onCheckActive={() => fetchActiveFor(r, origIndex)}
+                onDeepDive={deepDiveCard}
+                onOverride={(pence) => setOverrideFor(origIndex, pence)}
+              />
+            ))}
           </div>
         )}
       </section>
@@ -2696,6 +2736,25 @@ function KnownCell({ known, rec }) {
   );
 }
 
+/**
+ * The photograph of this copy, off the CardUploader row the card came in on.
+ *
+ * Small on purpose: the table's job is scanning two hundred rows for the ones
+ * that are wrong, and the picture is there to answer "which card is this"
+ * without reading a four-line title. `contain` rather than `cover`, the same
+ * rule the binder keeps — a gallery shot cropped to fill loses the edges, and
+ * the edges are what you look at a scan to see.
+ *
+ * Nothing is drawn when the row has no scan: a missing picture is a gap, and
+ * catalogue art in its place would show a mint card where a played one is.
+ */
+function RowScan({ r, size = 34 }) {
+  const src = r?.csvItem?.images?.[0];
+  if (!src) return null;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img className="rr-scan" src={src} alt="" loading="lazy" style={{ width: size, height: Math.round(size * 1.4) }} />;
+}
+
 function ResultRow({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onOverride }) {
   const [open, setOpen] = useState(false);
   if (!r.rec) {
@@ -2706,7 +2765,7 @@ function ResultRow({ r, known, showCurrentPrice, showDetails = true, active, onC
     return (
       <tr>
         <td>{r.sku}</td>
-        <td><span className="rr-title">{r.title} <MarketLinks query={r.query || r.title} gameSlug="pokemon" /></span></td>
+        <td><span className="rr-title"><RowScan r={r} />{r.title} <MarketLinks query={r.query || r.title} gameSlug="pokemon" /></span></td>
         <td>{r.query}</td><td>—</td>
         <td><span className="conf-badge conf-low">Skipped</span></td>
         <td><KnownCell known={known} rec={null} /></td>
@@ -2739,7 +2798,7 @@ function ResultRow({ r, known, showCurrentPrice, showDetails = true, active, onC
     <>
       <tr className={rowClass}>
         <td>{r.sku}</td>
-        <td><span className="rr-title">{r.title} <MarketLinks query={r.query || r.title} gameSlug="pokemon" /></span></td>
+        <td><span className="rr-title"><RowScan r={r} />{r.title} <MarketLinks query={r.query || r.title} gameSlug="pokemon" /></span></td>
         <td>{r.query}</td>
         <td>
           {canExpand ? (
@@ -2773,6 +2832,101 @@ function ResultRow({ r, known, showCurrentPrice, showDetails = true, active, onC
   );
 }
 
+/**
+ * One priced card, laid out the way CardUploader lays one out: the scan of
+ * this copy on the left, what the card IS next to it, and the numbers on the
+ * right. It replaced a ten-column table whose titles wrapped to four lines,
+ * which made every row 130px tall and a 200-card run unreadable — a table that
+ * cannot be scanned is a card list wearing a table's clothes.
+ *
+ * Deliberately NOT a <table>: the columns here are a grid that reflows on a
+ * narrow screen, and the old header-and-nth-child hiding is what made adding
+ * the "In stock" column silently hide the wrong one.
+ */
+function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride }) {
+  const [open, setOpen] = useState(false);
+  const rec = r.rec;
+  const specs = r.csvItem ? CardUploaderCsv.itemSpecifics(r.csvItem) : [];
+  const verdict = reviewVerdict(rec);
+  const mine = rec ? isOverridden(rec) : false;
+  const isActive = rec?.dataSource === "active";
+  const reasonCounts = rec ? countReasons(rec) : {};
+  const reasonBreakdown = Object.entries(reasonCounts).map(([reason, n]) => `${n} ${reason}`).join(", ");
+  const canExpand = !!rec && (rec.included.length + rec.excluded.length > 0 || !!(active && active.rec));
+
+  let currentPence = null;
+  if (showCurrentPrice && r.csvItem && r.csvItem.startPrice) {
+    currentPence = Math.round(parseFloat(r.csvItem.startPrice) * 100);
+  }
+  const bigDelta =
+    currentPence != null && rec && effectivePence(rec) != null &&
+    Math.abs(effectivePence(rec) - currentPence) >= 300;
+
+  return (
+    <div className={`rs-row${bigDelta ? " rs-row-delta" : ""}${!rec ? " rs-row-skip" : ""}`}>
+      <div className="rs-scan">
+        <RowScan r={r} size={72} />
+      </div>
+
+      <div className="rs-main">
+        <div className="rs-titlerow">
+          <span className="rs-title" title={r.title}>{r.title}</span>
+          {r.sku ? <span className="rs-sku">{r.sku}</span> : null}
+          {!showDetails && rec && noteIsCaveat(rec) ? <span className="note-warn" title={rec.note}>⚠</span> : null}
+        </div>
+        {specs.length ? (
+          <dl className="ci-specs">
+            {specs.map((sp) => (
+              <div key={sp.label} className="ci-spec"><dt>{sp.label}</dt><dd>{sp.value}</dd></div>
+            ))}
+          </dl>
+        ) : null}
+        {showDetails ? <div className="rs-q" title={r.query}>“{r.query}”</div> : null}
+        {known?.stock || known?.history ? <KnownCell known={known} rec={rec} /> : null}
+        {rec && overrideNote(rec) ? <div className="rc-note rc-note-mine">{overrideNote(rec)}</div> : null}
+        {showDetails && rec?.note ? <div className="rc-note">{rec.note}</div> : null}
+        {!rec && r.failed ? <div className="rc-note">{r.failed}</div> : null}
+      </div>
+
+      <div className="rs-price">
+        <span className="k">{mine ? "Your price" : rec ? "Recommended" : "No price"}</span>
+        <span className="v big"><PriceOverride rec={rec || null} onSet={onOverride} /></span>
+        {currentPence != null ? (
+          <span className="rs-was">was {CompFinderPricing.toPoundsStr(currentPence)}</span>
+        ) : null}
+      </div>
+
+      <div className="rs-meta">
+        {verdict.needsReview ? (
+          <span className="review-badge" title={verdict.reasons.join("; ")}>⚑ Look</span>
+        ) : rec ? (
+          <span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>
+            {isActive ? `${rec.confidence} (active)` : rec.confidence}
+          </span>
+        ) : (
+          <span className="conf-badge conf-low">Skipped</span>
+        )}
+        {rec ? (
+          canExpand ? (
+            <button type="button" className="comps-toggle" onClick={() => setOpen((o) => !o)} title={reasonBreakdown}>
+              <span className="comps-toggle-caret">{open ? "▾" : "▸"}</span> {rec.included.length} / {rec.excluded.length}
+            </button>
+          ) : (
+            <span className="hint-small">{rec.included.length} / {rec.excluded.length}</span>
+          )
+        ) : null}
+        <ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} />
+        <div className="rs-links">
+          <MarketLinks query={r.query || r.title} gameSlug="pokemon" />
+          {onDeepDive ? <button type="button" className="rc-dive" onClick={() => onDeepDive(r.title)}>↗</button> : null}
+        </div>
+      </div>
+
+      {open && canExpand ? <div className="rs-detail"><CompsDetail rec={rec} active={active} /></div> : null}
+    </div>
+  );
+}
+
 function ResultCard({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride }) {
   const [open, setOpen] = useState(false);
 
@@ -2780,6 +2934,7 @@ function ResultCard({ r, known, showCurrentPrice, showDetails = true, active, on
     return (
       <div className="rc rc-skip">
         <div className="rc-head">
+          <RowScan r={r} size={44} />
           <span className="rc-title" title={r.title}>{r.title}</span>
           <span className="conf-badge conf-low">Skipped</span>
         </div>
@@ -2819,6 +2974,7 @@ function ResultCard({ r, known, showCurrentPrice, showDetails = true, active, on
   return (
     <div className={`rc${bigDelta ? " rc-big-delta" : ""}`}>
       <div className="rc-head">
+        <RowScan r={r} size={44} />
         <span className="rc-title" title={r.title}>{r.title}</span>
         {verdict.needsReview ? <span className="review-badge" title={verdict.reasons.join("; ")}>⚑ Needs a look</span> : null}
         <span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span>

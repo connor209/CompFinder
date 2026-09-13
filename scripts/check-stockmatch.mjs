@@ -182,42 +182,66 @@ eq("the same printing has nothing to say", printingDiff(plain, plain), "");
   }
 }
 
-// --- 7. the results table hides columns BY POSITION -----------------------
-// globals.css hides the Current, Query used and Note columns with nth-child.
-// Adding a column in the middle silently hides the wrong one, which is exactly
-// what happened when "In stock" went in: unticking "show current price" hid
-// the in-stock chips instead. Pin the header order to the rules that assume it.
+// --- 7. the results sheet shows the card, and hides only the working ------
+// The batch results used to be a ten-column table whose hiding worked by
+// nth-child, which is how adding "In stock" silently hid the Current column
+// instead for months. It is a row layout now (ResultSheet), so the rule that
+// replaces the header/CSS pin is about WHAT a row may drop: the working goes,
+// the answer and the warnings stay, and the scan of the copy in hand is drawn
+// wherever the file carried one.
 {
   const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
   const css = readFileSync(new URL("../apps/app/app/globals.css", import.meta.url), "utf8");
-  const head = panel.slice(panel.indexOf("<thead>"), panel.indexOf("</thead>"));
-  const cols = [...head.matchAll(/<th>([^<]+)<\/th>/g)].map((m) => m[1].replace(/&amp;/g, "&").trim());
-  eq("the results table's column order", cols, [
-    "SKU", "Title", "Query used", "Comps", "Confidence", "In stock", "Current", "Recommended", "Active", "Note"
-  ]);
-  const at = (name) => cols.indexOf(name) + 1;
-  const hides = (cls, n) =>
-    new RegExp(`#compfinder-results\\.${cls}[^{]*th:nth-child\\(${n}\\)`).test(css) ||
-    new RegExp(`#compfinder-results\\.${cls}[^{]*\\n?[^{]*th:nth-child\\(${n}\\)`).test(css);
-  if (!hides("hide-current-price", at("Current"))) {
-    fail(`.hide-current-price does not hide column ${at("Current")} — it is hiding a different column than "Current"`);
+
+  if (/<table id="compfinder-results"/.test(panel)) {
+    fail("the batch results are a table again — if that is deliberate, this check has to go back to pinning the header order against the nth-child rules that hide its columns");
   }
-  for (const name of ["Query used", "Note"]) {
-    if (!hides("hide-working", at(name))) {
-      fail(`.hide-working does not hide column ${at(name)} — "${name}" is not what gets compacted away`);
-    }
+  if (/hide-current-price|hide-working/.test(panel)) {
+    fail("Panel.js still sets a positional column-hiding class — that mechanism is what hid the wrong column for months");
   }
-  // What is hidden is the WORKING, never the answer or a warning about it.
-  for (const name of ["Recommended", "Confidence", "In stock", "Comps"]) {
-    if (hides("hide-working", at(name))) {
-      fail(`.hide-working hides "${name}" — that is the answer, not the working`);
-    }
+  if (/#compfinder-results\.(hide-current-price|hide-working)/.test(css)) {
+    fail("globals.css still carries the positional hiding rules for a table that no longer exists");
   }
-  if (!/!showDetails && noteIsCaveat\(rec\)/.test(panel)) {
-    fail("a note carrying a ⚠ loses its mark when the working is hidden — the one thing compacting a row must not do");
+
+  // The scan is the whole reason a row can be read at a glance, and it comes
+  // off the CardUploader row the card arrived on — which both upload paths now
+  // carry, and the saved run keeps in csv_item.
+  if (!/function RowScan\(/.test(panel)) {
+    fail("Panel.js no longer draws the scan on a result row");
   }
-  if (!/\{overrideNote\(rec\) \? <div className="rc-note rc-note-mine">/.test(panel)) {
-    fail("the override note is now behind the working toggle — a price somebody typed is loud on every screen");
+  if (!/r\?\.csvItem\?\.images\?\.\[0\]/.test(panel)) {
+    fail("the scan is no longer read off the row's own CardUploader item");
+  }
+  // A row with no scan draws nothing. Catalogue art here would show a mint
+  // card where a played one is — the rule counter mode settled.
+  if (!/if \(!src\) return null;/.test(panel)) {
+    fail("a row with no scan must draw nothing rather than reach for a substitute");
+  }
+  if (/card_catalog|image_small/.test(panel)) {
+    fail("Panel.js is reaching for catalogue art on a result row");
+  }
+
+  // What the working toggle may take, and what it may never take.
+  if (!/\{showDetails \? <div className="rs-q"/.test(panel)) {
+    fail("the sheet row no longer folds the query away with the rest of the working");
+  }
+  if (!/showDetails && rec\?\.note \? <div className="rc-note">/.test(panel)) {
+    fail("the sheet row no longer folds the engine's note away with the rest of the working");
+  }
+  if (!/!showDetails && rec && noteIsCaveat\(rec\)/.test(panel)) {
+    fail("a note carrying a ⚠ loses its mark on the sheet row when the working is hidden");
+  }
+  if (!/rec && overrideNote\(rec\) \? <div className="rc-note rc-note-mine">/.test(panel)) {
+    fail("the override note is behind the working toggle on the sheet row — a price somebody typed is loud on every screen");
+  }
+
+  // A run spends money for several minutes; which cards are on the bench is
+  // the one thing that was invisible while it did.
+  if (!/setPricingNow/.test(panel)) {
+    fail("Panel.js no longer says which cards are being priced right now");
+  }
+  if (!/} finally \{\s*setPricingNow\(\(cur\) => cur\.filter/.test(panel)) {
+    fail("the bench is cleared somewhere other than a finally — priceOne exits from half a dozen places and a missed one leaves a card on the bench for ever");
   }
 }
 
