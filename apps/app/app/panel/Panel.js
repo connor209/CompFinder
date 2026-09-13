@@ -657,6 +657,39 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     return () => { cancelled = true; };
   }, [stream, initialPool]);
 
+  /**
+   * Price the cards on screen again, with the filters as they stand NOW.
+   *
+   * The reason this exists is that everything worth changing is changed AFTER
+   * a run: the search depth, a set the file got wrong, a title you corrected.
+   * Without it the only way to re-price was to find the CSV and upload it
+   * again, which loses every correction made since.
+   *
+   * It confirms, because it spends a request per card and the screen it lives
+   * on is one somebody is holding in one hand at a show. Cards priced in the
+   * last 24 hours come back from the cache for nothing, which is why a re-run
+   * straight after a correction is usually far cheaper than the button says.
+   */
+  function rerunCurrent() {
+    if (results.length === 0 || running) return;
+    const most = results.length * searchDepth;
+    if (!confirm(
+      `Price these ${results.length} card(s) again with the current filters?\n\n` +
+      `Up to ${most} SoldComps request(s) — fewer, because anything priced in the last 24 hours is cached, ` +
+      `and a card that comes back with a full page stops early.`
+    )) return;
+    const items = results.map((r) => ({
+      sku: r.sku || "",
+      title: r.title,
+      source: r.csvItem ? "csv" : "paste",
+      ...(r.csvItem ? { csvItem: r.csvItem } : {})
+    }));
+    runBatch(items, { poolName: poolRunRef.current }).catch((err) => {
+      setStatus(`Re-run failed: ${err.message}`);
+      setStatusIsError(true);
+    });
+  }
+
   /** Clear the screen for a fresh run, and stop the one being cleared from
    *  being written back out on the way to the empty page. */
   const startNewBatch = useCallback(() => {
@@ -2483,7 +2516,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       <section className="panel results-panel">
         <div className="panel-head">
           <span className="eyebrow">Results</span>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div className="results-actions">
             {(() => {
               const pricedCount = results.filter((r) => effectivePence(r.rec) != null).length;
               // The bulk lister used to filter the unpriced rows out and say
@@ -2510,6 +2543,16 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 </button>
               );
             })()}
+            {results.length > 0 ? (
+              <button
+                className="btn btn-ghost"
+                disabled={running}
+                onClick={rerunCurrent}
+                title={`Price these ${results.length} cards again with the filters as they stand now — including any cards you have corrected. Costs up to ${results.length * searchDepth} SoldComps request(s); cards priced in the last 24 hours come back from the cache for nothing.`}
+              >
+                ↻ Re-run ({results.length})
+              </button>
+            ) : null}
             {!openBatch && results.length > 0 ? (
               <button
                 className="btn btn-ghost"

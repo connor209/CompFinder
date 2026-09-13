@@ -74,6 +74,36 @@ for (const file of files) {
 
 if (checked === 0) fail("no panel component called a setter — this check is not looking at anything");
 
+// --- A row of buttons that cannot wrap is a button off the edge -----------
+//
+// The results actions shipped as an inline `style={{ display: "flex" }}` inside
+// a space-between header. On a desktop all five fit; on a phone the last ones
+// went off the side of the screen with nothing to scroll to reach them — and
+// one of them spends money. The filter row had the matching fault: five fixed
+// grid columns, no breakpoint, and a sixth control added to it.
+{
+  const at = (f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
+  const panel = at("apps/app/app/panel/Panel.js");
+  const css = at("apps/app/app/globals.css");
+
+  if (/style=\{\{\s*display:\s*"flex"/.test(panel)) {
+    fail("Panel.js has an inline flex row again — give it a class with flex-wrap, or its last button goes off the edge of a phone");
+  }
+  if (!/\.results-actions\s*\{[^}]*flex-wrap:\s*wrap/.test(css)) {
+    fail(".results-actions does not wrap — the buttons that do not fit are simply off the screen");
+  }
+  if (/\.filter-grid\s*\{[^}]*grid-template-columns:\s*[^;]*fr\s+[^;]*fr\s+[^;]*fr\s+[^;]*fr\s+[^;]*fr/.test(css)) {
+    fail(".filter-grid is back to fixed columns — adding a control to it then pushes the row off a narrow screen");
+  }
+  // Re-running spends a request per card, on a screen held in one hand.
+  if (!/function rerunCurrent\(/.test(panel)) {
+    fail("Panel.js has no re-run — the only way back to a re-price is finding the CSV again, which loses every correction since");
+  }
+  if (!/if \(!confirm\([\s\S]{0,200}again with the current filters/.test(panel)) {
+    fail("re-run does not confirm — it spends a SoldComps request per card and one mis-tap on a phone starts the lot");
+  }
+}
+
 if (failures) {
   console.error(`\ncheck-panelstate: ${failures} failure(s)\n`);
   process.exit(1);

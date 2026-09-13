@@ -132,6 +132,9 @@ stream` (the relay, only while streaming).
   Born from a white screen: the Show Desk shipped calling `setPhoto()` with no
   `useState` behind it, which `next build` compiles, a JSX parse accepts and
   every grep in this repo passes, because it only throws when React renders.
+  It also holds the rows that must WRAP — an inline flex row of buttons and a
+  fixed-column filter grid both put controls off the side of a phone, with
+  nothing to scroll to reach them — and that re-running a batch confirms first.
 - `scripts/check-override.mjs` — a price you typed: what counts as one, that
   the recommendation is never edited, that the sticker gate lets yours through,
   and a grep over every path that spends money for a direct read of
@@ -1267,6 +1270,23 @@ what made adding an "In stock" column silently hide the Current one for months.
 `check-stockmatch.mjs` now pins what a row may DROP — the working goes, the
 answer, the ⚠ and an override note stay — rather than a header order against
 a stylesheet.
+
+**A row of buttons that cannot wrap is a button off the edge.** The results
+actions shipped as an inline `style={{ display: "flex" }}` inside a
+`space-between` header: five buttons fit a desktop, and on a phone the last of
+them were off the side of the screen with nothing to scroll to reach — one of
+which spends money. The filter row had the matching fault, five fixed grid
+columns with no breakpoint, and **Search depth** was added to it as a sixth.
+Both are classes that wrap now, and `check-panelstate.mjs` fails on either
+coming back. Neither was visible from a desktop, which is the whole point.
+
+**A run can be priced again without finding the file.** Everything worth
+changing is changed AFTER a run — the search depth, a set the file got wrong, a
+title you corrected — and until `rerunCurrent()` the only way back was
+re-uploading the CSV, which throws away every correction made since. It
+CONFIRMS, because it spends a request per card on a screen somebody is holding
+in one hand at a show; the count it quotes is the ceiling, since anything
+priced in the last 24 hours comes back from the cache for nothing.
 
 **Saved runs is folded shut by default.** The argument for listing it above the
 Batch screen was that the moment you want a run is the moment you are looking
