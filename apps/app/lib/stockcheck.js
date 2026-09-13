@@ -15,7 +15,10 @@
  * Matching is deliberately conservative. A SKU match is exact and trusted. A
  * card match (collector number + first word of the name) is only trusted when
  * it is unambiguous — if two different listings answer to the same key, the
- * row is reported as ambiguous with the count, rather than picking one.
+ * row is reported as ambiguous with the count, rather than picking one — and
+ * when it is the same PRINTING: the reverse holo and the plain copy share a
+ * key, share a name and a number, and are two different cards at two
+ * different prices. See printingOf() below.
  */
 import CompFinderPricing from "@compfinder/core/pricing.js";
 
@@ -53,6 +56,85 @@ export function keyFromTitle(title) {
 }
 
 /**
+ * WHICH PRINTING of a card a title is talking about.
+ *
+ * `cardKey()` above stops at the collector number and one word of the name,
+ * and that is as far as identity goes: a Shedinja 14/107 and a Shedinja
+ * 14/107 Reverse Holo are one key and are not one card. They are printed,
+ * collected and PRICED separately — the engine already refuses to pool them
+ * (`variantMismatch` in packages/core/pricing.js, after a £7.97 Reverse Holo
+ * landed in a £2.34-£3.48 comp set) — so a batch row reading "In stock ·
+ * £2.37" off the copy we hold in the other printing is that same mistake one
+ * screen further on, with a price and a delta attached to it.
+ *
+ * A slab is the same problem with a bigger gap. A PSA 10 on the shelf is not
+ * evidence about the raw copy in the run, and the difference between them is
+ * multiples rather than pennies.
+ *
+ * Read off the TITLE, because that is where it is written. CardUploader's own
+ * `*C:Finish` column is unreliable for exactly this — 25 of 30 Reverse Holo
+ * cards left it blank, see the note at the top of lib/carduploader.js — and
+ * `\breverse\s*holo\b` is the spelling core and the CSV reader already agree
+ * on, so this is the same reading in a third place rather than a new one.
+ */
+const REVERSE_HOLO_PATTERN = /\breverse\s*holo\b/i;
+
+export function printingOf(title) {
+  const t = String(title || "");
+  // subjectGradeFrom() rather than a grade regex of our own: it is the one
+  // definition of "the card in my hand is a slab", NOT_GRADED_PATTERN guard
+  // and all. Both sides here are titles of cards we hold, which is exactly
+  // the question it answers.
+  const graded = CompFinderPricing.subjectGradeFrom(t);
+  return {
+    reverse: REVERSE_HOLO_PATTERN.test(t),
+    graded: !!graded,
+    // Grades kept apart, companies pooled — the same split the engine makes
+    // on its comps. PSA over CGC is a real premium and nothing like the gap
+    // between a 10 and an 8.
+    grade: graded ? graded.grade : null
+  };
+}
+
+/**
+ * Are two printings the same object?
+ *
+ * Only ever used to REFUSE a match, so it errs toward yes: a difference has
+ * to be written down in both titles before it counts. A slab whose grade
+ * would not parse is still a slab, and splitting on a number neither seller
+ * typed would drop a real match on a detail nobody stated.
+ */
+export function samePrinting(a, b) {
+  if (!a || !b) return true;
+  if (a.reverse !== b.reverse) return false;
+  if (a.graded !== b.graded) return false;
+  if (a.graded && b.graded && a.grade != null && b.grade != null && a.grade !== b.grade) return false;
+  return true;
+}
+
+/**
+ * What the other printing IS, in words, from the point of view of the row
+ * being priced — "non-reverse", "reverse holo", "graded 10", "raw". Empty
+ * string when they are the same card.
+ *
+ * The near miss is worth saying rather than swallowing: "we have the
+ * non-reverse" is a useful thing to know while pricing the reverse, and a
+ * match that silently disappeared would look exactly like a card we have
+ * never listed.
+ */
+export function printingDiff(want, other) {
+  if (!want || !other) return "";
+  const parts = [];
+  if (want.reverse !== other.reverse) parts.push(other.reverse ? "reverse holo" : "non-reverse");
+  if (want.graded !== other.graded) {
+    parts.push(other.graded ? (other.grade != null ? `graded ${other.grade}` : "graded") : "raw");
+  } else if (want.graded && other.graded && want.grade != null && other.grade != null && want.grade !== other.grade) {
+    parts.push(`graded ${other.grade}`);
+  }
+  return parts.join(", ");
+}
+
+/**
  * Index the user's live listings by SKU and by card key.
  * `listings` are rows from `ebay_listings`.
  */
@@ -84,14 +166,26 @@ export function buildStockIndex(listings) {
   return { bySku, byCard, size: (listings || []).length };
 }
 
+/** A printing, flattened to something a Map can key on. */
+function printingSig(p) {
+  return `${p.reverse ? "rev" : "-"}|${p.graded ? (p.grade != null ? `g${p.grade}` : "g") : "raw"}`;
+}
+
 /**
  * Index past price checks by SKU and card key, keeping only the most recent
  * for each — "what did we say last time" is one number, not a history.
  * `checks` are rows from `price_checks`.
+ *
+ * One number PER PRINTING, though. Keeping a single newest row per card key
+ * would have the reverse holo priced last Tuesday answer for the plain copy
+ * priced this morning, on the strength of being newer; they are different
+ * cards and each has its own last price. Newest first within a key, so a
+ * caller that has to fall back to a different printing falls back to the
+ * freshest one.
  */
 export function buildHistoryIndex(checks) {
   const bySku = new Map();
-  const byCard = new Map();
+  const byPrinting = new Map(); // card key -> Map(printing signature -> row)
   const keep = (map, key, row) => {
     if (!key) return;
     const cur = map.get(key);
@@ -106,28 +200,59 @@ export function buildHistoryIndex(checks) {
       title: c.title || ""
     };
     if (c.sku) keep(bySku, c.sku, row);
-    keep(byCard, keyFromTitle(c.title), row);
+    const key = keyFromTitle(c.title);
+    if (!key) continue;
+    const bucket = byPrinting.get(key) || new Map();
+    keep(bucket, printingSig(printingOf(c.title)), row);
+    byPrinting.set(key, bucket);
+  }
+  const byCard = new Map();
+  for (const [key, bucket] of byPrinting) {
+    byCard.set(key, [...bucket.values()].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at))));
   }
   return { bySku, byCard };
 }
 
 /**
  * Look one batch row up in an index. Returns null (no match), or
- * { match, via, count, ambiguous } where `via` is "sku" or "card".
+ * { match, via, count, ambiguous, otherPrinting } where `via` is "sku" or
+ * "card" and `otherPrinting` names the printing when the only thing found
+ * under the key is a DIFFERENT one ("non-reverse", "graded 10") — empty
+ * string when it is the same card.
+ *
+ * A SKU match is exact and stays trusted: the SKU is on the sleeve of that
+ * physical copy, so it cannot be the wrong printing of it. The card key can
+ * be, and is checked.
  */
-function lookup(index, { sku, name, number, title }) {
+function lookup(index, { sku, name, number, title, printing }) {
   if (!index) return null;
   if (sku && index.bySku.has(sku)) {
     const list = index.bySku.get(sku);
     const arr = Array.isArray(list) ? list : [list];
-    return { match: arr[0], via: "sku", count: arr.length, ambiguous: false };
+    return { match: arr[0], via: "sku", count: arr.length, ambiguous: false, otherPrinting: "" };
   }
   const key = name || number ? cardKey({ name, number }) : keyFromTitle(title);
   if (!key || !index.byCard.has(key)) return null;
   const list = index.byCard.get(key);
   const arr = Array.isArray(list) ? list : [list];
+  const want = printing || printingOf(title);
+  const same = arr.filter((e) => samePrinting(printingOf(e.title), want));
   // Several different listings under one key: report it, don't guess.
-  return { match: arr[0], via: "card", count: arr.length, ambiguous: arr.length > 1 };
+  if (same.length) {
+    return { match: same[0], via: "card", count: same.length, ambiguous: same.length > 1, otherPrinting: "" };
+  }
+  // Nothing under this key is this printing. Hand back the nearest thing with
+  // a label on it rather than nothing at all — but a caller that spends money
+  // or draws a delta has to read `otherPrinting` first, because this price is
+  // about a different object.
+  const other = arr[0];
+  return {
+    match: other,
+    via: "card",
+    count: arr.length,
+    ambiguous: false,
+    otherPrinting: printingDiff(want, printingOf(other.title)) || "a different printing"
+  };
 }
 
 /**
@@ -140,7 +265,11 @@ export function checkRow(row, { stock, history } = {}) {
     sku: row?.sku || "",
     name: row?.csvItem?.cardName || "",
     number: row?.csvItem?.cardNumber || "",
-    title: row?.title || ""
+    title: row?.title || "",
+    // Which printing this row IS, read once off the title — the same place
+    // carduploader.js reads it from when it builds the query, and for the
+    // same reason: the CSV's own finish column does not say.
+    printing: printingOf(row?.title || "")
   };
   return {
     stock: lookup(stock, ident),

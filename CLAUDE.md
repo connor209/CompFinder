@@ -54,7 +54,7 @@ stream` (the relay, only while streaming).
 
 ## Checks
 
-`npm run check` runs thirty-four table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-six table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -139,6 +139,12 @@ stream` (the relay, only while streaming).
 - `scripts/check-instock.mjs` — whether a card is still ours to sell: that a
   listing at quantity zero is a card that has gone, that a missing quantity is
   not a zero, and a grep over the two screens that ask.
+- `scripts/check-stockmatch.mjs` — whether a listing of ours is THIS card: that
+  the reverse holo and the plain copy are two cards and a slab and a raw copy
+  two more, that a SKU match stays exact, that "last priced" is kept per
+  printing, a grep against reading a matched listing's price around
+  `stockedMatch()`, and — since the results table hides columns by position —
+  that its header order still matches the CSS that does the hiding.
 - `scripts/check-recent.mjs` — the cards you looked at: newest first, one row
   per card however it was spelled, capped, and junk from an older build
   dropped rather than drawn.
@@ -848,6 +854,72 @@ way.
 Migration 023 has to be applied in Supabase. Until it is, the panel says so on
 the run it couldn't save, and the sessionStorage copy still carries the run
 across the panel — but not across a reload.
+
+## The copy on the shelf is only the same card if it is the same printing
+
+A batch row is matched against our live listings and our own price history on
+the collector number plus one word of the name (`cardKey()` in
+`apps/app/lib/stockcheck.js`). That key cannot tell a Shedinja 14/107 from a
+Shedinja 14/107 **Reverse Holo** — same number, same name, different card,
+different price — so rows were reading `In stock · £2.37` off a copy we hold in
+the other printing, with a `▲ £6.62 vs listed` delta drawn between the two.
+
+The engine settled this one screen earlier: a reverse holo comp in a plain
+card's set is `variantMismatch`, learned when a £7.97 Reverse Holo landed in a
+£2.34–£3.48 comp set. `printingOf()` is the same reading in a third place —
+the spelling `\breverse\s*holo\b` that core and `carduploader.js` already
+agree on, off the TITLE, because CardUploader's own `*C:Finish` column is blank
+on 25 of 30 reverse holos.
+
+- **A slab rides the same rule.** A PSA 10 on the shelf is not evidence about
+  the raw copy in the run, and the gap is multiples rather than pennies. Read
+  through core's `subjectGradeFrom()`, so the "not graded, raw" guard comes
+  with it; grades kept apart, companies pooled, as everywhere else.
+- **It errs toward a match.** A difference has to be written in both titles
+  before it counts — a slab whose grade won't parse is still a slab, not a
+  different one. Splitting too eagerly is the expensive direction: the shelf
+  copy stops being mentioned at all, which is how a second copy goes up at
+  half what its twin is asking.
+- **A SKU match is still exact.** A SKU is on the sleeve of one physical copy,
+  so it cannot be the wrong printing of it.
+- **The near miss is shown, never counted.** `stockedMatch()` in `Panel.js` is
+  the one reading of "we already stock this card", and the count, the filter,
+  the delta, the diagnostic CSV and — the one that spends money — the graded
+  sticker's "what we already ask on eBay" all go through it. What the row shows
+  instead is `Not this printing · non-reverse`, because "we have the other one"
+  is worth knowing while you price this one, and a match that silently
+  disappeared would look exactly like a card we had never listed. The count of
+  those rows sits beside the in-stock filter for the same reason.
+- **"Last priced" is per printing too.** One newest row per card key had the
+  reverse priced last Tuesday answering for the plain copy priced this morning,
+  purely by being newer.
+
+## The working folds away; the answer and the warnings do not
+
+Fifty priced cards is fifty query strings and fifty paragraphs of engine prose,
+and the prose is read once and scrolled past for the rest of the run. **Show
+the working** (remembered in `localStorage`, default ON) drops the query line
+and the note from both the cards and the table — never the price, the
+confidence, the comp counts, the ⚑ or anything a price was overridden with,
+which is loud on every screen by rule. A note carrying a **⚠** keeps its mark
+beside the confidence badge with the full text behind it, so the one thing
+compacting a row must not do is unrepresentable rather than merely avoided.
+
+Default ON because off is a choice about your own screen; shipping it off would
+hide the engine's caveats from somebody who never asked for a quieter one.
+
+**The table hides columns by nth-child, and that had already gone wrong.**
+Adding the "In stock" column left `.hide-current-price` hiding position 6,
+so unticking *show current price* hid the in-stock chips and left the empty
+Current column standing. `check-stockmatch.mjs` now reads the header out of
+`Panel.js` and fails if the two disagree.
+
+**Saved runs is folded shut by default.** The argument for listing it above the
+Batch screen was that the moment you want a run is the moment you are looking
+at an empty screen wondering where the last one went — which is an argument for
+one click away, not for thirty days of rows between the controls and the
+results. The header carries the count, an open run is named there, and a save
+that FAILED still says so whether the list is open or shut.
 
 ## A price you set beats a price we worked out
 

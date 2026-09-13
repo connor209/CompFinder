@@ -539,7 +539,20 @@ html, body { overflow-x: clip; max-width: 100%; }
 #compfinder-results tr:hover td { background:var(--surface-2); }
 #compfinder-results td:nth-child(7), #compfinder-results td:nth-child(8) { font-family:var(--font-mono); font-variant-numeric:tabular-nums; white-space:nowrap; font-weight:600; }
 .compfinder-big-delta td { background:var(--warn-soft); }
-#compfinder-results.hide-current-price th:nth-child(6), #compfinder-results.hide-current-price td:nth-child(6) { display:none; }
+/* These hide COLUMNS BY POSITION, so they are pinned to the header order:
+   1 SKU · 2 Title · 3 Query used · 4 Comps · 5 Confidence · 6 In stock ·
+   7 Current · 8 Recommended · 9 Active · 10 Note. Add a column in the middle
+   and the wrong one disappears — which is exactly what happened when "In
+   stock" went in and this rule went on hiding nth-child(6): unticking "show
+   current price" hid the in-stock chips and left the empty Current column
+   standing. check-stockmatch.mjs reads the header out of Panel.js and fails
+   if the two ever disagree again. */
+#compfinder-results.hide-current-price th:nth-child(7), #compfinder-results.hide-current-price td:nth-child(7) { display:none; }
+/* The working: the query it searched on, and the engine's note. A ⚠ in a note
+   is lifted onto the confidence cell before this hides it. */
+#compfinder-results.hide-working th:nth-child(3), #compfinder-results.hide-working td:nth-child(3),
+#compfinder-results.hide-working th:nth-child(10), #compfinder-results.hide-working td:nth-child(10) { display:none; }
+.note-warn { margin-left:6px; color:var(--warn-ink); font-size:12px; cursor:help; }
 .row-hidden { display:none; }
 
 /* ---------- Confidence chip ---------- */
@@ -1518,6 +1531,10 @@ html, body { overflow-x: clip; max-width: 100%; }
 .inv-upd.busy { color:var(--ink-soft); }
 
 /* Saved batch runs — the list, and the banner over a re-opened one */
+.sb-toggle { display:inline-flex; align-items:center; gap:8px; border:0; background:transparent; padding:0; cursor:pointer; color:inherit; }
+.sb-toggle .eyebrow { cursor:pointer; }
+.sb-caret { display:inline-block; width:10px; color:var(--ink-faint); font-size:11px; }
+.sb-count { font-family:var(--font-mono); font-size:11px; font-weight:600; color:var(--ink-soft); background:var(--surface-sink); border:1px solid var(--line); border-radius:999px; padding:1px 8px; }
 .sb-list { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
 .sb-row { display:flex; align-items:center; gap:12px; padding:9px 12px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); }
 .sb-row-on { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
@@ -1556,6 +1573,14 @@ html, body { overflow-x: clip; max-width: 100%; }
   color:var(--accent-2); background:var(--accent-soft, transparent); border:1px solid var(--accent-2);
 }
 .kn-chip-amb { border-style:dashed; }
+/* A listing of a DIFFERENT printing of the same card. Deliberately not the
+   accent colour of a real match: it reads as a note, not as stock, because
+   that is what it is. */
+.kn-chip-other {
+  color:var(--ink-soft); background:transparent; border:1px dashed var(--line-strong);
+  font-weight:500; white-space:normal;
+}
+.kn-other { font-style:italic; }
 .kn-gap { font-family:var(--font-mono); font-size:11px; white-space:nowrap; color:var(--ink-faint); }
 .kn-gap.up { color:var(--good-ink, var(--ink)); }
 .kn-gap.down { color:var(--bad-ink, var(--ink)); }

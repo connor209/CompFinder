@@ -53,6 +53,11 @@ const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 const LIVE_BATCH_KEY = "cf-batch-live";
 // How wide the labels being printed on are, in characters of card name.
 const LABEL_NAME_KEY = "cf-label-name-max";
+// Whether a result row shows its working — the query it searched on and the
+// engine's note under the price. Remembered rather than re-chosen every run:
+// a fifty-card run is a wall of prose on a laptop, and somebody who has turned
+// it off once has said what they want from the screen.
+const RESULT_DETAILS_KEY = "cf-result-details";
 
 // Section <-> URL slug mapping so each stream has its own /panel/<slug>.
 const STREAM_SLUG = {
@@ -309,6 +314,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   const [reasonFilter, setReasonFilter] = useState("");
   const [showCurrentPrice, setShowCurrentPrice] = useState(false);
   const [resultsView, setResultsView] = useState("cards");
+  // Defaults to ON. Off is a choice somebody makes about their own screen;
+  // shipping it off would hide the engine's caveats from a run nobody had
+  // asked to compact, which is the one thing this screen must not do.
+  const [showDetails, setShowDetails] = useState(true);
 
   // What we already know about these cards: our live eBay listings and our own
   // past price decisions. Loaded once when the Batch stream is first opened,
@@ -356,6 +365,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   function saveNameMax(n) {
     setNameMax(n);
     try { localStorage.setItem(LABEL_NAME_KEY, String(n)); } catch { /* best-effort */ }
+  }
+  useEffect(() => {
+    try { if (localStorage.getItem(RESULT_DETAILS_KEY) === "off") setShowDetails(false); } catch { /* private mode — the default is fine */ }
+  }, []);
+  function saveShowDetails(on) {
+    setShowDetails(on);
+    try { localStorage.setItem(RESULT_DETAILS_KEY, on ? "on" : "off"); } catch { /* best-effort */ }
   }
 
   // The saved run the results on screen came from — set both when one is
@@ -1370,10 +1386,20 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     const rows = results.map((r) => {
       const currentPrice = r.csvItem && r.csvItem.startPrice ? r.csvItem.startPrice : "";
       const k = knownFor(r);
-      const listedPence = k?.stock?.match?.pricePence ?? null;
-      const stockCell = k?.stock ? (k.stock.count > 1 ? `yes (${k.stock.count})` : "yes") : "";
+      // Only a listing of the SAME printing fills the numeric columns: a
+      // reverse holo's asking price in a "Listed Price" column against the
+      // plain copy is a wrong number, and a wrong number in a sheet outlives
+      // every screen it was explained on. The near miss is not dropped, it
+      // moves into the text column where it can say what it is.
+      const inStock = stockedMatch(k);
+      const listedPence = inStock?.match?.pricePence ?? null;
+      const stockCell = inStock
+        ? (inStock.count > 1 ? `yes (${inStock.count})` : "yes")
+        : k?.stock
+          ? `different printing (${k.stock.otherPrinting})`
+          : "";
       const listedCell = listedPence != null ? (listedPence / 100).toFixed(2) : "";
-      const lastCell = k?.history ? (k.history.match.pricePence / 100).toFixed(2) : "";
+      const lastCell = k?.history && !k.history.otherPrinting ? (k.history.match.pricePence / 100).toFixed(2) : "";
       const quote = (cells) => cells.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
       if (!r.rec) {
         // 0.00, not blank. This sheet gets read next to the eBay upload file
@@ -1665,14 +1691,20 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       const matchesConfidence = !confidenceFilter || confidence === confidenceFilter;
       const reasons = r.rec ? Object.keys(countReasons(r.rec)) : [];
       const matchesReason = !reasonFilter || reasons.includes(reasonFilter);
-      const matchesStock = !stockOnly || !!k?.stock;
+      const matchesStock = !stockOnly || !!stockedMatch(k);
       const v = verdictFor(r);
       const matchesReview =
         !reviewFilter ||
         (reviewFilter === "needs" ? v.needsReview : reviewFilter === "asking" ? !!v.basis : !v.needsReview);
       return matchesSearch && matchesConfidence && matchesReason && matchesStock && matchesReview;
     });
-  const inStockCount = known ? results.filter((r) => knownFor(r)?.stock).length : 0;
+  const inStockCount = known ? results.filter((r) => stockedMatch(knownFor(r))).length : 0;
+  // Rows where the only listing under this card's name and number is a
+  // different printing of it. Counted and said out loud: a row that used to
+  // read "In stock" and now reads nothing looks like the check broke.
+  const otherPrintingCount = known
+    ? results.filter((r) => { const k = knownFor(r); return k?.stock && !!k.stock.otherPrinting; }).length
+    : 0;
 
   /**
    * What we already ask for each row on eBay, keyed by position in the run.
@@ -1686,7 +1718,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
    */
   const listedByIndex = poolRun
     ? results.reduce((acc, r, i) => {
-        const p = knownFor(r)?.stock?.match?.pricePence;
+        const p = stockedMatch(knownFor(r))?.match?.pricePence;
         if (p != null) acc[i] = p;
         return acc;
       }, {})
@@ -2316,19 +2348,42 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               <span>Show current price &amp; highlight big changes</span>
             </label>
 
+            {/* The working, not the answer. Prices, confidence, the comp
+                counts and anything flagged for a look all stay whatever this
+                is set to — what goes is the query string and the engine's
+                explanation, which are the two longest things on a row and the
+                two you read once and then scroll past fifty times. A row
+                whose note carries a ⚠ keeps the mark, so a caveat is never
+                what got compacted away. */}
+            <label className="checkbox-field">
+              <input type="checkbox" checked={showDetails} onChange={(e) => saveShowDetails(e.target.checked)} />
+              <span>Show the working — the query searched and the note under each price</span>
+            </label>
+
             {known ? (
-              inStockCount > 0 ? (
-                <label className="checkbox-field">
-                  <input type="checkbox" checked={stockOnly} onChange={(e) => setStockOnly(e.target.checked)} />
-                  <span>
-                    Only cards we already stock — <b>{inStockCount}</b> of {results.length} matched a live listing
-                  </span>
-                </label>
-              ) : (
-                <p className="hint hint-small">
-                  None of these match a live listing (checked against {known.stock.size.toLocaleString()} of ours).
-                </p>
-              )
+              <>
+                {inStockCount > 0 ? (
+                  <label className="checkbox-field">
+                    <input type="checkbox" checked={stockOnly} onChange={(e) => setStockOnly(e.target.checked)} />
+                    <span>
+                      Only cards we already stock — <b>{inStockCount}</b> of {results.length} matched a live listing
+                    </span>
+                  </label>
+                ) : (
+                  <p className="hint hint-small">
+                    None of these match a live listing (checked against {known.stock.size.toLocaleString()} of ours).
+                  </p>
+                )}
+                {/* Its own line rather than inside the label: it is a count of
+                    what did NOT match, and a sentence that toggles a filter
+                    when you click it to read it is a sentence nobody reads. */}
+                {otherPrintingCount > 0 ? (
+                  <p className="hint hint-small">
+                    Another <b>{otherPrintingCount}</b> matched a different printing of the same card — the reverse
+                    holo, or a slab of it. Marked on the row, not counted as stock: different card, different price.
+                  </p>
+                ) : null}
+              </>
             ) : (
               <p className="hint hint-small">Checking against our own stock…</p>
             )}
@@ -2345,6 +2400,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 r={r}
                 known={k}
                 showCurrentPrice={showCurrentPrice}
+                showDetails={showDetails}
                 active={activeByIndex[origIndex]}
                 onCheckActive={() => fetchActiveFor(r, origIndex)}
                 onDeepDive={deepDiveCard}
@@ -2354,7 +2410,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           </div>
         ) : (
           <div className="table-wrap">
-            <table id="compfinder-results" className={showCurrentPrice ? "" : "hide-current-price"}>
+            <table
+              id="compfinder-results"
+              className={[showCurrentPrice ? "" : "hide-current-price", showDetails ? "" : "hide-working"].filter(Boolean).join(" ")}
+            >
               <thead>
                 <tr>
                   <th>SKU</th><th>Title</th><th>Query used</th><th>Comps</th>
@@ -2368,6 +2427,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                     r={r}
                     known={k}
                     showCurrentPrice={showCurrentPrice}
+                    showDetails={showDetails}
                     active={activeByIndex[origIndex]}
                     onCheckActive={() => fetchActiveFor(r, origIndex)}
                     onOverride={(pence) => setOverrideFor(origIndex, pence)}
@@ -2472,10 +2532,38 @@ function historyRecord({ userId, row, rec, ebaySite }) {
   };
 }
 
+/**
+ * Does this note carry a warning rather than just an explanation?
+ *
+ * The engine writes its caveats into the same string as its workings — a wide
+ * comp span, a catalogue split, a set confirmed in only some of the comps —
+ * and marks every one of them with a ⚠. Hiding the note to quieten a fifty-row
+ * screen must not hide those, so the mark comes out and rides on the row
+ * instead, with the full note behind it.
+ */
+function noteIsCaveat(rec) {
+  return /⚠/.test(rec?.note || "");
+}
+
 function countReasons(rec) {
   const counts = {};
   for (const e of rec.excluded) counts[e.exclusionReason] = (counts[e.exclusionReason] || 0) + 1;
   return counts;
+}
+
+/**
+ * The listing that is THIS card, out of what stockcheck.js found.
+ *
+ * A match carrying `otherPrinting` is a near miss: the reverse holo answering
+ * for the plain copy, or a slab answering for a raw one. Worth showing on the
+ * row — we do own one, and knowing that is useful while you price its sibling
+ * — and never worth counting as stock, filtering on, drawing a delta against
+ * or starting a sticker from, because it is a different card at a different
+ * price. One definition, because the row, the filter, the count, the sticker
+ * and the export all have to agree about which listings are this card.
+ */
+function stockedMatch(k) {
+  return k?.stock && !k.stock.otherPrinting ? k.stock : null;
 }
 
 /**
@@ -2487,21 +2575,35 @@ function KnownCell({ known, rec }) {
   const stock = known?.stock;
   const hist = known?.history;
   if (!stock && !hist) return <span className="hint-small">—</span>;
-  const listed = stock?.match?.pricePence ?? null;
+  // The near miss is shown and labelled, never counted. Its price is kept out
+  // of the delta entirely: "▲ £6.62 vs listed" against the copy we hold in the
+  // other printing is a comparison between two different cards, and it reads
+  // on the row exactly like a comparison between two of the same.
+  const inStock = stockedMatch(known);
+  const listed = inStock?.match?.pricePence ?? null;
   const gap = priceGap(effectivePence(rec), listed);
   return (
     <span className="kn">
-      {stock ? (
+      {inStock ? (
         <span
-          className={`kn-chip${stock.ambiguous ? " kn-chip-amb" : ""}`}
+          className={`kn-chip${inStock.ambiguous ? " kn-chip-amb" : ""}`}
           title={
-            (stock.ambiguous
-              ? `${stock.count} of our listings match this card — showing the first. `
-              : "") + `Matched on ${stock.via === "sku" ? "SKU" : "card name & number"}: ${stock.match.title}`
+            (inStock.ambiguous
+              ? `${inStock.count} of our listings match this card — showing the first. `
+              : "") + `Matched on ${inStock.via === "sku" ? "SKU" : "card name & number"}: ${inStock.match.title}`
           }
         >
-          In stock{stock.count > 1 ? ` ×${stock.count}` : ""}
+          In stock{inStock.count > 1 ? ` ×${inStock.count}` : ""}
           {listed != null ? ` · ${CompFinderPricing.toPoundsStr(listed)}` : ""}
+        </span>
+      ) : stock ? (
+        <span
+          className="kn-chip kn-chip-other"
+          title={`Not this printing. The nearest we have is ${stock.otherPrinting}: ${stock.match.title}${
+            stock.match.pricePence != null ? ` (listed at ${CompFinderPricing.toPoundsStr(stock.match.pricePence)})` : ""
+          }. Different card, different price — so it is not counted as stock and no comparison is drawn.`}
+        >
+          Not this printing · {stock.otherPrinting}
         </span>
       ) : null}
       {gap ? (
@@ -2510,15 +2612,21 @@ function KnownCell({ known, rec }) {
         </span>
       ) : null}
       {hist ? (
-        <span className="kn-hist" title={`Last priced ${String(hist.match.created_at).slice(0, 10)} — ${hist.match.title}`}>
+        <span
+          className={`kn-hist${hist.otherPrinting ? " kn-other" : ""}`}
+          title={`Last priced ${String(hist.match.created_at).slice(0, 10)} — ${hist.match.title}${
+            hist.otherPrinting ? `. That is the ${hist.otherPrinting}, not this printing.` : ""
+          }`}
+        >
           last {CompFinderPricing.toPoundsStr(hist.match.pricePence)}
+          {hist.otherPrinting ? ` (${hist.otherPrinting})` : ""}
         </span>
       ) : null}
     </span>
   );
 }
 
-function ResultRow({ r, known, showCurrentPrice, active, onCheckActive, onOverride }) {
+function ResultRow({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onOverride }) {
   const [open, setOpen] = useState(false);
   if (!r.rec) {
     // A card the app couldn't price still gets a price box. It is the strongest
@@ -2578,6 +2686,7 @@ function ResultRow({ r, known, showCurrentPrice, active, onCheckActive, onOverri
           ) : (
             <span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span>
           )}
+          {!showDetails && noteIsCaveat(rec) ? <span className="note-warn" title={rec.note}>⚠</span> : null}
         </td>
         <td><KnownCell known={known} rec={rec} /></td>
         <td>{currentCell}</td>
@@ -2594,7 +2703,7 @@ function ResultRow({ r, known, showCurrentPrice, active, onCheckActive, onOverri
   );
 }
 
-function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepDive, onOverride }) {
+function ResultCard({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride }) {
   const [open, setOpen] = useState(false);
 
   if (!r.rec) {
@@ -2643,11 +2752,12 @@ function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepD
         <span className="rc-title" title={r.title}>{r.title}</span>
         {verdict.needsReview ? <span className="review-badge" title={verdict.reasons.join("; ")}>⚑ Needs a look</span> : null}
         <span className={`conf-badge conf-${rec.confidence.toLowerCase()}${isActive ? " conf-badge-active" : ""}`}>{confidenceLabel}</span>
+        {!showDetails && noteIsCaveat(rec) ? <span className="note-warn" title={rec.note}>⚠</span> : null}
       </div>
       {verdict.needsReview ? <div className="review-why">{verdict.reasons.join(" · ")}</div> : null}
       {r.sku ? <div className="rc-sku">SKU {r.sku}</div> : null}
       {known?.stock || known?.history ? <div className="rc-known"><KnownCell known={known} rec={rec} /></div> : null}
-      <div className="rc-q" title={r.query}>“{r.query}”</div>
+      {showDetails ? <div className="rc-q" title={r.query}>“{r.query}”</div> : null}
 
       <div className="rc-prices">
         <div className="rc-pcell">
@@ -2670,7 +2780,7 @@ function ResultCard({ r, known, showCurrentPrice, active, onCheckActive, onDeepD
       </div>
 
       {overrideNote(rec) ? <div className="rc-note rc-note-mine">{overrideNote(rec)}</div> : null}
-      {rec.note ? <div className="rc-note">{rec.note}</div> : null}
+      {showDetails && rec.note ? <div className="rc-note">{rec.note}</div> : null}
 
       <div className="rc-foot">
         {canExpand ? (

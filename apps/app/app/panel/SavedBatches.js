@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { listBatches, purgeExpired, deleteBatch, RETENTION_DAYS } from "@/lib/batch-store.js";
 
+const OPEN_KEY = "cf-saved-runs-open";
+
 function fmtWhen(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -25,11 +27,30 @@ function fmtLeft(iso) {
  * The runs we still have. Listed above the Batch screen rather than behind
  * their own nav entry, because the moment you want one is the moment you are
  * looking at an empty Batch screen wondering where the last one went.
+ *
+ * Folded shut by default, because that argument is about being ONE CLICK
+ * away, not about being permanently in the way: thirty days of retention on a
+ * screen somebody opens several times a day is a stack of rows between the
+ * controls and the results. The header still carries the count, so the thing
+ * it exists to answer — is the last run still there? — is answered without
+ * opening it.
  */
 export default function SavedBatches({ onOpen, refreshNonce = 0, openId = null }) {
   const [rows, setRows] = useState(null); // null = still loading
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState(null);
+  const [open, setOpen] = useState(false);
+  // Remembered, like every other preference about what this screen shows.
+  useEffect(() => {
+    try { if (localStorage.getItem(OPEN_KEY) === "on") setOpen(true); } catch { /* private mode — shut is fine */ }
+  }, []);
+  function toggle() {
+    setOpen((wasOpen) => {
+      const next = !wasOpen;
+      try { localStorage.setItem(OPEN_KEY, next ? "on" : "off"); } catch { /* best-effort */ }
+      return next;
+    });
+  }
 
   const load = useCallback(async () => {
     try {
@@ -67,17 +88,35 @@ export default function SavedBatches({ onOpen, refreshNonce = 0, openId = null }
   }
 
 
+  const count = rows ? rows.length : null;
+  const openRow = rows && openId ? rows.find((r) => r.id === openId) : null;
+
   return (
     <section className="panel">
       <div className="panel-head">
-        <span className="eyebrow">Saved runs</span>
-        <span className="hint-small">Kept {RETENTION_DAYS} days · re-opening one costs no SoldComps requests</span>
+        <button type="button" className="sb-toggle" onClick={toggle} aria-expanded={open}>
+          <span className="sb-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+          <span className="eyebrow">Saved runs</span>
+          {count != null ? <span className="sb-count">{count}</span> : null}
+        </button>
+        <span className="hint-small">
+          {open
+            ? `Kept ${RETENTION_DAYS} days · re-opening one costs no SoldComps requests`
+            : openRow
+              ? `Showing “${openRow.label || "Batch run"}”`
+              : count === 0
+                ? "Nothing saved yet"
+                : `Kept ${RETENTION_DAYS} days`}
+        </span>
       </div>
 
+      {/* Shown whether the list is open or shut. A save that failed is the one
+          thing on this panel you have to see, and it is the whole reason the
+          empty case says so out loud rather than rendering nothing. */}
       {error ? <p className="hint hint-small compfinder-error">{error}</p> : null}
-      {rows === null ? <p className="hint hint-small">Looking for earlier runs…</p> : null}
+      {open && rows === null ? <p className="hint hint-small">Looking for earlier runs…</p> : null}
 
-      {rows && rows.length === 0 && !error ? (
+      {open && rows && rows.length === 0 && !error ? (
         // Says so rather than hiding, because an empty list and a save that
         // failed used to look identical: nothing on the screen at all.
         <p className="hint hint-small">
@@ -86,7 +125,7 @@ export default function SavedBatches({ onOpen, refreshNonce = 0, openId = null }
         </p>
       ) : null}
 
-      {rows && rows.length > 0 ? (
+      {open && rows && rows.length > 0 ? (
         <div className="sb-list">
           {rows.map((row) => (
             <div key={row.id} className={`sb-row${row.id === openId ? " sb-row-on" : ""}`}>
