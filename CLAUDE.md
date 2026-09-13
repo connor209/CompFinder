@@ -54,7 +54,7 @@ stream` (the relay, only while streaming).
 
 ## Checks
 
-`npm run check` runs thirty-six table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-seven table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -98,6 +98,11 @@ stream` (the relay, only while streaming).
 - `scripts/check-batchsave.mjs` — what survives saving and re-opening a batch
   run: every comp, every exclusion reason, the asking prices on the right card,
   and a grep against a second definition of the saved shape.
+- `scripts/check-cardimport.mjs` — a CardUploader export, kept: that the scans
+  and the card details survive the file and the round trip, that the serialiser
+  and migration 028 declare the same columns, that `title_original` is not
+  writable from a patch, that a batch run prices the EDITED title, and a grep
+  keeping the two tables named in one file.
 - `scripts/check-showstock.mjs` — the show pool and the price that reaches a
   label: the cash ladder as a table, which prices are held back, that a graded
   card starts from our own eBay price while a raw one never does, and that a
@@ -854,6 +859,51 @@ way.
 Migration 023 has to be applied in Supabase. Until it is, the panel says so on
 the run it couldn't save, and the sessionStorage copy still carries the run
 across the panel — but not across a reload.
+
+## The file already had the card in it
+
+The Batch screen has read CardUploader exports since the beginning and kept
+four fields out of twenty-five: title, SKU, number, condition. So a row on that
+screen could only ever say its title, and the two questions you actually ask
+holding a card — *is this the one I scanned* and *is the title right* — had no
+answer anywhere in the app.
+
+Both answers were in the file the whole time. **`PicURL` is a pipe-separated
+list of photographs of THAT COPY**, four per row in a September 2026 export,
+already public on CardUploader's CDN. The set, rarity, year, illustrator, type,
+stage and language are each one column. `apps/app/app/panel/Imports.js` is the
+screen, `lib/import-store.js` owns the tables, and migration 028 is
+`card_imports` + `card_import_items`.
+
+- **URLs, not bytes**, the same rule migration 022 set for catalogue art, and a
+  stronger case here: these are pictures of a card we are holding.
+- **The scans beat catalogue art, which is why the row never reaches for it.**
+  Counter mode settled this already — publisher artwork shows a mint card to
+  somebody holding a played one. A row with no scan says "no scan"; a gap is
+  honest and a perfect picture of a different copy is not. `check-cardimport`
+  greps the screen to keep it that way.
+- **Editing the title is the point, not a convenience.** The title is what the
+  engine searches on and — since `*C:Finish` is blank on 49 of 50 reverse holos
+  — it is also what decides which PRINTING gets priced. So a correction changes
+  the price that comes back. `title_original` is kept beside it and is NOT
+  writable from a patch, exactly as `finalPence` survives an override: a change
+  nobody can see is indistinguishable from what the file said.
+- **A run prices what you corrected.** `/panel/batch?import=<id>` is the same
+  device as `?pool=show` — a set of cards named in the URL, because a slug
+  change remounts the panel and state is what that loses — and it hands over
+  the edited titles. Handing over the originals would make the edit a
+  decoration.
+- **The serialiser and the migration are checked against each other.** A field
+  added to one and not the other is invisible until Postgres rejects the insert
+  — and it rejects the whole chunk of rows, not the offending column.
+- **No expiry, where a saved batch run has thirty days.** A run is a working
+  document fat with comps; an import is a few kilobytes of text and links, and
+  the day you want it is the day a card turns up in a box with a SKU on it and
+  nothing else attached.
+- **The file's £2.49 is shown and not editable.** Every row of a CardUploader
+  export carries that placeholder — the same figure as the engine's own floor,
+  which is the whole reason `zero-price.js` exists. Making it typeable here
+  would be a third place to set a price that nothing downstream reads.
 
 ## The copy on the shelf is only the same card if it is the same printing
 

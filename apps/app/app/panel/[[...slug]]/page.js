@@ -21,11 +21,15 @@ export default async function PanelPage({ params, searchParams }) {
   const { slug } = await params;
   const query = (await searchParams) || {};
   const pool = Array.isArray(query.pool) ? query.pool[0] : query.pool;
+  // ?import=<id> is the same idea as ?pool=show: a set of cards named before a
+  // run exists to have an id of its own.
+  const imported = Array.isArray(query.import) ? query.import[0] : query.import;
   return (
     <Panel
       initialSection={slug?.[0] || "dashboard"}
       initialBatchId={slug?.[1] || null}
       initialPool={pool || null}
+      initialImport={imported || null}
     />
   );
 }

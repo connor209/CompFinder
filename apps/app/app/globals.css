@@ -1554,6 +1554,78 @@ html, body { overflow-x: clip; max-width: 100%; }
   .sb-left { order:3; }
 }
 
+/* ---------- Card imports — a CardUploader export, with its scans ---------- */
+.ci-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+.ci-row {
+  display:grid; grid-template-columns:96px minmax(0,1fr) 220px; gap:14px; align-items:start;
+  background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:12px 14px;
+}
+/* An edited title is loud, the same rule a typed price follows: a change
+   nobody can see is indistinguishable from what the file said. */
+.ci-row-edited { border-color:color-mix(in srgb,var(--accent) 45%,var(--line)); }
+.ci-scans { display:flex; flex-direction:column; align-items:center; gap:4px; }
+.ci-thumb {
+  display:block; width:96px; height:132px; padding:0; border:1px solid var(--line-strong);
+  border-radius:8px; overflow:hidden; background:var(--surface-sink); cursor:zoom-in;
+}
+/* contain, never cover: the edges are what somebody looks at a scan to see. */
+.ci-thumb img { width:100%; height:100%; object-fit:contain; display:block; }
+.ci-thumb-empty {
+  display:flex; align-items:center; justify-content:center; cursor:default;
+  font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); border-style:dashed;
+}
+.ci-scan-count { font-family:var(--font-mono); font-size:10.5px; color:var(--ink-faint); cursor:zoom-in; }
+.ci-body { min-width:0; display:flex; flex-direction:column; gap:8px; }
+.ci-titlerow { display:flex; align-items:center; gap:8px; }
+.ci-title {
+  flex:1; min-width:0; font-family:var(--font-display); font-weight:600; font-size:15px;
+  color:var(--ink); background:var(--surface-2); border:1px solid transparent;
+  border-radius:8px; padding:7px 10px;
+}
+.ci-title:hover { border-color:var(--line); }
+.ci-title:focus { border-color:var(--accent); outline:none; background:var(--surface-sink); }
+.ci-title-over { border-color:var(--bad-ink); }
+.ci-count { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); white-space:nowrap; }
+.ci-count-over { color:var(--bad-ink); font-weight:700; }
+.ci-was { font-size:11.5px; color:var(--ink-soft); display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.ci-specs { display:flex; flex-wrap:wrap; gap:4px 14px; margin:0; }
+.ci-spec { display:flex; gap:6px; align-items:baseline; }
+.ci-spec dt { font-family:var(--font-body); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); margin:0; }
+.ci-spec dd { margin:0; font-size:12.5px; color:var(--ink); }
+.ci-fields { display:flex; flex-direction:column; gap:6px; }
+.ci-field { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.ci-field > span { font-family:var(--font-body); font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); }
+.ci-field input, .ci-field select {
+  width:110px; border:1px solid var(--line-strong); border-radius:var(--radius-sm);
+  padding:5px 8px; font-family:var(--font-mono); font-size:12.5px;
+  background:var(--surface-2); color:var(--ink);
+}
+.ci-field-static b { font-family:var(--font-mono); font-size:12.5px; color:var(--ink-soft); width:110px; }
+
+.ci-viewer {
+  position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.72);
+  display:flex; align-items:center; justify-content:center; padding:20px;
+}
+.ci-viewer-inner {
+  display:flex; flex-direction:column; gap:10px; max-width:min(920px,94vw); max-height:92vh;
+  background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:14px;
+}
+.ci-viewer-head { display:flex; align-items:center; justify-content:space-between; gap:12px; font-weight:600; }
+.ci-viewer img { max-width:100%; max-height:70vh; object-fit:contain; border-radius:10px; background:var(--surface-sink); }
+.ci-viewer-strip { display:flex; gap:6px; justify-content:center; }
+.ci-viewer-dot {
+  min-width:30px; border:1px solid var(--line-strong); background:var(--surface-2); color:var(--ink-soft);
+  border-radius:var(--radius-pill); padding:3px 9px; font-family:var(--font-mono); font-size:12px; cursor:pointer;
+}
+.ci-viewer-dot.on { border-color:var(--accent); color:var(--ink); }
+
+@media (max-width: 780px) {
+  .ci-row { grid-template-columns:76px minmax(0,1fr); }
+  .ci-thumb { width:76px; height:105px; }
+  .ci-fields { grid-column:1 / -1; flex-direction:row; flex-wrap:wrap; gap:10px 16px; }
+  .ci-field input, .ci-field select, .ci-field-static b { width:88px; }
+}
+
 /* Batch results — card view */
 .view-toggle { display:inline-flex; background:var(--surface-sink); border:1px solid var(--line); border-radius:var(--radius-pill); padding:3px; gap:2px; }
 .view-toggle button { border:0; background:transparent; color:var(--ink-soft); font-family:var(--font-body); font-weight:650; font-size:12.5px; padding:6px 12px; border-radius:var(--radius-pill); cursor:pointer; }

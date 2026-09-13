@@ -8,6 +8,7 @@ import { APP_SETTINGS, appNameTokens, applyConditionPreference, applyNumberGuard
 import { createGate, runPool, SOLDCOMPS_GAP_MS, BROWSE_GAP_MS, BATCH_CONCURRENCY } from "@/lib/pace";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
+import { loadImport, batchItemsFrom } from "@/lib/import-store.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
 import {
   saveBatch,
@@ -40,6 +41,7 @@ import Browse from "./Browse";
 import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
 import SavedBatches from "./SavedBatches";
+import Imports from "./Imports";
 import PriceOverride from "./PriceOverride";
 import MarketLinks from "./MarketLinks";
 import { Icon } from "./icons";
@@ -65,6 +67,7 @@ const STREAM_SLUG = {
   single: "search",
   scan: "scan",
   batch: "batch",
+  imports: "imports",
   browse: "browse",
   buy: "buy",
   inventory: "listings",
@@ -91,7 +94,8 @@ const MODULES = [
     sections: [
       { key: "single", label: "Quick search", desc: "Price a single card fast" },
       { key: "scan", label: "Scan", desc: "Point your camera to price instantly" },
-      { key: "batch", label: "Batch", desc: "Price a whole list or CSV at once" }
+      { key: "batch", label: "Batch", desc: "Price a whole list or CSV at once" },
+      { key: "imports", label: "Imports", desc: "Your CardUploader uploads, with their scans" }
     ]
   },
   { key: "browse", label: "Browse", icon: "grid", desc: "Explore every game, set & card", sections: [{ key: "browse", label: "Browse" }] },
@@ -219,7 +223,7 @@ function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic, disagrees 
   };
 }
 
-export default function Panel({ initialSection = "dashboard", initialBatchId = null, initialPool = null }) {
+export default function Panel({ initialSection = "dashboard", initialBatchId = null, initialPool = null, initialImport = null }) {
   const [pastedText, setPastedText] = useState("");
   const [csvItems, setCsvItems] = useState(null);
   const [csvSummary, setCsvSummary] = useState("");
@@ -332,6 +336,12 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // show, offered for pricing. Loaded, then WAITED ON: a pool of 200 cards is
   // 200 SoldComps requests, and a screen that spent them on mount would spend
   // them again on every refresh.
+  // A saved import named by ?import=<id>, offered for pricing. Same shape and
+  // same reasoning as the show pool below: a set of cards named in the URL,
+  // because a slug change remounts this panel and state is what that loses.
+  const [imported, setImported] = useState(null); // { items, label } | null
+  const [importLoading, setImportLoading] = useState(false);
+  const [importError, setImportError] = useState("");
   const [pool, setPool] = useState(null); // { items, skipped, label } | null
   const [poolLoading, setPoolLoading] = useState(false);
   const [poolError, setPoolError] = useState("");
@@ -557,6 +567,35 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     }
     if (payload.overrides) setOverrides(payload.overrides);
   }, [stream, initialBatchId, initialPool, openSavedBatch]);
+
+  // Load the cards of a saved import. The titles come back as they stand —
+  // edited ones included, which is the whole reason they can be edited.
+  const importRequested = useRef(false);
+  useEffect(() => {
+    if (stream !== "batch" || !initialImport || importRequested.current) return;
+    importRequested.current = true; // latched before the await: see the pool below
+    let cancelled = false;
+    (async () => {
+      setImportLoading(true);
+      setImportError("");
+      try {
+        const res = await loadImport(createClient(), initialImport);
+        if (cancelled) return;
+        if (res.missing) {
+          setImportError("Imports need migration 028 applying in Supabase — nothing saved can be re-opened until then.");
+        } else if (!res.ok) {
+          setImportError(`Couldn't open that import: ${res.error}`);
+        } else {
+          setImported({ items: batchItemsFrom(res.items), label: res.imported.label });
+        }
+      } catch (err) {
+        if (!cancelled) setImportError(`Couldn't open that import: ${err.message}`);
+      } finally {
+        if (!cancelled) setImportLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [stream, initialImport]);
 
   // Load the show pool: every card still checked out. The Show Desk owns this
   // set — nothing here decides what is in it, which is why re-running the pool
@@ -1877,6 +1916,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       {stream === "buy" && <Buy />}
       {stream === "browse" && <Browse onDeepDive={deepDiveCard} />}
       {stream === "accounts" && <Accounts />}
+      {stream === "imports" && <Imports onPrice={(id) => router.push(`/panel/batch?import=${id}`, { scroll: false })} />}
       {stream === "batch" && (
         <>
       <div className="status-strip">
@@ -1900,6 +1940,36 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       ) : null}
 
       <SavedBatches onOpen={goToBatch} refreshNonce={batchesNonce} openId={openBatch?.id || null} />
+
+      {initialImport ? (
+        <section className="panel">
+          <div className="panel-head">
+            <span className="eyebrow">From an import</span>
+            {imported ? <span className="badge2">{imported.items.length} cards</span> : null}
+          </div>
+          {importLoading ? <p className="hint hint-small">Opening that import…</p> : null}
+          {importError ? <p className="hint hint-small compfinder-error">{importError}</p> : null}
+          {imported && !importLoading ? (
+            <>
+              <p className="hint">
+                Every card in <b>{imported.label}</b>, searched on the titles <b>as they stand now</b> —
+                so a title corrected on the Imports screen is the one that gets priced. Costs{" "}
+                <b>{imported.items.length}</b> SoldComps request{imported.items.length === 1 ? "" : "s"}.
+                The run saves itself, and re-opening it later spends nothing.
+              </p>
+              <div className="row">
+                <button
+                  className="btn btn-primary"
+                  disabled={running}
+                  onClick={() => runBatch(imported.items, { poolName: imported.label })}
+                >
+                  {running ? "Running…" : `Price all ${imported.items.length}`}
+                </button>
+              </div>
+            </>
+          ) : null}
+        </section>
+      ) : null}
 
       {initialPool === "show" ? (
         <section className="panel">

@@ -123,6 +123,53 @@ const CardUploaderCsv = (() => {
     return "Unknown";
   }
 
+  // ---- The scans, and the card details, that were in the file all along ----
+
+  /**
+   * The photographs of THIS copy.
+   *
+   * `PicURL` is a pipe-separated list of URLs on CardUploader's own CDN — four
+   * of them per row in a September 2026 export, already public and already
+   * hosted. Links, not bytes: the same rule migration 022 follows for
+   * catalogue art, and here it matters more, because these are photographs of
+   * a card we are holding rather than a publisher's artwork.
+   *
+   * **In the file's order, and never relabelled.** Which one is the front is
+   * the scanner's business, not something to infer from a URL — the same
+   * discipline `fetchItemPictures()` keeps for a broadcast. The first is shown
+   * as the thumbnail because a list needs one picture; the rest are one tap
+   * away, whatever they turn out to be.
+   */
+  function splitPicUrls(value) {
+    return String(value || "")
+      .split("|")
+      .map((u) => u.trim())
+      .filter((u) => /^https?:\/\//i.test(u));
+  }
+
+  /**
+   * The card details a person would want to see beside a scan, in the order
+   * CardUploader itself shows them. Ordered and named here rather than in the
+   * screen, so what the import table stores and what the row renders cannot
+   * drift apart, and an empty field is dropped rather than rendered as a
+   * labelled blank.
+   */
+  function itemSpecifics(item) {
+    return [
+      ["Card name", item.cardName],
+      ["Number", item.cardNumber],
+      ["Type", item.cardType],
+      ["Set", item.set],
+      ["Year", item.year],
+      ["Rarity", item.rarity],
+      ["Stage", item.stage],
+      ["Illustrator", item.illustrator],
+      ["Language", item.language]
+    ]
+      .filter(([, v]) => String(v || "").trim())
+      .map(([label, value]) => ({ label, value: String(value).trim() }));
+  }
+
   // ---- Extract clean items from a raw CardUploader CSV string ----
 
   function extractItems(csvText) {
@@ -132,6 +179,7 @@ const CardUploaderCsv = (() => {
       .map((r) => {
         const rawCardNumber = (r["*C:Card Number"] || "").trim();
         const cardNumber = repairExcelDateMangling(rawCardNumber);
+        const str = (key) => (r[key] || "").trim();
         return {
           sku: r["CustomLabel"] || "",
           title: r["*Title"] || "",
@@ -142,7 +190,23 @@ const CardUploaderCsv = (() => {
           conditionLabel: r["C:Card Condition"] || "",
           condition: mapConditionLabel(r["C:Card Condition"]),
           startPrice: r["*StartPrice"] || "",
-          graded: (r["*C:Graded"] || "").trim().toLowerCase() === "yes"
+          graded: (r["*C:Graded"] || "").trim().toLowerCase() === "yes",
+          // Everything below was in every export this app has ever read and
+          // was dropped on the floor, which is why a batch row could only ever
+          // say its title. None of it is inferred: each is one column, as the
+          // file wrote it.
+          images: splitPicUrls(r["PicURL"]),
+          // eBay files the Pokémon type under the Magic colour aspect, which is
+          // why this reads like a mistake and isn't.
+          cardType: str("*C:Attribute/MTG:Colour"),
+          rarity: str("*C:Rarity"),
+          year: str("*C:Year Manufactured"),
+          illustrator: str("*C:Illustrator"),
+          stage: str("*C:Stage"),
+          language: str("*C:Language"),
+          character: str("*C:Character"),
+          game: str("*C:Game"),
+          quantity: str("*Quantity")
         };
       });
   }
@@ -257,7 +321,7 @@ const CardUploaderCsv = (() => {
     return { query, nameTokens, wantsReverseHolo, set: setIsUsable ? item.set : null };
   }
 
-  return { parseCsv, rowsToObjects, mapConditionLabel, extractItems, buildQueryFromItem, languageInTitle, GENERIC_SET_VALUES };
+  return { parseCsv, rowsToObjects, mapConditionLabel, extractItems, splitPicUrls, itemSpecifics, buildQueryFromItem, languageInTitle, GENERIC_SET_VALUES };
 })();
 
 export default CardUploaderCsv;
