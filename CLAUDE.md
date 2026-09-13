@@ -412,6 +412,15 @@ The boundary now goes on only where it means something, and **an
 abbreviation's dot is dropped** because sellers type it both ways ("Mr. Mime",
 "Mr Mime").
 
+**Measured on the same 50-card file, filter-only:** three rows gained comps,
+**none lost any**, 47 unchanged, +21 comps used across the run. Imakuni? went
+from 0 of 27 to 12 and priced at £6.49, Mr. Mime from 0 of 10 to 3 at £4.99,
+Exp. Share from nothing at all to 6 at £2.49 — and the run's £0.00 count fell
+from eight to five. The five that remain are honest: three cards have fewer
+than the three comps a price needs, and Ponyta 14/83 has eleven that span
+£0.55–£16.15, which the engine refuses on purpose rather than averaging into a
+figure nobody should trust.
+
 **The first fix was worse than the bug**, and the test caught it: trimming
 trailing punctuation instead made `Nidoran♀` match `Nidoran♂` — two different
 cards pooled into one price, which is the exact merge the image matcher was
@@ -432,11 +441,19 @@ The engine knew a card was a reverse holo by looking for the literal token
 two halves cancelled out into "it seems roughly fine":
 
 - **The app put "Reverse Holo" in the token list**, and `nameTokensMatch`
-  demands every token literally. A seller writing "Rev Holo" or "Reverse Foil"
-  was dropped as a NAME mismatch — six of thirteen comps on one real Emboar
-  row, which then left it too thin to price and it fell through to asking
-  prices at £3.49. Eleven of thirty-three rows in that run were on asking
-  prices.
+  demands every token literally, so a seller writing "Rev Holo" or "Reverse
+  Foil" was dropped as a NAME mismatch.
+
+  **How much that actually cost is smaller than this file first claimed.** The
+  Emboar row that prompted the work — `7 used / 6 excluded (6 nameMismatch)` —
+  was written up here as six spelling variants thrown away. Measured on
+  2026-09-13 with the fix live and the reasons finally printed on the row, it
+  reads **`5 nameMismatch, 1 variantMismatch`**: with `["Emboar"]` the only
+  required token, five of those comps genuinely do not say Emboar and one was
+  a plain copy. They were correctly excluded all along. The hypothesis was
+  reasonable, it was repeated across three commits, and it was never checked
+  until the row could say so out loud — which is the same lesson the Turnstile
+  fortnight taught and this file had already written down.
 - **The public page's free-text path produced no such token at all.**
   `buildCardQuery` takes the first two name words plus the number, so a reverse
   holo and a plain card generated an identical query and identical tokens —
@@ -467,10 +484,16 @@ and `subjectStamp`. Tokens are for the card's NAME.
 - **The query asks for it on both paths.** A search that never mentions the
   printing cannot return it, which was the public page's whole problem.
 
-**Not yet measured against a corpus.** This widens what counts as a comp on
-every reverse holo in both products, which is most of a bulk run — the audit
-harness (`audit-big.mjs`, then `diff-runs.mjs`) is how that gets checked, and
-the number to watch is cards that LOST a price rather than cards that moved.
+**What it measured to.** Over the same 50-card file, filter-only (the query is
+unchanged, so every card was a cache hit and the run cost nothing): **no card
+lost a price**, and `variantMismatch` now fires across the run where plain
+copies sit in a reverse holo's pool. The rule is doing its job; the Emboar
+story was just the wrong evidence for it. The public-page half needed no
+measuring — a query that never mentions the printing cannot return it, and
+every reverse comp was being excluded there.
+
+Still worth the full corpus before trusting it beyond this file:
+`audit-big.mjs`, then `diff-runs.mjs`, watching cards that LOST a price.
 
 ## A stamped copy is not the card underneath it either
 
