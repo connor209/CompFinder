@@ -807,7 +807,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         // runBatch is async: a rejection here would NOT reach the catch
         // below, it would just vanish and leave the panel stuck on
         // "Pricing 1 of N…" forever. Surface it as a status instead.
-        runBatchRef.current(loaded).catch((err) => {
+        runBatchRef.current(loaded, { csvFile: { text: String(reader.result), name: file.name } }).catch((err) => {
           setStatus(`Batch failed: ${err.message}`);
           setStatusIsError(true);
         });
@@ -960,7 +960,23 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     return { ...(await fetchSoldCompsWithRetry(query, { ...opts, sold: false })), budgetSpent: true };
   }
 
-  async function runBatch(items, { poolName = null } = {}) {
+  /**
+   * `csvFile` is handed in rather than read off state, and that is the bug it
+   * fixes rather than a preference.
+   *
+   * `onCsvSelected` calls `setCsvRaw(...)` and then, in the SAME tick, invokes
+   * this through `runBatchRef` — which points at the last COMPLETED render, so
+   * the closure it runs has the previous value of `csvRaw`. On the first
+   * upload of a session that is null, which is why every saved run read "50
+   * cards pasted" when it came from a file; on the second it is the PREVIOUS
+   * file, which is worse, because a saved run would carry the wrong CSV.
+   *
+   * The cost was not the label. `csv_raw` is what the eBay upload export is
+   * rebuilt from days later, and a saved run without it cannot produce the one
+   * file the run exists to make. This is the same trap the comment above
+   * runBatchRef already describes for the filters, one variable along.
+   */
+  async function runBatch(items, { poolName = null, csvFile = undefined } = {}) {
     if (!items || items.length === 0) {
       setStatus("Paste at least one title, or upload a CSV, first.");
       setStatusIsError(true);
@@ -979,7 +995,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     setPoolRun(poolName);
     setOverrides({});
     try {
-      await runBatchInner(items);
+      await runBatchInner(items, csvFile);
     } finally {
       // Whatever happens — an unexpected throw included — the Run button has
       // to come back, or the only way out of the page is a reload.
@@ -987,7 +1003,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     }
   }
 
-  async function runBatchInner(items) {
+  async function runBatchInner(items, csvFile) {
     setResults([]);
     // Fresh per run, so one run's pacing never delays the next.
     soldGate.current = createGate(SOLDCOMPS_GAP_MS);
@@ -1544,7 +1560,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         results: rows,
         activeByIndex: activeLocal,
         filters: currentFilters(),
-        csvRaw,
+        // The file this run was actually started from, when the caller knew
+        // it — see runBatch. Falling back to state covers a re-run, where the
+        // state has long since caught up.
+        csvRaw: csvFile !== undefined ? csvFile : csvRaw,
         poolName: poolRunRef.current,
         status
       });

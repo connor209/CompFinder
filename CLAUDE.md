@@ -1082,6 +1082,17 @@ way.
   are fat and their value decays fast: a run is a working document you list off
   over a few days, not an archive. Expired runs are swept when the saved-runs
   list loads, rather than by a cron that can quietly stop working.
+- **The file a run came from is HANDED to the save, not read off state.**
+  Every saved run read "50 cards pasted" even when it came from a CardUploader
+  file. `onCsvSelected` calls `setCsvRaw()` and then, in the same tick, starts
+  the run through `runBatchRef` — which points at the last COMPLETED render, so
+  the closure that saves holds the previous value: null on the first upload of
+  a session, and the WRONG FILE on the second. The label was only the symptom:
+  `csv_raw` is what the eBay upload export is rebuilt from days later, so a run
+  saved without it cannot produce the one file it exists to make — and nothing
+  said so, because the button reads live state and looked right until the run
+  was re-opened. Exactly the trap the comment above `runBatchRef` already
+  describes for the filters, one variable along.
 - **A save that fails says so, and can be retried.** Everything else on this
   screen is fire-and-forget; this isn't, because the promise is that the run
   can be got back and the failure would otherwise only surface at the moment it

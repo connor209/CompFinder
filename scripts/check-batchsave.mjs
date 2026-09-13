@@ -256,6 +256,30 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(store)) {
   fail("batch-store.js has picked up an app-aliased import — it has to stay loadable under bare node for this check");
 }
 
+// --- The file a run came from must reach the SAVE ------------------------
+//
+// Every saved run read "50 cards pasted" even when it came from a CardUploader
+// file. `onCsvSelected` calls `setCsvRaw()` and then, in the SAME tick, starts
+// the run through `runBatchRef` — which points at the last COMPLETED render,
+// so the closure that saves holds the PREVIOUS value: null on the first upload
+// of a session, and the wrong file on the second.
+//
+// The label was only the symptom. `csv_raw` is what the eBay upload export is
+// rebuilt from days later, so a run saved without it cannot produce the one
+// file it exists to make — and nothing said so, because the button reads LIVE
+// state and looked fine right up until the run was re-opened. It is the same
+// trap the comment above runBatchRef already describes for the filters, one
+// variable along.
+{
+  const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
+  if (!/runBatchRef\.current\(loaded, \{ csvFile:/.test(panel)) {
+    fail("the CSV upload does not hand its file to the run — the save reads a render-old `csvRaw` and keeps the wrong one, or none");
+  }
+  if (!/csvRaw: csvFile !== undefined \? csvFile : csvRaw/.test(panel)) {
+    fail("saveBatch no longer prefers the file it was handed over the one in state");
+  }
+}
+
 if (failures) {
   console.error(`\ncheck-batchsave: ${failures} failure(s)\n`);
   process.exit(1);
