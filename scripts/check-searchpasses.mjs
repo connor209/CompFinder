@@ -29,7 +29,7 @@ import { readFileSync } from "node:fs";
 import CardUploaderCsv from "../apps/app/lib/carduploader.js";
 import {
   PASSES, MAX_DEPTH, passesFor, stripPrinting, compKey, mergeComps,
-  needsAnotherPass, agreementOf, agreementNote, ENOUGH_COMPS
+  needsAnotherPass, agreementOf, agreementNote, searchSummary, searchLabel, ENOUGH_COMPS
 } from "../apps/app/lib/searchpasses.js";
 
 let failures = 0;
@@ -170,6 +170,81 @@ eq("one short of plenty does not", needsAnotherPass({ hasNextPage: false, comps:
   }
   eq("every rung is a change to the ITEM, not a query of its own",
     PASSES.every((p) => typeof p.item === "function"), true);
+}
+
+// --- 7. how many searches a card actually used --------------------------
+//
+// "I set it to 4 — how many did this card use?" had no answer anywhere: the
+// pass detail was attached only when MORE than one pass ran, so the card that
+// stopped at the first rung carried nothing and looked exactly like a card
+// priced at depth 1. That is the case most in need of explaining, because it
+// is the one where the setting appears to have done nothing.
+//
+// Three different things stop a ladder and they mean opposite things about the
+// card, so the summary has to tell them apart rather than just counting.
+{
+  const pass = (key, n, cached = false) => ({ key, label: key, query: `q-${key}`, comps: Array.from({ length: n }, (_, i) => i), cached });
+
+  const full = searchSummary({
+    depth: 4, ladder: [1, 2, 3, 4],
+    passResults: [pass("exact", 40), pass("noset", 5)],
+    addedBy: { exact: 40, noset: 2 },
+    lastResult: { hasNextPage: true }
+  });
+  eq("a full page stops the ladder and says so", [full.ran, full.eligible, full.stop], [2, 4, "full"]);
+
+  const enough = searchSummary({
+    depth: 4, ladder: [1, 2, 3, 4],
+    passResults: [pass("exact", 8), pass("noset", 9)],
+    addedBy: { exact: 8, noset: 9 },
+    lastResult: { hasNextPage: false, comps: Array.from({ length: 9 }) }
+  });
+  eq("a pool that is already big enough stops it for a different reason", enough.stop, "enough");
+
+  // THE ONE THAT WAS MISSING. A card with no set builds the same query at
+  // every rung, so passesFor drops them and there was never a second search to
+  // run. Reported as "nothing left to drop" rather than as a card that chose
+  // to stop — the depth did not fail here, it had nothing to spend.
+  const collapsed = searchSummary({
+    depth: 4, ladder: [1], passResults: [pass("exact", 3)], addedBy: { exact: 3 },
+    lastResult: { hasNextPage: false, comps: [1, 2, 3] }
+  });
+  eq("a card with nothing to drop is not a card that stopped early", collapsed.stop, "collapsed");
+  eq("and it says so in one line", searchLabel(collapsed), "1 of 1 search · nothing left to drop");
+
+  const ranAll = searchSummary({
+    depth: 4, ladder: [1, 2, 3, 4],
+    passResults: [pass("exact", 2), pass("noset", 2), pass("noprinting", 2), pass("bare", 2)],
+    addedBy: { exact: 2, noset: 1, noprinting: 0, bare: 1 },
+    lastResult: { hasNextPage: false, comps: [1, 2] }
+  });
+  eq("a card that used the whole ladder", [ranAll.ran, ranAll.stop], [4, "exhausted"]);
+
+  // Depth 1 is not "stopped early" either, and a run at depth 1 still gets a
+  // summary — the row has to be able to say "one search, because that is what
+  // you asked for" rather than staying silent.
+  const one = searchSummary({ depth: 1, ladder: [1], passResults: [pass("exact", 6)], addedBy: { exact: 6 } });
+  eq("depth 1 reports itself", one.stop, "single");
+
+  // FETCHED and ADDED are different numbers and the row shows both. Two
+  // searches often come back with largely the same page, and "12 found" on a
+  // rung that added nothing is the difference between a depth that is earning
+  // its requests and one that is not.
+  eq("a rung reports what it found AND what it contributed",
+    ranAll.passes.map((p) => [p.fetched, p.added]), [[2, 2], [2, 1], [2, 0], [2, 1]]);
+
+  // Every rec carries it, not only the multi-pass ones — that silence is the
+  // whole bug.
+  const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
+  if (!/if \(search\) rec = \{ \.\.\.rec, search \}/.test(panel)) {
+    fail("Panel.js does not put the search summary on every rec — a card that used one pass says nothing, which is the case that needed explaining");
+  }
+  if (!/searchOptions: \{[^}]*searchDepth/.test(panel)) {
+    fail("a downloaded run does not record its search depth — the one artefact that could answer 'how many searches did this run make' cannot");
+  }
+  if (!/search: r\.rec\?\.search \|\| null/.test(panel)) {
+    fail("a downloaded run drops the per-card search summary");
+  }
 }
 
 if (failures) {

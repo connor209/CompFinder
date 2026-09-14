@@ -208,6 +208,78 @@ export function agreementOf(passPrices, { within = AGREE_WITHIN_PCT } = {}) {
   };
 }
 
+/**
+ * What the ladder actually DID for one card — the answer to "I set it to 4;
+ * how many did this card use?"
+ *
+ * The app could not say. `rec.passes` was built only when more than one pass
+ * ran, so a card that stopped after the first one carried nothing at all and
+ * was indistinguishable from a card priced at depth 1 — which is the case you
+ * most want explained, because it is the one where the setting looks like it
+ * did nothing. Three separate things can end a ladder early and they mean
+ * opposite things about the card:
+ *
+ * - **collapsed** — the wider rungs built the SAME query (a card with no set
+ *   has nothing to drop), so there was never a second search to run. Nothing
+ *   was saved by stopping and nothing was lost.
+ * - **full** — the page came back capped. There are no older sales behind a
+ *   wider query, only a wider page, so another rung spends a request to make
+ *   the sample worse.
+ * - **enough** — the card already has plenty. Stopping is the budget working.
+ * - **exhausted** — every rung ran. This is the card the depth was for.
+ *
+ * Built for EVERY card, at every depth, so the row can always say which of
+ * those happened. `fetched` is what the pass returned and `added` is what it
+ * contributed after de-duplication — the second is the one that says whether a
+ * rung earned its request, and they are very different numbers on a card whose
+ * searches mostly return the same listings.
+ */
+export function searchSummary({ depth = 1, ladder = [], passResults = [], addedBy = {}, lastResult = null } = {}) {
+  const eligible = ladder.length || passResults.length || 1;
+  const ran = passResults.length;
+  const asked = Math.max(1, Math.min(depth || 1, MAX_DEPTH));
+
+  let stop = "exhausted";
+  if (asked === 1) stop = "single";
+  else if (eligible === 1) stop = "collapsed";
+  else if (ran < eligible) stop = lastResult && lastResult.hasNextPage ? "full" : "enough";
+
+  return {
+    depth: asked,
+    eligible,
+    ran,
+    stop,
+    stopReason: STOP_REASONS[stop],
+    passes: (passResults || []).map((p) => ({
+      key: p.key,
+      label: p.label,
+      query: p.query,
+      fetched: (p.comps || []).length,
+      added: addedBy && Object.prototype.hasOwnProperty.call(addedBy, p.key) ? addedBy[p.key] : null,
+      cached: !!p.cached
+    }))
+  };
+}
+
+const STOP_REASONS = {
+  single: "Depth 1 — one search, which is what the app has always done.",
+  collapsed: "Every wider search would have repeated the same query — this card has nothing left to drop, so one search is the whole ladder.",
+  full: "The page came back FULL, so there are no older sales behind a wider query — only a wider page, which on a reverse holo is a page of plain copies.",
+  enough: `Enough sales were already in hand (${ENOUGH_COMPS}+), so the remaining searches were not worth a request.`,
+  exhausted: "Every search available at this depth was run."
+};
+
+/** The short form for a row: "2 of 4 searches · stopped, page was full". */
+export function searchLabel(summary) {
+  if (!summary) return "";
+  const n = `${summary.ran} of ${summary.eligible} search${summary.eligible === 1 ? "" : "es"}`;
+  if (summary.stop === "single") return `${n} · depth 1`;
+  if (summary.stop === "collapsed") return `${n} · nothing left to drop`;
+  if (summary.stop === "full") return `${n} · stopped, page was full`;
+  if (summary.stop === "enough") return `${n} · stopped, enough sales`;
+  return `${n} · ran the lot`;
+}
+
 /** One sentence for the row, because a price that was corroborated and one
  *  that was contradicted must not look the same. */
 export function agreementNote(agreement, addedBy = {}) {

@@ -636,6 +636,32 @@ the Batch screen runs up to four passes per card, narrowest first:
 
 Depth 1 is the default and is exactly what the app has always done.
 
+**A run has to say how many searches it actually made.** The setting says "up
+to 4"; almost no run spends that, because three different things end a card's
+ladder and they mean opposite things about the card — the page came back FULL,
+the pool was already big enough, or every wider rung built the SAME query and
+there was never a second search to run. `searchSummary()` is the one definition
+of which happened, and `rec.search` carries it on **every** card at **every**
+depth.
+
+Attaching it only when more than one pass ran is what made this unanswerable:
+a card that stopped at the first rung carried nothing and was indistinguishable
+from a card priced at depth 1 — which is exactly the card you go looking at,
+because it is the one where the setting appears to have done nothing.
+
+- **`fetched` and `added` are different numbers and the row shows both.** Two
+  searches often come back with largely the same page. A rung that found twelve
+  and added none is the difference between a depth that is earning its requests
+  and one that is not.
+- **The run-wide line is the BILL, against the button's ceiling.** "61 searches
+  across 50 cards, against a ceiling of 200" is the useful fact; so is the
+  opposite, because if nearly every card ran the lot the wider passes are mostly
+  re-finding the same listings.
+- **`searchDepth` is in the downloaded run.** It is now the setting that changes
+  a corpus most, and a run that does not record it cannot be compared with
+  another — the file that prompted this carried none, so the one artefact that
+  could have answered "how many searches did this card make" could not.
+
 ## Measure before adding a pricing rule
 
 The audit harness exists so a rule is judged on data rather than on the two
@@ -655,6 +681,26 @@ CORPUS_OUT=corpus.json node scripts/probe-rules.mjs # dump every title, test a r
 
 Sold comps cache for 24 hours, so re-running straight after an audit is free
 and touches nothing at SoldComps.
+
+**`recurse-batch.mjs --corpus` is the app's side of that, and it was measuring
+the wrong thing.** It priced every card against a flat `APP_SETTINGS`, where
+Panel.js calls `settingsForText(title)` per card — which is where
+`subjectGrade`, `subjectStamp` and `subjectReverse` come from, and every one of
+those INVERTS an exclusion. So a 50-card reverse-holo run replayed as 47 cards
+with no price, because each card was read as a plain copy and every comp that
+WAS the card went out as `variantMismatch`. It also skipped the condition step
+`runBatchInner` runs, which is a smaller version of the same fault. Both are
+closed; the corpus that found it now reproduces its run **24 of 24**.
+
+**The R0 reproduction gate is why that cost a minute rather than a wrong
+answer.** It refused to report anything and said the corpus was at fault, which
+was right — the corpus was fine and the harness was not. A card priced from
+ACTIVE listings is now counted as having no sold figure to reproduce, alongside
+the held ones: its stored comps are asking prices, and replaying those down the
+sold path compares two different questions.
+
+`scripts/fixtures/neo-batch.json` is an August pin and its own R0 has drifted;
+that is a separate, older thing and not what `--corpus` measures.
 
 ## Where the pricing is trustworthy, measured
 

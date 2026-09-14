@@ -10,7 +10,7 @@ import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { loadImport, batchItemsFrom, saveImport, updateItem as updateImportItem } from "@/lib/import-store.js";
 import { SpecificsEditor, TitleEditor, StockFields } from "./CardFields";
-import { passesFor, mergeComps, needsAnotherPass, agreementOf, agreementNote, MAX_DEPTH } from "@/lib/searchpasses.js";
+import { passesFor, mergeComps, needsAnotherPass, agreementOf, agreementNote, searchSummary, searchLabel, MAX_DEPTH } from "@/lib/searchpasses.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
 import {
   saveBatch,
@@ -1081,7 +1081,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
 
       let query, nameTokens, set, csvItem, cardNumber;
       let soldComps, apiDiagnostic, fromCache = false;
-      let passRuns = null, passAdded = null;
+      let passRuns = null, passAdded = null, search = null;
       try {
         // Inside the try on purpose: a single malformed row must fail that
         // row like any other error, not reject out of runBatch and leave the
@@ -1115,6 +1115,12 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         soldComps = merged.comps;
         passRuns = passResults;
         passAdded = merged.addedBy;
+        // What the ladder actually did, for EVERY card at every depth — the
+        // rungs this card had after repeats were dropped, the ones that ran,
+        // and which of the three things ended it. Built here rather than from
+        // `passRuns` alone because only this scope knows the ladder the card
+        // was eligible for and whether the last page came back full.
+        search = searchSummary({ depth: searchDepth, ladder, passResults, addedBy: merged.addedBy, lastResult: result });
         // "Free" only if EVERY pass was a cache hit — one paid request in a
         // ladder is still a paid run, and saying otherwise makes the budget
         // estimate flatter than the bill.
@@ -1212,6 +1218,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // pricing a reverse holo, and reading the printing off the widened text
       // would pool the two — which is the bug three cards sold under market
       // for.
+      // What the ladder did goes on EVERY rec, including the one-pass card.
+      // Attaching it only when several passes ran is what left "I set it to 4
+      // and this row says nothing" unanswerable: a card that stopped at the
+      // first rung is the case that most needs explaining, because that is
+      // where the setting looks like it did nothing.
+      if (search) rec = { ...rec, search };
+
       if (passRuns && passRuns.length > 1) {
         const passPrices = passRuns.map((p) => {
           const { comps: own } = dropForeignPostage(applyNumberGuards(p.comps, cardNumber));
@@ -1706,8 +1719,16 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // What the run was priced UNDER. A corpus without its filters can't be
       // compared against a later one — the sold window and the marketplace
       // change what came back at least as much as any rule does.
-      searchOptions: { ebaySite, itemLocation, itemCondition, soldAfterDays: Number(soldWithin), minPrice: minPrice || null, maxPrice: maxPrice || null },
+      // searchDepth belongs here with the rest: it is now the setting that
+      // changes a corpus most, and a downloaded run that does not say what
+      // depth it used cannot be compared against another one. The file that
+      // prompted this carried none, so "how many searches did this card run"
+      // was unanswerable from the only artefact that could have answered it.
+      searchOptions: { ebaySite, itemLocation, itemCondition, soldAfterDays: Number(soldWithin), searchDepth, minPrice: minPrice || null, maxPrice: maxPrice || null },
       poolName: poolRunRef.current || null,
+      // The ladder across the whole run — cards by how many searches each used,
+      // what it cost against the ceiling, and what the wider searches added.
+      depthUsed: depthUsed || null,
       cards: results.map((r, i) => ({
         sku: r.sku || "", title: r.title, query: r.query,
         set: r.set || null, cardNumber: r.cardNumber || null,
@@ -1725,6 +1746,13 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               used: (r.rec.included || []).length, excluded: (r.rec.excluded || []).length
             }
           : null,
+        // What the ladder did for THIS card: the rungs it was eligible for,
+        // the ones that ran, what each returned and added, and why it stopped.
+        search: r.rec?.search || null,
+        // Each pass's own price, where more than one ran — the cross-reference
+        // the ⚠ on the row is built from.
+        passes: r.rec?.passes || null,
+        agreement: r.rec?.agreement || null,
         activeShipped: activeByIndex[i]?.rec
           ? { rawPence: activeByIndex[i].rec.rawPence ?? null, used: (activeByIndex[i].rec.included || []).length }
           : null,
@@ -1970,6 +1998,34 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     }
   };
   const staleCount = results.filter(priceIsStale).length;
+
+  /**
+   * What the search depth actually bought, across the run.
+   *
+   * The setting says "up to 4"; the ceiling is almost never what a run spends,
+   * because a full page or a pool that is already big enough stops the ladder
+   * — and on a card with nothing to drop there was never a second query to
+   * run. A run that cost 61 requests at depth 4 rather than the 200 the button
+   * quoted is the useful fact, and so is the opposite: if nearly every card
+   * ran the lot, the extra passes are mostly finding the same listings and the
+   * depth is buying little.
+   */
+  const depthUsed = (() => {
+    const rows = results.map((r) => r.rec?.search).filter(Boolean);
+    if (!rows.length) return null;
+    const byRan = {};
+    let requests = 0, collapsed = 0, extra = 0;
+    const stops = { single: 0, collapsed: 0, full: 0, enough: 0, exhausted: 0 };
+    for (const s of rows) {
+      byRan[s.ran] = (byRan[s.ran] || 0) + 1;
+      requests += s.ran;
+      if (s.stop === "collapsed") collapsed++;
+      if (stops[s.stop] != null) stops[s.stop]++;
+      for (const p of s.passes) if (p.key !== "exact" && p.added > 0) extra += p.added;
+    }
+    const depth = Math.max(...rows.map((s) => s.depth));
+    return { cards: rows.length, depth, byRan, requests, ceiling: rows.length * depth, collapsed, extra, stops };
+  })();
 
   const inStockCount = known ? results.filter((r) => stockedMatch(knownFor(r))).length : 0;
   // Rows where the only listing under this card's name and number is a
@@ -2699,6 +2755,24 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 summary above: a run that cannot be exported has to say so
                 before you reach for the button, and the count IS the whole
                 message — every one of these is a card nothing has priced. */}
+            {/* What the depth actually bought. The button quotes a ceiling;
+                this is the bill, and the two are usually far apart because a
+                full page or a pool that is already big enough stops a card's
+                ladder. Shown whenever more than one search was ASKED for —
+                at depth 1 there is nothing to report. */}
+            {depthUsed && depthUsed.depth > 1 ? (
+              <p className="hint hint-small" role="status">
+                <strong>Search depth {depthUsed.depth}</strong> — {depthUsed.requests} search
+                {depthUsed.requests === 1 ? "" : "es"} across {depthUsed.cards} card
+                {depthUsed.cards === 1 ? "" : "s"}, against a ceiling of {depthUsed.ceiling}.{" "}
+                {Object.keys(depthUsed.byRan).sort().map((n) => `${depthUsed.byRan[n]} card${depthUsed.byRan[n] === 1 ? "" : "s"} used ${n}`).join(", ")}.
+                {depthUsed.collapsed ? ` ${depthUsed.collapsed} had nothing left to drop, so one search was the whole ladder.` : ""}
+                {depthUsed.stops.full ? ` ${depthUsed.stops.full} stopped on a full page.` : ""}
+                {depthUsed.stops.enough ? ` ${depthUsed.stops.enough} stopped with enough sales already.` : ""}
+                {" "}The wider searches added <strong>{depthUsed.extra}</strong> sale
+                {depthUsed.extra === 1 ? "" : "s"} the first search had not found.
+              </p>
+            ) : null}
             {staleCount > 0 ? (
               <p className="hint hint-small zero-warn" role="status">
                 <strong>{staleCount} card{staleCount === 1 ? "" : "s"} corrected since pricing</strong> — {staleCount === 1 ? "its" : "their"}
@@ -3024,6 +3098,29 @@ function KnownCell({ known, rec }) {
  * Nothing is drawn when the row has no scan: a missing picture is a gap, and
  * catalogue art in its place would show a mint card where a played one is.
  */
+/** The long form behind the depth chip: every search this card ran, what it
+ *  returned, and what it ADDED after de-duplication. The second number is the
+ *  one that says whether a rung earned its request — two searches often come
+ *  back with largely the same page. */
+function depthDetail(search) {
+  if (!search) return "";
+  const lines = search.passes.map((p) =>
+    `${p.label}: ${p.fetched} found` +
+    (p.added == null ? "" : `, ${p.added} new`) +
+    (p.cached ? " (cached)" : "") +
+    `\n  ${p.query}`
+  );
+  const skipped = search.eligible - search.ran;
+  return [
+    `Depth ${search.depth} selected.`,
+    search.depth > search.eligible
+      ? `${search.depth - search.eligible} rung(s) would have repeated a query and were never run.`
+      : null,
+    ...lines,
+    skipped > 0 ? `${skipped} search(es) not run. ${search.stopReason}` : search.stopReason
+  ].filter(Boolean).join("\n");
+}
+
 function RowScan({ r, size = 34 }) {
   const src = r?.csvItem?.images?.[0];
   if (!src) return null;
@@ -3236,6 +3333,16 @@ function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, o
                 {p.label}: {p.pence > 0 ? CompFinderPricing.toPoundsStr(p.pence) : "—"} <i>({p.used})</i>
               </span>
             ))}
+          </span>
+        ) : null}
+        {/* How many of the searches this card actually used, and why it
+            stopped. On every row at every depth: a card that stopped at the
+            first rung is exactly the one that looks like the setting did
+            nothing, so saying nothing there is the answer people go looking
+            for and cannot find. */}
+        {showDetails && rec?.search ? (
+          <span className={`rs-depth rs-depth-${rec.search.stop}`} title={depthDetail(rec.search)}>
+            {searchLabel(rec.search)}
           </span>
         ) : null}
         <ActiveCell active={active} soldRec={rec} onCheck={onCheckActive} />

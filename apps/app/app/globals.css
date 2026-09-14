@@ -1585,6 +1585,13 @@ html, body { overflow-x: clip; max-width: 100%; }
 .rs-passes i { font-style:normal; color:var(--ink-faint); }
 .rs-passes.ok span { color:var(--good-ink); }
 .rs-passes.off span { color:var(--warn-ink); }
+/* How many of the searches this card used, and why it stopped. Quiet by
+   default: it is context for the numbers beside it, not a verdict. The two
+   that mean "the ladder chose to stop" are marked, because those are the ones
+   that explain a depth setting looking like it did nothing. */
+.rs-depth { font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); cursor:help; white-space:nowrap; }
+.rs-depth-full, .rs-depth-enough { color:var(--ink-soft); }
+.rs-depth-exhausted { color:var(--good-ink); }
 .rs-stale {
   font-size:11.5px; color:var(--warn-ink); background:var(--warn-soft);
   border-radius:8px; padding:6px 9px; line-height:1.4;

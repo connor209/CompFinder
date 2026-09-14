@@ -47,7 +47,8 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import CompFinderPricing from "@compfinder/core/pricing.js";
-import { APP_SETTINGS, appNameTokens, dropForeignPostage, MIN_SOLD_COMPS_TO_PRICE } from "../apps/app/lib/matching.js";
+import { APP_SETTINGS, appNameTokens, applyConditionPreference, conditionPreferenceHolds, dropForeignPostage, settingsForText, MIN_SOLD_COMPS_TO_PRICE } from "../apps/app/lib/matching.js";
+import SoldCompsApi from "@compfinder/core/soldcomps.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -91,14 +92,29 @@ function toComp(c) {
  * reproduction test quietly turns into a test of today's behaviour and stops
  * being evidence of anything.
  */
-const SHIPPED = { settings: DEFAULT_SETTINGS, tokens: (q) => extractNameTokens(q), postage: (c) => c };
-const APP = { settings: APP_SETTINGS, tokens: appNameTokens, postage: (c) => dropForeignPostage(c).comps };
+//
+// SETTINGS ARE PER CARD, not per rule set, and getting that wrong made this
+// harness report that a run could not reproduce itself. Panel.js calls
+// `settingsForText(title)` for every card: that is where `subjectGrade`,
+// `subjectStamp` and `subjectReverse` come from, and every one of those
+// INVERTS an exclusion. Priced against a flat APP_SETTINGS, a reverse holo is
+// read as a plain card and every comp that IS the card goes out as
+// `variantMismatch` — so a 50-card reverse-holo run replayed as 47 cards with
+// no price, and the harness blamed the corpus. It said so loudly, which is the
+// only reason this was a wasted minute rather than a wrong measurement.
+//
+// SHIPPED stays flat on purpose: it is a pin of 2026-08-25 behaviour, from
+// before subject facts existed, and making it track today's app would turn the
+// baseline into a second copy of the thing being measured.
+const SHIPPED = { settings: () => DEFAULT_SETTINGS, tokens: (q) => extractNameTokens(q), postage: (c) => c, condition: false };
+const APP = { settings: (card) => settingsForText(card?.title || card?.query || ""), tokens: appNameTokens, postage: (c) => dropForeignPostage(c).comps, condition: true };
 const LEGACY = args.includes("--legacy");
 const RULES = LEGACY ? SHIPPED : APP;
 
 /** Exactly the three calls Panel.js's runBatchInner makes for one card. */
 function priceLikeTheApp(card, comps, rules = RULES) {
-  const query = card.query ?? simplifyTitle(card.title, rules.settings.stripWords);
+  const settings = rules.settings(card);
+  const query = card.query ?? simplifyTitle(card.title, settings.stripWords);
   // A downloaded run carries the tokens it was priced with, and they are NOT
   // re-derivable from the query: buildQueryFromItem builds tokens from the card
   // NAME and NUMBER while the query also carries the set and the language.
@@ -107,7 +123,35 @@ function priceLikeTheApp(card, comps, rules = RULES) {
   // reproduce its own run — which was this function's fault, not the corpus's.
   const nameTokens = card.nameTokens && card.nameTokens.length ? card.nameTokens : rules.tokens(query);
   const priced = rules.postage(comps);
-  return { query, nameTokens, rec: recommend(priced, rules.settings, nameTokens, "sold", card.cardNumber || null, card.set || null) };
+  let rec = recommend(priced, settings, nameTokens, "sold", card.cardNumber || null, card.set || null);
+
+  // The condition step, which runBatchInner runs and this harness did not.
+  // Near-mint sells for about twice lightly-played, so a run where the
+  // preference held used FEWER comps than the raw filter keeps — and a replay
+  // without it reported more comps and a different price, then blamed the
+  // corpus for not reproducing its own run. SHIPPED skips it on purpose: it
+  // pins behaviour from before the step existed.
+  if (rules.condition) {
+    const cardCondition = card.csvItem?.condition || inferConditionOf(card.title);
+    const pref = applyConditionPreference(rec.included, cardCondition);
+    if (pref.dropped.length) {
+      const byGrade = recommend(
+        pref.comps.map(({ totalPence, exclusionReason, ...c }) => c),
+        settings, nameTokens, "sold", card.cardNumber || null, card.set || null
+      );
+      if (conditionPreferenceHolds(byGrade)) {
+        byGrade.excluded = [...byGrade.excluded, ...pref.dropped.map((c) => ({ ...c, exclusionReason: "conditionMismatch" }))];
+        rec = byGrade;
+      }
+    }
+  }
+  return { query, nameTokens, rec };
+}
+
+/** One reading of "NM", the same one Panel.js uses. */
+function inferConditionOf(title) {
+  const code = SoldCompsApi.inferCondition(title || "");
+  return code === "Unknown" ? null : code;
 }
 
 const reasonsOf = (rec) => {
@@ -234,7 +278,7 @@ bar("R5 · Counterfactual — the same comps, with the starved guards allowed to
 for (const card of fixture.cards) {
   const comps = card.comps.map(toComp);
   const asShipped = priceLikeTheApp(card, comps).rec;
-  const relaxed = { ...RULES.settings, postageOutlierMinComps: 2, catalogSignalMinComps: 2, catalogSignalMinKept: 1 };
+  const relaxed = { ...RULES.settings(card), postageOutlierMinComps: 2, catalogSignalMinComps: 2, catalogSignalMinKept: 1 };
   const rec = recommend(comps, relaxed, RULES.tokens(card.query), "sold", null, card.set || null);
   const removed = rec.excluded.filter((e) => !asShipped.excluded.some((x) => x.title === e.title && x.itemPricePence === e.itemPricePence));
   console.log(`  ${card.sku.padEnd(5)} ${card.query.padEnd(18)} as shipped ${gbp(asShipped.finalPence).padStart(7)} from ${asShipped.included.length}  →  ${gbp(rec.finalPence).padStart(7)} from ${rec.included.length}`);
@@ -319,6 +363,12 @@ if (CORPUS) {
   for (const r of rows) {
     const shipped = r.card.shipped;
     if (!shipped || shipped.finalPence == null) { repro.held++; continue; }
+    // A card priced from ACTIVE listings has no sold figure to reproduce. Its
+    // stored comps are the asking prices the rec was built from, and replaying
+    // those through the sold path compares two different questions — which is
+    // exactly the confident, plausible, wrong number this block exists to
+    // refuse. Counted as nothing to match, like a held card.
+    if (shipped.dataSource === "active") { repro.active = (repro.active || 0) + 1; continue; }
     if (r.now.finalPence === shipped.finalPence) repro.exact++;
     else {
       repro.off++;
@@ -327,7 +377,9 @@ if (CORPUS) {
   }
   const total = repro.exact + repro.off;
   const rate = total ? repro.exact / total : 1;
-  console.log(`  reproduces the run it came from: ${repro.exact}/${total}` + (repro.held ? ` (${repro.held} held, no price to match)` : ""));
+  const aside = [repro.held ? `${repro.held} held` : null, repro.active ? `${repro.active} priced from asking prices` : null]
+    .filter(Boolean).join(", ");
+  console.log(`  reproduces the run it came from: ${repro.exact}/${total}` + (aside ? ` (${aside} — no sold price to match)` : ""));
   if (rate < 0.95) {
     console.log(`\n  ⚠ THIS CORPUS DOES NOT REPRODUCE ITS RUN — the figures below are not`);
     console.log(`    about the rules, they are about whatever is missing or wrong here.`);
