@@ -597,7 +597,7 @@ the Batch screen runs up to four passes per card, narrowest first:
 |---|---|---|
 | exact | `Emboar Reverse Holo 33/236 Cosmic Eclipse` | what the file describes |
 | noset | `Emboar Reverse Holo 33/236` | the number is the anchor; the set was steering, and it is the term sellers spell most variously — CardUploader writes Cardmarket's names, and nobody titles a listing "Deck Exclusives" |
-| noprinting | `Emboar 33/236 Cosmic Eclipse` | finds the "Rev Holo" and "Reverse Foil" listings the literal words never return |
+| noprinting | `Emboar 33/236 Cosmic Eclipse` | was: finds the "Rev Holo" and "Reverse Foil" listings the literal words never return. **That premise is falsified — see below** |
 | bare | `Emboar 33/236` | the widest ask |
 
 - **A wider search is not a wider CARD.** Every pass is filtered against the
@@ -687,6 +687,28 @@ on 13 of 16 cards — SoldComps returns the same page with or without the set
 term, so that rung is close to a pure request. `noprinting` added 74 of the 82
 and `bare` added 4.
 
+**The `noprinting` rung's founding premise is falsified.** It exists because
+"a search that never mentions the printing cannot return it" was assumed to cut
+both ways — that a query saying *Reverse Holo* could only return listings
+spelling it that way, so "Rev Holo" and "Reverse Foil" needed a query of their
+own. SoldComps does not work like that. The single literal query
+`Bastiodon Reverse Holo 70/114 Steam Siege`, with no ladder behind it, returned
+`Bastiodon 70/114 Xy-Steam Siege - Rev Holo` and `… - Holo Reverse Rare`; the
+same for `Deino Reverse Holo 84/114 Steam Siege` → `DEINO STEAM SIEGE 84/114
+REV HOLO`, and Gastly and Haunter → `Rev.Foil`. The matching is loose, so the
+rung is asking for something the narrow query already had.
+
+The evidence comes from the ACTIVE listings rather than the sold ones, which is
+the caveat worth keeping: `fetchActiveListings(query, …)` is handed the exact
+rung and never the ladder, so anything loose in that pool came from the literal
+query and nothing else. It is a different endpoint at the same provider on the
+same string. Worth confirming on the sold side before acting, and cheap to —
+one card, two queries.
+
+`noset` fails for a neighbouring reason rather than the same one: it added
+nothing on 13 of 16 cards because dropping the set returned the **identical
+page**, which is the same looseness seen from the other side.
+
 Two things follow, and only the second is done:
 
 - **A pass that priced the SAME comps is not corroboration.** Every one of
@@ -697,11 +719,15 @@ Two things follow, and only the second is done:
   priced one pool the note says so and says how many sales the filter turned
   away. That sentence is the answer to "I set it to 4 and nothing changed".
 - **The ladder's ORDER and membership want revisiting against this**, not
-  against the reasoning that built it. `noset` looks close to worthless and
-  `noprinting` structurally cannot help a card whose printing is the thing
-  being filtered on. One run of 17 cards is not enough to reorder on, and the
-  corpus harness now reproduces a run exactly, so this is measurable rather
-  than arguable. Do it before changing a rung.
+  against the reasoning that built it. On this population `noset` returns the
+  same page and `noprinting` returns the printing the filter exists to reject,
+  so between them they are close to a tax. What that does NOT establish is the
+  behaviour on a card whose set name is one nobody titles a listing with —
+  Cardmarket's "Deck Exclusives" and "SM Base Set" are the case `noset` was
+  written for, and this run recorded no ladder for the one card that had it.
+  One run of 17 cards is not enough to remove a rung on. The corpus harness now
+  reproduces a run exactly, so this is measurable rather than arguable: measure
+  it before changing a rung.
 
 
 ## Measure before adding a pricing rule
