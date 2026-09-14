@@ -3549,23 +3549,40 @@ function CompsDetail({ rec, active }) {
   const dropped = rec.excluded || [];
   const activeRec = active && active.rec;
   const activeListings = activeRec ? activeRec.included || [] : [];
+  // A card the sold lookup could not price is sometimes priced from ASKING
+  // prices instead — the salvage path when the sold endpoint is down, and the
+  // replacement when the live market flatly contradicts a thin sold pool. Both
+  // hand this component a rec whose comps are live listings, which have no sold
+  // date because they have not sold. Rendering those under a "Date sold" column
+  // printed a blank in every row, and a blank is the one thing that reads as
+  // "nothing to report" rather than as "these are not sales".
+  //
+  // The table below this one has always got that right — asking prices carry no
+  // date column there. This is the same reading applied to the rec itself.
+  const askingPrices = rec.dataSource === "active";
   return (
     <div className="comps-detail">
       <div className="comps-detail-group">
-        <span className="eyebrow eyebrow-small">Comps used ({used.length})</span>
+        <span className="eyebrow eyebrow-small">
+          {askingPrices ? `Listings used — asking prices (${used.length})` : `Comps used (${used.length})`}
+        </span>
         {used.length === 0 ? (
-          <p className="hint hint-small">None — no comp survived the filters.</p>
+          <p className="hint hint-small">None — no {askingPrices ? "listing" : "comp"} survived the filters.</p>
         ) : (
           <div className="comps-mini-wrap">
             <table className="comps-mini">
               <thead>
-                <tr><th>Price</th><th>Date sold</th><th>Location</th><th>Listing title</th></tr>
+                <tr>
+                  <th>{askingPrices ? "Asking price" : "Price"}</th>
+                  {askingPrices ? null : <th>Date sold</th>}
+                  <th>Location</th><th>Listing title</th>
+                </tr>
               </thead>
               <tbody>
                 {used.map((c, i) => (
                   <tr key={i}>
                     <td>{compPriceStr(c)}</td>
-                    <td>{compSoldDate(c)}</td>
+                    {askingPrices ? null : <td>{compSoldDate(c)}</td>}
                     <td><LocationCell loc={c.itemLocation} /></td>
                     <td><TitleCell c={c} /></td>
                   </tr>
@@ -3577,20 +3594,26 @@ function CompsDetail({ rec, active }) {
       </div>
 
       <div className="comps-detail-group">
-        <span className="eyebrow eyebrow-small">Comps excluded ({dropped.length})</span>
+        <span className="eyebrow eyebrow-small">
+          {askingPrices ? `Listings excluded (${dropped.length})` : `Comps excluded (${dropped.length})`}
+        </span>
         {dropped.length === 0 ? (
           <p className="hint hint-small">None.</p>
         ) : (
           <div className="comps-mini-wrap">
             <table className="comps-mini">
               <thead>
-                <tr><th>Price</th><th>Date sold</th><th>Why excluded</th><th>Location</th><th>Listing title</th></tr>
+                <tr>
+                  <th>{askingPrices ? "Asking price" : "Price"}</th>
+                  {askingPrices ? null : <th>Date sold</th>}
+                  <th>Why excluded</th><th>Location</th><th>Listing title</th>
+                </tr>
               </thead>
               <tbody>
                 {dropped.map((c, i) => (
                   <tr key={i}>
                     <td>{compPriceStr(c)}</td>
-                    <td>{compSoldDate(c)}</td>
+                    {askingPrices ? null : <td>{compSoldDate(c)}</td>}
                     <td>{exclusionLabel(c.exclusionReason)}</td>
                     <td><LocationCell loc={c.itemLocation} /></td>
                     <td><TitleCell c={c} /></td>
