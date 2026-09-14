@@ -172,6 +172,52 @@ eq("one short of plenty does not", needsAnotherPass({ hasNextPage: false, comps:
     PASSES.every((p) => typeof p.item === "function"), true);
 }
 
+// --- 6b. agreement needs DIFFERENT comps, not just different queries ------
+//
+// MEASURED 2026-09-14 on a real depth-4 run: the wider searches merged in 82
+// extra sales across 17 cards and the filter kept TWO. Every card still
+// reported "4 searches agreed within 0%, corroborated" — because all four had
+// priced the same comps. Dropping "Reverse Holo" from the query returns plain
+// copies and `subjectReverse` then refuses every one, so the passes were one
+// sample counted four times, and the row said so in its most confident voice
+// exactly where the extra requests had bought nothing.
+{
+  const same = agreementOf([
+    { key: "exact", pence: 451, used: 3, fingerprint: "a|b|c" },
+    { key: "noset", pence: 451, used: 3, fingerprint: "a|b|c" },
+    { key: "noprinting", pence: 451, used: 3, fingerprint: "a|b|c" }
+  ]);
+  eq("three searches on one pool is one pool", [same.ran, same.pools, same.corroborated], [3, 1, false]);
+  const note = agreementNote(same, { exact: 4, noset: 0, noprinting: 4 });
+  if (/corroborated/.test(note)) fail("a figure priced from one pool is being called corroborated");
+  if (!/SAME comps/.test(note)) fail("the note does not say the searches priced the same comps — which is the answer to 'I set it to 4 and nothing changed'");
+  if (!/4 more sale/.test(note)) fail("the note does not say how many sales the wider searches brought back and lost to the filter");
+
+  const real = agreementOf([
+    { key: "exact", pence: 500, used: 3, fingerprint: "a|b|c" },
+    { key: "noprinting", pence: 540, used: 4, fingerprint: "a|b|c|d" }
+  ]);
+  eq("different pools are two voices", [real.pools, real.corroborated], [2, true]);
+  if (!/DIFFERENT sales/.test(agreementNote(real, { exact: 3, noprinting: 1 }))) {
+    fail("a genuinely corroborated figure does not say the searches found different sales");
+  }
+
+  // A pass that found different listings and a different PRICE is still the
+  // disagreement warning, unchanged.
+  const off = agreementOf([
+    { key: "exact", pence: 500, used: 3, fingerprint: "a|b|c" },
+    { key: "bare", pence: 1500, used: 9, fingerprint: "d|e|f" }
+  ]);
+  if (!/⚠/.test(agreementNote(off))) fail("two pools landing far apart is no longer warned about");
+
+  // Panel.js has to hand the fingerprint over, or every pass looks distinct
+  // again and the claim comes straight back.
+  const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
+  if (!/fingerprint: \(r\.included \|\| \[\]\)\.map\(compKey\)/.test(panel)) {
+    fail("Panel.js does not fingerprint each pass's comps — agreement then counts one sample as several");
+  }
+}
+
 // --- 7. how many searches a card actually used --------------------------
 //
 // "I set it to 4 — how many did this card use?" had no answer anywhere: the
@@ -236,8 +282,32 @@ eq("one short of plenty does not", needsAnotherPass({ hasNextPage: false, comps:
   // Every rec carries it, not only the multi-pass ones — that silence is the
   // whole bug.
   const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
-  if (!/if \(search\) rec = \{ \.\.\.rec, search \}/.test(panel)) {
-    fail("Panel.js does not put the search summary on every rec — a card that used one pass says nothing, which is the case that needed explaining");
+  if (!/const finalRec = rec\s*\n?\s*\? \{ \.\.\.rec, \.\.\.\(search \? \{ search \} : \{\}\)/.test(panel)) {
+    fail("Panel.js does not put the search summary on the rec it keeps — a card that used one pass says nothing, which is the case that needed explaining");
+  }
+
+  // WHERE it is attached is the rule, not a detail. `rec` is rebuilt from
+  // scratch five times inside priceOne — the condition preference, the active
+  // market twice, heldRec twice — and each is a fresh object out of
+  // recommend(), so anything spread onto an earlier copy is gone. Attached at
+  // the ladder it survived on 17 of 50 cards in a real run: every card the
+  // active check touched lost it, which is exactly the thin card whose search
+  // history you most want. So nothing may reassign `rec` after this line.
+  {
+    const at = panel.indexOf("const finalRec = rec");
+    const end = panel.indexOf("setResults(collected.filter(Boolean));", at);
+    if (at < 0 || end < 0) {
+      fail("check-searchpasses can no longer find where a priced card is finalised — this rule stopped being checked");
+    } else if (/(^|[^.\w])rec\s*=[^=]/.test(panel.slice(at + "const finalRec = rec".length, end))) {
+      fail("Panel.js rebuilds `rec` after the search summary is attached — recommend() returns a fresh object, so the summary is silently dropped again");
+    }
+  }
+
+  // The agreement SENTENCE must not be carried onto a rec the passes did not
+  // price. It claims the figure is corroborated; on a card the active check
+  // replaced, the figure is an asking price the sold passes never saw.
+  if (/passes: passPrices,[\s\S]{0,120}note: \[rec\.note, agreementNote/.test(panel)) {
+    fail("the pass data and the agreement sentence are attached together — the sentence has to ride the sold rec alone, or it follows a price the passes never worked out");
   }
   if (!/searchOptions: \{[^}]*searchDepth/.test(panel)) {
     fail("a downloaded run does not record its search depth — the one artefact that could answer 'how many searches did this run make' cannot");

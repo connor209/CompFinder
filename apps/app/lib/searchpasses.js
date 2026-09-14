@@ -190,10 +190,41 @@ export function needsAnotherPass(result, { enough = ENOUGH_COMPS } = {}) {
  */
 export const AGREE_WITHIN_PCT = 25;
 
+/**
+ * MEASURED, 2026-09-14, and it changes what this function may claim.
+ *
+ * A 50-card reverse-holo commons run at depth 4 spent 60 requests over the 17
+ * cards that recorded a ladder. The wider searches merged in **82 extra sales**
+ * — and the filter kept **two**. Every card reported "4 searches agreed within
+ * 0%, corroborated", because all four had priced the SAME comps: dropping
+ * "Reverse Holo" from the query returns plain copies, and `subjectReverse`
+ * then correctly refuses every one of them. The passes were not four
+ * independent samples agreeing. They were one sample, counted four times.
+ *
+ * So a pass only corroborates if it priced a DIFFERENT pool. `fingerprint` is
+ * the sorted identity of the comps a pass kept; passes sharing one are folded
+ * to a single voice before any claim is made about agreement. Otherwise the
+ * loudest signal on the row is the strongest — an agreement of exactly 0% —
+ * precisely when the extra requests bought nothing at all.
+ */
 export function agreementOf(passPrices, { within = AGREE_WITHIN_PCT } = {}) {
-  const priced = (passPrices || []).filter((p) => p && p.pence > 0);
+  const all = (passPrices || []).filter((p) => p && p.pence > 0);
+  const seen = new Set();
+  const priced = [];
+  for (const p of all) {
+    const fp = p.fingerprint == null ? `__${priced.length}` : p.fingerprint;
+    if (seen.has(fp)) continue;
+    seen.add(fp);
+    priced.push(p);
+  }
   if (priced.length < 2) {
-    return { passes: priced.length, corroborated: false, spreadPct: null, low: null, high: null };
+    return {
+      passes: priced.length,
+      ran: all.length,
+      pools: priced.length,
+      corroborated: false,
+      spreadPct: null, low: null, high: null
+    };
   }
   const values = priced.map((p) => p.pence);
   const low = Math.min(...values);
@@ -201,6 +232,8 @@ export function agreementOf(passPrices, { within = AGREE_WITHIN_PCT } = {}) {
   const spreadPct = low > 0 ? ((high - low) / low) * 100 : null;
   return {
     passes: priced.length,
+    ran: all.length,
+    pools: priced.length,
     corroborated: spreadPct != null && spreadPct <= within,
     spreadPct,
     low,
@@ -283,14 +316,26 @@ export function searchLabel(summary) {
 /** One sentence for the row, because a price that was corroborated and one
  *  that was contradicted must not look the same. */
 export function agreementNote(agreement, addedBy = {}) {
-  if (!agreement || agreement.passes < 2) return "";
+  if (!agreement) return "";
   const extra = Object.entries(addedBy)
     .filter(([key, n]) => key !== "exact" && n > 0)
     .map(([key, n]) => `${n} from "${key}"`)
     .join(", ");
   const found = extra ? ` (${extra})` : "";
+  const brought = Object.entries(addedBy).filter(([k]) => k !== "exact").reduce((a, [, n]) => a + (n || 0), 0);
+
+  // Several searches ran and all of them priced the same comps. That is not
+  // agreement, and saying so was the most confident thing on the row exactly
+  // where the depth had bought nothing. Worth saying out loud rather than
+  // staying silent: it is the answer to "I set it to 4 and nothing changed".
+  if (agreement.ran > 1 && agreement.pools < 2) {
+    return brought > 0
+      ? `${agreement.ran} searches of this card ran and all priced the SAME comps — the wider ones brought back ${brought} more sale(s), none of which this card's own filter accepted. The figure is still a single sample, and a deeper search will not change it.`
+      : `${agreement.ran} searches of this card ran and found nothing the first one had not. The figure is still a single sample.`;
+  }
+  if (agreement.passes < 2) return "";
   if (agreement.corroborated) {
-    return `${agreement.passes} searches of this card agreed within ${Math.round(agreement.spreadPct)}%${found}, so the figure is corroborated rather than a single sample.`;
+    return `${agreement.passes} searches of this card found DIFFERENT sales and agreed within ${Math.round(agreement.spreadPct)}%${found}, so the figure is corroborated rather than a single sample.`;
   }
   return `⚠ ${agreement.passes} searches of this card disagreed by ${Math.round(agreement.spreadPct)}%${found}. A wider search finding a different price means the narrow one was a biased sample, not just a small one — worth reading the comps before trusting this.`;
 }

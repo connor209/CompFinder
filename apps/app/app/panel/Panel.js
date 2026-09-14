@@ -10,7 +10,7 @@ import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { loadImport, batchItemsFrom, saveImport, updateItem as updateImportItem } from "@/lib/import-store.js";
 import { SpecificsEditor, TitleEditor, StockFields } from "./CardFields";
-import { passesFor, mergeComps, needsAnotherPass, agreementOf, agreementNote, searchSummary, searchLabel, MAX_DEPTH } from "@/lib/searchpasses.js";
+import { passesFor, mergeComps, needsAnotherPass, agreementOf, agreementNote, compKey, searchSummary, searchLabel, MAX_DEPTH } from "@/lib/searchpasses.js";
 import { repriceCardUploaderCsv, pricedSkuMap } from "@/lib/ebayexport.js";
 import {
   saveBatch,
@@ -1218,25 +1218,32 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // pricing a reverse holo, and reading the printing off the widened text
       // would pool the two — which is the bug three cards sold under market
       // for.
-      // What the ladder did goes on EVERY rec, including the one-pass card.
-      // Attaching it only when several passes ran is what left "I set it to 4
-      // and this row says nothing" unanswerable: a card that stopped at the
-      // first rung is the case that most needs explaining, because that is
-      // where the setting looks like it did nothing.
-      if (search) rec = { ...rec, search };
-
+      let passPrices = null, agreement = null;
       if (passRuns && passRuns.length > 1) {
-        const passPrices = passRuns.map((p) => {
+        passPrices = passRuns.map((p) => {
           const { comps: own } = dropForeignPostage(applyNumberGuards(p.comps, cardNumber));
           const r = CompFinderPricing.recommend(own, cardSettings, nameTokens, "sold", cardNumber, set);
-          return { key: p.key, label: p.label, query: p.query, pence: r.rawPence ?? 0, used: (r.included || []).length };
+          return {
+            key: p.key, label: p.label, query: p.query,
+            pence: r.rawPence ?? 0, used: (r.included || []).length,
+            // WHICH comps this pass priced, not just how many. Two searches
+            // landing on the same figure is only evidence if they priced
+            // different sales — and measured over a reverse-holo run they
+            // almost never do, because a widened query returns plain copies
+            // and the printing rule then refuses all of them. Without this the
+            // row reported "agreed within 0%, corroborated" on a pool of one
+            // sample counted four times.
+            fingerprint: (r.included || []).map(compKey).sort().join("|")
+          };
         });
-        const agreement = agreementOf(passPrices);
+        agreement = agreementOf(passPrices);
+        // The agreement SENTENCE rides the sold rec and only the sold rec. It
+        // claims the figure is corroborated, and the figure it is talking
+        // about is this one — if the active check later replaces the rec, the
+        // sentence goes with it rather than following a number the passes
+        // never priced. The pass data itself survives, further down.
         rec = {
           ...rec,
-          passes: passPrices,
-          passAdded,
-          agreement,
           note: [rec.note, agreementNote(agreement, passAdded || {})].filter(Boolean).join(" ")
         };
       }
@@ -1347,7 +1354,23 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         }
       }
 
-      collected[i] = { title, sku, query, csvItem, rec, nameTokens, set, cardNumber, fromCache };
+      // WHAT THE SEARCHES DID IS ATTACHED HERE, NOT WHERE IT IS WORKED OUT.
+      //
+      // `rec` is rebuilt from scratch five times between the ladder and this
+      // line — the condition preference (`byGrade`), the active market twice,
+      // and `heldRec` twice — and each one is a fresh object out of
+      // `recommend()`, so anything spread onto an earlier copy is simply gone.
+      // Attached at the ladder, the summary survived on 17 of 50 cards: every
+      // card the active check touched, which is exactly the thin card you most
+      // want to know the search history of. Here there is nothing after it,
+      // which makes losing it unrepresentable rather than merely unlikely.
+      //
+      // The pass PRICES travel too, for the deep dive. Their note does not —
+      // see above.
+      const finalRec = rec
+        ? { ...rec, ...(search ? { search } : {}), ...(passPrices ? { passes: passPrices, passAdded, agreement } : {}) }
+        : rec;
+      collected[i] = { title, sku, query, csvItem, rec: finalRec, nameTokens, set, cardNumber, fromCache };
       setResults(collected.filter(Boolean));
     };
 

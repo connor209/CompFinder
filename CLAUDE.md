@@ -644,6 +644,17 @@ there was never a second search to run. `searchSummary()` is the one definition
 of which happened, and `rec.search` carries it on **every** card at **every**
 depth.
 
+**It is attached where the rec is FINALISED, not where it is worked out**, and
+that distinction cost a whole run. `rec` is rebuilt from scratch five times
+inside `priceOne` — the condition preference, the active market twice, and
+`heldRec` twice — each a fresh object out of `recommend()`, so anything spread
+onto an earlier copy is simply gone. Attached at the ladder it survived on **17
+of 50 cards**: every card the active check touched lost it, which is exactly
+the thin card whose search history you most want. The pass prices ride along
+the same way. Their agreement SENTENCE does not — it claims *this figure* is
+corroborated, so it stays on the sold rec and dies with it rather than
+following an asking price the passes never worked out.
+
 Attaching it only when more than one pass ran is what made this unanswerable:
 a card that stopped at the first rung carried nothing and was indistinguishable
 from a card priced at depth 1 — which is exactly the card you go looking at,
@@ -661,6 +672,37 @@ because it is the one where the setting appears to have done nothing.
   a corpus most, and a run that does not record it cannot be compared with
   another — the file that prompted this carried none, so the one artefact that
   could have answered "how many searches did this card make" could not.
+
+**MEASURED 2026-09-14, and it is not what the ladder was built expecting.** A
+50-card reverse-holo commons run at depth 4, on the 17 cards whose ladder was
+recorded: 60 requests spent, the wider searches merged in **82 extra sales**,
+and the filter kept **two**. No card changed price. The mechanism is this
+repo's own rule working correctly — dropping "Reverse Holo" from the query
+returns plain copies, and `subjectReverse` then refuses every one of them, so
+on a reverse holo the `noprinting` rung can only return sales the filter is
+built to reject.
+
+Per rung, same run: `noset` ran 16 times and added **4 sales in total**, zero
+on 13 of 16 cards — SoldComps returns the same page with or without the set
+term, so that rung is close to a pure request. `noprinting` added 74 of the 82
+and `bare` added 4.
+
+Two things follow, and only the second is done:
+
+- **A pass that priced the SAME comps is not corroboration.** Every one of
+  those 16 cards reported "4 searches agreed within 0%, corroborated" — one
+  sample counted four times, announced in the row's most confident voice
+  exactly where the extra requests had bought nothing. `agreementOf` now folds
+  passes by a `fingerprint` of the comps they kept, and where several searches
+  priced one pool the note says so and says how many sales the filter turned
+  away. That sentence is the answer to "I set it to 4 and nothing changed".
+- **The ladder's ORDER and membership want revisiting against this**, not
+  against the reasoning that built it. `noset` looks close to worthless and
+  `noprinting` structurally cannot help a card whose printing is the thing
+  being filtered on. One run of 17 cards is not enough to reorder on, and the
+  corpus harness now reproduces a run exactly, so this is measurable rather
+  than arguable. Do it before changing a rung.
+
 
 ## Measure before adding a pricing rule
 
