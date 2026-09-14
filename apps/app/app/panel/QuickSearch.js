@@ -814,7 +814,7 @@ export default function QuickSearch({ seed }) {
                   const cmUrl = cardmarketBestUrl({ cardmarketId: view.card.cardmarketId, query: baseQ, gameSlug: sourceGame });
                   return (
                     <>
-                      <a className="btn btn-ghost" href={ebaySearchUrl(ebayQ, { customId: "quick-search-sold" })} target="_blank" rel={relFor("https://www.ebay.co.uk/", "noopener noreferrer")} title="Open this card's sold listings on eBay">🔍 eBay ↗</a>
+                      <a className="btn btn-ghost" href={ebaySearchUrl(ebayQ, { customId: "quick-search-sold" })} target="_blank" rel={relFor("https://www.ebay.co.uk/", "noopener noreferrer")} title="Open this card's sold listings on eBay — UK sellers only, the same comps the price is built from">🔍 eBay ↗</a>
                       {cmUrl ? <a className="btn btn-ghost" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Search this card on Cardmarket">🔍 Cardmarket ↗</a> : null}
                     </>
                   );

@@ -54,7 +54,7 @@ stream` (the relay, only while streaming).
 
 ## Checks
 
-`npm run check` runs thirty-eight table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-nine table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -96,6 +96,10 @@ stream` (the relay, only while streaming).
   the sub-IDs, that the slot prefix still selects what it always did, that
   `epn.js` passes them through unrewritten, and a grep against hand-writing
   one at a call site.
+- `scripts/check-marketlinks.mjs` — the link out to eBay: that a 🔍 asks for
+  UK sellers only on sold AND active links, that domestic is the DEFAULT rather
+  than something a call site opts into, that `soldcomps.js` still asks the same
+  question, and a grep against a second `/sch/` URL builder.
 - `scripts/check-batchsave.mjs` — what survives saving and re-opening a batch
   run: every comp, every exclusion reason, the asking prices on the right card,
   and a grep against a second definition of the saved shape.

@@ -17,7 +17,7 @@ export default function MarketLinks({ query, gameSlug = "pokemon", cardmarketId 
   const suffix = label ? ` — ${label}` : "";
   return (
     <span className="mkt-links" onClick={(e) => e.stopPropagation()}>
-      <a className="mkt-link" href={ebayUrl} target="_blank" rel={relFor(ebayUrl, "noopener noreferrer")} title="eBay sold listings ↗" aria-label={`eBay sold listings${suffix}`}>🔍</a>
+      <a className="mkt-link" href={ebayUrl} target="_blank" rel={relFor(ebayUrl, "noopener noreferrer")} title="eBay sold listings, UK only ↗" aria-label={`eBay sold listings, UK only${suffix}`}>🔍</a>
       {cmUrl ? <a className="mkt-link" href={cmUrl} target="_blank" rel="noopener noreferrer" title="Cardmarket ↗" aria-label={`Cardmarket page${suffix}`}>🛒</a> : null}
     </span>
   );

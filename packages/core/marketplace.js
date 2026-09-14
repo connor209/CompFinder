@@ -31,13 +31,28 @@ function q(text) {
  * eBay search URL. Defaults to sold + completed listings (the reseller's comp
  * view); pass { sold: false } for active listings.
  *
+ * DOMESTIC ONLY BY DEFAULT. `LH_PrefLoc=1` is eBay's own "items located in the
+ * site's country" filter, and it is on by default because this link's job is to
+ * show you the listings BEHIND a price: soldcomps.js asks for
+ * `itemLocation=domestic` on `ebay.co.uk`, so a link that leaves the filter off
+ * opens a different, wider search than the one the engine priced from — US and
+ * EU sellers, converted currency, international postage — and the obvious
+ * conclusion from a page that disagrees with the row is that the engine is
+ * wrong. Off by default it also had to be remembered at six call sites; on by
+ * default a new caller gets the comp view rather than a superset of it.
+ *
+ * It is `domesticOnly`, not `ukOnly`, because the parameter is relative to
+ * `site` — it means "this marketplace's own country", which is the UK only
+ * while `site` is the default.
+ *
  * `customId` is the EPN sub-ID recorded against any resulting sale — pass a
  * short label for the surface the link sits on ("browse", "batch", "quick-
  * search") so earnings can be attributed to a part of the product later.
  */
-export function ebaySearchUrl(query, { sold = true, site = "www.ebay.co.uk", customId = "" } = {}) {
+export function ebaySearchUrl(query, { sold = true, site = "www.ebay.co.uk", customId = "", domesticOnly = true } = {}) {
   const soldParams = sold ? "&LH_Sold=1&LH_Complete=1" : "";
-  const url = `https://${site}/sch/i.html?_nkw=${q(query)}${soldParams}`;
+  const locParams = domesticOnly ? "&LH_PrefLoc=1" : "";
+  const url = `https://${site}/sch/i.html?_nkw=${q(query)}${soldParams}${locParams}`;
   return epnLink(url, { customId });
 }
 
