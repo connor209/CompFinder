@@ -1291,6 +1291,28 @@ columns with no breakpoint, and **Search depth** was added to it as a sixth.
 Both are classes that wrap now, and `check-panelstate.mjs` fails on either
 coming back. Neither was visible from a desktop, which is the whole point.
 
+**Reading a file costs nothing; only the button does.** Uploading a
+CardUploader CSV used to start the run in the same tick the file landed, so
+every control on the screen was already spent by the time you could see what
+was in the file — **search depth** most of all, which is exactly the one you
+would change HAVING seen it. Changing it afterwards did nothing and nothing
+said so, because the requests were gone. The upload now loads a QUEUE and
+stops: the count, the file name and the cost at the depth currently selected,
+with **▶ Start search** under them. Pasted titles, an import and the show pool
+were already explicit buttons; this was the one path that wasn't.
+
+- **The queue carries the file it was built from**, and hands that to the run.
+  That is the same rule the save follows for `csv_raw`, and it is what makes a
+  second upload impossible to price under the first one's file. It also
+  retires `runBatchRef` — with no run starting out of a memoised callback,
+  the render-old closure that caused that bug has nowhere left to happen.
+- **Cleared on success only.** A run that fell over leaves the file loaded and
+  the button live; going to find the CSV again to retry something that cost
+  nothing to load is the shape of problem this screen keeps having.
+- **The import and pool buttons quote the depth too.** They read `searchDepth`
+  like every other run and were quoting one request per card regardless, which
+  understated a depth-4 run fourfold.
+
 **A run can be priced again without finding the file.** Everything worth
 changing is changed AFTER a run — the search depth, a set the file got wrong, a
 title you corrected — and until `rerunCurrent()` the only way back was

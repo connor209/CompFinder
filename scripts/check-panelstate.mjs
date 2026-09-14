@@ -102,6 +102,32 @@ if (checked === 0) fail("no panel component called a setter — this check is no
   if (!/if \(!confirm\([\s\S]{0,200}again with the current filters/.test(panel)) {
     fail("re-run does not confirm — it spends a SoldComps request per card and one mis-tap on a phone starts the lot");
   }
+
+  // --- Reading a file costs nothing; only the button does -----------------
+  //
+  // Uploading a CardUploader CSV used to start the run in the same tick the
+  // file landed. Every control on the screen was therefore already spent by
+  // the time you could see what was in the file — search depth most of all,
+  // which is precisely the one you would change HAVING seen it. Changing it
+  // afterwards did nothing, and there was nothing to say so, because the
+  // requests were gone.
+  //
+  // `onCsvSelected` must load the queue and stop. Grepped as a region rather
+  // than a whole-file search, since `runBatch` is legitimately called from
+  // half a dozen buttons.
+  const onCsv = panel.slice(panel.indexOf("const onCsvSelected"), panel.indexOf("const onPhotoSelected"));
+  if (onCsv.length < 200) {
+    fail("check-panelstate can no longer find onCsvSelected — the upload path has moved and this rule stopped being checked");
+  }
+  if (/runBatch/.test(onCsv)) {
+    fail("uploading a CSV starts a run again — the filters above it, search depth included, are then spent before they can be set");
+  }
+  if (!/function startPending\(/.test(panel)) {
+    fail("Panel.js has no startPending — a loaded CSV has no way to be priced on purpose");
+  }
+  if (!/onClick=\{startPending\}/.test(panel)) {
+    fail("nothing on the screen starts the loaded CSV — the file loads and there is no button to price it");
+  }
 }
 
 if (failures) {

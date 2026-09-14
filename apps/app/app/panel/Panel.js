@@ -228,7 +228,17 @@ function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic, disagrees 
 
 export default function Panel({ initialSection = "dashboard", initialBatchId = null, initialPool = null, initialImport = null }) {
   const [pastedText, setPastedText] = useState("");
-  const [csvItems, setCsvItems] = useState(null);
+  // A CSV that has been READ but not yet priced. Uploading used to start the
+  // run in the same tick as the file landed, which put every filter — search
+  // depth most of all — out of reach: by the time you could see how many cards
+  // were in the file, the requests were already being spent at whatever depth
+  // happened to be selected. The file is loaded, the queue is shown, and
+  // nothing is spent until "Start search" is pressed.
+  //
+  // It carries the FILE it was built from, so the run is handed that rather
+  // than reading `csvRaw` back off state — the same rule the save follows, and
+  // the reason a second upload can never be priced under the first one's file.
+  const [pending, setPending] = useState(null); // { items, file: { text, name }, label }
   const [csvSummary, setCsvSummary] = useState("");
   const [results, setResults] = useState([]);
   const [status, setStatus] = useState("");
@@ -466,7 +476,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       setResults(loaded.results);
       setActiveByIndex(loaded.activeByIndex);
       setCsvRaw(loaded.batch.csv_text ? { text: loaded.batch.csv_text, name: loaded.batch.csv_name || "batch.csv" } : null);
-      setCsvItems(null);
+      setPending(null);
       setCsvSummary("");
       applyFilters(loaded.batch.filters);
       setOpenBatch(loaded.batch);
@@ -690,6 +700,31 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     });
   }
 
+  /** Price the CSV that is loaded and waiting.
+   *
+   *  The file is handed to the run rather than read off `csvRaw`, for the same
+   *  reason the save prefers what it was handed: `pending` and the file it was
+   *  built from are one object, so a second upload can never be priced — or
+   *  saved — under the first one's file.
+   *
+   *  This is also where the filters are finally read. Nothing above it spends
+   *  anything, so search depth, the sold window and the rest are whatever they
+   *  say on screen at the moment the button is pressed.
+   */
+  function startPending() {
+    if (!pending || running) return;
+    // Cleared on SUCCESS only. A run that fell over leaves the file loaded and
+    // the button live, because the alternative is going and finding the CSV
+    // again to retry something that cost nothing to load.
+    runBatch(pending.items, { csvFile: pending.file }).then(
+      () => setPending(null),
+      (err) => {
+        setStatus(`Batch failed: ${err.message}`);
+        setStatusIsError(true);
+      }
+    );
+  }
+
   /** Clear the screen for a fresh run, and stop the one being cleared from
    *  being written back out on the way to the empty page. */
   const startNewBatch = useCallback(() => {
@@ -698,7 +733,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     setResults([]);
     setActiveByIndex({});
     setCsvRaw(null);
-    setCsvItems(null);
+    setPending(null);
     setCsvSummary("");
     setOpenBatch(null);
     setBatchNotice("");
@@ -752,16 +787,6 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     if (stream === "batch" && known === null) loadKnown();
   }, [stream, known, loadKnown]);
 
-  // runBatch is redefined every render, so it closes over the current filter
-  // state. onCsvSelected is memoised with no deps, so calling runBatch from
-  // inside it directly would call the FIRST render's copy and price every CSV
-  // with the default filters, ignoring whatever the user picked. The ref
-  // always points at the latest one.
-  const runBatchRef = useRef(null);
-  useEffect(() => {
-    runBatchRef.current = runBatch;
-  });
-
   const onCsvSelected = useCallback((e) => {
     const file = e.target.files[0];
     e.target.value = ""; // let the same file be re-selected after a failure
@@ -773,11 +798,11 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         const items = CardUploaderCsv.extractItems(reader.result);
         if (items.length === 0) {
           setCsvSummary("No rows with a recognisable Card Name + Card Number found — is this a CardUploader export?");
-          setCsvItems(null);
+          setPending(null);
           return;
         }
         const loaded = items.map((item) => ({ sku: item.sku, title: item.title, source: "csv", csvItem: item }));
-        setCsvItems(loaded);
+        setPending({ items: loaded, file: { text: String(reader.result), name: file.name }, label: file.name });
         // Keep the file as an import too. Two upload buttons that did
         // different things was the seam here: this one priced the cards and
         // kept nothing, so the scans inside the file existed only as long as
@@ -797,28 +822,24 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             }
           } catch { /* the run is the thing that matters here */ }
         })();
+        // The count and the file name are on the queue below; this line is for
+        // what the queue cannot say — and a repair warning is worth reading
+        // BEFORE the run rather than after it, which is the other thing the
+        // start button buys.
         const repairedCount = items.filter((i) => i.cardNumberRepaired).length;
         setCsvSummary(
-          `Loaded ${items.length} card(s) from ${file.name}.` +
-            (repairedCount
-              ? ` ⚠ ${repairedCount} card number(s) looked like Excel had auto-converted them to dates and were repaired — worth double-checking those rows.`
-              : "")
+          repairedCount
+            ? `⚠ ${repairedCount} card number(s) looked like Excel had auto-converted them to dates and were repaired — worth double-checking those rows before you start.`
+            : ""
         );
-        // runBatch is async: a rejection here would NOT reach the catch
-        // below, it would just vanish and leave the panel stuck on
-        // "Pricing 1 of N…" forever. Surface it as a status instead.
-        runBatchRef.current(loaded, { csvFile: { text: String(reader.result), name: file.name } }).catch((err) => {
-          setStatus(`Batch failed: ${err.message}`);
-          setStatusIsError(true);
-        });
       } catch (err) {
         setCsvSummary(`Could not read CSV: ${err.message}`);
-        setCsvItems(null);
+        setPending(null);
       }
     };
     reader.onerror = () => {
       setCsvSummary(`Could not read ${file.name} — the browser could not open that file.`);
-      setCsvItems(null);
+      setPending(null);
     };
     reader.readAsText(file);
   }, []);
@@ -2166,8 +2187,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             <>
               <p className="hint">
                 Every card in <b>{imported.label}</b>, searched on the titles <b>as they stand now</b> —
-                so a title corrected on the Imports screen is the one that gets priced. Costs{" "}
-                <b>{imported.items.length}</b> SoldComps request{imported.items.length === 1 ? "" : "s"}.
+                so a title corrected on the Imports screen is the one that gets priced. Costs up to{" "}
+                <b>{imported.items.length * searchDepth}</b> SoldComps request
+                {imported.items.length * searchDepth === 1 ? "" : "s"} at the <b>search depth</b> set below.
                 The run saves itself, and re-opening it later spends nothing.
               </p>
               <div className="row">
@@ -2200,8 +2222,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             ) : (
               <>
                 <p className="hint">
-                  Every card checked out to <b>{pool.label}</b>. Pricing them costs{" "}
-                  <b>{pool.items.length}</b> SoldComps request{pool.items.length === 1 ? "" : "s"} and takes
+                  Every card checked out to <b>{pool.label}</b>. Pricing them costs up to{" "}
+                  <b>{pool.items.length * searchDepth}</b> SoldComps request
+                  {pool.items.length * searchDepth === 1 ? "" : "s"} at the <b>search depth</b> set below, and takes
                   roughly {Math.max(1, Math.round((pool.items.length * 3) / 60))} minute
                   {Math.max(1, Math.round((pool.items.length * 3) / 60)) === 1 ? "" : "s"}. The run saves
                   itself, and re-opening it later spends nothing.
@@ -2353,6 +2376,36 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           <input id="csvInput" type="file" accept=".csv" onChange={onCsvSelected} style={{ position: "absolute", width: 1, height: 1, opacity: 0 }} />
         </div>
         {csvSummary && <p className="hint hint-small">{csvSummary}</p>}
+
+        {/* Loaded, and waiting. Uploading used to start the run as the file
+            landed, so every control above this was already spent by the time
+            you could see how many cards were in it — search depth most of all,
+            which is the one you would change HAVING seen the file. Reading a
+            file costs nothing; only this button does. */}
+        {pending ? (
+          <div className="pending-run">
+            <div className="panel-head">
+              <span className="eyebrow">Ready to price</span>
+              <span className="badge2">{pending.items.length} cards</span>
+            </div>
+            <p className="hint">
+              <b>{pending.label}</b> is loaded and nothing has been spent yet. Set the filters above —{" "}
+              <b>search depth</b> especially — and then start. Costs up to{" "}
+              <b>{pending.items.length * searchDepth}</b> SoldComps request
+              {pending.items.length * searchDepth === 1 ? "" : "s"}
+              {searchDepth > 1 ? " at the depth selected above, and fewer in practice: a card that comes back with a full page, or with enough sales already, stops early" : ""}
+              . Anything priced in the last 24 hours comes back from the cache for nothing.
+            </p>
+            <div className="results-actions">
+              <button className="btn btn-primary" disabled={running} onClick={startPending}>
+                {running ? "Running…" : `▶ Start search — price ${pending.items.length} card${pending.items.length === 1 ? "" : "s"}`}
+              </button>
+              <button className="btn btn-ghost" disabled={running} onClick={() => { setPending(null); setCsvSummary(""); }}>
+                Discard this file
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {status && <div className={statusIsError ? "compfinder-error" : ""} id="compfinder-status">{status}</div>}
