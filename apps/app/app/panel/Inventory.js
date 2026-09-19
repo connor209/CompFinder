@@ -345,6 +345,9 @@ export default function Inventory({ onDeepDive }) {
   const [updating, setUpdating] = useState(() => new Map()); // key -> { loading, done, error }
   const [syncing, setSyncing] = useState(false);
   const [pricingAll, setPricingAll] = useState(false);
+  // Its own flag rather than a second use of pricingAll: that one relabels the
+  // price buttons "Pricing…", and a checkout is not a price check.
+  const [checkingOut, setCheckingOut] = useState(false);
   const [note, setNote] = useState("");
   const [view, setView] = useState("cards");
   const [showActivity, setShowActivity] = useState(false);
@@ -677,9 +680,76 @@ export default function Inventory({ onDeepDive }) {
     }
   }
 
+  /** SKUs on a grouped row — one per physical copy behind the listing. */
+  const skusFor = (g) => g._items.map((it) => it.sku).filter(Boolean);
+
+  /**
+   * Check a set of grouped rows out to a show, matched by SKU.
+   *
+   * One definition behind the row button and the bulk bar. They differ only in
+   * what they confirm beforehand and what they say afterwards; a second copy
+   * of the SKU match would eventually disagree with this one about WHICH
+   * physical copy leaves the stack, and that disagreement is silent — the
+   * wrong card is marked away and the one in your hand still reads as home.
+   *
+   * The caller has already confirmed. `card_stacks` is read ONCE for the whole
+   * run rather than per card: a fifty-card checkout at a venue is on venue
+   * wifi, and fifty round trips to re-read the same four stack names is the
+   * difference between a pause and a hang.
+   */
+  async function checkOutGroups(groups) {
+    const sb = createClient();
+    const { data: stacks } = await sb.from("card_stacks").select("id,name");
+    const stackNm = new Map((stacks || []).map((s) => [s.id, s.name]));
+    const hideMode = getHideMode();
+    let ok = 0;
+    const errs = [];
+    let needsMigration = false;
+    for (const g of groups) {
+      for (const sku of skusFor(g)) {
+        // eslint-disable-next-line no-await-in-loop
+        const { data: matches } = await sb.from("stack_cards").select("*").ilike("sku", sku);
+        const card = (matches || []).find((c) => !c.pulled_at && !c.checked_out_at);
+        if (!card) {
+          // "Not in your stacks" is only one of the three reasons, and in bulk
+          // it is the wrong one most of the time: selecting a page of rows
+          // sweeps up cards that are already away or already pulled, and a
+          // card that IS in a stack reading as missing from it sends you
+          // looking for a card nothing is wrong with.
+          const why = (matches || []).length === 0
+            ? "not in your stacks"
+            : (matches || []).some((c) => c.checked_out_at) ? "already at a show" : "already pulled";
+          errs.push(`${sku}: ${why}`);
+          continue;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        const r = await checkoutStackCard(sb, { card, stackName: stackNm.get(card.stack_id) || null, event: null, hideMode });
+        if (r.ok) ok += 1;
+        else {
+          errs.push(`${sku}: ${r.error}`);
+          // A pending migration fails identically on every card behind it.
+          // Carrying on is forty more round trips to say the same sentence
+          // forty more times, on the wifi that is already the problem.
+          if (r.needsMigration) { needsMigration = true; break; }
+        }
+      }
+      if (needsMigration) break;
+    }
+    // The rows are now at a show, and their quantity is now zero. Without this
+    // the chip explaining why only turns up on the next reload — and until
+    // then they read as cards that just sold.
+    if (ok > 0) await loadAway();
+    return { ok, errs };
+  }
+
+  /** What a finished checkout says. Errors are named, never just counted. */
+  function noteCheckout({ ok, errs }) {
+    setNote(`Checked out ${ok} card(s) to the Show desk.${errs.length ? ` ⚠ ${errs.join(" · ")}` : ""}`);
+  }
+
   // Check a group's cards out to a show (Show desk) — matched by SKU.
   async function showOut(g) {
-    const skus = g._items.map((it) => it.sku).filter(Boolean);
+    const skus = skusFor(g);
     if (skus.length === 0) {
       setNote("No SKU on this listing — check it out from Stacks or the Show desk instead.");
       return;
@@ -687,32 +757,69 @@ export default function Inventory({ onDeepDive }) {
     const what = skus.length === 1 ? `"${skus[0]}"` : `${skus.length} cards`;
     if (!confirm(`Check ${what} out to a show?\n\nEach card leaves its stack's live numbering and the listing is taken off sale (per your Show desk hide setting). Manage them from the Show desk.`)) return;
     setUpdating((prev) => new Map(prev).set(g.key, { loading: true }));
-    const sb = createClient();
-    const { data: stacks } = await sb.from("card_stacks").select("id,name");
-    const stackNm = new Map((stacks || []).map((s) => [s.id, s.name]));
-    let ok = 0;
-    const errs = [];
-    for (const sku of skus) {
-      const { data: matches } = await sb.from("stack_cards").select("*").ilike("sku", sku);
-      const card = (matches || []).find((c) => !c.pulled_at && !c.checked_out_at);
-      if (!card) { errs.push(`${sku}: not in your stacks`); continue; }
-      const r = await checkoutStackCard(sb, { card, stackName: stackNm.get(card.stack_id) || null, event: null, hideMode: getHideMode() });
-      if (r.ok) ok += 1;
-      else { errs.push(`${sku}: ${r.error}`); if (r.needsMigration) break; }
-    }
+    const res = await checkOutGroups([g]);
     setUpdating((prev) => { const n = new Map(prev); n.delete(g.key); return n; });
-    // The row is now at a show, and its quantity is now zero. Without this the
-    // chip explaining why only turns up on the next reload — and until then
-    // the row reads as a card that just sold.
-    if (ok > 0) await loadAway();
-    setNote(`Checked out ${ok} card(s) to the Show desk.${errs.length ? ` ⚠ ${errs.join(" · ")}` : ""}`);
+    noteCheckout(res);
+  }
+
+  /**
+   * Bulk checkout: every selected row that is ON SCREEN goes to the show.
+   *
+   * Packing a show is a multi-card job and the table is the view you do it
+   * from, so the row button alone meant fifty confirms. Two rules hold it
+   * together, and both are this repo's rather than this screen's:
+   *
+   * - It acts on `selShown`, not on `selected` — what a bulk action acts on is
+   *   what you can see, the same rule as selectionFor() on the Show desk. A
+   *   tick the filter has since hidden keeps its tick and is left alone.
+   * - A listing with no SKU is NAMED, not silently skipped. There is no card
+   *   in a stack to check out, and finding out at the table that four of your
+   *   forty never travelled is the shape of fault this screen keeps having.
+   */
+  async function showSelected() {
+    const targets = selShown;
+    if (targets.length === 0) {
+      setNote("Nothing selected on screen to check out.");
+      return;
+    }
+    const noSku = targets.filter((g) => skusFor(g).length === 0);
+    const withSku = targets.filter((g) => skusFor(g).length > 0);
+    const cards = withSku.reduce((n, g) => n + skusFor(g).length, 0);
+    if (cards === 0) {
+      setNote(`No SKU on ${targets.length === 1 ? "that listing" : `any of those ${targets.length} listings`} — check them out from Stacks or the Show desk instead.`);
+      return;
+    }
+    const named = noSku.slice(0, 3).map((g) => g.title).join(", ");
+    const rest = noSku.length - Math.min(noSku.length, 3);
+    const skipped = noSku.length
+      ? `\n\n⚠ ${noSku.length} listing${noSku.length === 1 ? "" : "s"} ${noSku.length === 1 ? "has" : "have"} no SKU and will be left behind: ${named}${rest > 0 ? `, and ${rest} more` : ""}.`
+      : "";
+    if (!confirm(`Check ${cards} card${cards === 1 ? "" : "s"} across ${withSku.length} listing${withSku.length === 1 ? "" : "s"} out to a show?\n\nEach card leaves its stack's live numbering and its listing is taken off sale (per your Show desk hide setting). Manage them from the Show desk.${skipped}`)) return;
+
+    setCheckingOut(true);
+    setNote("");
+    setUpdating((prev) => {
+      const n = new Map(prev);
+      for (const g of withSku) n.set(g.key, { loading: true });
+      return n;
+    });
+    const res = await checkOutGroups(withSku);
+    setUpdating((prev) => {
+      const n = new Map(prev);
+      for (const g of withSku) n.delete(g.key);
+      return n;
+    });
+    setCheckingOut(false);
+    noteCheckout({
+      ok: res.ok,
+      errs: noSku.length ? [...res.errs, `${noSku.length} left behind with no SKU`] : res.errs
+    });
   }
 
   // Bulk write-back: update every selected (priced) card to its market price,
   // with a single confirm and drastic-change items skipped rather than forced.
   async function updateSelectedToMarket() {
-    const targets = shown.filter((g) => {
-      if (!selected.has(g.key)) return false;
+    const targets = selShown.filter((g) => {
       const p = priced.get(g.key);
       const ask = g.price_value != null ? Math.round(g.price_value * 100) : null;
       return p && !p.loading && !p.error && p.recPence != null && ask != null && Math.abs(p.recPence - ask) >= 1;
@@ -775,8 +882,17 @@ export default function Inventory({ onDeepDive }) {
     setPricingAll(false);
     setNote(`Priced ${todo.length} card${todo.length === 1 ? "" : "s"}.`);
   }
+  /**
+   * The selection a bulk action may act on: ticked AND on screen.
+   *
+   * The list is capped at PAGE rows, so `selected` can hold keys the filter or
+   * the cap has since taken off screen. What a bulk action acts on is what you
+   * can see — selectionFor()'s rule on the Show desk — and the counts on the
+   * buttons come from here so a button cannot offer to do more than it will.
+   */
+  const selShown = useMemo(() => shown.filter((g) => selected.has(g.key)), [shown, selected]);
   const priceAllVisible = () => priceMany(shown, `card${shown.length === 1 ? "" : "s"}`);
-  const priceSelected = () => priceMany(shown.filter((g) => selected.has(g.key)), "selected card(s)");
+  const priceSelected = () => priceMany(selShown, "selected card(s)");
 
   function toggleSel(key) {
     setSelected((prev) => {
@@ -897,13 +1013,21 @@ export default function Inventory({ onDeepDive }) {
           />
         </div>
         <div className="inv-meta">
-          {view === "table" && selected.size > 0 ? (
+          {view === "table" && selShown.length > 0 ? (
             <>
-              <button className="btn btn-primary" onClick={priceSelected} disabled={pricingAll}>
-                {pricingAll ? "Pricing…" : `💷 Price selected (${selected.size})`}
+              <button className="btn btn-primary" onClick={priceSelected} disabled={pricingAll || checkingOut}>
+                {pricingAll ? "Pricing…" : `💷 Price selected (${selShown.length})`}
               </button>
-              <button className="btn btn-ghost" onClick={updateSelectedToMarket} disabled={pricingAll} title="Update selected listings to market price on eBay">
+              <button className="btn btn-ghost" onClick={updateSelectedToMarket} disabled={pricingAll || checkingOut} title="Update selected listings to market price on eBay">
                 ⤴ Update selected
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={showSelected}
+                disabled={pricingAll || checkingOut}
+                title="Check the selected cards out to a show — each leaves its stack's live numbering and its listing is taken off sale"
+              >
+                {checkingOut ? "Checking out…" : `⤴ Show selected (${selShown.length})`}
               </button>
             </>
           ) : (
