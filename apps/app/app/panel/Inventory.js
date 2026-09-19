@@ -281,6 +281,11 @@ const ALL_COLUMNS = [
           ) : null}
           <DealButton className="itbl-check" deal={ctx.deal} update={ctx.onDeal} line={dealLineFor(g, ctx.priced)} />
           <StreamButton className="itbl-check" relay={ctx.relay} item={streamItemFor(g, ctx.priced)} />
+          {/* Same checkout as the card view's, off the same showOut(): the
+              table is the view you pack a show from, and a button that exists
+              on one view of one list and not the other sends you back to the
+              cards to do it a row at a time. */}
+          <button className="itbl-check" onClick={() => ctx.onShow(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
           <button className="itbl-end" onClick={() => ctx.onEnd(g)} title="End (delist) on eBay">End</button>
         </span>
       );
@@ -1006,7 +1011,7 @@ export default function Inventory({ onDeepDive }) {
                   </td>
                   {visibleCols(ALL_COLUMNS).map((c) => (
                     <td key={c.key} className={`itbl-${c.key}`}>
-                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay })}
+                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, onShow: showOut, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay })}
                     </td>
                   ))}
                 </tr>
