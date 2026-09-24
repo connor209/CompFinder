@@ -192,7 +192,8 @@ stream` (the relay, only while streaming).
 - `scripts/check-showhistory.mjs` — how a show's checkouts add up: a card
   re-packed for day two is one card brought, a card sold off eBay stock is
   takings but never "brought", not-back counts toward sell-through and never
-  toward takings, and the totals pool cards rather than averaging rates.
+  toward takings, the totals pool cards rather than averaging rates, and
+  profit is only ever over sales carrying both a price and a cost.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -2152,6 +2153,13 @@ owns the arithmetic.
   carry no price and on a running show every card is "not back". So the
   recorded rate sits beside it whenever they differ, and takings are only what
   was typed.
+- **Profit is takings less cost, over sales that HAVE a cost.** The cost is
+  `listing_costs` — the only per-card cost the app keeps — looked up by the
+  checkout's `ebay_item_id`, then `relisted_item_id`. A sale with no cost
+  recorded is left out and counted, never treated as cost £0: that would book
+  its whole price as profit, the flattering direction. The screen says how much
+  of the takings the figure covers, and a show with no costed sale shows a dash
+  rather than £0. Gross profit only — table fees and travel are not in it.
 
 ## What we were asked for is the only demand signal a show gives
 

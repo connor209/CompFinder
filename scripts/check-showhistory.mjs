@@ -27,6 +27,7 @@ import {
   showHistory,
   totalsOf,
   historyCsv,
+  costOf,
   pct
 } from "../apps/app/lib/showhistory.js";
 
@@ -49,7 +50,9 @@ const row = (over = {}) => ({
   resolved_at: over.resolved_at ?? null,
   resolution: over.resolution ?? null,
   sold_price_pence: over.sold_price_pence ?? null,
-  sticker_pence: over.sticker_pence ?? null
+  sticker_pence: over.sticker_pence ?? null,
+  ebay_item_id: over.ebay_item_id ?? null,
+  relisted_item_id: over.relisted_item_id ?? null
 });
 const sold = (pence, over = {}) => row({ resolved_at: "2026-09-05T15:00:00Z", resolution: "sold", sold_price_pence: pence, ...over });
 const back = (over = {}) => row({ resolved_at: "2026-09-06T09:00:00Z", resolution: "returned", ...over });
@@ -154,6 +157,44 @@ eq("a returned card is never a direct sale",
   eq("csv: header plus one line per show", csv.length, 3);
   eq("csv: pounds to 2dp", csv[1].includes('"3.00"'), true);
   eq("csv: a quote in a name is escaped", historyCsv(showHistory([row({ event: 'The "Big" One' })])).includes('"The ""Big"" One"'), true);
+}
+
+// ---- profit ------------------------------------------------------------------------
+{
+  const costs = new Map([["111", 400], ["222", 900], ["333", 0], ["new444", 250]]);
+  eq("cost by item id", costOf(row({ ebay_item_id: "111" }), costs), 400);
+  eq("cost by the relisted id when the original has none", costOf(row({ ebay_item_id: "444", relisted_item_id: "new444" }), costs), 250);
+  eq("a recorded cost of zero is a cost", costOf(row({ ebay_item_id: "333" }), costs), 0);
+  eq("no cost recorded is null, never zero", costOf(row({ ebay_item_id: "999" }), costs), null);
+  eq("no cost table at all", costOf(row({ ebay_item_id: "111" }), null), null);
+
+  const rows = [
+    sold(1000, { ebay_item_id: "111" }),          // +600
+    sold(700, { ebay_item_id: "222" }),           // -200, a loss is a loss
+    sold(500, { ebay_item_id: "999" }),           // no cost: left OUT, never £5 of profit
+    sold(null, { ebay_item_id: "111" }),          // no price: nothing to take a cost from
+    row({ ebay_item_id: "222" }),                 // not back: no sale, no profit
+    back({ ebay_item_id: "111" }),                // came home: no profit
+    // Off eBay stock via the deal: its profit counts.
+    row({ ebay_item_id: "333", checked_out_at: "2026-09-05T13:00:00Z", resolved_at: "2026-09-05T13:00:00Z", resolution: "sold", sold_price_pence: 300 })
+  ];
+  const m = summariseShow(rows, costs);
+  eq("profit over costed sales only", m.profit, 600 - 200 + 300);
+  eq("costed vs uncosted counted", [m.costedSales, m.uncosted], [3, 1]);
+  eq("cost of the costed sales", m.costOfSold, 1300);
+  eq("takings the profit covers", m.takingsCosted, 2000);
+  eq("margin over the covered takings, not all takings", pct(m.margin), "35%");
+  eq("without costs there is no profit, not £0", summariseShow(rows).profit, null);
+
+  const shows = showHistory([
+    ...rows,
+    sold(2000, { event: "Leeds", ebay_item_id: "222" }),
+    sold(800, { event: "York" })                 // no cost anywhere at York
+  ], costs);
+  const t = totalsOf(shows);
+  eq("totals: profit summed over shows that have one", t.profit, 700 + 1100);
+  eq("a show with no costed sale has no profit", shows.find((s) => s.label === "York").summary.profit, null);
+  eq("csv carries profit", historyCsv(shows).split("\n")[0].includes('"Profit (£)"'), true);
 }
 
 // ---- wiring ----------------------------------------------------------------------

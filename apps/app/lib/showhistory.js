@@ -116,10 +116,27 @@ export function latestPerCard(rows) {
 const ratio = (n, d) => (d > 0 ? n / d : null);
 
 /**
+ * What a card cost us, from `listing_costs` — the only per-card cost the app
+ * keeps, keyed by eBay item id. The checkout's own item id first, then the
+ * one it was relisted under, since an ended-and-relisted card may carry its
+ * cost against either. `costs` is a Map of item id -> pence; null means no
+ * cost is recorded, which is NOT a cost of zero.
+ */
+export function costOf(row, costs) {
+  if (!costs || !row) return null;
+  for (const id of [row.ebay_item_id, row.relisted_item_id]) {
+    if (id == null) continue;
+    const c = costs.get(String(id));
+    if (c != null && Number.isFinite(Number(c))) return Number(c);
+  }
+  return null;
+}
+
+/**
  * The figures for one show, from every checkout row that belongs to it.
  * Takings are recorded sales only — a card not checked back in has no price.
  */
-export function summariseShow(rows) {
+export function summariseShow(rows, costs = null) {
   const direct = rows.filter(isDirectSale);
   const box = latestPerCard(
     rows.filter((r) => !isDirectSale(r) && outcomeOf(r) !== "cancelled")
@@ -153,6 +170,21 @@ export function summariseShow(rows) {
     else directUnpriced++;
   }
 
+  // Profit is only ever over sales carrying BOTH a price and a cost. A sale
+  // with no cost recorded would otherwise count its whole price as profit,
+  // which is the flattering direction — so it is left out and counted instead,
+  // and the screen says how much of the takings the figure covers.
+  let profit = 0, costedSales = 0, costOfSold = 0, takingsCosted = 0, uncosted = 0;
+  for (const r of [...box.filter((x) => outcomeOf(x) === "sold"), ...direct]) {
+    if (r.sold_price_pence == null) continue;
+    const c = costOf(r, costs);
+    if (c == null) { uncosted++; continue; }
+    costedSales++;
+    costOfSold += c;
+    takingsCosted += r.sold_price_pence;
+    profit += r.sold_price_pence - c;
+  }
+
   const brought = box.length;
   const times = rows.flatMap((r) => [ts(r.checked_out_at), ts(r.resolved_at)]).filter(Boolean);
   const first = times.length ? Math.min(...times) : 0;
@@ -176,6 +208,13 @@ export function summariseShow(rows) {
     takings,
     soldUnpriced: soldUnpriced + directUnpriced,
     avgSale: pricedSales > 0 ? Math.round(takings / pricedSales) : null,
+    // Gross profit on the cards sold, before table fees and travel.
+    profit: costedSales > 0 ? profit : null,
+    costOfSold,
+    costedSales,
+    uncosted,
+    takingsCosted,
+    margin: ratio(profit, takingsCosted),
     stickerBrought,
     unstickered,
     // What the sold cards fetched against what their stickers asked.
@@ -190,7 +229,7 @@ export function summariseShow(rows) {
  * Every show, newest first, each with its summary and its own rows (one per
  * card for the box, plus the direct sales) for the drill-down.
  */
-export function showHistory(rows) {
+export function showHistory(rows, costs = null) {
   const groups = new Map();
   for (const r of rows || []) {
     if (!r) continue;
@@ -199,7 +238,7 @@ export function showHistory(rows) {
     groups.get(s.key).rows.push(r);
   }
   const shows = [...groups.values()].map((g) => {
-    const summary = summariseShow(g.rows);
+    const summary = summariseShow(g.rows, costs);
     const cards = latestPerCard(g.rows.filter((r) => !isDirectSale(r) && outcomeOf(r) !== "cancelled"));
     const direct = g.rows.filter(isDirectSale);
     return { key: g.key, label: g.label, named: g.named, summary, cards, direct };
@@ -211,7 +250,8 @@ export function showHistory(rows) {
 export function totalsOf(shows) {
   const t = {
     shows: shows.length, brought: 0, sold: 0, returned: 0, notBack: 0,
-    takings: 0, directSold: 0, soldUnpriced: 0
+    takings: 0, directSold: 0, soldUnpriced: 0,
+    profit: 0, costedSales: 0, uncosted: 0, takingsCosted: 0
   };
   for (const s of shows) {
     const m = s.summary;
@@ -222,9 +262,15 @@ export function totalsOf(shows) {
     t.takings += m.takings;
     t.directSold += m.directSold;
     t.soldUnpriced += m.soldUnpriced;
+    if (m.profit != null) t.profit += m.profit;
+    t.costedSales += m.costedSales;
+    t.uncosted += m.uncosted;
+    t.takingsCosted += m.takingsCosted;
   }
   t.sellThrough = ratio(t.sold + t.notBack, t.brought);
   t.recordedSellThrough = ratio(t.sold, t.brought);
+  if (t.costedSales === 0) t.profit = null;
+  t.margin = t.profit == null ? null : ratio(t.profit, t.takingsCosted);
   return t;
 }
 
@@ -238,7 +284,8 @@ const HEADER = [
   "Returned", "Not checked back in", "Sell-through", "Recorded sell-through",
   "Box takings (£)", "Sold from eBay stock", "eBay-stock takings (£)",
   "Total takings (£)", "Sales with no price", "Sticker value brought (£)",
-  "Achieved vs sticker"
+  "Achieved vs sticker", "Cost of costed sales (£)", "Profit (£)", "Margin",
+  "Sales with a cost", "Sales with no cost recorded"
 ];
 
 /**
@@ -257,7 +304,9 @@ export function historyCsv(shows) {
       pct(m.sellThrough), pct(m.recordedSellThrough),
       money(m.boxTakings), m.directSold, money(m.directTakings), money(m.takings),
       m.soldUnpriced, money(m.stickerBrought),
-      m.achievedVsSticker == null ? "" : pct(m.achievedVsSticker)
+      m.achievedVsSticker == null ? "" : pct(m.achievedVsSticker),
+      money(m.costOfSold), m.profit == null ? "" : money(m.profit),
+      m.margin == null ? "" : pct(m.margin), m.costedSales, m.uncosted
     ].map(cell).join(","));
   }
   return lines.join("\n");

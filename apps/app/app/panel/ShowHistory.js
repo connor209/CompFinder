@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
-import { showHistory, totalsOf, outcomeOf, pct, dayOf, historyCsv } from "@/lib/showhistory.js";
+import { showHistory, totalsOf, outcomeOf, pct, dayOf, historyCsv, costOf } from "@/lib/showhistory.js";
 
 /**
  * Show history — how each show went. Read-only, and built entirely from the
@@ -19,7 +19,7 @@ const shortDate = (iso) =>
 // sticker_pence arrived with migration 024, applied by hand. Asked for first
 // and dropped on refusal, so a pending 024 costs the sticker figures and not
 // the whole screen.
-const COLS = "id,event,sku,title,stack_card_id,checked_out_at,resolved_at,resolution,sold_price_pence";
+const COLS = "id,event,sku,title,stack_card_id,ebay_item_id,relisted_item_id,checked_out_at,resolved_at,resolution,sold_price_pence";
 
 function dateRange(m) {
   if (!m.firstAt) return "—";
@@ -37,6 +37,7 @@ function outcomeText(co) {
 
 export default function ShowHistory() {
   const [rows, setRows] = useState(null);
+  const [costs, setCosts] = useState(null); // eBay item id -> what the card cost us
   const [noStickers, setNoStickers] = useState(false);
   const [error, setError] = useState("");
   const [openKey, setOpenKey] = useState(null);
@@ -57,14 +58,21 @@ export default function ShowHistory() {
       const all = await pagedSelect(() =>
         sb.from("stock_checkouts").select(cols).order("checked_out_at", { ascending: true })
       );
+      // What each card cost, from the same table My listings and Sales read.
+      // A failure here costs the profit figures, never the rest of the screen.
+      let costRows = [];
+      try {
+        costRows = await pagedSelect(() => sb.from("listing_costs").select("ebay_item_id,cost_pence"));
+      } catch { /* no costs is a gap, not a failure */ }
       if (!live) return;
       setNoStickers(Boolean(sticker.error));
+      setCosts(new Map(costRows.filter((c) => c.cost_pence != null).map((c) => [String(c.ebay_item_id), c.cost_pence])));
       setRows(all);
     })();
     return () => { live = false; };
   }, []);
 
-  const shows = useMemo(() => (rows ? showHistory(rows) : []), [rows]);
+  const shows = useMemo(() => (rows ? showHistory(rows, costs) : []), [rows, costs]);
   const totals = useMemo(() => totalsOf(shows), [shows]);
 
   function downloadCsv() {
@@ -98,24 +106,30 @@ export default function ShowHistory() {
   return (
     <div className="rise-group sh-scope">
       <div className="stat-row">
-        <div className="stat"><div className="k">Shows</div><div className="v">{totals.shows}</div></div>
         <div className="stat"><div className="k">Cards brought</div><div className="v">{totals.brought}</div></div>
         <div className="stat">
           <div className="k">Sell-through</div>
           <div className="v">{pct(totals.sellThrough)}</div>
         </div>
         <div className="stat"><div className="k">Takings</div><div className="v">{pounds(totals.takings)}</div></div>
+        <div className="stat">
+          <div className="k">Profit</div>
+          <div className={`v${totals.profit == null ? "" : totals.profit >= 0 ? " up" : " down"}`}>
+            {totals.profit == null ? "—" : pounds(totals.profit)}
+          </div>
+        </div>
       </div>
 
       <div className="panel">
         <div className="panel-head">
-          <span className="eyebrow">By show</span>
+          <span className="eyebrow">By show · {totals.shows}</span>
           <button className="btn btn-ghost" onClick={downloadCsv}>Download CSV</button>
         </div>
         <p className="hint-small" style={{ marginTop: 0 }}>
           Sell-through counts every card that didn't come back as sold — that's how the table works. Where
           that differs from what was actually marked sold, the recorded figure is shown beside it.
           {totals.directSold > 0 ? ` Cards sold straight off eBay stock are in the takings but not in "brought", since they were never in the box.` : ""}
+          {" "}Profit is takings less what each sold card cost (the cost on its eBay listing), only over sales that have a cost recorded — before table fees and travel.
           {noStickers ? " Sticker figures need migration 024." : ""}
         </p>
 
@@ -153,6 +167,13 @@ export default function ShowHistory() {
                     <span className="v">{pounds(m.takings)}</span>
                     {m.directSold > 0 ? <span className="sub">{pounds(m.directTakings)} off eBay stock</span> : null}
                   </div>
+                  <div>
+                    <span className="k">Profit</span>
+                    <span className="v" style={m.profit == null ? undefined : { color: m.profit >= 0 ? "var(--good-ink)" : "var(--bad-ink)" }}>
+                      {m.profit == null ? "—" : pounds(m.profit)}
+                    </span>
+                    {m.margin != null ? <span className="sub">{pct(m.margin)} margin</span> : null}
+                  </div>
                   <div><span className="k">Avg sale</span><span className="v">{m.avgSale == null ? "—" : pounds(m.avgSale)}</span></div>
                   {!noStickers ? (
                     <div>
@@ -168,6 +189,13 @@ export default function ShowHistory() {
                   </p>
                 ) : null}
 
+                {m.uncosted > 0 ? (
+                  <p className="hint-small" style={{ color: "var(--ink-soft)" }}>
+                    Profit covers {m.costedSales} of {m.costedSales + m.uncosted} priced sales ({pounds(m.takingsCosted)} of {pounds(m.takings)}) —
+                    {" "}{m.uncosted} {m.uncosted === 1 ? "has" : "have"} no cost recorded on {m.uncosted === 1 ? "its" : "their"} listing.
+                  </p>
+                ) : null}
+
                 {isOpen ? (
                   <div className="stack-list sh-cards">
                     {s.cards.map((co) => {
@@ -177,6 +205,7 @@ export default function ShowHistory() {
                           <span className="stack-sku">{co.sku || "—"}</span>
                           <span className="stack-title">{co.title || <em>—</em>}</span>
                           {co.sticker_pence != null ? <span className="badge2">sticker {pounds(co.sticker_pence)}</span> : null}
+                          {outcomeOf(co) === "sold" && costOf(co, costs) != null ? <span className="badge2">cost {pounds(costOf(co, costs))}</span> : null}
                           <span className="hint-small" style={{ color: o.color, flex: "none", marginTop: 0 }}>{o.text}</span>
                         </div>
                       );
@@ -185,6 +214,7 @@ export default function ShowHistory() {
                       <div className="stack-row" key={co.id}>
                         <span className="stack-sku">{co.sku || "—"}</span>
                         <span className="stack-title">{co.title || <em>—</em>}</span>
+                        {costOf(co, costs) != null ? <span className="badge2">cost {pounds(costOf(co, costs))}</span> : null}
                         <span className="hint-small" style={{ color: "var(--conf-high)", flex: "none", marginTop: 0 }}>
                           sold off eBay stock{co.sold_price_pence != null ? ` · ${pounds(co.sold_price_pence)}` : ""}
                         </span>
