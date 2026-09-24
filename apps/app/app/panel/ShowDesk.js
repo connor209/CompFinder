@@ -27,6 +27,7 @@ import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-sto
 import { probePoolName } from "@/lib/batch-store";
 import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
 import DealBar, { DealButton, DealTally, useDeal } from "./DealBar";
+import StorefrontPanel from "./StorefrontPanel";
 import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 
 /**
@@ -1038,6 +1039,10 @@ export default function ShowDesk() {
         ) : null}
       </div>
       )}
+
+      {/* The QR on the table: the binder below, on a visitor's own phone.
+          Desk chrome — making and switching off links is ours to do. */}
+      {customerMode ? null : <StorefrontPanel event={event} />}
 
       {recs !== null && !customerMode ? (
         <div className="panel">

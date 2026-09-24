@@ -139,6 +139,9 @@ with schema_checks as (
         then '✅ present' else '❌ missing' end),
     (31, 'SCHEMA · 027 listing copies', 'listing_copy_state table',
       case when to_regclass('public.listing_copy_state') is not null
+        then '✅ present' else '❌ missing' end),
+    (32, 'SCHEMA · 029 show storefronts', 'show_storefronts table',
+      case when to_regclass('public.show_storefronts') is not null
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),

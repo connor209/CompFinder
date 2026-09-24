@@ -54,7 +54,7 @@ stream` (the relay, only while streaming).
 
 ## Checks
 
-`npm run check` runs thirty-eight table tests, no framework, non-zero exit on failure:
+`npm run check` runs thirty-nine table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -182,6 +182,13 @@ stream` (the relay, only while streaming).
   strips a figure off a held lot arriving with one; that four pictures come off
   the listing in the listing's order; and greps keeping the relay from ever
   building a lot itself or binding anything but loopback.
+- `scripts/check-storefront.mjs` — the QR on the table: rows stuffed with
+  every private value the app knows, run through the real loader against a
+  fake service-role client, and the payload searched for each; that every
+  read is filtered on the link owner by hand, since RLS is not there to
+  catch it; that a switched-off, expired or malformed link serves nothing;
+  and greps for noindex, no-referrer and the route staying outside the login
+  wall.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -1808,6 +1815,46 @@ Desk rather than a replacement for either of the other two.
   have one of something we have four of. A quantity-3 listing counts as one
   item — honest enough in a section whose promise is "ask and we'll check",
   and better than a number this file would have to guess at.
+
+## The binder behind a QR, on a stranger's phone
+
+The binder works while the tablet is in a customer's hands, and the table has
+room for one conversation at a time. The **storefront** is the same binder
+behind a link, printed as a sign: somebody waiting, or browsing the next table
+along, flips through the box on their own phone and shows us the card.
+**Read-only, no request flow, no account** — the cheapest honest test
+`docs/SHOW_STOREFRONT.md` asks for before anything bigger, with a view count
+on the desk to answer whether anybody scans.
+
+`apps/app/app/show/[token]` is the page, `lib/storefront.js` the projection,
+`lib/storefront-store.js` the links and the loader, `app/panel/StorefrontPanel.js`
+the desk's side (make a link, print the sign, switch it off), migration 029
+the table. In `apps/app`, not on Last Comp, for the reasons the note gives:
+Last Comp's proposition is having no stake in the number.
+
+- **The app's first anonymous surface, read with the service-role key.** RLS
+  is not there to catch a mistake, so every read in `loadPublicStorefront()`
+  filters on the link owner BY HAND and names its columns; `check-storefront`
+  runs it against a fake client and fails on a read without the filter.
+- **The rows never reach the browser.** On the desk the pocket is an
+  allow-list so the SCREEN cannot show a private field; here the server
+  projects through `storefrontCard()` and ships that alone, so a SKU is not
+  hidden from a stranger, it is absent from anything they could download. The
+  pocket's copy ids go too — a listed copy's id is its eBay item id, which is
+  the listing URL one step removed.
+- **A stranger searches the NAME**, not the SKU, event and stack the desk
+  searches, and the event name stays on the server.
+- **The token is the whole of the access control**: 128 random bits, a
+  switch-off, and an expiry (three days by default) because a printed sign
+  outlives its show. A dead link says the show has finished rather than
+  that the link is broken. Unknown, malformed and migration-pending all read
+  the same, so the page cannot be used to tell them apart.
+- **`noindex` and `no-referrer`.** The URL is the key, and every picture is
+  fetched from eBay's CDN — a default Referer would hand the token to a third
+  party's logs on every image. The QR is drawn locally for the same reason: a
+  QR image service would be handed every token we print.
+- **The view count is a number and nothing else.** `storefront_hit()` is
+  revoked from anon, or anybody holding the anon key could inflate it.
 
 ## A deal is one basket, one customer, one number
 

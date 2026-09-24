@@ -15,7 +15,8 @@ reasoning as it was written before any of it existed.
 
 - **The counter tool is proved as of 2026-08-29** — cards sold off-table at a
   show because the stock list was searched in front of a customer. That is
-  product 1 of the three below; the QR remains untested and unbuilt.
+  product 1 of the three below. **The QR is built as of 2026-09-24** (read-only,
+  see "Built" below) and still untested at a show.
 - **Worth building, but the best argument for it isn't the pitch.** Checking a
   card out to a show currently makes it invisible *everywhere* — the eBay
   listing is hidden so it can't double-sell, and there's no table space to
@@ -102,6 +103,26 @@ of them is gone by the next morning.
 Three things the test did NOT settle, still open below: what share of revenue
 shows are, whether anyone scans a cold QR, and whether the pull-request flow
 earns its place at all once the search exists.
+
+## Built, 2026-09-24: the read-only QR
+
+The "cheapest honest test" from the end of this note, and nothing more: a
+sign, a read-only binder, and a count of how many people looked. **No request
+flow** — a visitor shows us the card on their phone. That decides whether the
+request table, the pick-run queue and the hold rules below are worth writing.
+
+- **Show Desk → "QR for visitors"** makes a link, optionally limited to one
+  show's checkouts, optionally with the online stock on pages of its own.
+  Print sign, copy link, SVG download, switch off, and the view count.
+- **`/show/<token>`** in `apps/app`, as recommended under "Where it lives":
+  the binder's own projection, built on the server with the service-role key
+  and filtered on the owner by hand; `noindex`; per-link token that expires
+  (3 days by default) or is switched off. Migration 029.
+- **Nothing is reserved or held** — the hold rules below only matter once a
+  request exists. Two people can want the same card; the table settles it.
+
+What to read after the first show: the view count against how many people
+walked past, and whether anybody said "I saw it on the QR".
 
 ## The problem, stated properly
 
