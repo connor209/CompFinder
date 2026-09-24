@@ -28,8 +28,10 @@ import {
 } from "../apps/app/lib/storefront.js";
 import {
   wishKey, wishItem, toggleWish, reconcileWishlist, cleanWishlist, removeWish,
-  loadWishlist, saveWishlist, wishStorageKey, WISH_FIELDS, WISHLIST_MAX
+  loadWishlist, saveWishlist, wishStorageKey, WISH_FIELDS, WISHLIST_MAX,
+  wishCode, wishCodes, wishHandoffUrl, parseWishCodes, matchWishCodes, WISH_HANDOFF_PATH
 } from "../apps/app/lib/wishlist.js";
+import { binderView } from "../apps/app/lib/binder.js";
 import { buildSetIndex } from "@compfinder/core/setmatch.js";
 import {
   loadPublicStorefront, newToken, isWellFormedToken, storefrontStatus, expiresAtFor,
@@ -300,6 +302,41 @@ ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|ev
   ok(wishStorageKey("/show/AbC?x=1") === "cf-wish:/show/AbC", "two links could share a list, or a query string splits one");
 }
 
+// --- The list handed to us: a QR off their screen, scanned into the desk ----
+{
+  // The same rows seen two ways: the stranger's projected storefront, and the
+  // desk's own binder pockets. A code made on one must land on the other.
+  const rows = [
+    { id: "co-1", sku: "A1", title: "Pokemon Card Gengar VMAX 020/198 Chilling Reign NM", sticker_pence: 4000 },
+    { id: "co-2", sku: "A2", title: "Gengar VMAX 020/198 (Chilling Reign) LP", sticker_pence: 2500 },
+    { id: "co-3", sku: "A3", title: "Umbreon VMAX 215/203", sticker_pence: null }
+  ];
+  const lst = [{ ebay_item_id: "887766554433", sku: "B9", title: "Charizard ex 199/165", price_value: 120, quantity: 1 }];
+  const store = storefrontStock(rows, lst, { includeOnline: true });
+  let wl = [];
+  for (const c of store.cards) wl = toggleWish(wl, c).list;
+  const codes = wishCodes(reconcileWishlist(wl, store.cards).rows);
+  ok(codes.length === 3, `three cards picked should be three codes, got ${codes.length}`);
+  const url = wishHandoffUrl("https://app.test", codes);
+  ok(url.startsWith(`https://app.test${WISH_HANDOFF_PATH}?wish=`) && WISH_HANDOFF_PATH.startsWith("/panel/"), `the handoff does not land behind the login: ${url}`);
+  for (const p of ["A1", "A2", "co-1", "887766554433", "B9"]) ok(!url.includes(p), `the handoff URL carries a private value: ${p}`);
+  ok(url.length < 200, `a three-card handoff is too long to scan comfortably: ${url.length}`);
+  const back = parseWishCodes(new URL(url).searchParams.get("wish"));
+  ok(JSON.stringify(back) === JSON.stringify(codes), "the codes do not survive the URL");
+  const desk = binderView(rows, { sort: "name", scope: "all" }, { listings: lst }).cards;
+  const m = matchWishCodes(back, desk);
+  ok(m.matched.length === 3 && m.missing.length === 0, `the desk did not find the cards the visitor picked: ${m.matched.length} found, ${m.missing.length} missing`);
+  const g = m.matched.find((c) => /gengar/i.test(c.name));
+  ok(g && g.copies.length === 2 && g.copies.every((cp) => cp.id), "the desk's match lost the copies it needs to locate and sell");
+  // A card sold since they tapped ♡ is counted, not dropped.
+  const gone = matchWishCodes(back, desk.filter((c) => !/umbreon/i.test(c.name)));
+  ok(gone.missing.length === 1 && gone.matched.length === 2, "a card that has gone was not counted as missing");
+  ok(parseWishCodes("abc.<script>.ABC.abc..toolongcode").join(",") === "abc", `junk in wish= was accepted: ${parseWishCodes("abc.<script>.ABC.abc..toolongcode")}`);
+  ok(wishCode("box:gengar") === wishCode("box:gengar") && wishCode("box:gengar") !== wishCode("online:gengar"), "a card's code is not stable, or the two sections share one");
+  const full = wishHandoffUrl("https://app.test", Array.from({ length: WISHLIST_MAX }, (_, i) => wishCode(`box:card ${i}`)));
+  ok(full.length < 520, `a full list's QR is too dense to read off a screen: ${full.length} chars`);
+}
+
 // --- The QR ---------------------------------------------------------------
 {
   const m = qrMatrix("https://comp-finder-alpha.vercel.app/show/AbCdEfGhIjKlMnOpQrStUv");
@@ -340,6 +377,10 @@ ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|ev
   ok(!/for select using \(true\)|to anon/i.test(mig), "migration 029 opens show_storefronts to anon");
 
   const desk = src("apps/app/app/panel/ShowDesk.js");
+  ok(/customerMode \|\| wishCodesIn\.length === 0 \? null : \(\s*<WishPickup/.test(desk), "the visitor's scanned list renders on a customer screen — locations and deal buttons would face them");
+  ok(/redirectedFrom", request\.nextUrl\.pathname \+ request\.nextUrl\.search/.test(mw), "a signed-out scan loses the list at the login wall");
+  const login = src("apps/app/app/login/page.js");
+  ok(/\^\\\/\(\?!\[\\\/\\\\\]\)/.test(login), "the login page follows redirectedFrom off the site");
   ok(/customerMode \? null : <StorefrontPanel/.test(desk), "the link panel renders on a customer screen — the switch-off button would face them");
   const qrLib = src("apps/app/lib/qr.js");
   ok(!/https?:\/\//.test(qrLib.replace(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, "")), "qr.js calls out to a service — every token we print would be handed to it");

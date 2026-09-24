@@ -28,6 +28,8 @@ import { probePoolName } from "@/lib/batch-store";
 import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
 import DealBar, { DealButton, DealTally, useDeal } from "./DealBar";
 import StorefrontPanel from "./StorefrontPanel";
+import WishPickup from "./WishPickup";
+import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 
 /**
@@ -118,6 +120,10 @@ export default function ShowDesk() {
   // rows' locations: never before a tap, because a SKU and a stack name say
   // how deep the stock runs to somebody who may be holding the tablet.
   const [binderWhere, setBinderWhere] = useState(new Set());
+  // A visitor's wish list, scanned off their phone: /panel/shows?wish=…
+  // Read once on mount rather than through useSearchParams, which would ask
+  // the whole panel to sit in a Suspense boundary for one optional value.
+  const [wishCodesIn, setWishCodesIn] = useState([]);
   const [images, setImages] = useState(new Map()); // sku -> eBay photo of THIS copy
   const [listings, setListings] = useState([]);    // live eBay stock, for the counter
   const [stackCards, setStackCards] = useState([]); // every unpulled card, for locating one
@@ -542,6 +548,24 @@ export default function ShowDesk() {
     ),
     [binderCard, rowsById, skuByListingId, locations]
   );
+  useEffect(() => {
+    try {
+      setWishCodesIn(parseWishCodes(new URLSearchParams(window.location.search).get("wish")));
+    } catch { /* no list is the ordinary case */ }
+  }, []);
+  // Every pocket, unfiltered — the visitor's list is matched against all the
+  // stock, not whatever the binder happens to be narrowed to right now.
+  const wishCards = useMemo(
+    () => (wishCodesIn.length > 0 ? binderView(open, { sort: DEFAULT_BINDER_SORT, scope: DEFAULT_SCOPE }, { images, listings }).cards : []),
+    [wishCodesIn, open, images, listings]
+  );
+  function wishPlaces(card) {
+    return new Map(copyLocations(card, { rowsById, skuByListing: skuByListingId, locations }).map((f) => [f.id, f.location]));
+  }
+  function closeWish() {
+    setWishCodesIn([]);
+    try { window.history.replaceState(null, "", window.location.pathname); } catch { /* the list is closed either way */ }
+  }
   function turnBinder(dir) {
     setBinderPage((cur) => (spread
       ? turnSpread(spreads, clampPage(cur, binder.pageCount), dir)
@@ -969,6 +993,21 @@ export default function ShowDesk() {
           </div>
         </div>
       ) : null}
+
+      {/* A visitor's list, scanned off their phone. Desk chrome: where each
+          copy is and the deal buttons are ours, not a customer's. */}
+      {customerMode || wishCodesIn.length === 0 ? null : (
+        <WishPickup
+          codes={wishCodesIn}
+          cards={wishCards}
+          loading={loading}
+          placesFor={wishPlaces}
+          lineFor={dealLineForCopy}
+          deal={deal}
+          updateDeal={updateDeal}
+          onClose={closeWish}
+        />
+      )}
 
       {/* Counter mode hides every screen that isn't the stock list. Not styled
           away — not rendered. A customer holding the tablet can scroll, and a

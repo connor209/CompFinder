@@ -15,8 +15,10 @@ import { BLANK_PAGE, clampPage, turnPage, swipeDirection } from "@/lib/binder.js
 import { counterPrice } from "@/lib/showcounter.js";
 import {
   hasWish, toggleWish, removeWish, reconcileWishlist,
-  loadWishlist, saveWishlist, wishStorageKey, WISHLIST_MAX
+  loadWishlist, saveWishlist, wishStorageKey, WISHLIST_MAX,
+  wishCodes, wishHandoffUrl
 } from "@/lib/wishlist.js";
+import { qrPath } from "@/lib/qr.js";
 
 /**
  * The binder, on a visitor's own phone.
@@ -75,6 +77,15 @@ export default function Storefront({ storefront, stock }) {
     [cards, q, sort, price, scope, set, condition]
   );
   const list = useMemo(() => reconcileWishlist(wish, cards), [wish, cards]);
+  // The QR our phone scans: the list itself, in the URL, opening the desk.
+  // Nothing is sent anywhere — it is drawn here and read off this screen.
+  const [origin, setOrigin] = useState("");
+  useEffect(() => { setOrigin(window.location.origin); }, []);
+  const handoff = useMemo(() => {
+    const codes = wishCodes(list.rows);
+    if (!origin || codes.length === 0) return null;
+    return qrPath(wishHandoffUrl(origin, codes));
+  }, [origin, list.rows]);
   const at = clampPage(page, view.pageCount);
   const kind = view.pageKinds[at];
 
@@ -361,6 +372,15 @@ export default function Storefront({ storefront, stock }) {
               </div>
               {list.ask > 0 ? <p className="sf-list-note">+ {list.ask} to ask about</p> : null}
               {list.gone > 0 ? <p className="sf-list-note">{list.gone} no longer in the binder</p> : null}
+              {handoff ? (
+                <div className="sf-handoff">
+                  <svg viewBox={`0 0 ${handoff.size} ${handoff.size}`} shapeRendering="crispEdges" role="img" aria-label="QR code for the stall to scan">
+                    <rect width={handoff.size} height={handoff.size} fill="#fff" />
+                    <path d={handoff.d} fill="#000" />
+                  </svg>
+                  <p className="sf-list-note sf-handoff-note">Staff: scan this to pull your cards</p>
+                </div>
+              ) : null}
               <button
                 className="sd-clear-all sf-list-clear"
                 onClick={() => { if (window.confirm("Clear your whole list?")) { updateWish([]); setShowList(false); } }}

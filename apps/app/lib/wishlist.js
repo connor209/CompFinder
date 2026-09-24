@@ -149,3 +149,87 @@ export function saveWishlist(storage, key, list) {
     return false;
   }
 }
+
+// --- Handing the list to us: a QR on their screen, scanned by our phone ----
+//
+// The list never leaves the visitor's phone by any network. What it CAN do is
+// show a QR that our phone scans, and the QR carries the list itself — so the
+// storefront stays read-only and nothing is stored anywhere but the two
+// screens. It opens the Show Desk (behind our login), which knows what the
+// storefront does not: where each copy is, and how to put it in a deal.
+//
+// Each card goes as a short hash of its wishKey rather than its name. A name
+// is up to 64 characters and a list is up to sixty cards; hashed, a full list
+// is a QR a phone reads off another phone's screen in a glance. The desk
+// hashes its own pockets the same way and matches. The hash is of a card name
+// already on a public page, so nothing private rides in the URL either way.
+
+/** Where the handoff lands. The desk slug, behind the app's login. */
+export const WISH_HANDOFF_PATH = "/panel/shows";
+
+/** FNV-1a, 32-bit, base36: one card's code, at most seven characters. */
+export function wishCode(id) {
+  let h = 0x811c9dc5;
+  const s = String(id || "");
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36);
+}
+
+/** The codes for a list's cards that are still in the binder, in list order. */
+export function wishCodes(rows) {
+  const out = [];
+  for (const r of rows || []) {
+    if (!r || r.gone || !r.id) continue;
+    const c = wishCode(r.id);
+    if (!out.includes(c)) out.push(c);
+  }
+  return out;
+}
+
+/** The URL the visitor's QR carries. */
+export function wishHandoffUrl(origin, codes) {
+  const list = (codes || []).slice(0, WISHLIST_MAX).join(".");
+  return `${String(origin || "").replace(/\/+$/, "")}${WISH_HANDOFF_PATH}?wish=${list}`;
+}
+
+/** The codes out of a `wish=` value, junk refused rather than guessed at. */
+export function parseWishCodes(value) {
+  const out = [];
+  for (const raw of String(value || "").split(".")) {
+    const c = raw.trim().toLowerCase();
+    if (/^[0-9a-z]{1,7}$/.test(c) && !out.includes(c)) out.push(c);
+    if (out.length >= WISHLIST_MAX) break;
+  }
+  return out;
+}
+
+/**
+ * The codes against the desk's own binder, in the visitor's order.
+ *
+ * `cards` are binder pockets — the desk's, carrying copy ids it can resolve to
+ * its own rows. A code that matches nothing is a card that has gone since the
+ * visitor tapped ♡, and is counted rather than dropped. Two pockets sharing a
+ * code (a 32-bit collision, or one name in both sections) both come back:
+ * showing us one card too many is harmless; hiding the one they meant is not.
+ */
+export function matchWishCodes(codes, cards) {
+  const byCode = new Map();
+  for (const c of cards || []) {
+    const id = wishKey(c);
+    if (!id) continue;
+    const code = wishCode(id);
+    if (!byCode.has(code)) byCode.set(code, []);
+    byCode.get(code).push(c);
+  }
+  const matched = [];
+  const missing = [];
+  for (const code of codes || []) {
+    const hit = byCode.get(code);
+    if (hit) matched.push(...hit);
+    else missing.push(code);
+  }
+  return { matched, missing };
+}

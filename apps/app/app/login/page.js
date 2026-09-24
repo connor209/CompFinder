@@ -26,7 +26,10 @@ function LoginForm() {
       return;
     }
 
-    const redirectTo = searchParams.get("redirectedFrom") || "/panel";
+    // Only a path on this site: "//host" and "https://…" would send a fresh
+    // sign-in somewhere else entirely.
+    const asked = searchParams.get("redirectedFrom") || "";
+    const redirectTo = /^\/(?![\/\\])/.test(asked) ? asked : "/panel";
     router.push(redirectTo);
     router.refresh();
   }

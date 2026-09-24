@@ -189,7 +189,8 @@ stream` (the relay, only while streaming).
   catch it; that a switched-off, expired or malformed link serves nothing;
   which set a card is read into and the filters over it; that a visitor's
   wish list follows the CARD when positions move, never totals a card that
-  has gone, and never leaves the phone; and greps for noindex, no-referrer
+  has gone, and never leaves the phone; that a code made on the storefront
+  lands on the same card in the desk's binder; and greps for noindex, no-referrer
   and the route staying outside the login wall.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
@@ -1872,6 +1873,15 @@ Last Comp's proposition is having no stake in the number.
   does; on every render the list is matched back to the binder, so it shows
   the CURRENT price, and a card that has gone says so and drops out of the
   total rather than quoting a figure we no longer stand behind.
+- **The list reaches us as a QR on THEIR screen**, scanned by our phone —
+  still no network, still nothing stored. It carries each card as a short
+  hash of its wish key (`wishCode`, FNV-1a) so a full list stays a QR one
+  phone can read off another, and opens `/panel/shows?wish=…` behind the
+  login, where `WishPickup` matches the codes against the desk's OWN binder
+  pockets and shows each copy's location with a ＋ Deal. A code that matches
+  nothing is counted as gone, never dropped. The middleware now carries the
+  query through the login redirect — a signed-out scan used to lose the list —
+  and the login page only follows a path on this site.
 
 ## A deal is one basket, one customer, one number
 

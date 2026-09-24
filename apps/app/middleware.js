@@ -35,7 +35,9 @@ export async function middleware(request) {
   if (isProtected && !user) {
     const redirectUrl = request.nextUrl.clone();
     redirectUrl.pathname = "/login";
-    redirectUrl.searchParams.set("redirectedFrom", request.nextUrl.pathname);
+    // The query too: a visitor's wish-list QR opens /panel/shows?wish=…, and a
+    // phone that has to sign in first would otherwise land on an empty desk.
+    redirectUrl.searchParams.set("redirectedFrom", request.nextUrl.pathname + request.nextUrl.search);
     return NextResponse.redirect(redirectUrl);
   }
 
