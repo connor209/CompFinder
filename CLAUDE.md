@@ -195,8 +195,10 @@ stream` (the relay, only while streaming).
 - `scripts/check-showhistory.mjs` — how a show's checkouts add up: a card
   re-packed for day two is one card brought, a card sold off eBay stock is
   takings but never "brought", not-back counts toward sell-through and never
-  toward takings, the totals pool cards rather than averaging rates, and
-  profit is only ever over sales carrying both a price and a cost.
+  toward takings, the totals pool cards rather than averaging rates,
+  profit is only ever over sales carrying both a price and a cost, a show's
+  running costs come off its OWN profit and never another show's, and
+  `show_expenses` is named in its store alone.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -2163,9 +2165,9 @@ Three things about it that are the point rather than detail:
 
 `/panel/show-history` answers "how did that show go": cards brought, sold,
 returned, not checked back in, sell-through and takings, one block per show,
-tap to see the cards, plus a CSV. **No migration** — it groups the
-`stock_checkouts` rows the desk has written since 016, and `lib/showhistory.js`
-owns the arithmetic.
+tap to see the cards, plus a CSV. The card figures need **no migration** —
+they group the `stock_checkouts` rows the desk has written since 016, and
+`lib/showhistory.js` owns the arithmetic. Show costs are migration 030.
 
 - **A show is its event name**, trimmed and case-folded, so two days at
   Glasgow are one show. Unnamed checkouts group by the day they left.
@@ -2186,7 +2188,17 @@ owns the arithmetic.
   recorded is left out and counted, never treated as cost £0: that would book
   its whole price as profit, the flattering direction. The screen says how much
   of the takings the figure covers, and a show with no costed sale shows a dash
-  rather than £0. Gross profit only — table fees and travel are not in it.
+  rather than £0.
+- **Net profit takes the show's own running costs off** — table fee, travel,
+  accommodation — from `show_expenses` (migration 030, named only in
+  `lib/show-expenses-store.js`). A cost is keyed on the same `show_key`
+  `showOf()` makes, so a table fee logged a month ahead under "Glasgow" lands
+  on the block the desk's checkouts later fill. A show with costs and no card
+  costs has NO net figure — takings less running costs is shown instead and
+  labelled as such — and the total net is over nettable shows only, so one
+  show's table fee is never taken off another show's profit. Until 030 is run
+  the screen says so and shows gross profit; the store degrades like
+  `wants-store.js`.
 
 ## What we were asked for is the only demand signal a show gives
 

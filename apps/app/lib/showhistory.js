@@ -226,10 +226,37 @@ export function summariseShow(rows, costs = null) {
 }
 
 /**
+ * What running the show cost (table, travel — `show_expenses`, migration 030)
+ * laid over the card figures.
+ *
+ * Net profit is gross profit less those costs, and it exists only where gross
+ * profit does: with no card costs recorded there is no honest net figure, and
+ * treating the cards as free would report the takings as profit. What CAN
+ * always be said is the takings less the running costs, so that is carried
+ * too, and the screen says which of the two it is showing.
+ */
+export function withExpenses(summary, expenses) {
+  const list = expenses || [];
+  const expensesPence = list.reduce((t, e) => t + (Number(e.amount_pence) || 0), 0);
+  return {
+    ...summary,
+    expensesPence,
+    expenseCount: list.length,
+    net: summary.profit == null ? null : summary.profit - expensesPence,
+    takingsLessExpenses: summary.takings - expensesPence
+  };
+}
+
+/**
  * Every show, newest first, each with its summary and its own rows (one per
  * card for the box, plus the direct sales) for the drill-down.
+ *
+ * `expenses` are `show_expenses` rows, joined on `show_key` — the same key
+ * `showOf()` makes. A show with costs logged and no checkout yet (the table
+ * fee paid a month ahead) still gets a block, headed by the name it was
+ * logged under.
  */
-export function showHistory(rows, costs = null) {
+export function showHistory(rows, costs = null, expenses = []) {
   const groups = new Map();
   for (const r of rows || []) {
     if (!r) continue;
@@ -237,11 +264,31 @@ export function showHistory(rows, costs = null) {
     if (!groups.has(s.key)) groups.set(s.key, { ...s, rows: [] });
     groups.get(s.key).rows.push(r);
   }
+  const byShow = new Map();
+  for (const e of expenses || []) {
+    if (!e?.show_key) continue;
+    if (!byShow.has(e.show_key)) byShow.set(e.show_key, []);
+    byShow.get(e.show_key).push(e);
+    if (!groups.has(e.show_key)) {
+      const named = e.show_key.startsWith("e:");
+      const label = e.show_label || (named ? e.show_key.slice(2) : `Unnamed · ${e.show_key.slice(2)}`);
+      groups.set(e.show_key, { key: e.show_key, label, named, rows: [] });
+    }
+  }
   const shows = [...groups.values()].map((g) => {
-    const summary = summariseShow(g.rows, costs);
+    const own = byShow.get(g.key) || [];
+    const summary = withExpenses(summariseShow(g.rows, costs), own);
+    if (!summary.lastAt && own.length) {
+      // Nothing checked out yet: date the block by when its costs were logged.
+      const times = own.map((e) => ts(e.created_at)).filter(Boolean);
+      if (times.length) {
+        summary.firstAt = new Date(Math.min(...times)).toISOString();
+        summary.lastAt = new Date(Math.max(...times)).toISOString();
+      }
+    }
     const cards = latestPerCard(g.rows.filter((r) => !isDirectSale(r) && outcomeOf(r) !== "cancelled"));
     const direct = g.rows.filter(isDirectSale);
-    return { key: g.key, label: g.label, named: g.named, summary, cards, direct };
+    return { key: g.key, label: g.label, named: g.named, summary, cards, direct, expenses: own };
   });
   return shows.sort((a, b) => ts(b.summary.lastAt) - ts(a.summary.lastAt) || a.label.localeCompare(b.label));
 }
@@ -251,7 +298,8 @@ export function totalsOf(shows) {
   const t = {
     shows: shows.length, brought: 0, sold: 0, returned: 0, notBack: 0,
     takings: 0, directSold: 0, soldUnpriced: 0,
-    profit: 0, costedSales: 0, uncosted: 0, takingsCosted: 0
+    profit: 0, costedSales: 0, uncosted: 0, takingsCosted: 0,
+    expensesPence: 0, net: 0, netShows: 0
   };
   for (const s of shows) {
     const m = s.summary;
@@ -266,10 +314,16 @@ export function totalsOf(shows) {
     t.costedSales += m.costedSales;
     t.uncosted += m.uncosted;
     t.takingsCosted += m.takingsCosted;
+    t.expensesPence += m.expensesPence || 0;
+    if (m.net != null) { t.net += m.net; t.netShows++; }
   }
   t.sellThrough = ratio(t.sold + t.notBack, t.brought);
   t.recordedSellThrough = ratio(t.sold, t.brought);
   if (t.costedSales === 0) t.profit = null;
+  // Net across shows is only over shows that HAVE a net figure — a show with
+  // no card costs cannot be netted, and its running costs must not be taken
+  // off somebody else's profit.
+  if (t.netShows === 0) t.net = null;
   t.margin = t.profit == null ? null : ratio(t.profit, t.takingsCosted);
   return t;
 }
@@ -285,7 +339,8 @@ const HEADER = [
   "Box takings (£)", "Sold from eBay stock", "eBay-stock takings (£)",
   "Total takings (£)", "Sales with no price", "Sticker value brought (£)",
   "Achieved vs sticker", "Cost of costed sales (£)", "Profit (£)", "Margin",
-  "Sales with a cost", "Sales with no cost recorded"
+  "Sales with a cost", "Sales with no cost recorded",
+  "Show costs (£)", "Net profit (£)", "Takings less show costs (£)"
 ];
 
 /**
@@ -306,7 +361,9 @@ export function historyCsv(shows) {
       m.soldUnpriced, money(m.stickerBrought),
       m.achievedVsSticker == null ? "" : pct(m.achievedVsSticker),
       money(m.costOfSold), m.profit == null ? "" : money(m.profit),
-      m.margin == null ? "" : pct(m.margin), m.costedSales, m.uncosted
+      m.margin == null ? "" : pct(m.margin), m.costedSales, m.uncosted,
+      money(m.expensesPence || 0), m.net == null ? "" : money(m.net),
+      money(m.takingsLessExpenses ?? m.takings)
     ].map(cell).join(","));
   }
   return lines.join("\n");

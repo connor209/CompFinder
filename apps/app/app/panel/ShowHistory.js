@@ -3,13 +3,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
-import { showHistory, totalsOf, outcomeOf, pct, dayOf, historyCsv, costOf } from "@/lib/showhistory.js";
+import { showHistory, totalsOf, outcomeOf, pct, dayOf, historyCsv, costOf, eventKey } from "@/lib/showhistory.js";
+import {
+  EXPENSE_CATEGORIES, categoryLabel, parseExpensePence, loadExpenses, addExpense, deleteExpense
+} from "@/lib/show-expenses-store.js";
 
 /**
- * Show history — how each show went. Read-only, and built entirely from the
- * `stock_checkouts` rows the Show Desk already writes, so there is no
- * migration: every show since 016 is already in it. The arithmetic, and the
- * reasons behind it, are in lib/showhistory.js.
+ * Show history — how each show went. The card figures are built entirely
+ * from the `stock_checkouts` rows the Show Desk already writes, so every show
+ * since 016 is already in it, and this screen never writes to that table.
+ * The one thing it does write is what a show cost to run (table, travel),
+ * through lib/show-expenses-store.js — migration 030, and until that is run
+ * the screen says so and shows gross profit. The arithmetic, and the reasons
+ * behind it, are in lib/showhistory.js.
  */
 
 const pounds = (pence) => `£${((pence || 0) / 100).toFixed(2)}`;
@@ -28,6 +34,58 @@ function dateRange(m) {
   return a === b ? a : `${a} – ${b}`;
 }
 
+/**
+ * The costs of running one show, and a row to add another. Its own component
+ * so each show keeps its own half-typed amount, rather than one draft shared
+ * across every block on the screen.
+ */
+function ExpenseEditor({ show, onAdd, onDelete, missing }) {
+  const [category, setCategory] = useState("table");
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  if (missing) {
+    return <p className="hint-small">To record table fees and travel against a show, run migration 030_show_expenses.sql in the Supabase SQL editor.</p>;
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    const pence = parseExpensePence(amount);
+    if (pence == null) { setMsg("Enter an amount in pounds, e.g. 45 or 12.50."); return; }
+    setBusy(true);
+    setMsg("");
+    const res = await onAdd({ showKey: show.key, showLabel: show.label, category, pence, note });
+    setBusy(false);
+    if (res.ok) { setAmount(""); setNote(""); }
+    else setMsg(res.error || "Couldn't save that cost.");
+  }
+
+  return (
+    <div className="sh-costs">
+      <span className="eyebrow eyebrow-small">Show costs</span>
+      {show.expenses.length === 0 ? <p className="hint-small">None recorded — add the table fee, travel and anything else it cost to be there.</p> : null}
+      {show.expenses.map((e) => (
+        <div className="stack-row" key={e.id}>
+          <span className="stack-title">{categoryLabel(e.category)}{e.note ? ` · ${e.note}` : ""}</span>
+          <span className="sh-money">{pounds(e.amount_pence)}</span>
+          <button className="stack-pull" onClick={() => onDelete(e.id)} title="Remove this cost">✕</button>
+        </div>
+      ))}
+      <form className="sh-costform" onSubmit={submit}>
+        <select className="sd-select" value={category} onChange={(e) => setCategory(e.target.value)} aria-label="What the cost was">
+          {EXPENSE_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+        </select>
+        <input className="sd-select" inputMode="decimal" placeholder="£ amount" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Amount in pounds" />
+        <input className="sd-select" placeholder="Note (optional)" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Note" />
+        <button className="btn" type="submit" disabled={busy}>{busy ? "Saving…" : "＋ Add cost"}</button>
+      </form>
+      {msg ? <p className="hint-small" style={{ color: "var(--bad-ink)" }}>{msg}</p> : null}
+    </div>
+  );
+}
+
 function outcomeText(co) {
   const o = outcomeOf(co);
   if (o === "sold") return { text: `sold${co.sold_price_pence != null ? ` · ${pounds(co.sold_price_pence)}` : " · no price recorded"}`, color: "var(--conf-high)" };
@@ -41,6 +99,11 @@ export default function ShowHistory() {
   const [noStickers, setNoStickers] = useState(false);
   const [error, setError] = useState("");
   const [openKey, setOpenKey] = useState(null);
+  const [expenses, setExpenses] = useState([]);
+  const [expensesMissing, setExpensesMissing] = useState(false); // migration 030 not applied
+  const [expenseErr, setExpenseErr] = useState("");
+  const [newShow, setNewShow] = useState("");
+  const [pending, setPending] = useState(null); // a show named for costs, nothing recorded yet
 
   useEffect(() => {
     let live = true;
@@ -64,7 +127,11 @@ export default function ShowHistory() {
       try {
         costRows = await pagedSelect(() => sb.from("listing_costs").select("ebay_item_id,cost_pence"));
       } catch { /* no costs is a gap, not a failure */ }
+      const ex = await loadExpenses(sb);
       if (!live) return;
+      setExpensesMissing(Boolean(ex.missing));
+      if (ex.error) setExpenseErr(ex.error);
+      setExpenses(ex.rows || []);
       setNoStickers(Boolean(sticker.error));
       setCosts(new Map(costRows.filter((c) => c.cost_pence != null).map((c) => [String(c.ebay_item_id), c.cost_pence])));
       setRows(all);
@@ -72,9 +139,38 @@ export default function ShowHistory() {
     return () => { live = false; };
   }, []);
 
-  const shows = useMemo(() => (rows ? showHistory(rows, costs) : []), [rows, costs]);
+  const shows = useMemo(() => (rows ? showHistory(rows, costs, expenses) : []), [rows, costs, expenses]);
   const totals = useMemo(() => totalsOf(shows), [shows]);
 
+  async function onAddExpense(args) {
+    const res = await addExpense(createClient(), args);
+    if (res.missing) setExpensesMissing(true);
+    if (res.ok) setExpenses((xs) => [...xs, res.row]);
+    return res;
+  }
+
+  async function onDeleteExpense(id) {
+    const res = await deleteExpense(createClient(), id);
+    if (res.missing) setExpensesMissing(true);
+    if (res.ok) setExpenses((xs) => xs.filter((x) => x.id !== id));
+    else if (res.error) setExpenseErr(res.error);
+  }
+
+  // A show not on the list yet — the table fee is usually paid weeks before
+  // anything is checked out. Keyed exactly as its checkouts will be, so the
+  // costs land on the same block the day the desk stamps that event name.
+  function openNewShow(e) {
+    e.preventDefault();
+    const name = newShow.replace(/\s+/g, " ").trim();
+    const k = eventKey(name);
+    if (!k) return;
+    const key = `e:${k}`;
+    if (!shows.some((s) => s.key === key)) {
+      setPending({ key, label: name, named: true, expenses: [] });
+    }
+    setOpenKey(key);
+    setNewShow("");
+  }
   function downloadCsv() {
     const url = URL.createObjectURL(new Blob([historyCsv(shows)], { type: "text/csv" }));
     const a = document.createElement("a");
@@ -95,10 +191,22 @@ export default function ShowHistory() {
     );
   }
 
-  if (shows.length === 0) {
+  // A show named in the box above but with nothing recorded yet: shown as an
+  // empty block until its first cost lands, at which point it is a real show.
+  const pendingShow = pending && !shows.some((s) => s.key === pending.key) ? pending : null;
+
+  const addShowForm = !expensesMissing ? (
+    <form className="sh-costform sh-newshow" onSubmit={openNewShow}>
+      <input className="sd-select" placeholder="Show name, as you'll type it on the desk" value={newShow} onChange={(e) => setNewShow(e.target.value)} aria-label="Show name" />
+      <button className="btn btn-ghost" type="submit">Log costs for a show</button>
+    </form>
+  ) : null;
+
+  if (shows.length === 0 && !pendingShow) {
     return (
       <div className="panel">
         <p className="dd-empty">No shows yet. Check cards out on the Show desk and each show appears here — grouped by event name, with how many went, how many came back, and what they took.</p>
+        {addShowForm}
       </div>
     );
   }
@@ -112,12 +220,17 @@ export default function ShowHistory() {
           <div className="v">{pct(totals.sellThrough)}</div>
         </div>
         <div className="stat"><div className="k">Takings</div><div className="v">{pounds(totals.takings)}</div></div>
-        <div className="stat">
-          <div className="k">Profit</div>
-          <div className={`v${totals.profit == null ? "" : totals.profit >= 0 ? " up" : " down"}`}>
-            {totals.profit == null ? "—" : pounds(totals.profit)}
-          </div>
-        </div>
+        {(() => {
+          // Net once any show has running costs against it; gross until then.
+          const useNet = totals.expensesPence > 0 && totals.net != null;
+          const v = useNet ? totals.net : totals.profit;
+          return (
+            <div className="stat">
+              <div className="k">{useNet ? "Net profit" : "Profit"}</div>
+              <div className={`v${v == null ? "" : v >= 0 ? " up" : " down"}`}>{v == null ? "—" : pounds(v)}</div>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="panel">
@@ -129,12 +242,24 @@ export default function ShowHistory() {
           Sell-through counts every card that didn't come back as sold — that's how the table works. Where
           that differs from what was actually marked sold, the recorded figure is shown beside it.
           {totals.directSold > 0 ? ` Cards sold straight off eBay stock are in the takings but not in "brought", since they were never in the box.` : ""}
-          {" "}Profit is takings less what each sold card cost (the cost on its eBay listing), only over sales that have a cost recorded — before table fees and travel.
+          {" "}Profit is takings less what each sold card cost (the cost on its eBay listing), only over sales that have a cost recorded.
+          Net profit takes the show's own costs — table, travel — off that. Open a show to add them.
           {noStickers ? " Sticker figures need migration 024." : ""}
+          {expensesMissing ? " Show costs need migration 030." : ""}
         </p>
+        {expenseErr ? <p className="hint-small" style={{ color: "var(--bad-ink)" }}>Show costs: {expenseErr}</p> : null}
+        {addShowForm}
 
         <div className="sh-list">
-          {shows.map((s) => {
+          {(pendingShow ? [{ ...pendingShow, summary: null, cards: [], direct: [] }, ...shows] : shows).map((s) => {
+            if (!s.summary) {
+              return (
+                <div className="sh-show" key={s.key}>
+                  <div className="sh-head"><span className="sh-name"><strong>{s.label}</strong><span className="hint-small">nothing checked out yet</span></span></div>
+                  <ExpenseEditor show={s} onAdd={onAddExpense} onDelete={onDeleteExpense} missing={expensesMissing} />
+                </div>
+              );
+            }
             const m = s.summary;
             const isOpen = openKey === s.key;
             return (
@@ -174,6 +299,17 @@ export default function ShowHistory() {
                     </span>
                     {m.margin != null ? <span className="sub">{pct(m.margin)} margin</span> : null}
                   </div>
+                  <div>
+                    <span className="k">Show costs</span>
+                    <span className="v">{m.expenseCount > 0 ? pounds(m.expensesPence) : "—"}</span>
+                  </div>
+                  <div>
+                    <span className="k">Net profit</span>
+                    <span className="v" style={m.net == null ? undefined : { color: m.net >= 0 ? "var(--good-ink)" : "var(--bad-ink)" }}>
+                      {m.net == null ? "—" : pounds(m.net)}
+                    </span>
+                    {m.net == null && m.expenseCount > 0 ? <span className="sub">takings less costs {pounds(m.takingsLessExpenses)}</span> : null}
+                  </div>
                   <div><span className="k">Avg sale</span><span className="v">{m.avgSale == null ? "—" : pounds(m.avgSale)}</span></div>
                   {!noStickers ? (
                     <div>
@@ -194,6 +330,10 @@ export default function ShowHistory() {
                     Profit covers {m.costedSales} of {m.costedSales + m.uncosted} priced sales ({pounds(m.takingsCosted)} of {pounds(m.takings)}) —
                     {" "}{m.uncosted} {m.uncosted === 1 ? "has" : "have"} no cost recorded on {m.uncosted === 1 ? "its" : "their"} listing.
                   </p>
+                ) : null}
+
+                {isOpen ? (
+                  <ExpenseEditor show={s} onAdd={onAddExpense} onDelete={onDeleteExpense} missing={expensesMissing} />
                 ) : null}
 
                 {isOpen ? (

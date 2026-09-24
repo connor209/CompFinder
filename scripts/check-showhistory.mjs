@@ -28,8 +28,10 @@ import {
   totalsOf,
   historyCsv,
   costOf,
+  withExpenses,
   pct
 } from "../apps/app/lib/showhistory.js";
+import { parseExpensePence, isMissingTable, EXPENSE_CATEGORIES } from "../apps/app/lib/show-expenses-store.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -197,6 +199,49 @@ eq("a returned card is never a direct sale",
   eq("csv carries profit", historyCsv(shows).split("\n")[0].includes('"Profit (£)"'), true);
 }
 
+// ---- show costs ----------------------------------------------------------------------
+{
+  eq("£45 is 4500p", parseExpensePence("£45"), 4500);
+  eq("12.50 is 1250p", parseExpensePence("12.50"), 1250);
+  eq("a thousand with a comma", parseExpensePence("1,200"), 120000);
+  eq("zero refused", parseExpensePence("0"), null);
+  eq("negative refused", parseExpensePence("-5"), null);
+  eq("three decimals refused, not rounded", parseExpensePence("4.555"), null);
+  eq("junk refused", parseExpensePence("forty"), null);
+  eq("pending migration recognised", isMissingTable({ code: "42P01" }), true);
+  eq("categories keep 'other' last (the fallback)", EXPENSE_CATEGORIES[EXPENSE_CATEGORIES.length - 1].key, "other");
+
+  const costs = new Map([["111", 400]]);
+  const glasgow = [sold(1000, { event: "Glasgow", ebay_item_id: "111" })];   // gross +600
+  const expenses = [
+    { id: "x1", show_key: "e:glasgow", show_label: "Glasgow", category: "table", amount_pence: 5000, created_at: "2026-08-01T10:00:00Z" },
+    { id: "x2", show_key: "e:glasgow", show_label: "Glasgow", category: "travel", amount_pence: 1500, created_at: "2026-09-05T07:00:00Z" },
+    // York: costs logged, cards sold, but no card has a cost recorded.
+    { id: "x3", show_key: "e:york", show_label: "York", category: "table", amount_pence: 3000, created_at: "2026-09-10T10:00:00Z" },
+    // Leeds: table fee paid ahead, nothing checked out yet.
+    { id: "x4", show_key: "e:leeds", show_label: "Leeds", category: "table", amount_pence: 4000, created_at: "2026-09-20T10:00:00Z" }
+  ];
+  const shows = showHistory([...glasgow, sold(900, { event: "york" })], costs, expenses);
+  const by = (label) => shows.find((s) => s.key === `e:${label.toLowerCase()}`);
+
+  eq("costs join on the show key, case-blind event", by("Glasgow").summary.expensesPence, 6500);
+  eq("net is gross less costs, and can be a loss", by("Glasgow").summary.net, 600 - 6500);
+  eq("no card costs: no net profit, never takings-as-profit", by("York").summary.net, null);
+  eq("…but takings less costs is still said", by("York").summary.takingsLessExpenses, 900 - 3000);
+  eq("a show with only costs still gets a block", Boolean(by("Leeds")), true);
+  eq("…dated by its costs", by("Leeds").summary.lastAt, "2026-09-20T10:00:00.000Z");
+  eq("…with nothing brought", by("Leeds").summary.brought, 0);
+  eq("its costs ride on the block for the editor", by("Glasgow").expenses.map((e) => e.id), ["x1", "x2"]);
+
+  const t = totalsOf(shows);
+  eq("total costs are every show's", t.expensesPence, 13500);
+  // Only Glasgow can be netted. York's and Leeds's costs must not be taken off
+  // Glasgow's profit, or a show with no card costs makes another look worse.
+  eq("total net only over shows that have a net", t.net, 600 - 6500);
+  eq("no costs anywhere: net equals gross", withExpenses({ profit: 700, takings: 1000 }, []).net, 700);
+  eq("csv carries net profit", historyCsv(shows).split("\n")[0].includes('"Net profit (£)"'), true);
+}
+
 // ---- wiring ----------------------------------------------------------------------
 {
   const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
@@ -205,7 +250,18 @@ eq("a returned card is never a direct sale",
   // The history is a reader. A write from it would be a second place a
   // checkout gets resolved, and the desk and the deal already guard theirs.
   const screen = readFileSync(new URL("../apps/app/app/panel/ShowHistory.js", import.meta.url), "utf8");
-  if (/\.(update|insert|upsert|delete)\s*\(/.test(screen)) fail("ShowHistory.js writes to the database — it must only read");
+  if (/\.(update|insert|upsert|delete)\s*\(/.test(screen)) fail("ShowHistory.js writes to the database directly — show costs go through show-expenses-store.js, and checkouts are never written here");
+  if (/stock_checkouts["'`]\s*\)\s*\.(update|insert|upsert|delete)/.test(screen)) fail("ShowHistory.js writes stock_checkouts");
+  // show_expenses is named in its store only, like show_wants and the batch tables.
+  const { readdirSync } = await import("node:fs");
+  const libDir = new URL("../apps/app/lib/", import.meta.url);
+  const panelDir = new URL("../apps/app/app/panel/", import.meta.url);
+  for (const [dir, files] of [[libDir, readdirSync(libDir)], [panelDir, readdirSync(panelDir)]]) {
+    for (const f of files) {
+      if (!f.endsWith(".js") || f === "show-expenses-store.js") continue;
+      if (readFileSync(new URL(f, dir), "utf8").includes('"show_expenses"')) fail(`${f} names show_expenses — only show-expenses-store.js may`);
+    }
+  }
 }
 
 if (failures) {

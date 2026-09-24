@@ -60,7 +60,8 @@ const MIGRATIONS = [
   ["025", "app comp cache", [["table", "app_comp_cache"]]],
   ["026", "show wants", [["table", "show_wants"]]],
   ["027", "listing copies", [["column", "stack_cards", "copy_seq"], ["column", "stack_cards", "scan_url"], ["table", "listing_copy_state"]]],
-  ["029", "show storefronts", [["table", "show_storefronts"], ["function", "storefront_hit"]]]
+  ["029", "show storefronts", [["table", "show_storefronts"], ["function", "storefront_hit"]]],
+  ["030", "show expenses", [["table", "show_expenses"]]]
 ];
 
 /**
