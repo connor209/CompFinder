@@ -13,7 +13,9 @@
  * list. It is separate from showstock.js because it answers a different
  * question — that file decides what a card is WORTH, this one decides which
  * rows you are looking at — and it is framework-free and app-import-free on
- * purpose, so scripts/check-showfilter.mjs can load it under bare node.
+ * purpose, so scripts/check-showfilter.mjs can load it under bare node. The
+ * one import, games.js, is held to the same rule: it reads a game off a title
+ * and imports nothing but core.
  *
  * **A bulk action applies to what you can SEE, and that is the rule this file
  * exists to hold.** The desk's convention is that ticking nothing means "all
@@ -23,6 +25,7 @@
  * rows that moved were never on screen. `selectionFor()` is the one definition
  * of what a bulk action acts on, and every count on the screen comes from it.
  */
+import { inGames } from "./games.js";
 
 /**
  * Search text, flattened: lower case, accents off, everything that isn't a
@@ -106,7 +109,11 @@ export const LISTING_FILTERS = [
 ];
 
 /** Everything except the free-text query — the dropdowns. */
-export function matchesFilters(co, { event = "", stack = "", sticker = "any", listing = "any" } = {}) {
+export function matchesFilters(co, { event = "", stack = "", sticker = "any", listing = "any", games = null } = {}) {
+  // The game is tagged onto the row by the desk (games.js reads it off the
+  // title and the listing's category); a row it could not place is
+  // "unknown", which is a choice of its own rather than a wildcard.
+  if (!inGames(co, games)) return false;
   if (event && String(co?.event || "").trim() !== event) return false;
   if (stack && String(co?.stack_name || "").trim() !== stack) return false;
   if (sticker === "yes" && !hasSticker(co)) return false;
@@ -211,9 +218,10 @@ export function sortCheckouts(rows, key = DEFAULT_SORT) {
 }
 
 /** Is anything actually narrowing the list? Drives the "showing x of y" line. */
-export function isFiltering({ query = "", event = "", stack = "", sticker = "any", listing = "any" } = {}) {
+export function isFiltering({ query = "", event = "", stack = "", sticker = "any", listing = "any", games = null } = {}) {
   return Boolean(
-    normalise(query) || event || stack || (sticker && sticker !== "any") || (listing && listing !== "any")
+    normalise(query) || event || stack || (sticker && sticker !== "any") || (listing && listing !== "any") ||
+      (games && games.size > 0)
   );
 }
 

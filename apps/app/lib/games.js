@@ -132,11 +132,22 @@ export function gameFacets(rows, gameKey = (r) => r.game) {
 }
 
 /**
+ * Is this row in the chosen games? Nothing chosen is every game. A row with no
+ * `game` on it counts as unknown, never as a match for everything — so the
+ * Show Desk's lists, which tag their rows once, and a row that somehow missed
+ * the tagging still answer the same question.
+ */
+export function inGames(row, chosen, gameKey = (r) => r?.game) {
+  if (!chosen || chosen.size === 0) return true;
+  return chosen.has(gameKey(row) || UNKNOWN_GAME);
+}
+
+/**
  * Narrow rows to the chosen games. An empty choice is every game — the chips
  * start with nothing picked and everything showing, which is the list as it
  * was before there were chips.
  */
 export function filterByGames(rows, chosen, gameKey = (r) => r.game) {
   if (!chosen || chosen.size === 0) return rows || [];
-  return (rows || []).filter((r) => chosen.has(gameKey(r) || UNKNOWN_GAME));
+  return (rows || []).filter((r) => inGames(r, chosen, gameKey));
 }

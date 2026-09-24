@@ -48,6 +48,7 @@
  * Framework-free and app-import-free on purpose, so scripts/check-binder.mjs
  * can load it under bare node.
  */
+import { inGames, gameFacets } from "./games.js";
 import { matchesQuery, normalise, hasSticker } from "./showfilter.js";
 import { counterName, conditionOf, counterPrice, counterImage, imageAt, inBoxSkus, ASK_TEXT } from "./showcounter.js";
 import { isListingAvailable } from "./stockcheck.js";
@@ -400,8 +401,10 @@ function sectionOf(items, criteria = {}) {
 }
 
 /** Is anything actually narrowing the binder? Drives the "showing x of y" line. */
-export function isFiltering({ query = "", price = "any", scope = DEFAULT_SCOPE } = {}) {
-  return Boolean(normalise(query) || (price && price !== "any") || (scope && scope !== DEFAULT_SCOPE));
+export function isFiltering({ query = "", price = "any", scope = DEFAULT_SCOPE, games = null } = {}) {
+  return Boolean(
+    normalise(query) || (price && price !== "any") || (scope && scope !== DEFAULT_SCOPE) || (games && games.size > 0)
+  );
 }
 
 /**
@@ -423,8 +426,14 @@ export function binderView(checkouts, criteria = {}, { images, listings } = {}) 
   const boxRows = (checkouts || []).filter(Boolean);
   const onlineRows = onlineStock(listings, { inBox: inBoxSkus(boxRows) });
 
-  const matchedBox = scope === ONLINE ? [] : boxRows.filter((co) => matchesQuery(co, criteria.query));
-  const matchedOnline = scope === BOX ? [] : onlineRows.filter((l) => matchesQuery(l, criteria.query));
+  const scopedBox = scope === ONLINE ? [] : boxRows;
+  const scopedOnline = scope === BOX ? [] : onlineRows;
+  // The game chips narrow BOTH sections, and are counted over both before the
+  // search or the chips themselves narrow anything — a game only held at home
+  // is still a game the binder can show, and a chip that vanished the moment
+  // you picked another would be a filter you cannot get back out of.
+  const matchedBox = scopedBox.filter((co) => matchesQuery(co, criteria.query) && inGames(co, criteria.games));
+  const matchedOnline = scopedOnline.filter((l) => matchesQuery(l, criteria.query) && inGames(l, criteria.games));
 
   const box = sectionOf(matchedBox.map((co) => boxItem(co, images)), criteria);
   const online = sectionOf(matchedOnline.map(onlineItem), criteria);
@@ -445,7 +454,8 @@ export function binderView(checkouts, criteria = {}, { images, listings } = {}) 
     total,
     shown,
     hidden: total - shown,
-    filtering: isFiltering(criteria)
+    filtering: isFiltering(criteria),
+    gameFacets: gameFacets([...scopedBox, ...scopedOnline])
   };
 }
 

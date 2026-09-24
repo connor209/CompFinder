@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/stackpos.js";
 import { isListingAvailable, soldOutSkus } from "@/lib/stockcheck.js";
-import { gameOf, gameFacets, filterByGames } from "@/lib/games.js";
+import { gameOf, gameFacets, filterByGames, gameName, UNKNOWN_GAME } from "@/lib/games.js";
 import { getSetIndex } from "@/lib/set-index.js";
 import {
   checkoutStackCard, unhideListing, nextStackName, planReallocation,
@@ -90,6 +90,14 @@ export default function ShowDesk() {
   const [q, setQ] = useState("");
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [eventFilter, setEventFilter] = useState("");
+  // The game chips over the away list, the counter list and the binder — one
+  // choice for all three, like the search box, so flipping between them never
+  // shows one game on the desk and another in the binder.
+  const [gamesFilter, setGamesFilter] = useState(new Set());
+  // Set name -> game, from the catalogue: the last way to place a card whose
+  // title and listing say nothing. Loaded after the desk renders and never
+  // waited on; until it lands those cards are simply "unknown".
+  const [gameIndex, setGameIndex] = useState(null);
   const [stackFilter, setStackFilter] = useState("");
   const [stickerFilter, setStickerFilter] = useState("any");
   const [listingFilter, setListingFilter] = useState("any");
@@ -251,7 +259,7 @@ export default function ShowDesk() {
     // since it shows a mint scan of a played card to the person holding it.
     try {
       const live = await pagedSelect(() =>
-        sb.from("ebay_listings").select("ebay_item_id,sku,title,price_value,quantity,image_url")
+        sb.from("ebay_listings").select("ebay_item_id,sku,title,price_value,quantity,image_url,extra")
       );
       const bySku = new Map();
       for (const l of live) {
@@ -446,14 +454,6 @@ export default function ShowDesk() {
   // unticked. A ticked card the filter has hidden is never checked out.
   const recChosen = useMemo(() => (recs || []).filter((r) => !recOff.has(r.card.id)), [recs, recOff]);
 
-  function toggleRecGame(slug) {
-    setRecGames((prev) => {
-      const n = new Set(prev);
-      if (n.has(slug)) n.delete(slug); else n.add(slug);
-      return n;
-    });
-  }
-
   async function checkoutRecs() {
     const chosen = recChosen.map((r) => r.card);
     if (chosen.length === 0) return;
@@ -469,16 +469,44 @@ export default function ShowDesk() {
 
   // ---- Check-in ------------------------------------------------------------
 
+  // Every row tagged with its game ONCE, here, so the away list, the counter
+  // list, the online matches and the binder all filter on the same answer. A
+  // checkout has no category of its own, so it borrows its listing's — by
+  // item id, then SKU — and falls back on its title. See lib/games.js.
+  const categoryOf = useMemo(() => {
+    const byItem = new Map();
+    const bySku = new Map();
+    for (const l of listings) {
+      const cat = l?.extra?.category;
+      if (!cat) continue;
+      if (l.ebay_item_id) byItem.set(String(l.ebay_item_id), cat);
+      if (l.sku) bySku.set(String(l.sku).toLowerCase(), cat);
+    }
+    return (row) =>
+      (row?.ebay_item_id && byItem.get(String(row.ebay_item_id))) ||
+      (row?.sku && bySku.get(String(row.sku).toLowerCase())) ||
+      null;
+  }, [listings]);
+  const taggedOpen = useMemo(
+    () => open.map((co) => ({ ...co, game: gameOf({ category: categoryOf(co), title: co.title }, gameIndex) })),
+    [open, categoryOf, gameIndex]
+  );
+  const taggedListings = useMemo(
+    () => listings.map((l) => ({ ...l, game: gameOf({ category: l?.extra?.category, title: l.title }, gameIndex) })),
+    [listings, gameIndex]
+  );
+  const awayGames = useMemo(() => gameFacets(taggedOpen), [taggedOpen]);
+
   // What's on screen, and what the buttons under it act on. Both come out of
   // showfilter.js, so "all of them" can never mean more than you can see —
   // read the note on selectionFor(): the cards a bulk action moves silently
   // are the ones that were never rendered.
   const view = useMemo(
-    () => showView(open, {
+    () => showView(taggedOpen, {
       query: q, sort, event: eventFilter, stack: stackFilter,
-      sticker: stickerFilter, listing: listingFilter
+      sticker: stickerFilter, listing: listingFilter, games: gamesFilter
     }),
-    [open, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter]
+    [taggedOpen, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter, gamesFilter]
   );
   const visible = view.rows;
   const selected = useMemo(() => selectionFor(visible, sel), [visible, sel]);
@@ -486,11 +514,11 @@ export default function ShowDesk() {
   // showcounter.js so what reaches a stranger's eyes is an allow-list rather
   // than this row with the private bits hidden by CSS.
   const counter = useMemo(
-    () => counterView(open, {
+    () => counterView(taggedOpen, {
       query: q, sort, event: eventFilter, stack: stackFilter,
-      sticker: stickerFilter, listing: listingFilter
+      sticker: stickerFilter, listing: listingFilter, games: gamesFilter
     }, { images }),
-    [open, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter, images]
+    [taggedOpen, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter, gamesFilter, images]
   );
   // The same stock, nine to a page. Built from `open` rather than from
   // `visible`, for the same reason the counter list is: what reaches a
@@ -498,11 +526,11 @@ export default function ShowDesk() {
   // a desk row with the private parts hidden by CSS.
   const binder = useMemo(
     () => binderView(
-      open,
-      { query: q, sort: binderSort, price: binderPrice, scope: binderScope },
-      { images, listings }
+      taggedOpen,
+      { query: q, sort: binderSort, price: binderPrice, scope: binderScope, games: gamesFilter },
+      { images, listings: taggedListings }
     ),
-    [open, listings, q, binderSort, binderPrice, binderScope, images]
+    [taggedOpen, taggedListings, q, binderSort, binderPrice, binderScope, gamesFilter, images]
   );
   // A page that still exists, however the search just changed under it.
   const binderAt = clampPage(binderPage, binder.pageCount);
@@ -531,8 +559,8 @@ export default function ShowDesk() {
   // Stock that is listed online and not in the box. Only ever on a search, and
   // never a card already in the list above it — see onlineMatches().
   const online = useMemo(
-    () => (counterMode ? onlineMatches(listings, { query: q, inBoxSkus: inBoxSkus(open) }) : []),
-    [counterMode, listings, q, open]
+    () => (counterMode ? onlineMatches(taggedListings, { query: q, inBoxSkus: inBoxSkus(open), games: gamesFilter }) : []),
+    [counterMode, taggedListings, q, open, gamesFilter]
   );
   // Where every card physically is, and which SKU each online row came from.
   //
@@ -654,7 +682,16 @@ export default function ShowDesk() {
   // the page legal on its own; this is about where you WANT to be, which is
   // page one of what you just asked for rather than page six of what you asked
   // for before.
-  useEffect(() => { setBinderPage(0); }, [q, binderSort, binderPrice, binderScope]);
+  useEffect(() => { setBinderPage(0); }, [q, binderSort, binderPrice, binderScope, gamesFilter]);
+  // The catalogue's set names, for placing a card in a game. After the first
+  // render and never awaited by anything: on venue wifi a slow catalogue read
+  // costs a few cards sitting under "unknown" for a moment, never the desk.
+  useEffect(() => {
+    let live = true;
+    getSetIndex(supabase()).then((r) => { if (live) setGameIndex(r?.gameIndex || null); }, () => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return;
     const mq = window.matchMedia("(min-width: 900px)");
@@ -722,6 +759,7 @@ export default function ShowDesk() {
     setStackFilter("");
     setStickerFilter("any");
     setListingFilter("any");
+    setGamesFilter(new Set());
   }
 
   function toggleSel(id) {
@@ -1138,29 +1176,9 @@ export default function ShowDesk() {
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 Your live stock ranked by listing price. Untick anything staying home, then check the rest out in one go.
               </p>
-              {recFacets.length > 1 ? (
-                // Built from the pool, so every chip has cards behind it. Nothing
-                // picked is every game; the top N is taken AFTER this, so it is
-                // the top N of the games you picked.
-                <div className="sd-games" role="group" aria-label="Filter by game">
-                  <button type="button" aria-pressed={recGames.size === 0} onClick={() => setRecGames(new Set())}>
-                    All games <span className="sd-games-n">{recPool.length}</span>
-                  </button>
-                  {recFacets.map((f) => (
-                    <button
-                      type="button"
-                      key={f.slug}
-                      aria-pressed={recGames.has(f.slug)}
-                      onClick={() => toggleRecGame(f.slug)}
-                      title={f.slug === "unknown"
-                        ? "Neither the eBay category, the title nor a set name said which game these are. Put the game in the title to sort them."
-                        : `Only ${f.name}`}
-                    >
-                      {f.name} <span className="sd-games-n">{f.count}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
+              {/* The top N is taken AFTER these, so it is the top N of the
+                  games you picked. */}
+              <GameChips facets={recFacets} chosen={recGames} onChange={setRecGames} customer={false} />
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 The SKU comes first, then the <b>live position</b> — count that many from the top of the
                 stack. The two are not the same number: a SKU is a name and never moves, while positions
@@ -1361,6 +1379,15 @@ export default function ShowDesk() {
                 </select>
               ) : null}
             </div>
+            {/* The game chips, on all three screens. Not desk data — which
+                game a card is can be read off the card — so a customer gets
+                them too, with "unknown" worded for a stranger. */}
+            <GameChips
+              facets={binderMode ? binder.gameFacets : awayGames}
+              chosen={gamesFilter}
+              onChange={setGamesFilter}
+              customer={customerMode}
+            />
             {view.filtering && !customerMode ? (
               /* Said out loud, because the alternative is a button that looks
                  like it does one thing and does another. A card filed while it
@@ -1564,7 +1591,7 @@ export default function ShowDesk() {
                 >
                   {binder.pageCount === 0 ? (
                     <p className="dd-empty bn-blank">
-                      {q.trim() || binderPrice !== "any" || binderScope !== DEFAULT_SCOPE
+                      {q.trim() || binderPrice !== "any" || binderScope !== DEFAULT_SCOPE || gamesFilter.size > 0
                         ? "Nothing in the binder matches that."
                         : "Nothing to show yet — check some stock out, or sync your eBay listings."}
                     </p>
@@ -1936,6 +1963,47 @@ export default function ShowDesk() {
           starts closed, so selling from the binder is two deliberate taps —
           Open deal, then £ Mark sold — never one. */}
       {dealMode ? <DealBar deal={deal} update={updateDeal} onSold={load} /> : null}
+    </div>
+  );
+}
+
+/**
+ * One row of game chips. Nothing picked is every game; picking adds, picking
+ * again removes. Drawn only when there is a choice to make — one game is not a
+ * filter, it is a chip with one answer — but a chip that is PICKED always
+ * stays, even at a count of nothing, or a filter could hide its own way out.
+ */
+function GameChips({ facets, chosen, onChange, customer }) {
+  const shown = [...facets];
+  for (const slug of chosen) {
+    if (!shown.some((f) => f.slug === slug)) shown.push({ slug, name: gameName(slug), count: 0 });
+  }
+  if (shown.length < 2 && chosen.size === 0) return null;
+  const total = facets.reduce((n, f) => n + f.count, 0);
+  const label = (f) => (f.slug === UNKNOWN_GAME && customer ? "Other" : f.name);
+  const toggle = (slug) => {
+    const n = new Set(chosen);
+    if (n.has(slug)) n.delete(slug); else n.add(slug);
+    onChange(n);
+  };
+  return (
+    <div className="sd-games" role="group" aria-label="Filter by game">
+      <button type="button" aria-pressed={chosen.size === 0} onClick={() => onChange(new Set())}>
+        All games <span className="sd-games-n">{total}</span>
+      </button>
+      {shown.map((f) => (
+        <button
+          type="button"
+          key={f.slug}
+          aria-pressed={chosen.has(f.slug)}
+          onClick={() => toggle(f.slug)}
+          title={f.slug === UNKNOWN_GAME && !customer
+            ? "Neither the eBay category, the title nor a set name said which game these are. Put the game in the title to sort them."
+            : undefined}
+        >
+          {label(f)} <span className="sd-games-n">{f.count}</span>
+        </button>
+      ))}
     </div>
   );
 }

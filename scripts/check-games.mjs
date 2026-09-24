@@ -29,6 +29,9 @@ import {
   gameFacets,
   filterByGames
 } from "../apps/app/lib/games.js";
+import { showView, selectionFor } from "../apps/app/lib/showfilter.js";
+import { counterView, onlineMatches } from "../apps/app/lib/showcounter.js";
+import { binderView, BOX, ONLINE } from "../apps/app/lib/binder.js";
 
 let failures = 0;
 const fail = (msg) => { failures++; console.error("✕ " + msg); };
@@ -122,8 +125,65 @@ if (!/const chosen = recChosen\.map/.test(desk) || !/\(recs \|\| \[\]\)\.filter\
 }
 if (/recSel/.test(desk)) fail("ShowDesk.js still carries recSel — the recommended list's ticks are recOff now, one definition");
 
+// ---- The away list, the counter and the binder: one chip, every screen ------
+// The desk tags each row with `game` once; the libraries only ever read it.
+const AWAY = [
+  { id: "a1", sku: "A1", title: "Umbreon VMAX 215/203", game: "pokemon", sticker_pence: 80000 },
+  { id: "a2", sku: "A2", title: "Luffy OP05-119", game: "onepiece", sticker_pence: 4000 },
+  { id: "a3", sku: "A3", title: "Mystery card", game: UNKNOWN_GAME },
+  { id: "a4", sku: "A4", title: "Charizard ex 199/165", game: "pokemon" },
+  { id: "a5", sku: "A5", title: "Untagged row" } // missed the tagging: unknown, never a wildcard
+];
+const ONE = (slug) => new Set([slug]);
+
+eq("away: no chip is everything", showView(AWAY, {}).shown, 5);
+eq("away: Pokémon only", showView(AWAY, { games: ONE("pokemon") }).rows.map((r) => r.id).sort().join(","), "a1,a4");
+eq("away: unknown includes an untagged row", showView(AWAY, { games: ONE(UNKNOWN_GAME) }).rows.map((r) => r.id).sort().join(","), "a3,a5");
+eq("away: a chip counts as filtering", showView(AWAY, { games: ONE("onepiece") }).filtering, true);
+eq("away: hidden count is said", showView(AWAY, { games: ONE("onepiece") }).hidden, 4);
+// The rule that costs cards: nothing ticked means all of what is ON SCREEN,
+// and a ticked card the chip has hidden is not acted on either.
+{
+  const visible = showView(AWAY, { games: ONE("pokemon") }).rows;
+  eq("away: bulk with nothing ticked acts on the chip's rows only", selectionFor(visible, new Set()).map((r) => r.id).sort().join(","), "a1,a4");
+  eq("away: a ticked row the chip hides is not acted on", selectionFor(visible, new Set(["a2", "a4"])).map((r) => r.id).join(","), "a4");
+}
+eq("counter: same rows as the desk", counterView(AWAY, { games: ONE("onepiece") }).rows.map((r) => r.id).join(","), "a2");
+
+const LISTINGS = [
+  { ebay_item_id: "e1", sku: "B1", title: "Pokemon Gengar 094/091", quantity: 1, price_value: 12, game: "pokemon" },
+  { ebay_item_id: "e2", sku: "B2", title: "One Piece Gengar-ish Zoro OP01-025", quantity: 1, price_value: 9, game: "onepiece" },
+  { ebay_item_id: "e3", sku: "B3", title: "MTG Gengar proxy", quantity: 1, price_value: 3, game: "magic" }
+];
+eq("online matches follow the chip", onlineMatches(LISTINGS, { query: "gengar", games: ONE("pokemon") }).map((r) => r.id).join(","), "e1");
+eq("online matches, no chip", onlineMatches(LISTINGS, { query: "gengar" }).length, 3);
+
+{
+  const all = binderView(AWAY, {}, { listings: LISTINGS });
+  const pk = binderView(AWAY, { games: ONE("pokemon") }, { listings: LISTINGS });
+  eq("binder: chips counted over both sections", all.gameFacets.map((f) => `${f.slug}:${f.count}`).join(","), "pokemon:3,onepiece:2,magic:1,unknown:2");
+  eq("binder: Pokémon narrows the box", pk.box.copies, 2);
+  eq("binder: Pokémon narrows the online pages too", pk.online.copies, 1);
+  eq("binder: sections still never share a page", pk.pageKinds.join(","), `${BOX},${ONLINE}`);
+  eq("binder: a chip counts as filtering", pk.filtering, true);
+  // Counted BEFORE the chips narrow, so picking one never makes the others vanish.
+  eq("binder: facets do not shrink under a chip", pk.gameFacets.length, all.gameFacets.length);
+  const boxOnly = binderView(AWAY, { scope: BOX }, { listings: LISTINGS });
+  eq("binder: facets follow the scope", boxOnly.gameFacets.some((f) => f.slug === "magic"), false);
+}
+
+// The desk passes the one choice to all four, off the tagged rows.
+for (const [label, re] of [
+  ["the away list", /showView\(taggedOpen, \{[\s\S]*?games: gamesFilter/],
+  ["the counter list", /counterView\(taggedOpen, \{[\s\S]*?games: gamesFilter/],
+  ["the binder", /binderView\(\s*taggedOpen,[\s\S]*?games: gamesFilter[\s\S]*?listings: taggedListings/],
+  ["the online matches", /onlineMatches\(taggedListings, \{[^}]*games: gamesFilter/]
+]) {
+  if (!re.test(desk)) fail(`ShowDesk.js must filter ${label} by the same game chips, off the tagged rows`);
+}
+
 if (failures) {
   console.error(`\n${failures} game check(s) failed.`);
   process.exit(1);
 }
-console.log(`✓ games: ${CASES.length + 2} readings, facets, filter-then-cut on the Show Desk`);
+console.log(`✓ games: ${CASES.length + 2} readings, facets, filter-then-cut, and one chip across the away list, counter and binder`);

@@ -31,6 +31,7 @@
  * Framework-free and app-import-free on purpose, so scripts/check-showcounter.mjs
  * can load it under bare node.
  */
+import { inGames } from "./games.js";
 import { showView, matchesQuery, normalise } from "./showfilter.js";
 import { labelName } from "./showstock.js";
 import { isListingAvailable } from "./stockcheck.js";
@@ -282,7 +283,7 @@ export function listingRow(l) {
  *    sets, and showing it under "ask us" as well as in the box reads as two
  *    copies.
  */
-export function onlineMatches(listings, { query = "", inBoxSkus = null, limit = ONLINE_LIMIT } = {}) {
+export function onlineMatches(listings, { query = "", inBoxSkus = null, limit = ONLINE_LIMIT, games = null } = {}) {
   if (!normalise(query)) return [];
   const skip = inBoxSkus instanceof Set ? inBoxSkus : new Set(inBoxSkus || []);
   const seen = new Set();
@@ -292,6 +293,7 @@ export function onlineMatches(listings, { query = "", inBoxSkus = null, limit = 
     const key = l?.sku ? String(l.sku).toLowerCase() : "";
     if (key && (skip.has(key) || seen.has(key))) continue;
     if (!matchesQuery(l, query)) continue;
+    if (!inGames(l, games)) continue;
     if (key) seen.add(key);
     out.push(l);
   }
