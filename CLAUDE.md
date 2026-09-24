@@ -54,7 +54,7 @@ stream` (the relay, only while streaming).
 
 ## Checks
 
-`npm run check` runs thirty-nine table tests, no framework, non-zero exit on failure:
+`npm run check` runs forty table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -189,6 +189,10 @@ stream` (the relay, only while streaming).
   catch it; that a switched-off, expired or malformed link serves nothing;
   and greps for noindex, no-referrer and the route staying outside the login
   wall.
+- `scripts/check-showhistory.mjs` — how a show's checkouts add up: a card
+  re-packed for day two is one card brought, a card sold off eBay stock is
+  takings but never "brought", not-back counts toward sell-through and never
+  toward takings, and the totals pool cards rather than averaging rates.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -2126,6 +2130,28 @@ Three things about it that are the point rather than detail:
   checkbox that brings them back, and the count of cards at a show is in the
   summary. A row that vanished with no count looks exactly like a card we never
   had, in the one list you would go looking in to find out.
+
+## Show history is the ledger, grouped
+
+`/panel/show-history` answers "how did that show go": cards brought, sold,
+returned, not checked back in, sell-through and takings, one block per show,
+tap to see the cards, plus a CSV. **No migration** — it groups the
+`stock_checkouts` rows the desk has written since 016, and `lib/showhistory.js`
+owns the arithmetic.
+
+- **A show is its event name**, trimmed and case-folded, so two days at
+  Glasgow are one show. Unnamed checkouts group by the day they left.
+- **A card is counted once per show, latest trip wins.** Filed back on day one
+  and packed again for day two is one card brought, not a return plus another
+  card — otherwise the busier the show, the worse its rate.
+- **Sold straight off eBay stock is takings, not "brought".** The Current Deal
+  writes those rows already resolved (`checked_out_at === resolved_at`); they
+  were never in the box, and counting them would flatter sell-through.
+- **Not checked back in counts as sold for the RATE, never for the money.**
+  That is how the table works — what doesn't come home went — but those rows
+  carry no price and on a running show every card is "not back". So the
+  recorded rate sits beside it whenever they differ, and takings are only what
+  was typed.
 
 ## What we were asked for is the only demand signal a show gives
 

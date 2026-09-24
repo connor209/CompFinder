@@ -1,0 +1,174 @@
+/**
+ * Show history: how a show's checkout rows add up to brought, sold, not back,
+ * sell-through and takings.
+ *
+ *   node scripts/check-showhistory.mjs      (or: npm run check)
+ *
+ * The cases that matter are the ones that would quietly move the rate:
+ *
+ * - a card re-packed for day two is ONE card brought, not a return plus a
+ *   second card, or a busy two-day show reads worse than a quiet one;
+ * - a card sold straight off eBay stock by the Current Deal is takings but was
+ *   never in the box, so it must not be in "brought";
+ * - "not checked back in" counts toward sell-through but never toward takings;
+ * - an unpriced sale is counted as a sale and flagged, not read as £0;
+ * - the totals pool the cards rather than averaging the shows' rates.
+ *
+ * Offline, no Supabase, no framework: showhistory.js is pure by design.
+ */
+import { readFileSync } from "node:fs";
+import {
+  eventKey,
+  showOf,
+  isDirectSale,
+  outcomeOf,
+  latestPerCard,
+  summariseShow,
+  showHistory,
+  totalsOf,
+  historyCsv,
+  pct
+} from "../apps/app/lib/showhistory.js";
+
+let failures = 0;
+const fail = (msg) => { console.error(`  ${msg}`); failures++; };
+const eq = (label, got, want) => {
+  if (JSON.stringify(got) !== JSON.stringify(want)) {
+    fail(`${label} — expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
+  }
+};
+
+let n = 0;
+const row = (over = {}) => ({
+  id: over.id ?? `r${++n}`,
+  event: "event" in over ? over.event : "Glasgow",
+  sku: over.sku ?? null,
+  title: over.title ?? null,
+  stack_card_id: "stack_card_id" in over ? over.stack_card_id : `c${n}`,
+  checked_out_at: over.checked_out_at ?? "2026-09-05T08:00:00Z",
+  resolved_at: over.resolved_at ?? null,
+  resolution: over.resolution ?? null,
+  sold_price_pence: over.sold_price_pence ?? null,
+  sticker_pence: over.sticker_pence ?? null
+});
+const sold = (pence, over = {}) => row({ resolved_at: "2026-09-05T15:00:00Z", resolution: "sold", sold_price_pence: pence, ...over });
+const back = (over = {}) => row({ resolved_at: "2026-09-06T09:00:00Z", resolution: "returned", ...over });
+
+// ---- grouping ---------------------------------------------------------------
+eq("event key folds case and spacing", eventKey("  Glasgow   Comic Con "), "glasgow comic con");
+eq("same show typed two ways", showOf(row({ event: "glasgow" })).key, showOf(row({ event: "Glasgow " })).key);
+eq("unnamed rows grouped by day, and say so", showOf(row({ event: "", checked_out_at: "2026-09-05T08:00:00Z" })).named, false);
+eq("unnamed on different days are different shows",
+  showOf(row({ event: null, checked_out_at: "2026-09-05T12:00:00Z" })).key === showOf(row({ event: null, checked_out_at: "2026-09-12T12:00:00Z" })).key,
+  false);
+
+// ---- outcomes -----------------------------------------------------------------
+eq("unresolved is out", outcomeOf(row()), "out");
+eq("sold is sold", outcomeOf(sold(500)), "sold");
+eq("returned is returned", outcomeOf(back()), "returned");
+eq("direct sale: checked out and sold in one instant",
+  isDirectSale(row({ checked_out_at: "2026-09-05T11:00:00Z", resolved_at: "2026-09-05T11:00:00Z", resolution: "sold" })), true);
+eq("a box card sold later is not a direct sale", isDirectSale(sold(500)), false);
+eq("a returned card is never a direct sale",
+  isDirectSale(row({ checked_out_at: "2026-09-05T11:00:00Z", resolved_at: "2026-09-05T11:00:00Z", resolution: "returned" })), false);
+
+// ---- the re-pack: one card, two trips, latest wins ----------------------------
+{
+  const day1 = back({ stack_card_id: "gengar", resolved_at: "2026-09-05T18:00:00Z" });
+  const day2 = sold(1200, { stack_card_id: "gengar", checked_out_at: "2026-09-06T08:00:00Z", resolved_at: "2026-09-06T14:00:00Z" });
+  eq("re-packed card folds to one", latestPerCard([day1, day2]).length, 1);
+  const m = summariseShow([day1, day2]);
+  eq("re-pack: brought once", m.brought, 1);
+  eq("re-pack: the day-two sale decides it", [m.sold, m.returned], [1, 0]);
+  eq("re-pack: 100% sell-through, not 50%", pct(m.sellThrough), "100%");
+}
+{
+  // Folded on SKU when there is no stack card.
+  const a = back({ stack_card_id: null, sku: "AB12", resolved_at: "2026-09-05T18:00:00Z" });
+  const b = row({ stack_card_id: null, sku: "ab12", checked_out_at: "2026-09-06T08:00:00Z" });
+  eq("folds on SKU, case-blind", latestPerCard([a, b]).length, 1);
+  // A row with neither is itself.
+  const c = row({ stack_card_id: null, sku: null });
+  const d = row({ stack_card_id: null, sku: null });
+  eq("nothing to fold on: two rows, two cards", latestPerCard([c, d]).length, 2);
+}
+
+// ---- one show, all the figures -------------------------------------------------
+{
+  const rows = [
+    sold(1000, { sticker_pence: 1200 }),
+    sold(500, { sticker_pence: 500 }),
+    sold(null, { sticker_pence: 800 }),     // sold, nobody typed the price
+    back({ sticker_pence: 300 }),
+    back(),
+    row({ sticker_pence: 2000 }),           // not checked back in
+    // Sold off eBay stock from the Current Deal: takings, not brought.
+    row({ checked_out_at: "2026-09-05T13:00:00Z", resolved_at: "2026-09-05T13:00:00Z", resolution: "sold", sold_price_pence: 2500 }),
+    // Cancelled: never happened.
+    row({ resolved_at: "2026-09-05T09:00:00Z", resolution: "cancelled" })
+  ];
+  const m = summariseShow(rows);
+  eq("brought excludes direct sales and cancellations", m.brought, 6);
+  eq("sold / returned / not back", [m.sold, m.returned, m.notBack], [3, 2, 1]);
+  eq("not settled while a card is out", m.settled, false);
+  eq("sell-through counts not-back as sold", pct(m.sellThrough), "67%");
+  eq("recorded sell-through is the floor", pct(m.recordedSellThrough), "50%");
+  eq("box takings are recorded prices only", m.boxTakings, 1500);
+  eq("direct sale in the takings", [m.directSold, m.directTakings, m.takings], [1, 2500, 4000]);
+  eq("unpriced sale is flagged, not £0", m.soldUnpriced, 1);
+  eq("average over PRICED sales", m.avgSale, Math.round(4000 / 3));
+  eq("sticker value of everything brought", [m.stickerBrought, m.unstickered], [4800, 1]);
+  // 1500 fetched against 1700 asked; the unpriced sale's £8 sticker is left out.
+  eq("achieved vs sticker ignores unpriced sales", pct(m.achievedVsSticker), "88%");
+}
+{
+  const m = summariseShow([sold(100), back()]);
+  eq("settled show: both rates agree", [m.settled, pct(m.sellThrough), pct(m.recordedSellThrough)], [true, "50%", "50%"]);
+  eq("no stickers: no ratio", m.achievedVsSticker, null);
+}
+{
+  const m = summariseShow([row({ checked_out_at: "2026-09-05T13:00:00Z", resolved_at: "2026-09-05T13:00:00Z", resolution: "sold", sold_price_pence: 900 })]);
+  eq("only direct sales: nothing brought, no rate", [m.brought, m.sellThrough], [0, null]);
+  eq("…and pct says so", pct(m.sellThrough), "—");
+}
+
+// ---- history and totals --------------------------------------------------------
+{
+  const rows = [
+    sold(1000, { event: "Glasgow", checked_out_at: "2026-09-05T08:00:00Z", resolved_at: "2026-09-05T15:00:00Z" }),
+    back({ event: "glasgow", checked_out_at: "2026-09-05T08:00:00Z", resolved_at: "2026-09-06T18:00:00Z" }),
+    // Ten brought to a later show, one sold.
+    ...Array.from({ length: 9 }, () => back({ event: "Leeds", checked_out_at: "2026-09-19T08:00:00Z", resolved_at: "2026-09-20T18:00:00Z" })),
+    sold(300, { event: "Leeds", checked_out_at: "2026-09-19T08:00:00Z", resolved_at: "2026-09-19T12:00:00Z" })
+  ];
+  const shows = showHistory(rows);
+  eq("two shows", shows.map((s) => s.label), ["Leeds", "Glasgow"]);
+  eq("newest first", shows[0].summary.lastAt > shows[1].summary.lastAt, true);
+  eq("Glasgow spans two days", shows[1].summary.days, 2);
+  const t = totalsOf(shows);
+  // Pooled: 2 of 12 = 17%. Averaging the shows' rates (50% and 10%) says 30%.
+  eq("totals pool cards, never average rates", pct(t.sellThrough), "17%");
+  eq("total takings", t.takings, 1300);
+
+  const csv = historyCsv(shows).split("\n");
+  eq("csv: header plus one line per show", csv.length, 3);
+  eq("csv: pounds to 2dp", csv[1].includes('"3.00"'), true);
+  eq("csv: a quote in a name is escaped", historyCsv(showHistory([row({ event: 'The "Big" One' })])).includes('"The ""Big"" One"'), true);
+}
+
+// ---- wiring ----------------------------------------------------------------------
+{
+  const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
+  if (!/showhistory:\s*"show-history"/.test(panel)) fail("Panel.js: no /panel/show-history slug");
+  if (!/stream === "showhistory" && <ShowHistory \/>/.test(panel)) fail("Panel.js: Show history is not rendered");
+  // The history is a reader. A write from it would be a second place a
+  // checkout gets resolved, and the desk and the deal already guard theirs.
+  const screen = readFileSync(new URL("../apps/app/app/panel/ShowHistory.js", import.meta.url), "utf8");
+  if (/\.(update|insert|upsert|delete)\s*\(/.test(screen)) fail("ShowHistory.js writes to the database — it must only read");
+}
+
+if (failures) {
+  console.error(`check-showhistory: ${failures} failure${failures === 1 ? "" : "s"}`);
+  process.exit(1);
+}
+console.log("check-showhistory: ok");

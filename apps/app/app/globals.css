@@ -2229,3 +2229,25 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
    depth on a tablet. On a phone the page behind is text, and text behind text
    is noise — so the storefront's backdrop is near-solid, and scrolls. */
 .sf-shell .bn-preview { background:rgba(0,0,0,.96); overflow-y:auto; }
+
+/* Show history — one block per show: a header you tap to open the cards, and
+   a grid of figures that wraps to two columns on a phone rather than pushing
+   the takings off the side. */
+.sh-list { display:flex; flex-direction:column; }
+.sh-show { padding:12px 0; border-top:1px solid var(--line); }
+.sh-show:first-child { border-top:0; }
+.sh-head { display:flex; align-items:center; gap:10px; width:100%; background:none; border:0; padding:0; text-align:left; cursor:pointer; color:inherit; font:inherit; }
+.sh-name { display:flex; flex-direction:column; flex:1 1 auto; min-width:0; }
+.sh-name .hint-small { margin-top:2px; color:var(--ink-faint); }
+.sh-caret { flex:none; color:var(--ink-faint); }
+.sh-figs { display:grid; grid-template-columns:repeat(auto-fill, minmax(110px, 1fr)); gap:8px 14px; margin-top:10px; }
+.sh-figs > div { display:flex; flex-direction:column; min-width:0; }
+.sh-figs .k { font-size:11px; font-weight:var(--label-weight); letter-spacing:var(--label-spacing-sm); text-transform:var(--label-transform); color:var(--ink-faint); }
+.sh-figs .v { font-family:var(--num-font); font-weight:700; font-size:16px; font-variant-numeric:tabular-nums; letter-spacing:var(--num-spacing); }
+.sh-figs .sub { font-size:11.5px; color:var(--ink-soft); }
+.sh-cards { margin-top:10px; }
+@media (max-width: 640px) {
+  .sh-figs { grid-template-columns:repeat(2, 1fr); }
+  .sh-scope .stack-row { flex-wrap:wrap; row-gap:6px; }
+  .sh-scope .stack-title { flex:1 1 55%; }
+}

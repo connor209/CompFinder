@@ -37,6 +37,7 @@ import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import ShowDesk from "./ShowDesk";
+import ShowHistory from "./ShowHistory";
 import SellSheet from "./SellSheet";
 import Buy from "./Buy";
 import Accounts from "./Accounts";
@@ -79,6 +80,7 @@ const STREAM_SLUG = {
   stacks: "stacks",
   pull: "pull",
   shows: "shows",
+  showhistory: "show-history",
   sheets: "sheets",
   accounts: "accounts"
 };
@@ -113,7 +115,8 @@ const MODULES = [
       { key: "sales", label: "Sales", desc: "Completed sales, fees & profit" },
       { key: "stacks", label: "Stacks", desc: "Group inventory into sellable stacks" },
       { key: "pull", label: "Pull sheet", desc: "Pick & pack the day's orders" },
-      { key: "shows", label: "Show desk", desc: "Check stock out to shows & back in" }
+      { key: "shows", label: "Show desk", desc: "Check stock out to shows & back in" },
+      { key: "showhistory", label: "Show history", desc: "Sell-through and takings, show by show" }
     ]
   },
   { key: "sheets", label: "Sell sheets", icon: "sheet", desc: "Build CSV imports for Cardmarket listing tools", sections: [{ key: "sheets", label: "Sell sheets" }] },
@@ -2202,6 +2205,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       {stream === "stacks" && <Stacks />}
       {stream === "pull" && <PullSheet />}
       {stream === "shows" && <ShowDesk />}
+      {stream === "showhistory" && <ShowHistory />}
       {stream === "sheets" && <SellSheet />}
       {stream === "buy" && <Buy />}
       {stream === "browse" && <Browse onDeepDive={deepDiveCard} />}
