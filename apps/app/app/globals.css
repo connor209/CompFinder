@@ -823,6 +823,12 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-select { border:1px solid var(--line-strong); border-radius:10px; padding:8px 10px; background:var(--surface); color:var(--ink); font-size:13px; max-width:100%; }
 .sd-select:focus { outline:none; border-color:var(--accent); }
 .sd-recbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+/* Game chips on the recommended list. They WRAP: a row of eleven games that
+   cannot wrap is a chip off the side of a phone with nothing to scroll to. */
+.sd-games { display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px; }
+.sd-games button { font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius-pill); padding:6px 12px; cursor:pointer; }
+.sd-games button[aria-pressed="true"] { color:var(--accent-2); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 45%,var(--line)); font-weight:600; }
+.sd-games-n { opacity:.65; margin-left:4px; }
 .sd-count { width:64px; border:1px solid var(--line-strong); border-radius:10px; padding:7px 8px; background:var(--surface); color:var(--ink); font-size:13px; }
 .sd-count:focus { outline:none; border-color:var(--accent); }
 .sd-price { font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--conf-high); flex:none; margin-left:auto; }

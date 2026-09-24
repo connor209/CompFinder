@@ -117,6 +117,12 @@ stream` (the relay, only while streaming).
   looks at, that AB2 sorts before AB11 and an unstickered card sorts last in
   both directions, and — the one that costs cards — that a bulk action only
   ever acts on rows that are on screen.
+- `scripts/check-games.mjs` — which game a card of ours is, for the game chips
+  on **★ Recommend show stock**: eBay's category, then the title naming the
+  game, then a catalogue set name only one game uses. Every refusal errs to
+  "Unidentified", which stays on screen: bare "magic" is not MTG (Magic
+  Cylinder), a one-word set is not evidence ("Judgment Dragon"), a shared set
+  name says nothing. And that the list is the chosen games THEN the top N.
 - `scripts/check-showcounter.mjs` — the list turned round to face a customer:
   that the projection is an allow-list rather than a filter, that no private
   value survives it, that a held price asks instead of showing a number, and a

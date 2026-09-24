@@ -199,9 +199,15 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   for (const p of PRIVATE) ok(!json.includes(p), `the loader's output carries a private value: ${p}`);
   ok(!json.includes(TOKEN), "the loader echoes the token back into the page");
   // cm_sets is the public catalogue — the one read with no owner, and it may
-  // ask for nothing but set names and codes.
+  // ask for nothing but set names, codes and the game a set belongs to (the
+  // Show Desk's game chips share this loader). An allow-list of columns, not
+  // "anything in the view", for the same reason every projection here is one.
+  const SET_COLUMNS = new Set(["game", "set_name", "set_code"]);
   const setReads = admin.calls.filter((c) => c.table === "cm_sets");
-  for (const c of setReads) ok(c.select === "set_name,set_code", `the set-list read asks for more than names and codes: ${c.select}`);
+  for (const c of setReads) {
+    const cols = String(c.select || "").split(",").map((x) => x.trim());
+    ok(cols.length > 0 && cols.every((x) => SET_COLUMNS.has(x)), `the set-list read asks for more than catalogue columns: ${c.select}`);
+  }
   const reads = admin.calls.filter((c) => c.table && c.table !== "show_storefronts" && c.table !== "cm_sets");
   ok(reads.length >= 2, "the loader did not read the checkouts and the listings");
   for (const c of reads) {

@@ -6,6 +6,8 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/stackpos.js";
 import { isListingAvailable, soldOutSkus } from "@/lib/stockcheck.js";
+import { gameOf, gameFacets, filterByGames } from "@/lib/games.js";
+import { getSetIndex } from "@/lib/set-index.js";
 import {
   checkoutStackCard, unhideListing, nextStackName, planReallocation,
   DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode,
@@ -141,9 +143,16 @@ export default function ShowDesk() {
   const [setup, setSetup] = useState([]);
   const [showWants, setShowWants] = useState(false);
   const [backPickerOpen, setBackPickerOpen] = useState(false);
-  const [recs, setRecs] = useState(null); // null = closed; [] = built, empty
+  // Every live stack card with a price, ranked, each tagged with its game.
+  // The list on screen is cut from this AFTER the game filter, so "top 20" of
+  // One Piece is twenty One Piece cards rather than whatever One Piece
+  // happened to make the overall top 20.
+  const [recPool, setRecPool] = useState(null); // null = closed; [] = built, empty
   const [recsLoading, setRecsLoading] = useState(false);
-  const [recSel, setRecSel] = useState(new Set());
+  // What you UNticked, not what is ticked: a card is going unless you said
+  // otherwise, and switching the game chips back and forth keeps your no.
+  const [recOff, setRecOff] = useState(new Set());
+  const [recGames, setRecGames] = useState(new Set()); // empty = every game
   const [recCount, setRecCount] = useState(20);
   const [recSkipped, setRecSkipped] = useState(0); // in a stack, but sold out on eBay
   // Once for the desk, then handed down — see the note on useDeal().
@@ -371,13 +380,17 @@ export default function ShowDesk() {
 
   async function buildRecs() {
     setRecsLoading(true);
-    setRecs(null);
+    setRecPool(null);
+    setRecOff(new Set());
     setRecSkipped(0);
     setMsg("");
     const sb = supabase();
-    const [cards, listings] = await Promise.all([
+    const [cards, listings, sets] = await Promise.all([
       pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null)),
-      pagedSelect(() => sb.from("ebay_listings").select("sku,price_value,price_currency,quantity").not("sku", "is", null))
+      pagedSelect(() => sb.from("ebay_listings").select("sku,price_value,price_currency,quantity,extra").not("sku", "is", null)),
+      // The catalogue's set names are the last way to tell one game from
+      // another. A failed read costs that fallback, never the list.
+      getSetIndex(sb).catch(() => ({ gameIndex: null }))
     ]);
     // A card that SOLD is still a row here. eBay's out-of-stock control leaves
     // a sold fixed-price listing in the ActiveList at quantity 0, so "the SKU
@@ -387,10 +400,14 @@ export default function ShowDesk() {
     // stockcheck.js is the one definition of the difference.
     const gone = soldOutSkus(listings);
     const priceBySku = new Map();
+    const categoryBySku = new Map();
     for (const l of listings) {
       if (!isListingAvailable(l)) continue;
       const k = String(l.sku).toLowerCase();
-      if (l.price_value != null && !priceBySku.has(k)) priceBySku.set(k, Math.round(Number(l.price_value) * 100));
+      if (l.price_value != null && !priceBySku.has(k)) {
+        priceBySku.set(k, Math.round(Number(l.price_value) * 100));
+        categoryBySku.set(k, l.extra?.category || null);
+      }
     }
     // Where each card physically is, right now. Computed over EVERY unpulled
     // card, not just the recommended ones — a rank is a count within its whole
@@ -410,17 +427,35 @@ export default function ShowDesk() {
         card: c,
         pricePence: priceBySku.get(String(c.sku).toLowerCase()),
         rank: ranks.get(c.id) ?? null,
-        depth: depths.get(c.stack_id) ?? null
+        depth: depths.get(c.stack_id) ?? null,
+        game: gameOf({ category: categoryBySku.get(String(c.sku).toLowerCase()), title: c.title }, sets.gameIndex)
       }))
-      .sort((a, b) => b.pricePence - a.pricePence)
-      .slice(0, Math.max(1, Math.min(200, Number(recCount) || 20)));
-    setRecs(ranked);
-    setRecSel(new Set(ranked.map((r) => r.card.id)));
+      .sort((a, b) => b.pricePence - a.pricePence);
+    setRecPool(ranked);
     setRecsLoading(false);
   }
 
+  // The chips come from the whole pool, so a game is offered only if we hold
+  // some of it; the list is the chosen games, THEN the top N.
+  const recFacets = useMemo(() => (recPool ? gameFacets(recPool) : []), [recPool]);
+  const recs = useMemo(
+    () => (recPool === null ? null : filterByGames(recPool, recGames).slice(0, Math.max(1, Math.min(200, Number(recCount) || 20)))),
+    [recPool, recGames, recCount]
+  );
+  // What the check-out button acts on: rows on screen that you have not
+  // unticked. A ticked card the filter has hidden is never checked out.
+  const recChosen = useMemo(() => (recs || []).filter((r) => !recOff.has(r.card.id)), [recs, recOff]);
+
+  function toggleRecGame(slug) {
+    setRecGames((prev) => {
+      const n = new Set(prev);
+      if (n.has(slug)) n.delete(slug); else n.add(slug);
+      return n;
+    });
+  }
+
   async function checkoutRecs() {
-    const chosen = (recs || []).filter((r) => recSel.has(r.card.id)).map((r) => r.card);
+    const chosen = recChosen.map((r) => r.card);
     if (chosen.length === 0) return;
     setBusy(true);
     setMsg("");
@@ -428,7 +463,7 @@ export default function ShowDesk() {
     setFeedback(results);
     setProgress("");
     setBusy(false);
-    setRecs(null);
+    setRecPool(null);
     await load();
   }
 
@@ -1087,7 +1122,7 @@ export default function ShowDesk() {
         <div className="panel">
           <div className="panel-head">
             <span className="eyebrow">Recommended show stock — highest value first</span>
-            <button className="btn btn-ghost" onClick={() => setRecs(null)}>Close</button>
+            <button className="btn btn-ghost" onClick={() => setRecPool(null)}>Close</button>
           </div>
           {recSkipped > 0 ? (
             <p className="hint hint-small" style={{ marginTop: 0, color: "var(--warn-ink)" }}>
@@ -1096,13 +1131,36 @@ export default function ShowDesk() {
               Run <b>Stacks → Reconcile</b> to pull them, or you&apos;ll be looking for cards that aren&apos;t there.
             </p>
           ) : null}
-          {recs.length === 0 ? (
+          {recPool.length === 0 ? (
             <p className="dd-empty">No stack cards matched a live listing price. Sync your eBay listings, then try again.</p>
           ) : (
             <>
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 Your live stock ranked by listing price. Untick anything staying home, then check the rest out in one go.
               </p>
+              {recFacets.length > 1 ? (
+                // Built from the pool, so every chip has cards behind it. Nothing
+                // picked is every game; the top N is taken AFTER this, so it is
+                // the top N of the games you picked.
+                <div className="sd-games" role="group" aria-label="Filter by game">
+                  <button type="button" aria-pressed={recGames.size === 0} onClick={() => setRecGames(new Set())}>
+                    All games <span className="sd-games-n">{recPool.length}</span>
+                  </button>
+                  {recFacets.map((f) => (
+                    <button
+                      type="button"
+                      key={f.slug}
+                      aria-pressed={recGames.has(f.slug)}
+                      onClick={() => toggleRecGame(f.slug)}
+                      title={f.slug === "unknown"
+                        ? "Neither the eBay category, the title nor a set name said which game these are. Put the game in the title to sort them."
+                        : `Only ${f.name}`}
+                    >
+                      {f.name} <span className="sd-games-n">{f.count}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 The SKU comes first, then the <b>live position</b> — count that many from the top of the
                 stack. The two are not the same number: a SKU is a name and never moves, while positions
@@ -1112,13 +1170,19 @@ export default function ShowDesk() {
                 <label className="sd-toggle">
                   <input
                     type="checkbox"
-                    checked={recSel.size === recs.length && recs.length > 0}
+                    checked={recChosen.length === recs.length && recs.length > 0}
                     // Indeterminate is the honest state for a part-selection: without it
                     // the box reads as "none selected" while forty cards are ticked.
-                    ref={(el) => { if (el) el.indeterminate = recSel.size > 0 && recSel.size < recs.length; }}
-                    onChange={(e) => setRecSel(e.target.checked ? new Set(recs.map((r) => r.card.id)) : new Set())}
+                    ref={(el) => { if (el) el.indeterminate = recChosen.length > 0 && recChosen.length < recs.length; }}
+                    // Acts on the rows on screen only; an untick on a card another
+                    // game chip is hiding is left as it was.
+                    onChange={(e) => setRecOff((prev) => {
+                      const n = new Set(prev);
+                      for (const r of recs) { if (e.target.checked) n.delete(r.card.id); else n.add(r.card.id); }
+                      return n;
+                    })}
                   />
-                  {recSel.size === recs.length ? "All" : `${recSel.size} of ${recs.length}`}
+                  {recChosen.length === recs.length ? "All" : `${recChosen.length} of ${recs.length}`}
                 </label>
               </div>
               <div className="stack-list">
@@ -1126,8 +1190,8 @@ export default function ShowDesk() {
                   <label className="ps-row sd-rec-row" key={card.id}>
                     <input
                       type="checkbox"
-                      checked={recSel.has(card.id)}
-                      onChange={() => setRecSel((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
+                      checked={!recOff.has(card.id)}
+                      onChange={() => setRecOff((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
                     />
                     <span className="stack-sku" title="The card's SKU. A name, not an address — it does not move when the stack re-flows.">
                       {card.sku}
@@ -1144,7 +1208,7 @@ export default function ShowDesk() {
                 ))}
               </div>
               {(() => {
-                const chosen = recs.filter((r) => recSel.has(r.card.id));
+                const chosen = recChosen;
                 const total = chosen.reduce((t, r) => t + r.pricePence, 0);
                 return (
                   <button className="btn btn-primary" onClick={checkoutRecs} disabled={busy || chosen.length === 0} style={{ marginTop: 10 }}>
