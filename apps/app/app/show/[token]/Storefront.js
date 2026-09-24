@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   storefrontView,
+  storefrontFacets,
   STOREFRONT_SORTS,
   DEFAULT_STOREFRONT_SORT,
   STOREFRONT_PRICE_FILTERS,
@@ -11,6 +12,11 @@ import {
   ONLINE
 } from "@/lib/storefront.js";
 import { BLANK_PAGE, clampPage, turnPage, swipeDirection } from "@/lib/binder.js";
+import { counterPrice } from "@/lib/showcounter.js";
+import {
+  hasWish, toggleWish, removeWish, reconcileWishlist,
+  loadWishlist, saveWishlist, wishStorageKey, WISHLIST_MAX
+} from "@/lib/wishlist.js";
 
 /**
  * The binder, on a visitor's own phone.
@@ -25,23 +31,59 @@ import { BLANK_PAGE, clampPage, turnPage, swipeDirection } from "@/lib/binder.js
  * page four" means the same thing on their phone as on the tablet at the
  * table. What it drops is everything the desk resolves on a tap: where a copy
  * is, and adding it to a deal. A visitor points; we fetch.
+ *
+ * What it adds is the visitor's own list (lib/wishlist.js): ♡ on the cards
+ * they like, and one screen to show us at the table. It is kept on their
+ * phone and never sent anywhere.
  */
 export default function Storefront({ storefront, stock }) {
   const cards = stock?.cards || [];
   const both = (stock?.box || 0) > 0 && (stock?.online || 0) > 0;
+  const facets = useMemo(() => storefrontFacets(cards), [cards]);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState(DEFAULT_STOREFRONT_SORT);
   const [price, setPrice] = useState("any");
   const [scope, setScope] = useState("all");
+  const [set, setSet] = useState("");
+  const [condition, setCondition] = useState("");
   const [page, setPage] = useState(0);
   const [open, setOpen] = useState(null);
+  const [wish, setWish] = useState([]);
+  const [showList, setShowList] = useState(false);
+  const [note, setNote] = useState("");
+  const storeKey = useRef("");
 
-  const view = useMemo(() => storefrontView(cards, { query: q, sort, price, scope }), [cards, q, sort, price, scope]);
+  // The list is read after mount: localStorage does not exist on the server,
+  // and reading it during render would hydrate differently from the HTML.
+  useEffect(() => {
+    storeKey.current = wishStorageKey(window.location.pathname);
+    setWish(loadWishlist(window.localStorage, storeKey.current));
+  }, []);
+  function updateWish(next) {
+    setWish(next);
+    if (storeKey.current) saveWishlist(window.localStorage, storeKey.current, next);
+  }
+  function toggle(card) {
+    const r = toggleWish(wish, card);
+    if (r.full) { setNote(`Your list is full at ${WISHLIST_MAX} cards — show us what you've got so far.`); return; }
+    setNote("");
+    updateWish(r.list);
+  }
+
+  const view = useMemo(
+    () => storefrontView(cards, { query: q, sort, price, scope, set, condition }),
+    [cards, q, sort, price, scope, set, condition]
+  );
+  const list = useMemo(() => reconcileWishlist(wish, cards), [wish, cards]);
   const at = clampPage(page, view.pageCount);
   const kind = view.pageKinds[at];
 
   // A new search is a new binder, and it opens at the front.
-  useEffect(() => { setPage(0); }, [q, sort, price, scope]);
+  useEffect(() => { setPage(0); }, [q, sort, price, scope, set, condition]);
+
+  function clearFilters() {
+    setQ(""); setPrice("any"); setScope("all"); setSet(""); setCondition("");
+  }
 
   function turn(dir) {
     setPage((cur) => turnPage(cur, dir, view.pageCount));
@@ -66,8 +108,8 @@ export default function Storefront({ storefront, stock }) {
 
   useEffect(() => {
     function onKey(e) {
-      if (e.key === "Escape") { setOpen(null); return; }
-      if (open) return;
+      if (e.key === "Escape") { setOpen(null); setShowList(false); return; }
+      if (open || showList) return;
       if (e.key === "ArrowLeft") turn("prev");
       if (e.key === "ArrowRight") turn("next");
     }
@@ -79,13 +121,14 @@ export default function Storefront({ storefront, stock }) {
   const updated = storefront?.at
     ? new Date(storefront.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
     : null;
+  const totalText = list.totalPence > 0 ? `${list.totalFrom ? "from " : ""}${counterPrice(list.totalPence)}` : null;
 
   return (
-    <main className="sf-shell">
+    <main className={list.count > 0 ? "sf-shell sf-shell-listed" : "sf-shell"}>
       <header className="sf-head">
         <h1 className="sf-title">{title}</h1>
         <p className="hint sf-lede">
-          Flip through what we&apos;ve brought. See something you like? Show us this screen at the table and we&apos;ll pull it out for you.
+          Flip through what we&apos;ve brought. Tap ♡ on anything you like, then show us your list at the table.
         </p>
       </header>
 
@@ -99,22 +142,41 @@ export default function Storefront({ storefront, stock }) {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search — name or number"
+                placeholder="Search — name, number or set"
                 aria-label="Search the stock"
                 enterKeyHint="search"
               />
               {q ? <button className="sd-clear" onClick={() => setQ("")} aria-label="Clear the search">×</button> : null}
             </div>
-            <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Order">
-              {STOREFRONT_SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-            <select className="sd-select" value={price} onChange={(e) => setPrice(e.target.value)} aria-label="Filter by price">
+          </div>
+          {/* Built from the cards themselves, so an option that finds nothing
+              is never offered, and a filter with one choice is not a filter. */}
+          <div className="sf-filters">
+            {facets.sets.length > 1 ? (
+              <select className="sd-select" value={set} onChange={(e) => setSet(e.target.value)} aria-label="Set">
+                <option value="">All sets</option>
+                {facets.sets.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.count})</option>)}
+              </select>
+            ) : null}
+            <select className="sd-select" value={price} onChange={(e) => setPrice(e.target.value)} aria-label="Price">
               {STOREFRONT_PRICE_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
             </select>
+            {facets.conditions.length > 1 ? (
+              <select className="sd-select" value={condition} onChange={(e) => setCondition(e.target.value)} aria-label="Condition">
+                <option value="">Any condition</option>
+                {facets.conditions.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+              </select>
+            ) : null}
             {both ? (
               <select className="sd-select" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Which stock">
                 {STOREFRONT_SCOPES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
+            ) : null}
+            <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Order">
+              {STOREFRONT_SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+            {view.filtering ? (
+              <button className="sd-clear-all" onClick={clearFilters}>Clear filters</button>
             ) : null}
           </div>
 
@@ -155,6 +217,7 @@ export default function Storefront({ storefront, stock }) {
                                the copy we'd hand over. */
                             <span className="bn-art bn-noart" aria-hidden="true">no photo</span>
                           )}
+                          {hasWish(wish, c) ? <span className="sf-heart" aria-label="On your list">♥</span> : null}
                           {c.source === ONLINE ? (
                             <span className="bn-copies bn-flag">{c.count > 1 ? `ask ×${c.count}` : "ask"}</span>
                           ) : c.count > 1 ? (
@@ -192,9 +255,21 @@ export default function Storefront({ storefront, stock }) {
         </>
       )}
 
+      {note ? <p className="hint hint-small sf-note">{note}</p> : null}
+
       <footer className="hint hint-small sf-foot">
         Prices are for cash at the table{updated ? ` · as of ${updated}` : ""}. Pull down to refresh.
+        {" "}Your list stays on this phone — we never see it until you show us.
       </footer>
+
+      {/* The list bar. Only while there is a list, and pinned to the bottom so
+          it is one thumb away from any page of the binder. */}
+      {list.count > 0 && !showList && !open ? (
+        <button className="sf-listbar" onClick={() => setShowList(true)}>
+          <span>♥ My list · {list.count} card{list.count === 1 ? "" : "s"}{totalText ? ` · ${totalText}` : ""}</span>
+          <span className="sf-listbar-go">Show us ›</span>
+        </button>
+      ) : null}
 
       {open ? (
         <div className="bn-preview" role="dialog" aria-modal="true" aria-label={open.name}>
@@ -210,15 +285,21 @@ export default function Storefront({ storefront, stock }) {
             </div>
             <div className="bn-preview-info">
               <h4 className="bn-preview-name">{open.name}</h4>
+              {open.set ? <p className="bn-preview-cond">{open.set}</p> : null}
               {open.condition ? <p className="bn-preview-cond">{open.condition}</p> : null}
               <p className={open.pricePence == null ? "bn-preview-price bn-price-ask" : "bn-preview-price"}>
                 {open.priceFrom ? "from " : ""}{open.priceText}
               </p>
+              <button
+                className={hasWish(wish, open) ? "btn btn-ghost sf-wish sf-wish-on" : "btn btn-primary sf-wish"}
+                onClick={() => toggle(open)}
+              >
+                {hasWish(wish, open) ? "♥ On your list — remove" : "♡ Add to my list"}
+              </button>
               <p className="hint hint-small bn-preview-count">
                 {open.source === ONLINE
                   ? `${SECTION_LABELS[ONLINE].note}`
                   : open.count === 1 ? "One copy at the table." : `${open.count} copies at the table.`}
-                {" "}Show us this screen and we&apos;ll get it out.
               </p>
               {open.count > 1 ? (
                 <div className="bn-copylist">
@@ -233,6 +314,61 @@ export default function Storefront({ storefront, stock }) {
               ) : null}
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {/* The screen they hand across the table. Light and large on purpose:
+          it is read upside down, at arm's length, by somebody else. */}
+      {showList ? (
+        <div className="sf-list" role="dialog" aria-modal="true" aria-label="My list">
+          <div className="sf-list-head">
+            <div>
+              <h2 className="sf-list-title">My list</h2>
+              <p className="sf-list-sub">Show this to us at the table</p>
+            </div>
+            <button className="bn-close sf-list-close" onClick={() => setShowList(false)} aria-label="Back to the binder">×</button>
+          </div>
+          {list.count === 0 ? (
+            <p className="sf-list-empty">Nothing on your list yet — tap ♡ on a card to add it.</p>
+          ) : (
+            <ol className="sf-list-rows">
+              {list.rows.map((r) => (
+                <li className={r.gone ? "sf-list-row sf-list-gone" : "sf-list-row"} key={r.id}>
+                  {r.image ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img className="sf-list-art" src={r.image} alt="" referrerPolicy="no-referrer" />
+                  ) : (
+                    <span className="sf-list-art sf-list-noart" aria-hidden="true" />
+                  )}
+                  <span className="sf-list-info">
+                    <span className="sf-list-name">{r.name}</span>
+                    <span className="sf-list-meta">
+                      {[r.set, r.condition, r.source === ONLINE ? "ask — may be at home" : null].filter(Boolean).join(" · ")}
+                    </span>
+                    {r.gone ? <span className="sf-list-meta sf-list-warn">No longer in the binder — ask us</span> : null}
+                  </span>
+                  <span className="sf-list-price">{r.gone ? "—" : `${r.priceFrom ? "from " : ""}${r.priceText}`}</span>
+                  <button className="sf-list-x" onClick={() => updateWish(removeWish(wish, r.id))} aria-label={`Remove ${r.name}`}>×</button>
+                </li>
+              ))}
+            </ol>
+          )}
+          {list.count > 0 ? (
+            <div className="sf-list-foot">
+              <div className="sf-list-total">
+                <span>{list.available} card{list.available === 1 ? "" : "s"}</span>
+                <strong>{totalText || "—"}</strong>
+              </div>
+              {list.ask > 0 ? <p className="sf-list-note">+ {list.ask} to ask about</p> : null}
+              {list.gone > 0 ? <p className="sf-list-note">{list.gone} no longer in the binder</p> : null}
+              <button
+                className="sd-clear-all sf-list-clear"
+                onClick={() => { if (window.confirm("Clear your whole list?")) { updateWish([]); setShowList(false); } }}
+              >
+                Clear list
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </main>

@@ -187,8 +187,10 @@ stream` (the relay, only while streaming).
   fake service-role client, and the payload searched for each; that every
   read is filtered on the link owner by hand, since RLS is not there to
   catch it; that a switched-off, expired or malformed link serves nothing;
-  and greps for noindex, no-referrer and the route staying outside the login
-  wall.
+  which set a card is read into and the filters over it; that a visitor's
+  wish list follows the CARD when positions move, never totals a card that
+  has gone, and never leaves the phone; and greps for noindex, no-referrer
+  and the route staying outside the login wall.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -1855,6 +1857,21 @@ Last Comp's proposition is having no stake in the number.
   QR image service would be handed every token we print.
 - **The view count is a number and nothing else.** `storefront_hit()` is
   revoked from anon, or anybody holding the anon key could inflate it.
+- **A visitor can filter by set, price band and condition.** The set is the
+  part of a title `counterName()` cuts away, so it is read on the SERVER
+  before the projection (`setsByKey`, keyed like the binder groups) and
+  handed over as a plain name. The matcher is the pull sheet's —
+  `lib/set-index.js` owns the `cm_sets` loader for both, so the two can never
+  file a card under different sets. Options are built from the cards, so a
+  filter that finds nothing is never offered.
+- **The wish list stays on the visitor's phone** (`lib/wishlist.js`,
+  localStorage keyed by the link's path). ♡ on a card, one light, large
+  screen to hand across the table. No table, no route, nothing collected —
+  the storefront is still read-only. Items are keyed on what the card IS
+  (section + name), because storefront keys are positions and move when stock
+  does; on every render the list is matched back to the binder, so it shows
+  the CURRENT price, and a card that has gone says so and drops out of the
+  total rather than quoting a figure we no longer stand behind.
 
 ## A deal is one basket, one customer, one number
 

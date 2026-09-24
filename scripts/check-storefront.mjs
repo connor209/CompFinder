@@ -23,8 +23,14 @@
 import { readFileSync } from "node:fs";
 import {
   storefrontStock, storefrontView, storefrontCard, cardMatches,
-  STOREFRONT_FIELDS, STOREFRONT_COPY_FIELDS, BOX, ONLINE, ASK_TEXT
+  STOREFRONT_FIELDS, STOREFRONT_COPY_FIELDS, BOX, ONLINE, ASK_TEXT,
+  storefrontFacets, priceMatches
 } from "../apps/app/lib/storefront.js";
+import {
+  wishKey, wishItem, toggleWish, reconcileWishlist, cleanWishlist, removeWish,
+  loadWishlist, saveWishlist, wishStorageKey, WISH_FIELDS, WISHLIST_MAX
+} from "../apps/app/lib/wishlist.js";
+import { buildSetIndex } from "@compfinder/core/setmatch.js";
 import {
   loadPublicStorefront, newToken, isWellFormedToken, storefrontStatus, expiresAtFor,
   storefrontUrl, CHECKOUT_COLUMNS, LISTING_COLUMNS
@@ -145,7 +151,11 @@ const listings = [
 // --- The loader, against a fake service-role client ----------------------
 function fakeAdmin({ link, checkoutsError = null, missingTable = false } = {}) {
   const calls = [];
-  const tables = { stock_checkouts: checkouts, ebay_listings: listings };
+  const tables = {
+    stock_checkouts: checkouts,
+    ebay_listings: listings,
+    cm_sets: [{ set_name: "Chilling Reign", set_code: "CRE" }, { set_name: "Evolving Skies", set_code: "EVS" }, { set_name: "151", set_code: "MEW" }]
+  };
   const client = {
     calls,
     from(table) {
@@ -186,7 +196,11 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   const json = JSON.stringify(r);
   for (const p of PRIVATE) ok(!json.includes(p), `the loader's output carries a private value: ${p}`);
   ok(!json.includes(TOKEN), "the loader echoes the token back into the page");
-  const reads = admin.calls.filter((c) => c.table && c.table !== "show_storefronts");
+  // cm_sets is the public catalogue — the one read with no owner, and it may
+  // ask for nothing but set names and codes.
+  const setReads = admin.calls.filter((c) => c.table === "cm_sets");
+  for (const c of setReads) ok(c.select === "set_name,set_code", `the set-list read asks for more than names and codes: ${c.select}`);
+  const reads = admin.calls.filter((c) => c.table && c.table !== "show_storefronts" && c.table !== "cm_sets");
   ok(reads.length >= 2, "the loader did not read the checkouts and the listings");
   for (const c of reads) {
     ok(c.filters.some((f) => f[0] === "eq" && f[1] === "user_id" && f[2] === OWNER), `a service-role read of ${c.table} is not filtered on the link owner`);
@@ -198,6 +212,10 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   ok(admin.calls.some((c) => c.rpc === "storefront_hit" && c.args?.p_id === "link-1"), "the view was not counted");
   ok(r.storefront.title === "Glasgow table", "the heading did not arrive");
   ok(!("event" in r.storefront), "the event name — our word for the trip — went to the visitor");
+  const g = r.stock.cards.find((c) => /gengar/i.test(c.name));
+  ok(g?.set === "Chilling Reign", `the loader did not read the set out of the title: ${g?.set}`);
+  const u = r.stock.cards.find((c) => /umbreon/i.test(c.name));
+  ok(u?.set === "Evolving Skies", `the loader did not read the set out of the title: ${u?.set}`);
 }
 {
   const at = new Date("2026-09-24T12:00:00Z");
@@ -216,6 +234,71 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   ok(!broken.ok && broken.reason === "error", "a failed read of the box served an empty binder as if it were the answer");
 }
 ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|event/.test(CHECKOUT_COLUMNS), `the checkout read asks for columns the projection never uses: ${CHECKOUT_COLUMNS}`);
+
+// --- Sets, filters -----------------------------------------------------------
+{
+  const index = buildSetIndex([{ set_name: "Chilling Reign", set_code: "CRE" }, { set_name: "Evolving Skies", set_code: "EVS" }]);
+  const { matchSetFromTitle } = await import("@compfinder/core/setmatch.js");
+  const setOf = (t) => matchSetFromTitle(t, index);
+  const rows = [
+    { id: "a", sku: "S1", title: "Gengar VMAX 020/198 Chilling Reign", sticker_pence: 500 },
+    // No set in the checkout's own title: it comes off the listing.
+    { id: "b", sku: "S2", title: "Umbreon VMAX 215/203", sticker_pence: 9000 },
+    { id: "c", sku: "S3", title: "Mystery Card 1/2", sticker_pence: null }
+  ];
+  const lst = [{ ebay_item_id: "1", sku: "S2", title: "Umbreon VMAX 215/203 Evolving Skies Alt Art", price_value: 99, quantity: 1 }];
+  const st = storefrontStock(rows, lst, { includeOnline: false, setOf });
+  const by = (re) => st.cards.find((c) => re.test(c.name));
+  ok(by(/gengar/i)?.set === "Chilling Reign", "the set was not read off the checkout's title");
+  ok(by(/umbreon/i)?.set === "Evolving Skies", "a checkout with no set in its title did not fall back to its listing's");
+  ok(by(/mystery/i)?.set === null, "a card nothing names was given a set");
+  const f = storefrontFacets(st.cards);
+  ok(JSON.stringify(f.sets.map((x) => x.name)) === JSON.stringify(["Chilling Reign", "Evolving Skies"]), `set facets wrong: ${JSON.stringify(f.sets)}`);
+  ok(storefrontView(st.cards, { set: "Chilling Reign" }).shown === 1, "the set filter did not narrow to one set");
+  ok(storefrontView(st.cards, { query: "evolving" }).shown === 1, "search does not look at the set name");
+  ok(storefrontView(st.cards, { price: "u5" }).shown === 0 && storefrontView(st.cards, { price: "5-20" }).shown === 1, "£5 sits in the wrong band");
+  ok(storefrontView(st.cards, { price: "50-100" }).shown === 1, "£90 is not in £50–£100");
+  ok(!priceMatches({ pricePence: null }, "u5"), "a card with no price counted as under £5");
+  ok(storefrontView(st.cards, { price: "ask" }).shown === 1, "the ask filter lost the unpriced card");
+  const nm = [{ key: "box-0", source: BOX, name: "A", condition: "Near Mint", pricePence: 100, copies: [{ condition: "Near Mint" }, { condition: "Lightly Played" }] }];
+  ok(storefrontView(nm, { condition: "Lightly Played" }).shown === 1, "a pocket holding an LP copy is hidden from the LP filter");
+  const none = storefrontStock(rows, lst, { includeOnline: false });
+  ok(none.cards.every((c) => c.set === null), "with no catalogue, cards should carry no set rather than guess");
+}
+
+// --- The visitor's list ------------------------------------------------------
+{
+  const g = { key: "box-4", source: BOX, name: "Gengar VMAX 020/198", set: "Chilling Reign", condition: "Near Mint", pricePence: 4000, priceText: "£40", priceFrom: false, image: "https://i.ebayimg.com/x/s-l500.jpg", copies: [] };
+  const u = { key: "box-7", source: BOX, name: "Umbreon VMAX 215/203", set: null, condition: null, pricePence: null, priceText: ASK_TEXT, priceFrom: false, image: null, copies: [] };
+  let l = toggleWish([], g, 1).list;
+  l = toggleWish(l, u, 2).list;
+  ok(l.length === 2 && l[0].id === wishKey(u), "the newest card is not first on the list");
+  ok(JSON.stringify(Object.keys(l[0])) === JSON.stringify(WISH_FIELDS), `a list item carries fields nobody allowed: ${Object.keys(l[0])}`);
+  ok(toggleWish(l, g).list.length === 1, "tapping ♡ again did not take the card off");
+  // Positions move when stock changes; the list must follow the CARD.
+  const moved = [{ ...g, key: "box-0", pricePence: 3500, priceText: "£35" }];
+  const rec = reconcileWishlist(l, moved);
+  const gr = rec.rows.find((r) => /gengar/i.test(r.name));
+  ok(gr && !gr.gone && gr.pricePence === 3500, "the list did not follow a card whose position moved, or quoted the old price");
+  ok(rec.rows.find((r) => /umbreon/i.test(r.name))?.gone === true, "a card that left the binder is not marked gone");
+  ok(rec.totalPence === 3500 && rec.gone === 1, `a gone card counted in the total: ${rec.totalPence}`);
+  const box = wishKey({ source: BOX, name: "Gengar" }), online = wishKey({ source: ONLINE, name: "Gengar" });
+  ok(box !== online, "a card at the table and the same card online share one list entry");
+  ok(cleanWishlist([null, 7, { id: "" }, { id: "box:x", name: "X" }, { id: "box:x", name: "dupe" }]).length === 1, "junk from storage was drawn");
+  let full = [];
+  for (let i = 0; i < WISHLIST_MAX; i++) full = toggleWish(full, { source: BOX, name: `Card ${i}` }).list;
+  const over = toggleWish(full, { source: BOX, name: "One more" });
+  ok(over.full && over.list.length === WISHLIST_MAX, "a full list silently dropped a card");
+  ok(removeWish(l, wishKey(g)).length === 1, "remove did not remove");
+  // Storage that throws (private mode) must never throw at the visitor.
+  const bad = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
+  ok(loadWishlist(bad, "k").length === 0 && saveWishlist(bad, "k", l) === false, "storage that refuses broke the list");
+  const mem = new Map();
+  const ok2 = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) };
+  saveWishlist(ok2, "k", l);
+  ok(loadWishlist(ok2, "k").length === 2, "the list did not survive a reload");
+  ok(wishStorageKey("/show/AbC?x=1") === "cf-wish:/show/AbC", "two links could share a list, or a query string splits one");
+}
 
 // --- The QR ---------------------------------------------------------------
 {
@@ -238,6 +321,9 @@ ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|ev
   const comp = src("apps/app/app/show/[token]/Storefront.js");
   ok(!/supabase|createClient|ShowDesk|DealBar|deal\.js|stackpos|placeOf|copyLocations/i.test(comp), "the visitor's component reaches for a database or desk code");
   ok(!/\bsku\b/i.test(comp), "the visitor's component names a SKU");
+  ok(!/fetch\(|XMLHttpRequest|sendBeacon/.test(comp), "the visitor's component sends something somewhere — the list is meant to stay on their phone");
+  const wl = src("apps/app/lib/wishlist.js");
+  ok(!/fetch\(|supabase|sendBeacon/i.test(wl.replace(/\/\*[\s\S]*?\*\//g, "")), "wishlist.js reaches for a network or a database");
 
   const mw = src("apps/app/middleware.js");
   const prot = mw.match(/PROTECTED_PATHS\s*=\s*\[([^\]]*)\]/)?.[1] || "";
