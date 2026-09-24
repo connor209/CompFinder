@@ -2251,3 +2251,65 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
   .sh-scope .stack-row { flex-wrap:wrap; row-gap:6px; }
   .sh-scope .stack-title { flex:1 1 55%; }
 }
+
+/* Storefront filters and the visitor's list. */
+.sf-filters { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:-2px; }
+.sf-filters .sd-select { flex:1 1 140px; min-width:0; }
+.sf-filters .sd-clear-all { flex:none; font-size:13px; }
+.sf-note { text-align:center; margin:0; }
+.sf-shell-listed { padding-bottom:96px; }
+.sf-heart { position:absolute; top:5px; left:5px; z-index:1; width:22px; height:22px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; font-size:12px; line-height:1;
+  background:#e0245e; color:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); }
+.sf-wish { margin-top:12px; width:100%; max-width:320px; }
+.sf-wish-on { color:#fff; border-color:rgba(255,255,255,.4); }
+
+/* The bar: sticky to the viewport's bottom edge, the width of the column. */
+.sf-listbar { position:fixed; left:50%; transform:translateX(-50%); bottom:max(12px, env(safe-area-inset-bottom));
+  width:calc(100% - 24px); max-width:536px; z-index:50; display:flex; justify-content:space-between; align-items:center; gap:10px;
+  padding:14px 16px; border:0; border-radius:14px; background:#e0245e; color:#fff; font:inherit; font-weight:700; font-size:15px;
+  box-shadow:0 6px 20px rgba(0,0,0,.28); cursor:pointer; text-align:left; }
+.sf-listbar-go { flex:none; font-weight:600; opacity:.9; }
+
+/* The screen handed across a table: light, large, and the same in every theme,
+   because it is read by somebody else at arm's length. */
+.sf-list { position:fixed; inset:0; z-index:70; background:#fff; color:#111; overflow-y:auto;
+  padding:18px 16px calc(24px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:14px; }
+.sf-list-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; max-width:560px; width:100%; margin:0 auto; }
+.sf-list-title { margin:0; font-family:var(--font-display); font-size:26px; line-height:1.15; color:#111; }
+.sf-list-sub { margin:2px 0 0; font-size:15px; color:#555; }
+.sf-list-close { position:static; flex:none; background:#111; color:#fff; }
+.sf-list-empty { max-width:560px; margin:10vh auto 0; text-align:center; color:#555; font-size:16px; }
+.sf-list-rows { list-style:none; margin:0 auto; padding:0; max-width:560px; width:100%; display:flex; flex-direction:column; }
+.sf-list-row { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid #e6e6e6; }
+.sf-list-art { flex:none; width:64px; height:89px; object-fit:contain; background:#f2f2f2; border-radius:5px; }
+.sf-list-noart { display:block; }
+.sf-list-info { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.sf-list-name { font-weight:700; font-size:17px; line-height:1.25; color:#111; }
+.sf-list-meta { font-size:13.5px; color:#555; }
+.sf-list-warn { color:#b3261e; font-weight:600; }
+.sf-list-gone .sf-list-art, .sf-list-gone .sf-list-name { opacity:.5; }
+.sf-list-price { flex:none; font-family:var(--font-mono); font-weight:700; font-size:18px; color:#111; white-space:nowrap; }
+.sf-list-x { flex:none; border:0; background:none; color:#999; font-size:22px; line-height:1; padding:4px 2px; cursor:pointer; }
+.sf-list-foot { max-width:560px; width:100%; margin:0 auto; display:flex; flex-direction:column; gap:4px; }
+.sf-list-total { display:flex; justify-content:space-between; align-items:baseline; font-size:17px; color:#111; }
+.sf-list-total strong { font-family:var(--font-mono); font-size:26px; }
+.sf-list-note { margin:0; font-size:14px; color:#555; text-align:right; }
+.sf-list-clear { align-self:flex-start; margin-top:14px; color:#b3261e; }
+.sf-handoff { display:flex; flex-direction:column; align-items:center; gap:6px; margin-top:16px; }
+.sf-handoff svg { width:min(62vw, 240px); height:auto; aspect-ratio:1; display:block; }
+.sf-handoff-note { text-align:center; }
+
+/* A visitor's list, on the desk. */
+.wp-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.wp-rows { display:flex; flex-direction:column; gap:10px; }
+.wp-card { display:flex; gap:12px; align-items:flex-start; padding:8px 0; border-top:1px solid var(--line); }
+.wp-art { flex:none; width:56px; aspect-ratio:5/7; object-fit:contain; background:var(--surface-sink); border-radius:5px; }
+.wp-noart { display:block; }
+.wp-info { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:3px; }
+.wp-name { font-size:14.5px; }
+.wp-where { margin-top:0; }
+.wp-copy { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; font-size:13px; }
+.wp-copy-cond { color:var(--ink-soft); }
+.wp-copy-price { font-family:var(--font-mono); font-weight:700; }
+.wp-copy-loc { font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); }

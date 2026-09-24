@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { buildSetIndex, matchSetFromTitle } from "@compfinder/core/setmatch.js";
+import { getSetIndex, matchSetFromTitle } from "@/lib/set-index.js";
 
 /**
  * Resolve eBay listing titles to catalogue sets (name + code).
@@ -14,32 +14,8 @@ import { buildSetIndex, matchSetFromTitle } from "@compfinder/core/setmatch.js";
  * POST { titles: string[] } -> { ok, available, matches: { title: {name, code} } }
  */
 
-// The set list changes only when the catalogue is re-imported, so a warm
-// instance can reuse it. Short TTL keeps a fresh import from going unnoticed.
-let cache = { at: 0, index: null, available: false };
-const TTL_MS = 10 * 60 * 1000;
-
-async function getIndex(supabase) {
-  if (cache.index && Date.now() - cache.at < TTL_MS) return cache;
-
-  const rows = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase
-      .from("cm_sets")
-      .select("set_name,set_code")
-      .range(from, from + 999);
-    if (error) {
-      // View missing (catalogue migration not run yet) — degrade quietly.
-      cache = { at: Date.now(), index: null, available: false };
-      return cache;
-    }
-    if (!data || data.length === 0) break;
-    rows.push(...data);
-    if (data.length < 1000) break;
-  }
-  cache = { at: Date.now(), index: buildSetIndex(rows), available: rows.length > 0 };
-  return cache;
-}
+// The loader and its cache live in lib/set-index.js, shared with the
+// storefront, so both read a title into the same set.
 
 export async function POST(request) {
   const supabase = await createClient();
@@ -57,7 +33,7 @@ export async function POST(request) {
   const titles = Array.isArray(body.titles) ? body.titles.filter((t) => typeof t === "string").slice(0, 500) : [];
   if (titles.length === 0) return NextResponse.json({ ok: true, available: true, matches: {} });
 
-  const { index, available } = await getIndex(supabase);
+  const { index, available } = await getSetIndex(supabase);
   if (!index) return NextResponse.json({ ok: true, available: false, matches: {} });
 
   const matches = {};

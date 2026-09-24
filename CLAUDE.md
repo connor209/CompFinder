@@ -187,8 +187,11 @@ stream` (the relay, only while streaming).
   fake service-role client, and the payload searched for each; that every
   read is filtered on the link owner by hand, since RLS is not there to
   catch it; that a switched-off, expired or malformed link serves nothing;
-  and greps for noindex, no-referrer and the route staying outside the login
-  wall.
+  which set a card is read into and the filters over it; that a visitor's
+  wish list follows the CARD when positions move, never totals a card that
+  has gone, and never leaves the phone; that a code made on the storefront
+  lands on the same card in the desk's binder; and greps for noindex, no-referrer
+  and the route staying outside the login wall.
 - `scripts/check-showhistory.mjs` — how a show's checkouts add up: a card
   re-packed for day two is one card brought, a card sold off eBay stock is
   takings but never "brought", not-back counts toward sell-through and never
@@ -1860,6 +1863,30 @@ Last Comp's proposition is having no stake in the number.
   QR image service would be handed every token we print.
 - **The view count is a number and nothing else.** `storefront_hit()` is
   revoked from anon, or anybody holding the anon key could inflate it.
+- **A visitor can filter by set, price band and condition.** The set is the
+  part of a title `counterName()` cuts away, so it is read on the SERVER
+  before the projection (`setsByKey`, keyed like the binder groups) and
+  handed over as a plain name. The matcher is the pull sheet's —
+  `lib/set-index.js` owns the `cm_sets` loader for both, so the two can never
+  file a card under different sets. Options are built from the cards, so a
+  filter that finds nothing is never offered.
+- **The wish list stays on the visitor's phone** (`lib/wishlist.js`,
+  localStorage keyed by the link's path). ♡ on a card, one light, large
+  screen to hand across the table. No table, no route, nothing collected —
+  the storefront is still read-only. Items are keyed on what the card IS
+  (section + name), because storefront keys are positions and move when stock
+  does; on every render the list is matched back to the binder, so it shows
+  the CURRENT price, and a card that has gone says so and drops out of the
+  total rather than quoting a figure we no longer stand behind.
+- **The list reaches us as a QR on THEIR screen**, scanned by our phone —
+  still no network, still nothing stored. It carries each card as a short
+  hash of its wish key (`wishCode`, FNV-1a) so a full list stays a QR one
+  phone can read off another, and opens `/panel/shows?wish=…` behind the
+  login, where `WishPickup` matches the codes against the desk's OWN binder
+  pockets and shows each copy's location with a ＋ Deal. A code that matches
+  nothing is counted as gone, never dropped. The middleware now carries the
+  query through the login redirect — a signed-out scan used to lose the list —
+  and the login page only follows a path on this site.
 
 ## A deal is one basket, one customer, one number
 

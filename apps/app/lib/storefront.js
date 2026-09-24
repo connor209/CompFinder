@@ -37,7 +37,7 @@
  */
 import { normalise } from "./showfilter.js";
 import { counterPrice } from "./showcounter.js";
-import { binderView, binderPages, BOX, ONLINE, SECTION_LABELS, ASK_TEXT } from "./binder.js";
+import { binderView, binderPages, binderKey, BOX, ONLINE, SECTION_LABELS, ASK_TEXT } from "./binder.js";
 
 export { BOX, ONLINE, SECTION_LABELS, ASK_TEXT };
 
@@ -47,7 +47,7 @@ export { BOX, ONLINE, SECTION_LABELS, ASK_TEXT };
  * so adding one is a deliberate act with a test behind it.
  */
 export const STOREFRONT_FIELDS = [
-  "key", "source", "name", "condition", "pricePence", "priceText", "priceFrom",
+  "key", "source", "name", "set", "condition", "pricePence", "priceText", "priceFrom",
   "image", "imageLarge", "count", "copies"
 ];
 export const STOREFRONT_COPY_FIELDS = ["condition", "pricePence", "priceText"];
@@ -67,12 +67,33 @@ export const STOREFRONT_SORTS = [
 ];
 export const DEFAULT_STOREFRONT_SORT = "name";
 
-/** The price filter, in a visitor's words. Same three answers as the binder. */
+/**
+ * The price filter, in a visitor's words: bands a pocket's CHEAPEST copy falls
+ * in, plus the cards with no price at all. A band is judged on the headline
+ * figure because that is the number on the pocket — filtering "under £5" and
+ * showing a pocket reading "from £4" is right; showing one reading "£6" is not.
+ */
 export const STOREFRONT_PRICE_FILTERS = [
-  { key: "any", label: "Every card" },
+  { key: "any", label: "Any price" },
+  { key: "u5", label: "Under £5", min: 0, max: 499 },
+  { key: "5-20", label: "£5–£20", min: 500, max: 2000 },
+  { key: "20-50", label: "£20–£50", min: 2001, max: 5000 },
+  { key: "50-100", label: "£50–£100", min: 5001, max: 10000 },
+  { key: "100+", label: "£100+", min: 10001, max: Infinity },
   { key: "priced", label: "With a price on" },
   { key: "ask", label: "Ask at the table" }
 ];
+
+/** Does a card pass the price filter? */
+export function priceMatches(card, key = "any") {
+  const p = card?.pricePence ?? null;
+  if (!key || key === "any") return true;
+  if (key === "priced") return p != null;
+  if (key === "ask") return p == null;
+  const band = STOREFRONT_PRICE_FILTERS.find((f) => f.key === key);
+  if (!band || band.min == null) return true;
+  return p != null && p >= band.min && p <= band.max;
+}
 
 /** Which stock is on screen. Only offered when the link carries both. */
 export const STOREFRONT_SCOPES = [
@@ -104,7 +125,7 @@ export function storefrontCopy(copy) {
  * already an allow-list, but it is an allow-list for a screen WE hold, and it
  * carries ids that are fine there and not here. See the file header.
  */
-export function storefrontCard(pocket, index) {
+export function storefrontCard(pocket, index, set = null) {
   const source = pocket?.source === ONLINE ? ONLINE : BOX;
   const copies = Array.isArray(pocket?.copies) ? pocket.copies.map(storefrontCopy) : [];
   const p = pence(pocket?.pricePence);
@@ -112,6 +133,7 @@ export function storefrontCard(pocket, index) {
     key: `${source}-${Number.isInteger(index) ? index : 0}`,
     source,
     name: String(pocket?.name || "Card"),
+    set: set ? String(set) : null,
     condition: pocket?.condition ?? null,
     pricePence: p,
     priceText: counterPrice(p),
@@ -146,18 +168,80 @@ export function imagesBySku(listings) {
  * out of this function, which is why check-storefront.mjs stuffs the rows it
  * is handed with every private value the app knows and searches the result.
  */
-export function storefrontStock(checkouts, listings, { includeOnline = true } = {}) {
+export function storefrontStock(checkouts, listings, { includeOnline = true, setOf = null } = {}) {
+  const sets = setsByKey(checkouts, includeOnline ? listings : [], listings, setOf);
   const view = binderView(
     checkouts || [],
     { sort: DEFAULT_STOREFRONT_SORT, scope: includeOnline ? "all" : BOX },
     { images: imagesBySku(listings), listings: includeOnline ? listings || [] : [] }
   );
-  const cards = view.cards.map((pocket, i) => storefrontCard(pocket, i));
+  const cards = view.cards.map((pocket, i) => storefrontCard(pocket, i, sets.get(`${pocket.source}|${pocket.key}`) || null));
   return {
     cards,
     box: cards.filter((c) => c.source === BOX).length,
     online: cards.filter((c) => c.source === ONLINE).length
   };
+}
+
+/**
+ * Which set each pocket is in, read off the titles on the SERVER.
+ *
+ * The set is the part of a title counterName() cuts away — "Gengar VMAX
+ * 020/198 Chilling Reign" becomes "Gengar VMAX 020/198" — so it has to be read
+ * before the projection, from the rows a stranger never sees, and handed over
+ * as a plain name. Keyed the way binder.js groups (binderKey), so the pocket
+ * and its set are the same card by construction.
+ *
+ * A checkout's own title often omits the set where its listing carries it, so
+ * a box row falls back to the title on the listing it was checked out of. The
+ * first copy that names a set answers for the pocket; a card nothing names
+ * gets no set, and "All sets" still shows it.
+ */
+function setsByKey(checkouts, onlineListings, allListings, setOf) {
+  const out = new Map();
+  if (typeof setOf !== "function") return out;
+  const listingTitle = new Map();
+  for (const l of allListings || []) {
+    if (l?.sku && l?.title) listingTitle.set(String(l.sku).toLowerCase(), l.title);
+  }
+  const note = (source, title, fallbackTitle) => {
+    const key = binderKey({ title });
+    if (!key) return;
+    const id = `${source}|${key}`;
+    if (out.has(id)) return;
+    const hit = setOf(title) || (fallbackTitle ? setOf(fallbackTitle) : null);
+    if (hit?.name) out.set(id, hit.name);
+  };
+  for (const co of checkouts || []) {
+    note(BOX, co?.title, co?.sku ? listingTitle.get(String(co.sku).toLowerCase()) : null);
+  }
+  for (const l of onlineListings || []) note(ONLINE, l?.title, null);
+  return out;
+}
+
+/**
+ * The options a visitor can narrow by, built from the cards themselves so an
+ * option that finds nothing is never offered — the same rule the desk's event
+ * and stack dropdowns follow. Counted, and sorted A–Z.
+ */
+export function storefrontFacets(cards) {
+  const sets = new Map();
+  const conditions = new Map();
+  for (const c of cards || []) {
+    if (!c) continue;
+    if (c.set) sets.set(c.set, (sets.get(c.set) || 0) + 1);
+    const conds = new Set([c.condition, ...(c.copies || []).map((cp) => cp?.condition)].filter(Boolean));
+    for (const k of conds) conditions.set(k, (conditions.get(k) || 0) + 1);
+  }
+  const list = (m) => [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
+  return { sets: list(sets), conditions: list(conditions) };
+}
+
+/** Does a card have a copy in this condition? A pocket can hold an NM and an LP. */
+export function conditionMatches(card, condition) {
+  if (!condition) return true;
+  if (card?.condition === condition) return true;
+  return (card?.copies || []).some((cp) => cp?.condition === condition);
 }
 
 const COMPARATORS = {
@@ -179,14 +263,15 @@ const COMPARATORS = {
 /**
  * Does this card match what the visitor typed?
  *
- * The NAME only, which already carries the collector number. The desk's search
+ * The name (which carries the collector number) and the set — both on the
+ * card a visitor is looking at. The desk's search
  * also looks at the SKU, the event and the stack — none of which a stranger
  * has, and none of which is on the card any more, which is the point.
  */
 export function cardMatches(card, query) {
   const tokens = normalise(query).split(" ").filter(Boolean);
   if (tokens.length === 0) return true;
-  const hay = normalise(card?.name);
+  const hay = normalise([card?.name, card?.set].filter(Boolean).join(" "));
   return tokens.every((t) => hay.includes(t));
 }
 
@@ -198,11 +283,13 @@ export function cardMatches(card, query) {
  * page is never half box and half online; and a page is nine pockets, the last
  * one padded, so "it's on page four" means the same thing on every phone.
  */
-export function storefrontView(cards, { query = "", sort = DEFAULT_STOREFRONT_SORT, price = "any", scope = "all" } = {}) {
+export function storefrontView(cards, { query = "", sort = DEFAULT_STOREFRONT_SORT, price = "any", scope = "all", set = "", condition = "" } = {}) {
   const cmp = COMPARATORS[sort] || COMPARATORS[DEFAULT_STOREFRONT_SORT];
   const keep = (c) =>
     cardMatches(c, query) &&
-    (price === "priced" ? c.pricePence != null : price === "ask" ? c.pricePence == null : true);
+    priceMatches(c, price) &&
+    (!set || c.set === set) &&
+    conditionMatches(c, condition);
   const section = (source) => {
     if (scope !== "all" && scope !== source) return [];
     return (cards || [])
@@ -224,6 +311,6 @@ export function storefrontView(cards, { query = "", sort = DEFAULT_STOREFRONT_SO
     online: online.length,
     shown: box.length + online.length,
     total,
-    filtering: Boolean(normalise(query) || (price && price !== "any") || (scope && scope !== "all"))
+    filtering: Boolean(normalise(query) || (price && price !== "any") || (scope && scope !== "all") || set || condition)
   };
 }

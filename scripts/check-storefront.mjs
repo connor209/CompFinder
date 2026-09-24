@@ -23,8 +23,16 @@
 import { readFileSync } from "node:fs";
 import {
   storefrontStock, storefrontView, storefrontCard, cardMatches,
-  STOREFRONT_FIELDS, STOREFRONT_COPY_FIELDS, BOX, ONLINE, ASK_TEXT
+  STOREFRONT_FIELDS, STOREFRONT_COPY_FIELDS, BOX, ONLINE, ASK_TEXT,
+  storefrontFacets, priceMatches
 } from "../apps/app/lib/storefront.js";
+import {
+  wishKey, wishItem, toggleWish, reconcileWishlist, cleanWishlist, removeWish,
+  loadWishlist, saveWishlist, wishStorageKey, WISH_FIELDS, WISHLIST_MAX,
+  wishCode, wishCodes, wishHandoffUrl, parseWishCodes, matchWishCodes, WISH_HANDOFF_PATH
+} from "../apps/app/lib/wishlist.js";
+import { binderView } from "../apps/app/lib/binder.js";
+import { buildSetIndex } from "@compfinder/core/setmatch.js";
 import {
   loadPublicStorefront, newToken, isWellFormedToken, storefrontStatus, expiresAtFor,
   storefrontUrl, CHECKOUT_COLUMNS, LISTING_COLUMNS
@@ -145,7 +153,11 @@ const listings = [
 // --- The loader, against a fake service-role client ----------------------
 function fakeAdmin({ link, checkoutsError = null, missingTable = false } = {}) {
   const calls = [];
-  const tables = { stock_checkouts: checkouts, ebay_listings: listings };
+  const tables = {
+    stock_checkouts: checkouts,
+    ebay_listings: listings,
+    cm_sets: [{ set_name: "Chilling Reign", set_code: "CRE" }, { set_name: "Evolving Skies", set_code: "EVS" }, { set_name: "151", set_code: "MEW" }]
+  };
   const client = {
     calls,
     from(table) {
@@ -186,7 +198,11 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   const json = JSON.stringify(r);
   for (const p of PRIVATE) ok(!json.includes(p), `the loader's output carries a private value: ${p}`);
   ok(!json.includes(TOKEN), "the loader echoes the token back into the page");
-  const reads = admin.calls.filter((c) => c.table && c.table !== "show_storefronts");
+  // cm_sets is the public catalogue — the one read with no owner, and it may
+  // ask for nothing but set names and codes.
+  const setReads = admin.calls.filter((c) => c.table === "cm_sets");
+  for (const c of setReads) ok(c.select === "set_name,set_code", `the set-list read asks for more than names and codes: ${c.select}`);
+  const reads = admin.calls.filter((c) => c.table && c.table !== "show_storefronts" && c.table !== "cm_sets");
   ok(reads.length >= 2, "the loader did not read the checkouts and the listings");
   for (const c of reads) {
     ok(c.filters.some((f) => f[0] === "eq" && f[1] === "user_id" && f[2] === OWNER), `a service-role read of ${c.table} is not filtered on the link owner`);
@@ -198,6 +214,10 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   ok(admin.calls.some((c) => c.rpc === "storefront_hit" && c.args?.p_id === "link-1"), "the view was not counted");
   ok(r.storefront.title === "Glasgow table", "the heading did not arrive");
   ok(!("event" in r.storefront), "the event name — our word for the trip — went to the visitor");
+  const g = r.stock.cards.find((c) => /gengar/i.test(c.name));
+  ok(g?.set === "Chilling Reign", `the loader did not read the set out of the title: ${g?.set}`);
+  const u = r.stock.cards.find((c) => /umbreon/i.test(c.name));
+  ok(u?.set === "Evolving Skies", `the loader did not read the set out of the title: ${u?.set}`);
 }
 {
   const at = new Date("2026-09-24T12:00:00Z");
@@ -216,6 +236,106 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   ok(!broken.ok && broken.reason === "error", "a failed read of the box served an empty binder as if it were the answer");
 }
 ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|event/.test(CHECKOUT_COLUMNS), `the checkout read asks for columns the projection never uses: ${CHECKOUT_COLUMNS}`);
+
+// --- Sets, filters -----------------------------------------------------------
+{
+  const index = buildSetIndex([{ set_name: "Chilling Reign", set_code: "CRE" }, { set_name: "Evolving Skies", set_code: "EVS" }]);
+  const { matchSetFromTitle } = await import("@compfinder/core/setmatch.js");
+  const setOf = (t) => matchSetFromTitle(t, index);
+  const rows = [
+    { id: "a", sku: "S1", title: "Gengar VMAX 020/198 Chilling Reign", sticker_pence: 500 },
+    // No set in the checkout's own title: it comes off the listing.
+    { id: "b", sku: "S2", title: "Umbreon VMAX 215/203", sticker_pence: 9000 },
+    { id: "c", sku: "S3", title: "Mystery Card 1/2", sticker_pence: null }
+  ];
+  const lst = [{ ebay_item_id: "1", sku: "S2", title: "Umbreon VMAX 215/203 Evolving Skies Alt Art", price_value: 99, quantity: 1 }];
+  const st = storefrontStock(rows, lst, { includeOnline: false, setOf });
+  const by = (re) => st.cards.find((c) => re.test(c.name));
+  ok(by(/gengar/i)?.set === "Chilling Reign", "the set was not read off the checkout's title");
+  ok(by(/umbreon/i)?.set === "Evolving Skies", "a checkout with no set in its title did not fall back to its listing's");
+  ok(by(/mystery/i)?.set === null, "a card nothing names was given a set");
+  const f = storefrontFacets(st.cards);
+  ok(JSON.stringify(f.sets.map((x) => x.name)) === JSON.stringify(["Chilling Reign", "Evolving Skies"]), `set facets wrong: ${JSON.stringify(f.sets)}`);
+  ok(storefrontView(st.cards, { set: "Chilling Reign" }).shown === 1, "the set filter did not narrow to one set");
+  ok(storefrontView(st.cards, { query: "evolving" }).shown === 1, "search does not look at the set name");
+  ok(storefrontView(st.cards, { price: "u5" }).shown === 0 && storefrontView(st.cards, { price: "5-20" }).shown === 1, "£5 sits in the wrong band");
+  ok(storefrontView(st.cards, { price: "50-100" }).shown === 1, "£90 is not in £50–£100");
+  ok(!priceMatches({ pricePence: null }, "u5"), "a card with no price counted as under £5");
+  ok(storefrontView(st.cards, { price: "ask" }).shown === 1, "the ask filter lost the unpriced card");
+  const nm = [{ key: "box-0", source: BOX, name: "A", condition: "Near Mint", pricePence: 100, copies: [{ condition: "Near Mint" }, { condition: "Lightly Played" }] }];
+  ok(storefrontView(nm, { condition: "Lightly Played" }).shown === 1, "a pocket holding an LP copy is hidden from the LP filter");
+  const none = storefrontStock(rows, lst, { includeOnline: false });
+  ok(none.cards.every((c) => c.set === null), "with no catalogue, cards should carry no set rather than guess");
+}
+
+// --- The visitor's list ------------------------------------------------------
+{
+  const g = { key: "box-4", source: BOX, name: "Gengar VMAX 020/198", set: "Chilling Reign", condition: "Near Mint", pricePence: 4000, priceText: "£40", priceFrom: false, image: "https://i.ebayimg.com/x/s-l500.jpg", copies: [] };
+  const u = { key: "box-7", source: BOX, name: "Umbreon VMAX 215/203", set: null, condition: null, pricePence: null, priceText: ASK_TEXT, priceFrom: false, image: null, copies: [] };
+  let l = toggleWish([], g, 1).list;
+  l = toggleWish(l, u, 2).list;
+  ok(l.length === 2 && l[0].id === wishKey(u), "the newest card is not first on the list");
+  ok(JSON.stringify(Object.keys(l[0])) === JSON.stringify(WISH_FIELDS), `a list item carries fields nobody allowed: ${Object.keys(l[0])}`);
+  ok(toggleWish(l, g).list.length === 1, "tapping ♡ again did not take the card off");
+  // Positions move when stock changes; the list must follow the CARD.
+  const moved = [{ ...g, key: "box-0", pricePence: 3500, priceText: "£35" }];
+  const rec = reconcileWishlist(l, moved);
+  const gr = rec.rows.find((r) => /gengar/i.test(r.name));
+  ok(gr && !gr.gone && gr.pricePence === 3500, "the list did not follow a card whose position moved, or quoted the old price");
+  ok(rec.rows.find((r) => /umbreon/i.test(r.name))?.gone === true, "a card that left the binder is not marked gone");
+  ok(rec.totalPence === 3500 && rec.gone === 1, `a gone card counted in the total: ${rec.totalPence}`);
+  const box = wishKey({ source: BOX, name: "Gengar" }), online = wishKey({ source: ONLINE, name: "Gengar" });
+  ok(box !== online, "a card at the table and the same card online share one list entry");
+  ok(cleanWishlist([null, 7, { id: "" }, { id: "box:x", name: "X" }, { id: "box:x", name: "dupe" }]).length === 1, "junk from storage was drawn");
+  let full = [];
+  for (let i = 0; i < WISHLIST_MAX; i++) full = toggleWish(full, { source: BOX, name: `Card ${i}` }).list;
+  const over = toggleWish(full, { source: BOX, name: "One more" });
+  ok(over.full && over.list.length === WISHLIST_MAX, "a full list silently dropped a card");
+  ok(removeWish(l, wishKey(g)).length === 1, "remove did not remove");
+  // Storage that throws (private mode) must never throw at the visitor.
+  const bad = { getItem() { throw new Error("denied"); }, setItem() { throw new Error("denied"); }, removeItem() { throw new Error("denied"); } };
+  ok(loadWishlist(bad, "k").length === 0 && saveWishlist(bad, "k", l) === false, "storage that refuses broke the list");
+  const mem = new Map();
+  const ok2 = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v), removeItem: (k) => mem.delete(k) };
+  saveWishlist(ok2, "k", l);
+  ok(loadWishlist(ok2, "k").length === 2, "the list did not survive a reload");
+  ok(wishStorageKey("/show/AbC?x=1") === "cf-wish:/show/AbC", "two links could share a list, or a query string splits one");
+}
+
+// --- The list handed to us: a QR off their screen, scanned into the desk ----
+{
+  // The same rows seen two ways: the stranger's projected storefront, and the
+  // desk's own binder pockets. A code made on one must land on the other.
+  const rows = [
+    { id: "co-1", sku: "A1", title: "Pokemon Card Gengar VMAX 020/198 Chilling Reign NM", sticker_pence: 4000 },
+    { id: "co-2", sku: "A2", title: "Gengar VMAX 020/198 (Chilling Reign) LP", sticker_pence: 2500 },
+    { id: "co-3", sku: "A3", title: "Umbreon VMAX 215/203", sticker_pence: null }
+  ];
+  const lst = [{ ebay_item_id: "887766554433", sku: "B9", title: "Charizard ex 199/165", price_value: 120, quantity: 1 }];
+  const store = storefrontStock(rows, lst, { includeOnline: true });
+  let wl = [];
+  for (const c of store.cards) wl = toggleWish(wl, c).list;
+  const codes = wishCodes(reconcileWishlist(wl, store.cards).rows);
+  ok(codes.length === 3, `three cards picked should be three codes, got ${codes.length}`);
+  const url = wishHandoffUrl("https://app.test", codes);
+  ok(url.startsWith(`https://app.test${WISH_HANDOFF_PATH}?wish=`) && WISH_HANDOFF_PATH.startsWith("/panel/"), `the handoff does not land behind the login: ${url}`);
+  for (const p of ["A1", "A2", "co-1", "887766554433", "B9"]) ok(!url.includes(p), `the handoff URL carries a private value: ${p}`);
+  ok(url.length < 200, `a three-card handoff is too long to scan comfortably: ${url.length}`);
+  const back = parseWishCodes(new URL(url).searchParams.get("wish"));
+  ok(JSON.stringify(back) === JSON.stringify(codes), "the codes do not survive the URL");
+  const desk = binderView(rows, { sort: "name", scope: "all" }, { listings: lst }).cards;
+  const m = matchWishCodes(back, desk);
+  ok(m.matched.length === 3 && m.missing.length === 0, `the desk did not find the cards the visitor picked: ${m.matched.length} found, ${m.missing.length} missing`);
+  const g = m.matched.find((c) => /gengar/i.test(c.name));
+  ok(g && g.copies.length === 2 && g.copies.every((cp) => cp.id), "the desk's match lost the copies it needs to locate and sell");
+  // A card sold since they tapped ♡ is counted, not dropped.
+  const gone = matchWishCodes(back, desk.filter((c) => !/umbreon/i.test(c.name)));
+  ok(gone.missing.length === 1 && gone.matched.length === 2, "a card that has gone was not counted as missing");
+  ok(parseWishCodes("abc.<script>.ABC.abc..toolongcode").join(",") === "abc", `junk in wish= was accepted: ${parseWishCodes("abc.<script>.ABC.abc..toolongcode")}`);
+  ok(wishCode("box:gengar") === wishCode("box:gengar") && wishCode("box:gengar") !== wishCode("online:gengar"), "a card's code is not stable, or the two sections share one");
+  const full = wishHandoffUrl("https://app.test", Array.from({ length: WISHLIST_MAX }, (_, i) => wishCode(`box:card ${i}`)));
+  ok(full.length < 520, `a full list's QR is too dense to read off a screen: ${full.length} chars`);
+}
 
 // --- The QR ---------------------------------------------------------------
 {
@@ -238,6 +358,9 @@ ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|ev
   const comp = src("apps/app/app/show/[token]/Storefront.js");
   ok(!/supabase|createClient|ShowDesk|DealBar|deal\.js|stackpos|placeOf|copyLocations/i.test(comp), "the visitor's component reaches for a database or desk code");
   ok(!/\bsku\b/i.test(comp), "the visitor's component names a SKU");
+  ok(!/fetch\(|XMLHttpRequest|sendBeacon/.test(comp), "the visitor's component sends something somewhere — the list is meant to stay on their phone");
+  const wl = src("apps/app/lib/wishlist.js");
+  ok(!/fetch\(|supabase|sendBeacon/i.test(wl.replace(/\/\*[\s\S]*?\*\//g, "")), "wishlist.js reaches for a network or a database");
 
   const mw = src("apps/app/middleware.js");
   const prot = mw.match(/PROTECTED_PATHS\s*=\s*\[([^\]]*)\]/)?.[1] || "";
@@ -254,6 +377,10 @@ ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|ev
   ok(!/for select using \(true\)|to anon/i.test(mig), "migration 029 opens show_storefronts to anon");
 
   const desk = src("apps/app/app/panel/ShowDesk.js");
+  ok(/customerMode \|\| wishCodesIn\.length === 0 \? null : \(\s*<WishPickup/.test(desk), "the visitor's scanned list renders on a customer screen — locations and deal buttons would face them");
+  ok(/redirectedFrom", request\.nextUrl\.pathname \+ request\.nextUrl\.search/.test(mw), "a signed-out scan loses the list at the login wall");
+  const login = src("apps/app/app/login/page.js");
+  ok(/\^\\\/\(\?!\[\\\/\\\\\]\)/.test(login), "the login page follows redirectedFrom off the site");
   ok(/customerMode \? null : <StorefrontPanel/.test(desk), "the link panel renders on a customer screen — the switch-off button would face them");
   const qrLib = src("apps/app/lib/qr.js");
   ok(!/https?:\/\//.test(qrLib.replace(/xmlns="http:\/\/www\.w3\.org\/2000\/svg"/g, "")), "qr.js calls out to a service — every token we print would be handed to it");

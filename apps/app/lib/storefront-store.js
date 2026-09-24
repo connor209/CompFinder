@@ -30,6 +30,7 @@
  * scripts/check-storefront.mjs can load it under bare node.
  */
 import { storefrontStock } from "./storefront.js";
+import { getSetIndex, setMatcher } from "./set-index.js";
 
 /** Where a storefront lives. Short, because it is a QR: fewer modules to scan. */
 export const STOREFRONT_PATH = "/show";
@@ -218,13 +219,16 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
 
   // Both reads and the view count at once: on venue wifi the visitor is
   // waiting on the slowest of them, not the sum.
-  const [box, live] = await Promise.all([
+  const [box, live, sets] = await Promise.all([
     readAll(checkoutQuery(CHECKOUT_COLUMNS)).then((r) =>
       r.error ? readAll(checkoutQuery(CHECKOUT_COLUMNS_PRE_024)) : r
     ),
     // Read even when the link leaves the online stock out: a checkout's photo
     // is on the listing it came from.
     readAll(() => admin.from("ebay_listings").select(LISTING_COLUMNS).eq("user_id", owner)),
+    // The public catalogue's set list, for the set filter. A failure here
+    // costs the filter, never the page.
+    getSetIndex(admin).catch(() => ({ index: null })),
     // A count we fail to write is a count we lose, not a page we refuse.
     Promise.resolve()
       .then(() => admin.rpc("storefront_hit", { p_id: link.id }))
@@ -241,6 +245,9 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
       includeOnline: Boolean(link.include_online),
       at: now.toISOString()
     },
-    stock: storefrontStock(box.rows, live.error ? [] : live.rows, { includeOnline: Boolean(link.include_online) })
+    stock: storefrontStock(box.rows, live.error ? [] : live.rows, {
+      includeOnline: Boolean(link.include_online),
+      setOf: setMatcher(sets?.index)
+    })
   };
 }
