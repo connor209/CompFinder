@@ -1,8 +1,14 @@
 # Live stream: auctioning off the scans
 
 Cards go up on eBay Live from the photographs already on their listings, with
-a host talking through each lot. The card itself stays in its stack until it
-sells.
+a host talking through each lot.
+
+**Update, 2026-09-25:** the cards no longer stay in their stacks. A stream now
+runs off a box of ~200 pulled cards — **Stream stock** in the app picks them,
+prints the pull sheet, hides their listings, records which lots aired (read off
+this relay's `aired` list) and sends a card home after three airings without a
+sale. The relay part below is unchanged; see "The stream box" in CLAUDE.md for
+the rules.
 
 The point is handling. Every card here is already pulled once, scanned,
 conditioned, SKU'd and priced. Pulling all of them again to wave each one at a

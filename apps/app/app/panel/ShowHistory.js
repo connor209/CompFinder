@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { showHistory, totalsOf, outcomeOf, pct, dayOf, historyCsv, costOf, eventKey } from "@/lib/showhistory.js";
+import { showOnly } from "@/lib/streamstock.js";
 import {
   EXPENSE_CATEGORIES, categoryLabel, parseExpensePence, loadExpenses, addExpense, deleteExpense
 } from "@/lib/show-expenses-store.js";
@@ -117,10 +118,13 @@ export default function ShowHistory() {
         return;
       }
       const sticker = await sb.from("stock_checkouts").select("sticker_pence").limit(0);
-      const cols = sticker.error ? COLS : `${COLS},sticker_pence`;
-      const all = await pagedSelect(() =>
+      // The pool column (migration 031): a card sold or returned from the
+      // live-stream box is not a show's takings or a show's sell-through.
+      const pool = await sb.from("stock_checkouts").select("pool").limit(0);
+      const cols = `${sticker.error ? COLS : `${COLS},sticker_pence`}${pool.error ? "" : ",pool"}`;
+      const all = showOnly(await pagedSelect(() =>
         sb.from("stock_checkouts").select(cols).order("checked_out_at", { ascending: true })
-      );
+      ));
       // What each card cost, from the same table My listings and Sales read.
       // A failure here costs the profit figures, never the rest of the screen.
       let costRows = [];

@@ -9,6 +9,7 @@ import MarketLinks from "./MarketLinks";
 import ColumnPicker, { useColumns } from "./ColumnPicker";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { awayIndex, listingStock } from "@/lib/stockcheck.js";
+import { withPool, isStreamCheckout } from "@/lib/streamstock.js";
 import DealBar, { DealButton, useDeal } from "./DealBar";
 import { StreamBar, StreamButton, useRelay } from "./StreamBar";
 import { listingLine } from "@/lib/deal.js";
@@ -145,9 +146,29 @@ function streamItemFor(g, priced) {
  * away AND something else happened to it, which is the double-sale the desk
  * warns about; it gets a question rather than a confident answer.
  */
+/**
+ * Is this row a card in the live-stream box? Those are checked out like show
+ * stock, and they are NOT show stock: no crossover (decided 2026-09-25), so a
+ * stream card never goes in a deal at a table. Sold on a stream, it is marked
+ * off on Stream stock, which resolves the right checkout.
+ */
+function inStreamBox(g) {
+  return (g?._away || []).some((a) => isStreamCheckout(a.checkout));
+}
+
 function AwayChip({ away }) {
   if (!away || away.length === 0) return null;
   const co = away[0].checkout;
+  if (isStreamCheckout(co)) {
+    return (
+      <span
+        className="inv-away"
+        title="Quantity 0 because the card is in the eBay Live box — not because it sold. It comes back when it has aired three times without selling."
+      >
+        📺 in the stream box
+      </span>
+    );
+  }
   const suspect = away.some((a) => a.suspect);
   const where = co?.event || co?.stack_name || null;
   const n = away.length;
@@ -279,7 +300,9 @@ const ALL_COLUMNS = [
           ) : canUpdate ? (
             <button className="itbl-set" onClick={() => ctx.onUpdate(g)} title="Update eBay price to market">↳ {pounds(p.recPence)}</button>
           ) : null}
-          <DealButton className="itbl-check" deal={ctx.deal} update={ctx.onDeal} line={dealLineFor(g, ctx.priced)} />
+          {inStreamBox(g) ? null : (
+            <DealButton className="itbl-check" deal={ctx.deal} update={ctx.onDeal} line={dealLineFor(g, ctx.priced)} />
+          )}
           <StreamButton className="itbl-check" relay={ctx.relay} item={streamItemFor(g, ctx.priced)} />
           {/* Same checkout as the card view's, off the same showOut(): the
               table is the view you pack a show from, and a button that exists
@@ -405,10 +428,11 @@ export default function Inventory({ onDeepDive }) {
    */
   async function loadAway() {
     try {
-      const { data, error } = await createClient()
+      const sb = createClient();
+      const { data, error } = await withPool((cols) => sb
         .from("stock_checkouts")
-        .select("id,sku,ebay_item_id,hide_method,event,stack_name,resolved_at")
-        .is("resolved_at", null);
+        .select(cols)
+        .is("resolved_at", null), "id,sku,ebay_item_id,hide_method,event,stack_name,resolved_at");
       if (error) { setAway(null); return; }
       setAway(awayIndex(data || []));
     } catch {
@@ -503,7 +527,17 @@ export default function Inventory({ onDeepDive }) {
     [listings, stock]
   );
   const awayCount = useMemo(
-    () => listings.reduce((n, l) => n + (stock.get(l.ebay_item_id)?.state === "show" ? 1 : 0), 0),
+    () => listings.reduce((n, l) => {
+      const st = stock.get(l.ebay_item_id);
+      return n + (st?.state === "show" && !isStreamCheckout(st.checkout) ? 1 : 0);
+    }, 0),
+    [listings, stock]
+  );
+  const streamCount = useMemo(
+    () => listings.reduce((n, l) => {
+      const st = stock.get(l.ebay_item_id);
+      return n + (st?.state === "show" && isStreamCheckout(st.checkout) ? 1 : 0);
+    }, 0),
     [listings, stock]
   );
 
@@ -718,7 +752,7 @@ export default function Inventory({ onDeepDive }) {
           // looking for a card nothing is wrong with.
           const why = (matches || []).length === 0
             ? "not in your stacks"
-            : (matches || []).some((c) => c.checked_out_at) ? "already at a show" : "already pulled";
+            : (matches || []).some((c) => c.checked_out_at) ? "already checked out — at a show or in the stream box" : "already pulled";
           errs.push(`${sku}: ${why}`);
           continue;
         }
@@ -1085,6 +1119,7 @@ export default function Inventory({ onDeepDive }) {
           {(group || dupOnly) && totalShownListings !== rows.length ? ` · ${totalShownListings} listings` : ""}
           {shown.length < rows.length ? ` · showing ${shown.length}` : ""}
           {awayCount > 0 ? ` · ${awayCount} at a show` : ""}
+          {streamCount > 0 ? ` · ${streamCount} in the stream box` : ""}
         </span>
         <div className="view-toggle" role="group" aria-label="Inventory view">
           <button aria-pressed={view === "cards"} onClick={() => setView("cards")}>▦ Cards</button>
@@ -1199,14 +1234,14 @@ export default function Inventory({ onDeepDive }) {
                     {onDeepDive ? (
                       <button className="inv-act" onClick={() => onDeepDive(g.title)}>Deep dive ↗</button>
                     ) : null}
-                    <DealButton
+                    {inStreamBox(g) ? null : <DealButton
                       deal={deal}
                       update={updateDeal}
                       line={dealLineFor(g, priced)}
                       title={g._count > 1
                         ? "Adds ONE copy to the current deal — untick “Group duplicates” to add another"
                         : "Add to the current deal — nothing happens on eBay until it sells"}
-                    />
+                    />}
                     <StreamButton relay={relay} item={streamItemFor(g, priced)} />
                     <button className="inv-act" onClick={() => showOut(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
                     <MarketLinks query={g.title} gameSlug="pokemon" label={g.title} />

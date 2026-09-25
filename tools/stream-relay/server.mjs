@@ -52,7 +52,7 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize } from "node:path";
-import { sanitiseLot, MAX_QUEUE, LOT_MS, RELAY_PORT, cycleTiming } from "../../apps/app/lib/livestream.js";
+import { sanitiseLot, MAX_QUEUE, LOT_MS, RELAY_PORT, cycleTiming, airedIds } from "../../apps/app/lib/livestream.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, "public");
@@ -102,6 +102,25 @@ const state = {
   runningSince: null // null while held; a timestamp while running
 };
 
+/**
+ * How long each lot has been on air this session, by lot id — the longest
+ * single spell, holds excluded. Stream stock reads it (as `aired` on /state)
+ * after the stream to record which cards had their chance; the ten-second
+ * threshold that turns a spell into an airing is livestream.js's, not ours.
+ *
+ * Kept when the queue is CLEARED, on purpose: clearing is how a stream ends,
+ * and the one thing this record is for is being read after that. It goes when
+ * the relay stops, like everything else here.
+ */
+const onAir = new Map();
+
+function noteOnAir() {
+  const lot = currentLot();
+  if (!lot) return;
+  const ms = elapsed();
+  if (ms > (onAir.get(lot.id) || 0)) onAir.set(lot.id, ms);
+}
+
 let timer = null;
 const clients = new Set();
 
@@ -127,6 +146,9 @@ function snapshot() {
     // photographs is most of a megabyte, and fetching them at the moment of
     // the swap is a blank rectangle on the broadcast.
     nextImages: state.queue[state.at + 1] ? state.queue[state.at + 1].images : [],
+    // Which lots have aired long enough to count. The current lot's spell so
+    // far is included, so reading this mid-lot is not a lot behind.
+    aired: (noteOnAir(), airedIds(onAir)),
     // The desk's list. The overlay never renders it; it is here so the host
     // can see what is coming without a second request.
     queue: state.queue.map((l, i) => ({ i, id: l.id, name: l.name, valueText: l.valueText, held: l.valueHeld }))
@@ -164,6 +186,7 @@ function arm() {
  * silently started the list again is a stream selling the same card twice.
  */
 function go(index, { hold = false } = {}) {
+  noteOnAir();
   const i = Number(index);
   state.at = Number.isFinite(i) && i >= 0 && i < state.queue.length ? i : -1;
   state.elapsedMs = 0;
@@ -327,6 +350,14 @@ const server = createServer(async (req, res) => {
       case "remove": {
         const i = Number(body.index);
         if (Number.isFinite(i) && i >= 0 && i < state.queue.length) {
+          // Removing the lot ON AIR: bank its spell and zero the clock first,
+          // or go() below would credit that time to whichever lot slides into
+          // its index — an airing for a card nobody saw.
+          if (i === state.at) {
+            noteOnAir();
+            state.elapsedMs = 0;
+            if (state.runningSince !== null) state.runningSince = Date.now();
+          }
           state.queue.splice(i, 1);
           if (i < state.at) state.at -= 1;
           else if (i === state.at) go(Math.min(state.at, state.queue.length - 1));
@@ -334,7 +365,7 @@ const server = createServer(async (req, res) => {
         publish();
         break;
       }
-      case "clear": state.queue = []; go(-1); break;
+      case "clear": noteOnAir(); state.queue = []; go(-1); break;
       case "demo": {
         /**
          * Fill the queue with fixtures, so an OBS scene can be laid out with

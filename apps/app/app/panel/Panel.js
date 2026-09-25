@@ -37,6 +37,8 @@ import Sales from "./Sales";
 import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import ShowDesk from "./ShowDesk";
+import StreamStock from "./StreamStock";
+import { withPool, showOnly } from "@/lib/streamstock.js";
 import ShowHistory from "./ShowHistory";
 import SellSheet from "./SellSheet";
 import Buy from "./Buy";
@@ -81,6 +83,7 @@ const STREAM_SLUG = {
   pull: "pull",
   shows: "shows",
   showhistory: "show-history",
+  streamstock: "stream-stock",
   sheets: "sheets",
   accounts: "accounts"
 };
@@ -116,7 +119,8 @@ const MODULES = [
       { key: "stacks", label: "Stacks", desc: "Group inventory into sellable stacks" },
       { key: "pull", label: "Pull sheet", desc: "Pick & pack the day's orders" },
       { key: "shows", label: "Show desk", desc: "Check stock out to shows & back in" },
-      { key: "showhistory", label: "Show history", desc: "Sell-through and takings, show by show" }
+      { key: "showhistory", label: "Show history", desc: "Sell-through and takings, show by show" },
+      { key: "streamstock", label: "Stream stock", desc: "Pick, pull and rotate the eBay Live box" }
     ]
   },
   { key: "sheets", label: "Sell sheets", icon: "sheet", desc: "Build CSV imports for Cardmarket listing tools", sections: [{ key: "sheets", label: "Sell sheets" }] },
@@ -646,15 +650,19 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       setPoolError("");
       try {
         const supabase = createClient();
-        const { data, error } = await supabase
+        // Show stock only — the live-stream box is checked out too, and its
+        // cards are not going on a table with a sticker. withPool() reads the
+        // column where migration 031 has added it and does without where not.
+        const { data: rows, error } = await withPool((cols) => supabase
           .from("stock_checkouts")
-          .select("id,sku,title,event,stack_name,sticker_pence")
+          .select(cols)
           .is("resolved_at", null)
-          .order("checked_out_at", { ascending: true });
+          .order("checked_out_at", { ascending: true }), "id,sku,title,event,stack_name,sticker_pence");
         if (error) throw error;
         if (cancelled) return;
-        const { items, skipped } = buildPool(data || []);
-        setPool({ items, skipped, label: poolLabel(data || []) });
+        const data = showOnly(rows);
+        const { items, skipped } = buildPool(data);
+        setPool({ items, skipped, label: poolLabel(data) });
       } catch (err) {
         if (!cancelled) {
           setPoolError(
@@ -1790,14 +1798,14 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   async function savedStickers(rows) {
     try {
       const supabase = createClient();
-      const { data, error } = await supabase
+      const { data, error } = await withPool((cols) => supabase
         .from("stock_checkouts")
-        .select("sku,sticker_pence")
+        .select(cols)
         .is("resolved_at", null)
-        .not("sticker_pence", "is", null);
+        .not("sticker_pence", "is", null), "sku,sticker_pence");
       if (error) throw error;
       const bySku = new Map();
-      for (const c of data || []) if (c.sku) bySku.set(String(c.sku).toLowerCase(), c.sticker_pence);
+      for (const c of showOnly(data)) if (c.sku) bySku.set(String(c.sku).toLowerCase(), c.sticker_pence);
       const found = {};
       (rows || []).forEach((r, i) => {
         const p = r.sku ? bySku.get(String(r.sku).toLowerCase()) : null;
@@ -1881,14 +1889,17 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
     setStickerNotice("Saving sticker prices to the show desk…");
     try {
       const supabase = createClient();
-      const { data: open, error } = await supabase
+      // A sticker goes on a SHOW card. A stream card with the same SKU is in
+      // the other box, and matching it here would write a table price onto a
+      // card nobody will ever put a sticker on.
+      const { data: open, error } = await withPool((cols) => supabase
         .from("stock_checkouts")
-        .select("id,sku")
-        .is("resolved_at", null);
+        .select(cols)
+        .is("resolved_at", null), "id,sku");
       if (error) throw error;
 
       const bySku = new Map();
-      for (const c of open || []) {
+      for (const c of showOnly(open)) {
         if (c.sku) bySku.set(String(c.sku).toLowerCase(), c.id);
       }
       const now = new Date().toISOString();
@@ -2206,6 +2217,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       {stream === "pull" && <PullSheet />}
       {stream === "shows" && <ShowDesk />}
       {stream === "showhistory" && <ShowHistory />}
+      {stream === "streamstock" && <StreamStock />}
       {stream === "sheets" && <SellSheet />}
       {stream === "buy" && <Buy />}
       {stream === "browse" && <Browse onDeepDive={deepDiveCard} />}

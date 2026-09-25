@@ -208,6 +208,14 @@ stream` (the relay, only while streaming).
   profit is only ever over sales carrying both a price and a cost, a show's
   running costs come off its OWN profit and never another show's, and
   `show_expenses` is named in its store alone.
+- `scripts/check-streamstock.mjs` — the eBay Live box: that a checkout with no
+  pool is a SHOW checkout, what the recommender offers and what it leaves out
+  (already out, sold, unpriced, back inside the cooldown), that "mew" is not
+  Mewtwo, that three unsold airings send a card home and a skipped lot is not
+  an airing, that the pull sheet numbers a card where it physically is, and —
+  the one that leaks — a grep that every reader of `stock_checkouts` has
+  decided about the stream box, so it never reaches the Show Desk, the binder
+  or a stranger's phone.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -2122,6 +2130,71 @@ in `docs/LIVE_STREAM.md`.
   own, so a browser source that reconnects mid-lot lands where the desk says it
   is instead of restarting the cycle under a host who has already done the
   front of the card.
+
+## The stream box: pulled for eBay Live, three chances, then home
+
+The relay above was built on the card staying in its stack until it sold. At
+200 cards a stream that stopped being true: the lots are pulled into a box, and
+the box is the unit. **Stream stock** (`/panel/stream-stock`) is the screen,
+`lib/streamstock.js` the rules, `lib/stream-store.js` the only file naming the
+two new tables, migration 031 the schema. `packages/core` is untouched.
+
+Decided 2026-09-25: **the listing is hidden while the card is out, a card goes
+home on AIRINGS rather than streams attended, and nothing crosses between the
+stream box and a show.**
+
+- **The box is `stock_checkouts` with `pool = 'stream'`**, not a table of its
+  own. A stream card is checked out for exactly the reasons a show card is —
+  the stack numbering closes up behind it, the listing is hidden — so it goes
+  through `checkoutStackCard()` and comes home through `restoreCheckout()`,
+  both in `checkout.js` and shared with the Show Desk. What 016 could not say
+  was WHERE a card went, and every screen reading open checkouts read them as
+  "at a show": the desk, the counter, the binder, Show history, the sticker
+  write-back and the **QR storefront**. Each of those now goes through
+  `showOnly()`, and `check-streamstock.mjs` fails on any new reader of
+  `stock_checkouts` that has not decided — a stream box on a stranger's phone
+  is the leak worth designing against.
+- **A row with no pool is a show row.** Every checkout before 031, and every
+  read from a database without it. The other reading would empty the Show
+  Desk the day this shipped. A show checkout never NAMES the column, so the
+  desk keeps working before 031 is applied; `withPool()` reads it where it
+  exists and does without where not.
+- **"Don't touch the listing" is not on offer for the box** (`streamHideMode`).
+  Three weeks with a live listing is a card that sells online while it is in a
+  box, and a pull sheet that sends somebody to a stack it is not in.
+- **Airings, not streams.** Two hundred cards is more than one stream gets
+  through, and a card that sat unaired has not been offered to anybody. The
+  relay records how long each lot was on air, and `AIRED_MIN_MS` (10s, in
+  `livestream.js`) turns that into an airing — so a host skipping with Next
+  never uses up a card's chance. Read it with **📺 Read what aired**, or tick
+  cards by hand. `STREAMS_BACKSTOP` (6 closed streams) sends home a card
+  nobody reaches, so the box cannot silt up. Only a CLOSED stream counts:
+  closing is what turns every un-packed airing into "unsold", which is why the
+  screen confirms it.
+- **The top-up is `target − cards staying`**, where a card due home is already
+  on its way out. The recommender reads our own eBay ask on an AVAILABLE
+  listing, like ★ Recommend show stock, and counts what it left out: already
+  out (show or stream), sold, unpriced, and back from the box inside the
+  cooldown — without that, the top-up after a return re-picks the cards just
+  filed back and the box never rotates. Characters match WHOLE words: "mew"
+  pulling every Mewtwo is a hundred wrong cards in a box.
+- **The pull sheet numbers a card where it physically IS.** Checking out closes
+  the numbering up at once, but the card is on the shelf until somebody pulls
+  it — so `pullSheet()` ranks the batch as if still present and lists each
+  stack deepest first. Pull from the back and every number above stays true.
+- **A stream sale's price goes on the AIRING, never on `sold_price_pence`.**
+  eBay Live sales are eBay orders and reach Accounts through `ebay_sales`;
+  writing the hammer price into the cash-sale column too would count every one
+  twice. `sellLine()` still does the rest — resolves the checkout, pulls the
+  stack card, ends the listing once.
+- **A ×3 listing is flagged, not refused.** Hiding one copy's listing takes all
+  three off sale, the same as a show checkout always has.
+- **`＋ Deal` is withheld from a stream card in My listings** — no crossover —
+  and the row says "📺 in the stream box" rather than "at a show".
+
+Still open: queueing lots to the relay is still from My listings (it needs the
+priced `rec` for a value line), and eBay Live orders are not yet matched to
+the box automatically — the pull sheet's away banner is where they surface.
 
 ## My listings: a keystroke used to render the whole inventory
 

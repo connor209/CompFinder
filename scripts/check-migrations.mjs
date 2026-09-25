@@ -61,7 +61,8 @@ const MIGRATIONS = [
   ["026", "show wants", [["table", "show_wants"]]],
   ["027", "listing copies", [["column", "stack_cards", "copy_seq"], ["column", "stack_cards", "scan_url"], ["table", "listing_copy_state"]]],
   ["029", "show storefronts", [["table", "show_storefronts"], ["function", "storefront_hit"]]],
-  ["030", "show expenses", [["table", "show_expenses"]]]
+  ["030", "show expenses", [["table", "show_expenses"]]],
+  ["031", "stream stock", [["column", "stock_checkouts", "pool"], ["table", "live_streams"], ["table", "stream_airings"]]]
 ];
 
 /**

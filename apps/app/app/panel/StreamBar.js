@@ -44,6 +44,14 @@ function readStored(key, fallback) {
 }
 
 /**
+ * Where the relay is, as set on My listings. Read by Stream stock, which asks
+ * the relay what aired — one key, read in one file.
+ */
+export function storedRelayOrigin() {
+  return readStored(ORIGIN_KEY, RELAY_ORIGIN) || RELAY_ORIGIN;
+}
+
+/**
  * The relay, as this screen sees it.
  *
  * Called ONCE per screen and handed down — the same rule useDeal() runs on,

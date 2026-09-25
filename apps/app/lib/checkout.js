@@ -64,14 +64,20 @@ export async function findItemIdForSku(sb, sku) {
 }
 
 const MIGRATION_MSG = "Run migration 016_show_checkouts.sql in the Supabase SQL editor first.";
+const STREAM_MIGRATION_MSG = "Run migration 031_stream_stock.sql in the Supabase SQL editor first.";
 
 /**
- * Check a single stack card out to a show.
+ * Check a single stack card out to a show — or, with `pool: "stream"`, into
+ * the live-stream box (migration 031; see lib/streamstock.js).
  * `card` is a stack_cards row ({ id, stack_id, sku, title, ebay_item_id }).
  * `hideMode` is a HIDE_MODES key (defaults to the saved preference).
  * Returns { ok, checkoutId, itemId, hideMethod, hideError } or { ok:false, error }.
+ *
+ * A show checkout never NAMES the pool column: the column defaults to 'show',
+ * and a show checkout that named it would stop working on a database that has
+ * not had 031 applied — the Show Desk taken out by a feature it does not use.
  */
-export async function checkoutStackCard(sb, { card, stackName, event, hideMode }) {
+export async function checkoutStackCard(sb, { card, stackName, event, hideMode, pool = "show" }) {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
 
@@ -90,26 +96,34 @@ export async function checkoutStackCard(sb, { card, stackName, event, hideMode }
   if (!itemId) itemId = await findItemIdForSku(sb, card.sku);
 
   // 3) Ledger row.
+  const stream = pool === "stream";
+  const row = {
+    user_id: user.id,
+    stack_card_id: card.id,
+    stack_id: card.stack_id,
+    stack_name: stackName || null,
+    sku: card.sku || null,
+    title: card.title || null,
+    ebay_item_id: itemId,
+    event: event || null,
+    hide_method: "none"
+  };
+  if (stream) row.pool = "stream";
   const { data: co, error: coErr } = await sb
     .from("stock_checkouts")
-    .insert({
-      user_id: user.id,
-      stack_card_id: card.id,
-      stack_id: card.stack_id,
-      stack_name: stackName || null,
-      sku: card.sku || null,
-      title: card.title || null,
-      ebay_item_id: itemId,
-      event: event || null,
-      hide_method: "none"
-    })
+    .insert(row)
     .select("id")
     .single();
   if (coErr) {
     // Roll the flag back so the card isn't stuck half checked-out.
     await sb.from("stack_cards").update({ checked_out_at: null }).eq("id", card.id);
-    const missing = /stock_checkouts/i.test(coErr.message || "");
-    return { ok: false, error: missing ? MIGRATION_MSG : coErr.message, needsMigration: missing };
+    const noPool = stream && /\bpool\b/i.test(coErr.message || "");
+    const missing = noPool || /stock_checkouts/i.test(coErr.message || "");
+    return {
+      ok: false,
+      error: noPool ? STREAM_MIGRATION_MSG : missing ? MIGRATION_MSG : coErr.message,
+      needsMigration: missing
+    };
   }
 
   // 4) Hide the listing (best-effort — the checkout stands either way).
@@ -154,6 +168,46 @@ export async function unhideListing(checkout) {
   } catch {
     return { restored: false, error: "Couldn't reach eBay to restore the listing." };
   }
+}
+
+/** The highest stored position in a stack, so a card filed "to the back" goes behind it. */
+export async function maxPosition(sb, stackId) {
+  const { data } = await sb
+    .from("stack_cards")
+    .select("position")
+    .eq("stack_id", stackId)
+    .not("position", "is", null)
+    .order("position", { ascending: false })
+    .limit(1);
+  return data && data.length ? data[0].position : 0;
+}
+
+/**
+ * Return one checked-out card to stock: clear the away flag (optionally moving
+ * it with `patch`), un-hide its listing, and close the checkout row. Shared by
+ * the Show Desk and Stream stock, because two copies of "a card comes home"
+ * would disagree about the listing first. Returns any warnings.
+ */
+export async function restoreCheckout(sb, co, patch, returnMode, returnStackId) {
+  const warnings = [];
+  if (co.stack_card_id) {
+    await sb.from("stack_cards").update({ checked_out_at: null, ...patch }).eq("id", co.stack_card_id);
+  } else {
+    warnings.push(`${co.sku || "?"}: its stack card no longer exists — add it back by hand.`);
+  }
+  const u = await unhideListing(co);
+  if (u.error) warnings.push(`${co.sku || "?"}: ${u.error}`);
+  if (u.newItemId && co.stack_card_id) {
+    await sb.from("stack_cards").update({ ebay_item_id: u.newItemId }).eq("id", co.stack_card_id);
+  }
+  await sb.from("stock_checkouts").update({
+    resolved_at: new Date().toISOString(),
+    resolution: "returned",
+    return_mode: returnMode,
+    return_stack_id: returnStackId,
+    relisted_item_id: u.newItemId || null
+  }).eq("id", co.id);
+  return warnings;
 }
 
 /** Default cards per stack when the user hasn't set their own. */

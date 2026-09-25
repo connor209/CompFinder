@@ -31,6 +31,7 @@
  */
 import { storefrontStock } from "./storefront.js";
 import { getSetIndex, setMatcher } from "./set-index.js";
+import { showOnly } from "./streamstock.js";
 
 /** Where a storefront lives. Short, because it is a QR: fewer modules to scan. */
 export const STOREFRONT_PATH = "/show";
@@ -170,6 +171,13 @@ export async function revokeStorefront(sb, id) {
 export const CHECKOUT_COLUMNS = "id,title,sku,sticker_pence";
 /** Without 024's column, so a database missing it still serves the box, unpriced. */
 export const CHECKOUT_COLUMNS_PRE_024 = "id,title,sku";
+/**
+ * The pool column (migration 031), read so the live-stream box can be LEFT
+ * OUT: those cards are checked out too, they are not on the table, and this
+ * is the one screen of ours a stranger holds. Read rather than filtered in the
+ * query, so a database without 031 — every row a show row — still serves.
+ */
+export const POOL_COLUMN = "pool";
 export const LISTING_COLUMNS = "ebay_item_id,sku,title,price_value,quantity,image_url";
 const LINK_COLUMNS = "id,user_id,title,event,include_online,expires_at,revoked_at";
 
@@ -220,9 +228,9 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
   // Both reads and the view count at once: on venue wifi the visitor is
   // waiting on the slowest of them, not the sum.
   const [box, live, sets] = await Promise.all([
-    readAll(checkoutQuery(CHECKOUT_COLUMNS)).then((r) =>
-      r.error ? readAll(checkoutQuery(CHECKOUT_COLUMNS_PRE_024)) : r
-    ),
+    readAll(checkoutQuery(`${CHECKOUT_COLUMNS},${POOL_COLUMN}`))
+      .then((r) => (r.error ? readAll(checkoutQuery(CHECKOUT_COLUMNS)) : r))
+      .then((r) => (r.error ? readAll(checkoutQuery(CHECKOUT_COLUMNS_PRE_024)) : r)),
     // Read even when the link leaves the online stock out: a checkout's photo
     // is on the listing it came from.
     readAll(() => admin.from("ebay_listings").select(LISTING_COLUMNS).eq("user_id", owner)),
@@ -245,7 +253,7 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
       includeOnline: Boolean(link.include_online),
       at: now.toISOString()
     },
-    stock: storefrontStock(box.rows, live.error ? [] : live.rows, {
+    stock: storefrontStock(showOnly(box.rows), live.error ? [] : live.rows, {
       includeOnline: Boolean(link.include_online),
       setOf: setMatcher(sets?.index)
     })

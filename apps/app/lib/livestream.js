@@ -98,6 +98,31 @@ export function cycleTiming(imageCount, lotMs = LOT_MS) {
   return { images: n, perImageMs: Math.max(MIN_IMAGE_MS, Math.round(total / n)) };
 }
 
+/**
+ * How long a lot must be on air to count as AIRED.
+ *
+ * Stream stock sends a card home after three airings without selling (see
+ * lib/streamstock.js), so an airing is a card's chance used up. A host
+ * skipping past a lot with Next is not that — the card was on screen for a
+ * second and nobody could have bid. Ten seconds is long enough that a skip
+ * never counts and short enough that a lot cut short by a quick sale still
+ * does.
+ */
+export const AIRED_MIN_MS = 10_000;
+
+/**
+ * The lot ids that have been on air long enough to count, in the order they
+ * first went up. `onAir` is [id, ms] pairs — the relay's record of the longest
+ * each lot has been on air this session.
+ */
+export function airedIds(onAir, minMs = AIRED_MIN_MS) {
+  const out = [];
+  for (const [id, ms] of onAir || []) {
+    if (id != null && Number(ms) >= minMs) out.push(String(id));
+  }
+  return out;
+}
+
 /** How many lots the relay will hold. A stream is a session, not an archive. */
 export const MAX_QUEUE = 200;
 

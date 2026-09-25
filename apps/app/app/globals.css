@@ -2327,3 +2327,15 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .wp-copy-cond { color:var(--ink-soft); }
 .wp-copy-price { font-family:var(--font-mono); font-weight:700; }
 .wp-copy-loc { font-family:var(--font-mono); font-size:12px; color:var(--ink-soft); }
+
+/* Stream stock — the eBay Live box. Rows WRAP: a box row carries a SKU, a
+   position, a title, the airing count and three buttons, and on a phone the
+   buttons are the part that would otherwise go off the side. */
+.ss-row { flex-wrap:wrap; row-gap:6px; }
+.ss-row .stack-title { flex:1 1 180px; }
+.ss-due { color:var(--warn-ink); border-color:color-mix(in srgb,var(--warn-ink) 40%,var(--line)); }
+.ss-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:0 0 10px; }
+.ss-filters label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--ink-soft); }
+.ss-filters input { border:1px solid var(--line-strong); border-radius:10px; padding:7px 9px; background:var(--surface); color:var(--ink); font-size:13px; min-width:0; }
+.ss-stats { display:flex; flex-wrap:wrap; gap:6px; }
+.ss-pull-head { margin:14px 0 4px; font-family:var(--font-mono); font-size:13px; font-weight:700; color:var(--ink); }

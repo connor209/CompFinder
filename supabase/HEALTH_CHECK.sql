@@ -145,6 +145,13 @@ with schema_checks as (
         then '✅ present' else '❌ missing' end),
     (33, 'SCHEMA · 030 show expenses', 'show_expenses table',
       case when to_regclass('public.show_expenses') is not null
+        then '✅ present' else '❌ missing' end),
+    (34, 'SCHEMA · 031 stream stock', 'stock_checkouts.pool column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='stock_checkouts' and column_name='pool')
+        then '✅ present' else '❌ missing' end),
+    (35, 'SCHEMA · 031 stream stock', 'live_streams + stream_airings tables',
+      case when to_regclass('public.live_streams') is not null and to_regclass('public.stream_airings') is not null
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),

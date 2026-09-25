@@ -422,10 +422,10 @@ export default function PullSheet() {
         <div className="mine-banner">
           <span className="mine-ic" aria-hidden="true">⚠</span>
           <div>
-            <strong>{away.length} ordered card(s) are checked out to a show</strong>
+            <strong>{away.length} ordered card(s) are checked out — in the show case or the stream box</strong>
             <p className="hint hint-small" style={{ marginTop: 4 }}>
-              {away.map((a) => a.sku || a.title).filter(Boolean).join(" · ")} — sold on eBay but currently in your show case.
-              Ship from the case, then mark them sold or pulled from the Show desk.
+              {away.map((a) => a.sku || a.title).filter(Boolean).join(" · ")} — sold on eBay but not in a stack.
+              Ship from the case or the box, then mark them sold on the Show desk or on Stream stock.
             </p>
           </div>
         </div>

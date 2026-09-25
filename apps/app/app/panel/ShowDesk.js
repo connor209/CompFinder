@@ -9,7 +9,7 @@ import { isListingAvailable, soldOutSkus } from "@/lib/stockcheck.js";
 import { gameOf, gameFacets, filterByGames, gameName, UNKNOWN_GAME } from "@/lib/games.js";
 import { getSetIndex } from "@/lib/set-index.js";
 import {
-  checkoutStackCard, unhideListing, nextStackName, planReallocation,
+  checkoutStackCard, nextStackName, planReallocation, maxPosition, restoreCheckout,
   DEFAULT_STACK_CAPACITY, HIDE_MODES, getHideMode, setHideMode,
   getShowEvent, setShowEvent
 } from "@/lib/checkout";
@@ -33,6 +33,7 @@ import StorefrontPanel from "./StorefrontPanel";
 import WishPickup from "./WishPickup";
 import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
+import { showOnly } from "@/lib/streamstock.js";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -250,7 +251,10 @@ export default function ShowDesk() {
       setLoading(false);
       return;
     }
-    setOpen(away || []);
+    // Show stock only. A card in the live-stream box is checked out too, and
+    // everything on this screen — the counter, the binder, the storefront it
+    // feeds — would otherwise present it as being on the table.
+    setOpen(showOnly(away));
 
     // A photo of THIS copy, for the counter view. Read from the listings we
     // already sync rather than fetched per row, and absent for anything
@@ -278,7 +282,7 @@ export default function ShowDesk() {
       .not("resolved_at", "is", null)
       .order("resolved_at", { ascending: false })
       .limit(30);
-    setHistory(past || []);
+    setHistory(showOnly(past));
     setSel(new Set());
     setLoading(false);
   }
@@ -368,7 +372,7 @@ export default function ShowDesk() {
       const candidates = (matches || []).filter((c) => !c.pulled_at && !c.checked_out_at);
       if (candidates.length === 0) {
         const gone = (matches || []).some((c) => c.checked_out_at && !c.pulled_at);
-        misses.push({ sku: s, ok: false, text: gone ? "already checked out" : "no unpulled card with that SKU" });
+        misses.push({ sku: s, ok: false, text: gone ? "already checked out — at a show or in the stream box" : "no unpulled card with that SKU" });
       } else {
         cards.push(candidates[0]);
       }
@@ -766,17 +770,6 @@ export default function ShowDesk() {
     setSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
 
-  async function maxPosition(sb, stackId) {
-    const { data } = await sb
-      .from("stack_cards")
-      .select("position")
-      .eq("stack_id", stackId)
-      .not("position", "is", null)
-      .order("position", { ascending: false })
-      .limit(1);
-    return data && data.length ? data[0].position : 0;
-  }
-
   // Stacks with their live count + free space, in warehouse order.
   const stacksWithSpace = useMemo(
     () => stacks.map((s) => {
@@ -843,28 +836,10 @@ export default function ShowDesk() {
     await load();
   }
 
-  // Return one card to stock: clear the away flag (optionally moving it),
-  // un-hide its listing, and close the checkout row. Returns any warnings.
+  // Return one card to stock — see restoreCheckout() in lib/checkout.js,
+  // which Stream stock shares.
   async function restoreOne(sb, co, patch, returnMode, returnStackId) {
-    const warnings = [];
-    if (co.stack_card_id) {
-      await sb.from("stack_cards").update({ checked_out_at: null, ...patch }).eq("id", co.stack_card_id);
-    } else {
-      warnings.push(`${co.sku || "?"}: its stack card no longer exists — add it back by hand.`);
-    }
-    const u = await unhideListing(co);
-    if (u.error) warnings.push(`${co.sku || "?"}: ${u.error}`);
-    if (u.newItemId && co.stack_card_id) {
-      await sb.from("stack_cards").update({ ebay_item_id: u.newItemId }).eq("id", co.stack_card_id);
-    }
-    await sb.from("stock_checkouts").update({
-      resolved_at: new Date().toISOString(),
-      resolution: "returned",
-      return_mode: returnMode,
-      return_stack_id: returnStackId,
-      relisted_item_id: u.newItemId || null
-    }).eq("id", co.id);
-    return warnings;
+    return restoreCheckout(sb, co, patch, returnMode, returnStackId);
   }
 
   async function checkin(items, mode, chosenStackId = null) {
