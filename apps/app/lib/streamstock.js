@@ -29,9 +29,15 @@
  *
  * 3. **The recommender never offers a card that is already out**, at a show
  *    or on a stream (no crossover, decided 2026-09-25), a card whose listing
- *    has sold, or a card that came home from the stream box inside the
- *    cooldown — without that, the top-up after a return re-picks the cards
- *    just filed back and the box never actually rotates.
+ *    has sold, a GRADED card (decided 2026-09-25: slabs stay off the stream),
+ *    or a card that came home from the stream box inside the cooldown —
+ *    without that, the top-up after a return re-picks the cards just filed
+ *    back and the box never actually rotates.
+ *
+ * 3b. **A box is a MIX, not the dearest 200.** Picks are spread across the
+ *    price range by default, and no more than `maxCopies` of one card go in —
+ *    counting the copies already in the box. Both asked for 2026-09-25, after
+ *    the first version filled the box from the top of the range down.
  *
  * 4. **The pull sheet numbers a card where it IS**, not where the app now
  *    thinks it is. Checking a card out closes the numbering up behind it
@@ -47,7 +53,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import { gameOf } from "./games.js";
 import { normalise, compareSku } from "./showfilter.js";
 import { liveRanks, stackDepths } from "./stackpos.js";
-import { isListingAvailable, soldOutSkus } from "./stockcheck.js";
+import { isListingAvailable, soldOutSkus, keyFromTitle, printingOf } from "./stockcheck.js";
 
 /* ------------------------------------------------------------------ pools */
 
@@ -135,11 +141,14 @@ export const CONDITIONS = [
   { key: "MP", label: "Moderately Played" },
   { key: "HP", label: "Heavily Played" },
   { key: "DMG", label: "Damaged" },
-  { key: "graded", label: "Graded" },
   { key: "unknown", label: "Not stated" }
 ];
 
-/** One condition code for a title. A slab is a slab before it is anything else. */
+/**
+ * One condition code for a title. A slab is a slab before it is anything else
+ * — and a slab is never offered for the box (rule 3), so "graded" is not one
+ * of the chips.
+ */
 export function conditionCode(title) {
   const t = String(title || "");
   if (CompFinderPricing.subjectGradeFrom(t) != null) return "graded";
@@ -212,7 +221,7 @@ export function streamCandidates({
     if (Number.isFinite(t) && t >= cutoff) cooling.add(String(co.stack_card_id));
   }
 
-  const skipped = { away: 0, soldOut: 0, unpriced: 0, cooldown: 0, noSku: 0 };
+  const skipped = { away: 0, soldOut: 0, unpriced: 0, cooldown: 0, graded: 0, noSku: 0 };
   const rows = [];
   for (const c of cards || []) {
     if (!c || c.pulled_at) continue;
@@ -225,8 +234,10 @@ export function streamCandidates({
       else skipped.unpriced += 1;
       continue;
     }
-    if (cooling.has(String(c.id))) { skipped.cooldown += 1; continue; }
     const title = c.title || listing.title || "";
+    const condition = conditionCode(title);
+    if (condition === "graded") { skipped.graded += 1; continue; }
+    if (cooling.has(String(c.id))) { skipped.cooldown += 1; continue; }
     rows.push({
       card: c,
       sku: c.sku,
@@ -235,23 +246,105 @@ export function streamCandidates({
       pricePence: Math.round(Number(listing.price_value) * 100),
       quantity: listing.quantity == null ? null : Number(listing.quantity),
       game: gameOf({ category: listing.extra?.category, title }, gameIndex),
-      condition: conditionCode(title)
+      condition
     });
   }
   return { rows, skipped };
 }
 
+/* -------------------------------------------------------- the mix */
+
+/** How the top-up list is chosen. */
+export const PICK_MODES = [
+  { key: "spread", label: "Spread across the price range" },
+  { key: "top", label: "Highest value first" }
+];
+export const DEFAULT_PICK_MODE = "spread";
+
+/** How many price bands a spread is taken across. */
+export const PRICE_BANDS = 5;
+
+/** No more than this many copies of one card in the box, unless changed. */
+export const DEFAULT_MAX_COPIES = 1;
+
 /**
- * The top-up list: the candidates that pass every filter, dearest first, cut
- * to `count`. Filters are the chosen games, a price band in pence, the
- * character terms and the chosen conditions; an empty choice is everything.
+ * What makes two cards "the same card" for the duplicate limit: the card key
+ * (collector number + first name word, stockcheck.js's) plus the printing. A
+ * reverse holo and a plain copy are two cards — the engine prices them apart,
+ * and so does a buyer. A title with no number falls back to the whole title,
+ * so two identical listings still count as two copies.
+ */
+export function duplicateKey(title) {
+  const p = printingOf(title);
+  const base = keyFromTitle(title) || `t:${normalise(title)}`;
+  return `${base}|${p.reverse ? "r" : ""}${p.stamped ? "s" : ""}`;
+}
+
+/**
+ * Price bands for a spread: equal steps on a LOG scale between the cheapest
+ * and dearest card that fit. Equal-width pound bands would put £2 to £160 in
+ * one band beside a card at £800; log steps give £2–£6, £6–£20, £20–£60 and so
+ * on, which is how a box of cards is actually priced.
  *
- * Returns { picks, matched } — `matched` is how many passed before the cut,
- * so "100 of 340 that fit" is on screen rather than just 100.
+ * Returns [{ loPence, hiPence }] cheapest first; the last band's top is
+ * inclusive. One band when everything costs the same.
+ */
+export function priceBands(rows, n = PRICE_BANDS) {
+  const prices = (rows || []).map((r) => r.pricePence).filter((p) => Number.isFinite(p) && p > 0);
+  if (prices.length === 0) return [];
+  const lo = Math.min(...prices);
+  const hi = Math.max(...prices);
+  const k = lo === hi ? 1 : Math.max(1, Math.round(n));
+  const ratio = hi / lo;
+  const edges = [];
+  for (let i = 0; i <= k; i++) edges.push(i === k ? hi : Math.round(lo * Math.pow(ratio, i / k)));
+  const bands = [];
+  for (let i = 0; i < k; i++) bands.push({ loPence: edges[i], hiPence: edges[i + 1] });
+  return bands;
+}
+
+function bandIndex(bands, pence) {
+  for (let i = 0; i < bands.length - 1; i++) if (pence < bands[i + 1].loPence) return i;
+  return bands.length - 1;
+}
+
+/**
+ * A band's cards in the order a spread takes them: evenly spaced through the
+ * band first, so a band asked for five of forty gets the dearest, the
+ * cheapest and three between rather than its top five; the rest after, in
+ * case the duplicate limit refuses some of the first pass.
+ */
+function spreadOrder(list, want) {
+  const n = list.length;
+  if (n === 0) return [];
+  const q = Math.max(1, Math.min(n, want));
+  const first = new Set();
+  for (let i = 0; i < q; i++) first.add(q === 1 ? 0 : Math.round((i * (n - 1)) / (q - 1)));
+  return [...first].sort((a, b) => a - b).map((i) => list[i]).concat(list.filter((_, i) => !first.has(i)));
+}
+
+/**
+ * The top-up list. Filters first — the chosen games, the price range in
+ * pence, the character terms and the chosen conditions; an empty choice is
+ * everything — then the MIX:
+ *
+ * - `mode: "spread"` (the default) takes cards from every price band in turn,
+ *   dearest band first, so the box is a spread of the range rather than its
+ *   top. A band with fewer cards than its share gives the rest to the others,
+ *   because the rotation just carries on without it.
+ * - `mode: "top"` is dearest first, which is what the first version did.
+ * - `maxCopies` caps copies of one card (`duplicateKey`), counting the ones
+ *   already in the box (`held`, their titles). 0 or blank is no limit.
+ *
+ * Returns { picks, matched, bands, capped } — picks dearest first for
+ * reading; `matched` is how many passed the filters, so "100 of 340" is on
+ * screen; `bands` says how many each band had and gave; `capped` is how many
+ * were passed over for the duplicate limit. Nothing is dropped quietly.
  */
 export function recommendStream(candidates, {
   count = DEFAULT_TARGET, games = null, minPence = null, maxPence = null,
-  names = "", conditions = null
+  names = "", conditions = null, mode = DEFAULT_PICK_MODE,
+  maxCopies = DEFAULT_MAX_COPIES, held = []
 } = {}) {
   const terms = nameTerms(names);
   const lo = minPence == null || minPence === "" ? null : Number(minPence);
@@ -263,9 +356,64 @@ export function recommendStream(candidates, {
     if (hi != null && Number.isFinite(hi) && r.pricePence > hi) return false;
     return matchesNames(r.title, terms);
   });
-  fit.sort((a, b) => b.pricePence - a.pricePence || compareSku(a.sku, b.sku));
+  const dearest = (a, b) => b.pricePence - a.pricePence || compareSku(a.sku, b.sku);
+  fit.sort(dearest);
   const n = Math.max(0, Math.min(MAX_PICKS, Math.round(Number(count) || 0)));
-  return { picks: fit.slice(0, n), matched: fit.length };
+
+  const cap = Math.max(0, Math.round(Number(maxCopies) || 0));
+  const copies = new Map();
+  for (const t of held || []) {
+    const k = duplicateKey(t);
+    copies.set(k, (copies.get(k) || 0) + 1);
+  }
+  const cappedKeys = new Set();
+  let capped = 0;
+  const take = (r) => {
+    if (cap > 0) {
+      const k = duplicateKey(r.title);
+      if ((copies.get(k) || 0) >= cap) {
+        capped += 1;
+        cappedKeys.add(k);
+        return false;
+      }
+      copies.set(k, (copies.get(k) || 0) + 1);
+    }
+    return true;
+  };
+
+  const picks = [];
+  let bands = [];
+  if (mode === "top") {
+    for (const r of fit) {
+      if (picks.length >= n) break;
+      if (take(r)) picks.push(r);
+    }
+  } else {
+    bands = priceBands(fit).map((b) => ({ ...b, available: 0, picked: 0, rows: [] }));
+    for (const r of fit) {
+      const b = bands[bandIndex(bands, r.pricePence)];
+      b.rows.push(r);
+      b.available += 1;
+    }
+    const share = bands.length ? Math.ceil(n / bands.length) : 0;
+    const queues = bands.map((b) => spreadOrder(b.rows, share));
+    const at = queues.map(() => 0);
+    // Round-robin, dearest band first, until the count is met or every band
+    // has run dry.
+    let moved = true;
+    while (picks.length < n && moved) {
+      moved = false;
+      for (let i = bands.length - 1; i >= 0 && picks.length < n; i--) {
+        while (at[i] < queues[i].length) {
+          const r = queues[i][at[i]++];
+          if (take(r)) { picks.push(r); bands[i].picked += 1; moved = true; break; }
+        }
+      }
+    }
+    bands = bands.map(({ rows, ...b }) => b);
+  }
+  picks.sort(dearest);
+  return { picks, matched: fit.length, bands, capped, cappedCards: cappedKeys.size };
 }
 
 /* ------------------------------------------------------------- the box */

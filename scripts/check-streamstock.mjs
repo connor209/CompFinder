@@ -24,6 +24,7 @@ import { fileURLToPath } from "node:url";
 import {
   poolOf, isShowCheckout, isStreamCheckout, showOnly, streamOnly, isMissingPool, withPool,
   streamHideMode, conditionCode, nameTerms, matchesNames, streamCandidates, recommendStream,
+  duplicateKey, priceBands, CONDITIONS, DEFAULT_PICK_MODE, DEFAULT_MAX_COPIES,
   airingCounts, boxStatus, topUpCount, pullSheet, latestBatch, matchAired, streamTally,
   AIRINGS_BEFORE_RETURN, STREAMS_BACKSTOP, SHOW_POOL, STREAM_POOL
 } from "../apps/app/lib/streamstock.js";
@@ -130,12 +131,14 @@ const RETURNED = [
   { stack_card_id: "a", resolution: "sold", resolved_at: daysAgo(2) }
 ];
 const cand = streamCandidates({ cards: CARDS, listings: LISTINGS, recentStream: RETURNED, now: NOW });
-eq("offered: the free, priced cards outside the cooldown", cand.rows.map((r) => r.sku).sort(), ["A1", "A6", "A9"]);
-eq("left out, and counted", cand.skipped, { away: 1, soldOut: 1, unpriced: 1, cooldown: 1, noSku: 1 });
+eq("offered: the free, priced, raw cards outside the cooldown", cand.rows.map((r) => r.sku).sort(), ["A1", "A6"]);
+eq("left out, and counted", cand.skipped, { away: 1, soldOut: 1, unpriced: 1, cooldown: 1, graded: 1, noSku: 1 });
+ok("a slab is never offered for the box (decided 2026-09-25)", !cand.rows.some((r) => r.condition === "graded"));
+ok("and graded is not a condition chip", !CONDITIONS.some((c) => c.key === "graded"));
 ok("a pulled card is neither offered nor counted", !cand.rows.some((r) => r.sku === "A7"));
 ok("a card back from the box 60 days ago is offered again", cand.rows.some((r) => r.sku === "A6"));
 ok("a SOLD checkout is not a cooldown", cand.rows.some((r) => r.sku === "A1"));
-eq("cooldown 0 lets the returned card straight back", streamCandidates({ cards: CARDS, listings: LISTINGS, recentStream: RETURNED, now: NOW, cooldownDays: 0 }).rows.map((r) => r.sku).sort(), ["A1", "A5", "A6", "A9"]);
+eq("cooldown 0 lets the returned card straight back", streamCandidates({ cards: CARDS, listings: LISTINGS, recentStream: RETURNED, now: NOW, cooldownDays: 0 }).rows.map((r) => r.sku).sort(), ["A1", "A5", "A6"]);
 const a1 = cand.rows.find((r) => r.sku === "A1");
 eq("price in pence off our own ask", a1.pricePence, 12000);
 eq("the item id travels, for matching the relay later", a1.itemId, "1");
@@ -152,16 +155,79 @@ const ROWS = [
   { card: { id: 5 }, sku: "B10", title: "Charizard V 17/189", pricePence: 1500, game: "pokemon", condition: "NM" },
   { card: { id: 6 }, sku: "B9", title: "Charizard V 17/189", pricePence: 1500, game: "pokemon", condition: "NM" }
 ];
-const top = recommendStream(ROWS, { count: 3 });
-eq("dearest first, cut to the count", top.picks.map((r) => r.sku), ["B4", "B1", "B3"]);
+// The filters, on "top" with no duplicate limit so each is tested on its own.
+const plain = (o) => recommendStream(ROWS, { mode: "top", maxCopies: 0, ...o });
+const top = plain({ count: 3 });
+eq("top: dearest first, cut to the count", top.picks.map((r) => r.sku), ["B4", "B1", "B3"]);
 eq("matched is before the cut", top.matched, 6);
-eq("equal prices by SKU as read off a box (B9 before B10)", recommendStream(ROWS, { count: 10, names: "charizard v" }).picks.map((r) => r.sku), ["B9", "B10"]);
-eq("games", recommendStream(ROWS, { count: 10, games: new Set(["yugioh"]) }).picks.map((r) => r.sku), ["B3"]);
-eq("conditions", recommendStream(ROWS, { count: 10, conditions: new Set(["LP", "graded"]) }).picks.map((r) => r.sku), ["B4", "B2"]);
-eq("a price band, both ends inclusive", recommendStream(ROWS, { count: 10, minPence: 1500, maxPence: 12000 }).picks.map((r) => r.sku), ["B1", "B3", "B9", "B10"]);
-eq("characters", recommendStream(ROWS, { count: 10, names: "charizard" }).picks.map((r) => r.sku), ["B1", "B9", "B10"]);
-eq("count 0 picks nothing", recommendStream(ROWS, { count: 0 }).picks, []);
-eq("an empty choice of games is every game", recommendStream(ROWS, { count: 10, games: new Set() }).picks.length, 6);
+eq("equal prices by SKU as read off a box (B9 before B10)", plain({ count: 10, names: "charizard v" }).picks.map((r) => r.sku), ["B9", "B10"]);
+eq("games", plain({ count: 10, games: new Set(["yugioh"]) }).picks.map((r) => r.sku), ["B3"]);
+eq("conditions", plain({ count: 10, conditions: new Set(["LP", "graded"]) }).picks.map((r) => r.sku), ["B4", "B2"]);
+eq("a price range, both ends inclusive", plain({ count: 10, minPence: 1500, maxPence: 12000 }).picks.map((r) => r.sku), ["B1", "B3", "B9", "B10"]);
+eq("characters", plain({ count: 10, names: "charizard" }).picks.map((r) => r.sku), ["B1", "B9", "B10"]);
+eq("count 0 picks nothing", plain({ count: 0 }).picks, []);
+eq("an empty choice of games is every game", plain({ count: 10, games: new Set() }).picks.length, 6);
+
+/* --------------------------------------------------- 5b. the mix and dupes */
+
+eq("the default is a spread", DEFAULT_PICK_MODE, "spread");
+eq("the default is no duplicates", DEFAULT_MAX_COPIES, 1);
+ok("two copies of one card are one key", duplicateKey("Charizard V 17/189 Darkness Ablaze") === duplicateKey("Charizard V 17/189 NM"));
+ok("a reverse holo is not the plain copy", duplicateKey("Emboar 33/236 Reverse Holo") !== duplicateKey("Emboar 33/236"));
+ok("a stamped copy is not the plain one", duplicateKey("Shedinja 14/107 Prerelease Stamp") !== duplicateKey("Shedinja 14/107"));
+ok("different numbers are different cards", duplicateKey("Pikachu 58/102") !== duplicateKey("Pikachu 60/64"));
+ok("a title with no number still dedupes against itself", duplicateKey("Mystery Lot Card") === duplicateKey("mystery lot card"));
+
+eq("one copy: B9 and B10 are the same card, so one goes", recommendStream(ROWS, { mode: "top", count: 10, names: "charizard v" }).picks.map((r) => r.sku), ["B9"]);
+eq("and the refusal is counted", recommendStream(ROWS, { mode: "top", count: 10, names: "charizard v" }).capped, 1);
+eq("two copies lets both in", recommendStream(ROWS, { mode: "top", count: 10, names: "charizard v", maxCopies: 2 }).picks.length, 2);
+eq("0 is no limit", recommendStream(ROWS, { mode: "top", count: 10, names: "charizard v", maxCopies: 0 }).picks.length, 2);
+eq("copies already in the box count toward the limit",
+  recommendStream(ROWS, { mode: "top", count: 10, names: "charizard v", held: ["Charizard V 17/189 Brilliant Stars"] }).picks, []);
+eq("a reverse holo in the box does not block the plain card",
+  recommendStream(ROWS, { mode: "top", count: 10, names: "charizard v", held: ["Charizard V 17/189 Reverse Holo"] }).picks.length, 1);
+
+{
+  // 100 distinct cards from £1 to ~£1000, dearest-heavy at the top by count.
+  const wide = Array.from({ length: 100 }, (_, i) => ({
+    card: { id: `w${i}` }, sku: `W${i}`, title: `Card ${i} ${i + 1}/200`,
+    pricePence: Math.round(100 * Math.pow(1000, i / 99)), game: "pokemon", condition: "NM"
+  }));
+  const bands = priceBands(wide);
+  eq("five bands", bands.length, 5);
+  eq("bands run cheapest to dearest, end to end", [bands[0].loPence, bands[4].hiPence], [100, 100000]);
+  ok("log steps: each band's top is the next one's bottom", bands.every((b, i) => i === 0 || b.loPence === bands[i - 1].hiPence));
+  eq("one band when every card costs the same", priceBands([{ pricePence: 500 }, { pricePence: 500 }]).length, 1);
+  eq("no bands for nothing", priceBands([]), []);
+
+  const spread = recommendStream(wide, { count: 20 });
+  eq("a spread fills the count", spread.picks.length, 20);
+  eq("every band gives its share", spread.bands.map((b) => b.picked), [4, 4, 4, 4, 4]);
+  ok("it reaches the cheap end, not just the top", spread.picks.some((r) => r.pricePence < 500));
+  ok("and still includes the dear end", spread.picks.some((r) => r.pricePence > 50000));
+  const topOnly = recommendStream(wide, { mode: "top", count: 20 });
+  ok("top mode is the dear end only — what the first version did", topOnly.picks.every((r) => r.pricePence > 20000));
+  eq("picks are shown dearest first either way", spread.picks.map((r) => r.pricePence), [...spread.picks.map((r) => r.pricePence)].sort((a, b) => b - a));
+  ok("a band spreads WITHIN itself: its cheapest and dearest are both taken", (() => {
+    const inTop = wide.filter((r) => r.pricePence >= bands[4].loPence);
+    const got = new Set(spread.picks.map((r) => r.sku));
+    return got.has(inTop[0].sku) && got.has(inTop[inTop.length - 1].sku);
+  })());
+
+  // A thin band gives its unused share to the others.
+  const lopsided = [...wide.slice(0, 60), wide[99]];
+  const lop = recommendStream(lopsided, { count: 20 });
+  eq("a thin band's share goes to the others, and the count is still met", lop.picks.length, 20);
+  ok("the lone dear card is in", lop.picks.some((r) => r.sku === "W99"));
+
+  const fewer = recommendStream(wide.slice(0, 3), { count: 20 });
+  eq("asking for more than there is takes all there is", fewer.picks.length, 3);
+
+  const dupes = [...wide.slice(0, 10), ...wide.slice(0, 10).map((r) => ({ ...r, card: { id: `${r.card.id}b` }, sku: `${r.sku}b` }))];
+  const d = recommendStream(dupes, { count: 20 });
+  eq("with one copy each, ten cards is all a spread can take", d.picks.length, 10);
+  eq("and it says ten were passed over", d.capped, 10);
+}
 
 /* ------------------------------------------------------------ 6. the box */
 

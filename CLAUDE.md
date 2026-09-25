@@ -210,7 +210,9 @@ stream` (the relay, only while streaming).
   `show_expenses` is named in its store alone.
 - `scripts/check-streamstock.mjs` — the eBay Live box: that a checkout with no
   pool is a SHOW checkout, what the recommender offers and what it leaves out
-  (already out, sold, unpriced, back inside the cooldown), that "mew" is not
+  (already out, sold, unpriced, graded, back inside the cooldown), that a
+  spread reaches every price band and a duplicate cap counts what is already
+  in the box, that "mew" is not
   Mewtwo, that three unsold airings send a card home and a skipped lot is not
   an airing, that the pull sheet numbers a card where it physically is, and —
   the one that leaks — a grep that every reader of `stock_checkouts` has
@@ -2178,6 +2180,19 @@ stream box and a show.**
   cooldown — without that, the top-up after a return re-picks the cards just
   filed back and the box never rotates. Characters match WHOLE words: "mew"
   pulling every Mewtwo is a hundred wrong cards in a box.
+- **A box is a mix, not the dearest 200** (asked for 2026-09-25, after the
+  first version filled it from the top down). The default **spread** splits
+  what fits into five LOG-scale price bands — £2–£6, £6–£20 and so on, since
+  equal pound bands would put £2 and £160 together beside one £800 card — and
+  takes from each in turn, evenly spaced within a band, a thin band's share
+  going to the others. "Highest value first" is still there. The screen shows
+  each band's picked-of-available.
+- **Duplicates are capped**, one copy by default, counting the copies already
+  in the box. "The same card" is `duplicateKey()`: stockcheck's card key plus
+  the printing, so a reverse holo and a plain copy are two cards. What the cap
+  turned away is counted on screen.
+- **Graded cards are never offered** (decided 2026-09-25) and are counted in
+  the left-out line; "graded" is not a condition chip.
 - **The pull sheet numbers a card where it physically IS.** Checking out closes
   the numbering up at once, but the card is on the shelf until somebody pulls
   it — so `pullSheet()` ranks the batch as if still present and lists each

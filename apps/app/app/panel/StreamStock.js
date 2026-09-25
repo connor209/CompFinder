@@ -17,7 +17,7 @@ import {
 import {
   streamCandidates, recommendStream, boxStatus, topUpCount, pullSheet, latestBatch,
   matchAired, streamTally, defaultStreamName, streamHideMode, isMissingPool,
-  CONDITIONS, AIRINGS_BEFORE_RETURN, STREAMS_BACKSTOP, DEFAULT_TARGET, COOLDOWN_DAYS
+  CONDITIONS, PICK_MODES, DEFAULT_PICK_MODE, DEFAULT_MAX_COPIES, AIRINGS_BEFORE_RETURN, STREAMS_BACKSTOP, DEFAULT_TARGET, COOLDOWN_DAYS
 } from "@/lib/streamstock.js";
 import {
   loadStreams, loadAirings, createStream, closeStream, reopenStream,
@@ -102,6 +102,8 @@ export default function StreamStock() {
   const [maxP, setMaxP] = useState("");
   const [names, setNames] = useState("");
   const [cooldown, setCooldown] = useState(String(COOLDOWN_DAYS));
+  const [pickMode, setPickMode] = useState(DEFAULT_PICK_MODE);
+  const [maxCopies, setMaxCopies] = useState(String(DEFAULT_MAX_COPIES));
   const [recOff, setRecOff] = useState(new Set());
 
   const [streamId, setStreamId] = useState("");
@@ -221,9 +223,11 @@ export default function StreamStock() {
   const rec = useMemo(
     () => recommendStream(candidates.rows, {
       count: wanted, games, conditions: conds, names,
-      minPence: penceFrom(minP), maxPence: penceFrom(maxP)
+      minPence: penceFrom(minP), maxPence: penceFrom(maxP),
+      // The box's own titles, so the duplicate limit counts copies already in it.
+      mode: pickMode, maxCopies, held: box.map((co) => co.title || "")
     }),
-    [candidates, wanted, games, conds, names, minP, maxP]
+    [candidates, wanted, games, conds, names, minP, maxP, pickMode, maxCopies, box]
   );
   const ranks = useMemo(() => liveRanks(cards), [cards]);
   const depths = useMemo(() => stackDepths(cards), [cards]);
@@ -535,6 +539,20 @@ export default function StreamStock() {
               Not back within (days)
               <input type="number" min="0" max="365" value={cooldown} onChange={(e) => setCooldown(e.target.value)} />
             </label>
+            <label>
+              Max copies of one card
+              <input
+                type="number" min="0" max="20" value={maxCopies}
+                title="Counts the copies already in the box. 0 is no limit."
+                onChange={(e) => setMaxCopies(e.target.value)}
+              />
+            </label>
+            <label>
+              Mix
+              <select className="sd-select" value={pickMode} onChange={(e) => setPickMode(e.target.value)}>
+                {PICK_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+              </select>
+            </label>
           </div>
           <div className="ss-filters">
             <label>
@@ -567,11 +585,22 @@ export default function StreamStock() {
             ))}
           </div>
           <p className="hint hint-small" style={{ marginTop: 0 }}>
-            {rec.matched} card{rec.matched === 1 ? "" : "s"} in the stacks fit; showing the top {rec.picks.length}.
+            {rec.matched} card{rec.matched === 1 ? "" : "s"} in the stacks fit; picking {rec.picks.length}
+            {pickMode === "spread" ? " spread across the price range" : ", dearest first"}.
+            {rec.capped ? ` ${rec.capped} passed over as duplicates (${rec.cappedCards} card${rec.cappedCards === 1 ? "" : "s"} already at the limit of ${maxCopies}).` : ""}
             {" "}Left out: {skipped.away} already out (show or stream) · {skipped.soldOut} sold on eBay (quantity 0 —
-            reconcile those) · {skipped.unpriced} with no live listing price · {skipped.cooldown} back from the box
-            in the last {Number(cooldown) || 0} days{skipped.noSku ? ` · ${skipped.noSku} with no SKU` : ""}.
+            reconcile those) · {skipped.unpriced} with no live listing price · {skipped.graded} graded · {skipped.cooldown} back
+            from the box in the last {Number(cooldown) || 0} days{skipped.noSku ? ` · ${skipped.noSku} with no SKU` : ""}.
           </p>
+          {rec.bands.length > 1 ? (
+            <div className="ss-stats" style={{ marginBottom: 10 }}>
+              {[...rec.bands].reverse().map((b) => (
+                <span className="badge2" key={b.loPence} title={`${b.available} card${b.available === 1 ? "" : "s"} in this band`}>
+                  {pounds(b.loPence)}–{pounds(b.hiPence)} · {b.picked} of {b.available}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {rec.picks.length === 0 ? (
             <p className="dd-empty">Nothing fits those filters.</p>
           ) : (
