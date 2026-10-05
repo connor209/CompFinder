@@ -1878,6 +1878,14 @@ Last Comp's proposition is having no stake in the number.
   outlives its show. A dead link says the show has finished rather than
   that the link is broken. Unknown, malformed and migration-pending all read
   the same, so the page cannot be used to tell them apart.
+- **A permanent QR is the one you print as stickers.** No expiry AND no show
+  filter (`isPermanent()`) — a link filtered to "Glasgow" serves an empty
+  binder at the next show however long it lives, so the panel will not make
+  one tied to a show name. Switching it off is a **pause** (`canResume()`):
+  its stickers are on boxes nobody can recall, so it stays on the desk with
+  Switch back on, and `loadStorefronts` reads permanent links separately so
+  twenty newer dated ones can't push it off the list. Dated links stay
+  one-way. **🏷 Print stickers** is offered on the permanent link only.
 - **`noindex` and `no-referrer`.** The URL is the key, and every picture is
   fetched from eBay's CDN — a default Referer would hand the token to a third
   party's logs on every image. The QR is drawn locally for the same reason: a

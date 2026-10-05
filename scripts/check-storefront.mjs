@@ -35,6 +35,7 @@ import { binderView } from "../apps/app/lib/binder.js";
 import { buildSetIndex } from "@compfinder/core/setmatch.js";
 import {
   loadPublicStorefront, newToken, isWellFormedToken, storefrontStatus, expiresAtFor,
+  isPermanent, canResume, resumeStorefront,
   storefrontUrl, CHECKOUT_COLUMNS, LISTING_COLUMNS
 } from "../apps/app/lib/storefront-store.js";
 import { qrMatrix, qrPath } from "../apps/app/lib/qr.js";
@@ -148,6 +149,27 @@ const listings = [
   ok(expiresAtFor(0, now) === null, "'until I switch it off' set an expiry");
   ok(expiresAtFor(3, now) === "2026-09-27T12:00:00.000Z", `three days is not three days: ${expiresAtFor(3, now)}`);
   ok(storefrontUrl("https://x.test/", "abc") === "https://x.test/show/abc", "the storefront URL is wrong");
+}
+
+// --- The permanent QR: printed as stickers, so it must outlive every show ---
+{
+  ok(isPermanent({ expires_at: null, event: null }), "a link with no expiry and no show is not permanent");
+  ok(isPermanent({ expires_at: null, event: "  " }), "a blank show name made a link non-permanent");
+  ok(!isPermanent({ expires_at: null, event: "Glasgow" }), "a link tied to one show counted as permanent — it goes empty at the next show");
+  ok(!isPermanent({ expires_at: "2027-01-01T00:00:00Z", event: null }), "a dated link counted as permanent");
+  ok(canResume({ revoked_at: "2026-09-24T11:00:00Z", expires_at: null, event: null }), "a paused permanent QR cannot be switched back on — every sticker is dead");
+  ok(!canResume({ revoked_at: "2026-09-24T11:00:00Z", expires_at: "2027-01-01T00:00:00Z" }), "a switched-off dated link can be revived");
+  ok(!canResume({ revoked_at: "2026-09-24T11:00:00Z", expires_at: null, event: "Glasgow" }), "a switched-off show link can be revived");
+  ok(!canResume({ revoked_at: null, expires_at: null }), "a live link offers to be switched back on");
+  const now = new Date("2026-09-24T12:00:00Z");
+  ok(storefrontStatus({ expires_at: null, revoked_at: null }, now) === "live", "a resumed permanent link is not live");
+  let touched = false;
+  const sb = { from: () => { touched = true; return { update: () => ({ eq: async () => ({ error: null }) }) }; } };
+  const refused = await resumeStorefront(sb, { id: "x", revoked_at: "2026-09-24T11:00:00Z", expires_at: "2026-09-27T00:00:00Z" });
+  ok(!refused.ok && !touched, "resumeStorefront wrote to a dated link it should have refused");
+  const panel = src("apps/app/app/panel/StorefrontPanel.js");
+  ok(/event:\s*forEvent && !permanent \? showName : ""/.test(panel), "the panel can make a permanent QR tied to one show's name");
+  ok(/keep \?[\s\S]{0,600}printStickers/.test(panel), "stickers are offered on a link that is not permanent");
 }
 
 // --- The loader, against a fake service-role client ----------------------

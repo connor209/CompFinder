@@ -9,7 +9,8 @@
  *
  * Two halves, and they are held to different standards:
  *
- * - **The desk's half** (loadStorefronts, createStorefront, revokeStorefront)
+ * - **The desk's half** (loadStorefronts, createStorefront, revokeStorefront,
+ *   resumeStorefront)
  *   runs in the logged-in browser through RLS, like every other store here,
  *   and degrades to `{ ok: false, missing: true }` until 029 is applied.
  *
@@ -98,6 +99,27 @@ export function isLive(row, now = new Date()) {
   return storefrontStatus(row, now) === "live";
 }
 
+/**
+ * A PERMANENT link: no expiry and no show filter — the one you print as a
+ * sticker or a sign and keep. Both halves are required. A link filtered to
+ * "Glasgow" serves an empty binder at the next show however long it lives,
+ * so a printed QR has to mean "whatever is checked out right now".
+ */
+export function isPermanent(row) {
+  return Boolean(row) && !row.expires_at && !String(row.event || "").trim();
+}
+
+/**
+ * Can a switched-off link be switched back ON? Only a permanent one. A printed
+ * sticker is on boxes and binders you cannot recall, so switching it off
+ * between shows must not be a one-way door that leaves every copy dead. A
+ * dated link stays one-way: it was made for one show, and the next show gets
+ * its own.
+ */
+export function canResume(row) {
+  return Boolean(row?.revoked_at) && isPermanent(row);
+}
+
 /** Does this error mean "migration 029 hasn't been run"? */
 export function isMissingTable(err) {
   const msg = String(err?.message || err || "");
@@ -109,15 +131,28 @@ export function isMissingTable(err) {
 /** How many links the desk lists. Old ones are history, not a to-do list. */
 export const STOREFRONTS_LIMIT = 20;
 
+const DESK_COLUMNS = "id,token,title,event,include_online,created_at,expires_at,revoked_at,views,last_viewed_at";
+
 export async function loadStorefronts(sb) {
   try {
-    const { data, error } = await sb
-      .from("show_storefronts")
-      .select("id,token,title,event,include_online,created_at,expires_at,revoked_at,views,last_viewed_at")
-      .order("created_at", { ascending: false })
-      .limit(STOREFRONTS_LIMIT);
+    // The permanent links are read on their own as well: a sticker printed a
+    // year ago must not fall off the desk because twenty dated links were
+    // made since — it is the one link still out in the world.
+    const [recent, permanent] = await Promise.all([
+      sb.from("show_storefronts").select(DESK_COLUMNS).order("created_at", { ascending: false }).limit(STOREFRONTS_LIMIT),
+      sb.from("show_storefronts").select(DESK_COLUMNS).is("expires_at", null).order("created_at", { ascending: false }).limit(STOREFRONTS_LIMIT)
+    ]);
+    const error = recent.error || permanent.error;
     if (error) return isMissingTable(error) ? { ok: false, missing: true, rows: [] } : { ok: false, error: error.message, rows: [] };
-    return { ok: true, rows: data || [] };
+    const seen = new Set();
+    const rows = [];
+    for (const r of [...(recent.data || []), ...(permanent.data || [])]) {
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      rows.push(r);
+    }
+    rows.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    return { ok: true, rows };
   } catch (e) {
     return { ok: false, error: String(e?.message || e), rows: [] };
   }
@@ -137,7 +172,7 @@ export async function createStorefront(sb, { title = "", event = "", includeOnli
         include_online: Boolean(includeOnline),
         expires_at: expiresAtFor(days)
       })
-      .select("id,token,title,event,include_online,created_at,expires_at,revoked_at,views,last_viewed_at")
+      .select(DESK_COLUMNS)
       .single();
     if (error) return isMissingTable(error) ? { ok: false, missing: true } : { ok: false, error: error.message };
     return { ok: true, row: data };
@@ -150,6 +185,18 @@ export async function createStorefront(sb, { title = "", event = "", includeOnli
 export async function revokeStorefront(sb, id) {
   try {
     const { error } = await sb.from("show_storefronts").update({ revoked_at: new Date().toISOString() }).eq("id", id);
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+/** Switch a permanent link back on. Refused for anything canResume() refuses. */
+export async function resumeStorefront(sb, row) {
+  if (!canResume(row)) return { ok: false, error: "Only a permanent link can be switched back on." };
+  try {
+    const { error } = await sb.from("show_storefronts").update({ revoked_at: null }).eq("id", row.id);
     if (error) return { ok: false, error: error.message };
     return { ok: true };
   } catch (e) {
