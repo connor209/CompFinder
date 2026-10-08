@@ -19,6 +19,16 @@ function numKey(s) {
 }
 
 /**
+ * Where a SKU says a card lives, read the same way Stacks → Auto-import reads
+ * it: `A50` is stack A, position 50. Anything else (a dated batch SKU like
+ * `26.08.06-010-029`) has no stack to name, and gets null.
+ */
+function stackOfSku(sku) {
+  const m = String(sku || "").trim().match(/^([A-Za-z]+)[-_ ]?(\d{1,4})$/);
+  return m ? { stack: m[1].toUpperCase(), pos: parseInt(m[2], 10) } : null;
+}
+
+/**
  * Order stack labels like spreadsheet columns rather than a dictionary:
  * A, B, C … Z, then AA, AB … (shorter labels first, then alpha), so a pile
  * "AE" sorts after "Z" instead of jumping in right after "A". Falls back to a
@@ -43,7 +53,8 @@ export default function PullSheet() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState([]); // active pick rows
   const [doneCount, setDoneCount] = useState(0); // already-pulled (picked earlier)
-  const [unmatched, setUnmatched] = useState([]);
+  const [unmatched, setUnmatched] = useState([]); // true variation picks: no SKU, or a pick-your-card listing
+  const [unstacked, setUnstacked] = useState([]); // has a SKU, but no card in any stack carries it
   const [away, setAway] = useState([]); // ordered on eBay but checked out to a show
   const [stackName, setStackName] = useState(new Map());
   const [stackOrder, setStackOrder] = useState(new Map()); // stackId -> [{id,position}]
@@ -145,10 +156,11 @@ export default function PullSheet() {
 
     const active = [];
     const unm = [];
+    const unstacked = [];
     const awayLines = [];
     let done = 0;
     for (const l of lines) {
-      const skl = l.sku ? l.sku.toLowerCase() : null;
+      const skl = l.sku ? String(l.sku).trim().toLowerCase() || null : null;
       // ONE LINE ITEM CAN BE SEVERAL CARDS. fetchPendingOrders has always
       // returned the quantity and this loop always ignored it, which is
       // invisible while every listing is a single card and is a card short the
@@ -172,6 +184,13 @@ export default function PullSheet() {
           awayLines.push({ key, sku: l.sku, title: l.title });
         } else if (skl && pulledSkus.has(skl)) {
           done += 1;
+        } else if (skl && !l.variation) {
+          // An ordinary SKU'd listing whose SKU is in no stack — the stacks
+          // were never told about it (Auto-import not run since it was listed,
+          // or a SKU format Auto-import can't read). This used to fall into the
+          // variation picks below, which made every un-imported card look like
+          // a pick-your-card sale and sent you to the set shelves for it.
+          unstacked.push({ key, sku: l.sku, title: l.title, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, ...stackOfSku(l.sku), ...unitOf });
         } else {
           // Loose / variation pick — no stack match. Sort these by card number so
           // they're a single pass through numbered storage (2, 4, 17, 101…).
@@ -192,17 +211,24 @@ export default function PullSheet() {
       return s !== 0 ? s : a.nk - b.nk;
     };
     unm.sort(bySetThenNumber);
+    // Stack-shaped SKUs in stack-then-number order, the batch-style ones after
+    // them by SKU — which for a dated SKU is batch order.
+    unstacked.sort((a, b) => {
+      if (!!a.stack !== !!b.stack) return a.stack ? -1 : 1;
+      if (a.stack) return a.stack !== b.stack ? pileCompare(a.stack, b.stack) : a.pos - b.pos;
+      return String(a.sku).localeCompare(String(b.sku), undefined, { numeric: true, sensitivity: "base" });
+    });
 
     // ---- Pack data: every order line in PULL order (stack, then position;
     // loose/variation picks by card number, last). Piles are numbered later
     // from the display sequence, so they form left-to-right as you deal.
     const anyBySku = new Map();
     for (const c of cards) {
-      const skl = c.sku ? String(c.sku).toLowerCase() : null;
+      const skl = c.sku ? String(c.sku).trim().toLowerCase() : null;
       if (skl && !anyBySku.has(skl)) anyBySku.set(skl, c);
     }
     const pack = lines.map((l) => {
-      const skl = l.sku ? l.sku.toLowerCase() : null;
+      const skl = l.sku ? String(l.sku).trim().toLowerCase() || null : null;
       const card = skl ? anyBySku.get(skl) : null;
       return {
         key: l.lineItemId,
@@ -237,6 +263,7 @@ export default function PullSheet() {
     setIndexByCard(idxByCard);
     setRows(active);
     setUnmatched(unm);
+    setUnstacked(unstacked);
     setAway(awayLines);
     setDoneCount(done);
     setPicked(new Set());
@@ -431,7 +458,7 @@ export default function PullSheet() {
         </div>
       ) : null}
 
-      {total === 0 && unmatched.length === 0 && away.length === 0 ? (
+      {total === 0 && unmatched.length === 0 && unstacked.length === 0 && away.length === 0 ? (
         <div className="panel"><p className="dd-empty">No orders waiting to be picked. 🎉</p></div>
       ) : null}
 
@@ -464,6 +491,40 @@ export default function PullSheet() {
           </div>
         </div>
       ))}
+
+      {unstacked.length > 0 ? (
+        <>
+          <div className="ps-section-head">
+            <span className="eyebrow">Has a SKU, but not in any stack ({unstacked.length})</span>
+            <p className="hint hint-small" style={{ margin: "4px 0 0" }}>
+              Ordinary listings, not variation picks — their SKU just isn&apos;t on a stack card, so there&apos;s no live position to give.
+              {unstacked.some((u) => u.stack) ? <> For the stack-style SKUs, run <b>Stacks → Auto-import</b> and refresh; they&apos;ll move up into their stacks.</> : null}
+              {unstacked.some((u) => !u.stack) ? <> Batch-style SKUs aren&apos;t a stack + position, so Auto-import can&apos;t place them — add them to a stack by hand, or pick them from their batch.</> : null}
+            </p>
+          </div>
+          <div className="panel loose-set">
+            <div className="panel-head">
+              <h3 className="loose-set-name">By SKU</h3>
+              <span className="badge2">{unstacked.filter((u) => !loosePicked.has(u.key)).length} to pick</span>
+            </div>
+            <div className="stack-list">
+              {unstacked.map((u) => {
+                const isPicked = loosePicked.has(u.key);
+                return (
+                  <label className={`ps-row loose-row${isPicked ? " done" : ""}`} key={u.key}>
+                    <input type="checkbox" checked={isPicked} onChange={() => toggleLoose(u.key)} />
+                    <span className="stack-pos">{isPicked ? "✓" : u.stack ? `${u.stack}·${u.pos}` : "—"}</span>
+                    <span className="loose-card">
+                      <span className="loose-card-name">{u.sku}{u.ofUnits ? <span className="badge2"> copy {u.unit} of {u.ofUnits}</span> : null}</span>
+                      <span className="loose-card-buyer">{u.title}{u.deliveryName || u.buyer ? ` — for ${u.deliveryName || u.buyer}` : ""}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : null}
 
       {unmatched.length > 0 ? (
         <>
