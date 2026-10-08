@@ -836,6 +836,7 @@ export async function fetchPendingOrders(accessToken) {
       lines.push({
         orderId: String(order.orderId || ""),
         lineItemId: String(li.lineItemId || ""),
+        ebayItemId: li.legacyItemId != null ? String(li.legacyItemId) : null,
         sku: li.sku != null ? String(li.sku) : null,
         title: li.title != null ? String(li.title) : "",
         variation,

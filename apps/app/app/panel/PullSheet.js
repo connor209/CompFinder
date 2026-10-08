@@ -62,6 +62,7 @@ export default function PullSheet() {
   const [picked, setPicked] = useState(new Set());
   const [loosePicked, setLoosePicked] = useState(new Set()); // ephemeral checklist for loose/variation picks (not stack cards)
   const [committing, setCommitting] = useState(false);
+  const [addingToStacks, setAddingToStacks] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -190,7 +191,7 @@ export default function PullSheet() {
           // or a SKU format Auto-import can't read). This used to fall into the
           // variation picks below, which made every un-imported card look like
           // a pick-your-card sale and sent you to the set shelves for it.
-          unstacked.push({ key, sku: l.sku, title: l.title, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, ...stackOfSku(l.sku), ...unitOf });
+          unstacked.push({ key, sku: String(l.sku).trim(), title: l.title, ebayItemId: l.ebayItemId || null, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, ...stackOfSku(l.sku), ...unitOf });
         } else {
           // Loose / variation pick — no stack match. Sort these by card number so
           // they're a single pass through numbered storage (2, 4, 17, 101…).
@@ -292,6 +293,56 @@ export default function PullSheet() {
       else n.add(cardId);
       return n;
     });
+  }
+
+  // Put the stack-style SKUs from open orders into their stacks. Stacks →
+  // Auto-import cannot do this: it reads the synced ACTIVE listings, and a
+  // single card that has sold has an ended listing — by the time it is on
+  // this sheet its SKU exists only on the order. Same reading as Auto-import
+  // (FY18 is stack FY, position 18), same rule: existing stacks are reused by
+  // name, missing ones are created, nothing already in a stack is touched.
+  // The card is still physically on the shelf, so it goes in as PRESENT — that
+  // is what gives it a live position, and what makes every card behind it in
+  // that stack count to the right number again.
+  async function addUnstackedToStacks() {
+    const todo = unstacked.filter((u) => u.stack);
+    if (!todo.length) return;
+    const stackNames = [...new Set(todo.map((u) => u.stack))];
+    if (!confirm(`Add ${todo.length} ordered card(s) to stack${stackNames.length === 1 ? "" : "s"} ${stackNames.join(", ")}?\n\nEach SKU like FY18 goes into stack FY at position 18. Existing stacks are reused; nothing already in a stack changes.`)) return;
+    setAddingToStacks(true);
+    setError("");
+    try {
+      const sb = supabase();
+      const { data: { user } } = await sb.auth.getUser();
+      if (!user) throw new Error("Not signed in.");
+      const { data: stacks, error: se } = await sb.from("card_stacks").select("id,name");
+      if (se) throw new Error(se.message);
+      const byName = new Map((stacks || []).map((s) => [String(s.name).trim().toUpperCase(), s.id]));
+      for (const name of stackNames) {
+        if (byName.has(name)) continue;
+        const { data, error: ce } = await sb.from("card_stacks").insert({ user_id: user.id, name }).select("id,name").single();
+        if (ce || !data) throw new Error(ce?.message || `Couldn't create stack ${name}.`);
+        byName.set(name, data.id);
+      }
+      // One row per UNIT: a quantity-2 line is two copies on the shelf, and the
+      // sheet matches each unit to its own card.
+      const rows = todo.map((u) => ({
+        user_id: user.id,
+        stack_id: byName.get(u.stack),
+        position: u.pos,
+        sku: u.sku,
+        title: u.title || "",
+        ebay_item_id: u.ebayItemId || null
+      }));
+      const { error: ie } = await sb.from("stack_cards").insert(rows);
+      if (ie) throw new Error(ie.message);
+      setNote(`Added ${rows.length} card(s) to ${stackNames.length} stack(s).`);
+      await load();
+    } catch (e) {
+      setError(`Couldn't add them to stacks: ${e.message || e}`);
+    } finally {
+      setAddingToStacks(false);
+    }
   }
 
   function toggleLoose(key) {
@@ -498,7 +549,12 @@ export default function PullSheet() {
             <span className="eyebrow">Has a SKU, but not in any stack ({unstacked.length})</span>
             <p className="hint hint-small" style={{ margin: "4px 0 0" }}>
               Ordinary listings, not variation picks — their SKU just isn&apos;t on a stack card, so there&apos;s no live position to give.
-              {unstacked.some((u) => u.stack) ? <> For the stack-style SKUs, run <b>Stacks → Auto-import</b> and refresh; they&apos;ll move up into their stacks.</> : null}
+              {unstacked.some((u) => u.stack) ? <> Stacks → Auto-import can&apos;t place these: it reads your live listings, and a sold card&apos;s listing has already ended. Add them from the order instead:</> : null}
+              {unstacked.some((u) => u.stack) ? (
+                <button className="btn btn-primary" style={{ display: "block", marginTop: 8 }} onClick={addUnstackedToStacks} disabled={addingToStacks || committing}>
+                  {addingToStacks ? "Adding…" : `＋ Add ${unstacked.filter((u) => u.stack).length} to their stacks`}
+                </button>
+              ) : null}
               {unstacked.some((u) => !u.stack) ? <> Batch-style SKUs aren&apos;t a stack + position, so Auto-import can&apos;t place them — add them to a stack by hand, or pick them from their batch.</> : null}
             </p>
           </div>
