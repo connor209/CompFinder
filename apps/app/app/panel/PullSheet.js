@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
+import { stackOfSku } from "@/lib/stackimport";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -16,16 +17,6 @@ function numKey(s) {
   const t = String(s || "");
   const m = t.match(/(\d{1,4})\s*\/\s*\d{1,4}/) || t.match(/\b(\d{1,4})\b/);
   return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
-}
-
-/**
- * Where a SKU says a card lives, read the same way Stacks → Auto-import reads
- * it: `A50` is stack A, position 50. Anything else (a dated batch SKU like
- * `26.08.06-010-029`) has no stack to name, and gets null.
- */
-function stackOfSku(sku) {
-  const m = String(sku || "").trim().match(/^([A-Za-z]+)[-_ ]?(\d{1,4})$/);
-  return m ? { stack: m[1].toUpperCase(), pos: parseInt(m[2], 10) } : null;
 }
 
 /**
@@ -549,7 +540,7 @@ export default function PullSheet() {
             <span className="eyebrow">Has a SKU, but not in any stack ({unstacked.length})</span>
             <p className="hint hint-small" style={{ margin: "4px 0 0" }}>
               Ordinary listings, not variation picks — their SKU just isn&apos;t on a stack card, so there&apos;s no live position to give.
-              {unstacked.some((u) => u.stack) ? <> Stacks → Auto-import can&apos;t place these: it reads your live listings, and a sold card&apos;s listing has already ended. Add them from the order instead:</> : null}
+              {unstacked.some((u) => u.stack) ? <> These sold before a listings sync put them in a stack, and a sold card&apos;s listing has ended, so a sync can&apos;t place them now. Add them from the order instead:</> : null}
               {unstacked.some((u) => u.stack) ? (
                 <button className="btn btn-primary" style={{ display: "block", marginTop: 8 }} onClick={addUnstackedToStacks} disabled={addingToStacks || committing}>
                   {addingToStacks ? "Adding…" : `＋ Add ${unstacked.filter((u) => u.stack).length} to their stacks`}

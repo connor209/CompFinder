@@ -13,6 +13,7 @@ import { withPool, isStreamCheckout } from "@/lib/streamstock.js";
 import DealBar, { DealButton, useDeal } from "./DealBar";
 import { StreamBar, StreamButton, useRelay } from "./StreamBar";
 import { listingLine } from "@/lib/deal.js";
+import { stackedNote } from "@/lib/stackimport";
 
 const settings = APP_SETTINGS;
 
@@ -485,7 +486,7 @@ export default function Inventory({ onDeepDive }) {
     try {
       const res = await fetch("/api/ebay/sync", { method: "POST" }).then((r) => r.json());
       if (res.ok) {
-        setNote(`Synced ${res.count} listing${res.count === 1 ? "" : "s"}.`);
+        setNote(`Synced ${res.count} listing${res.count === 1 ? "" : "s"}.${stackedNote(res.stacked)}`);
         setPriced(new Map());
         await loadStatus();
         await loadListings();

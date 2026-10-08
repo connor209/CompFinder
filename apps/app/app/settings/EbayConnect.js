@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { stackedNote } from "@/lib/stackimport";
 
 /**
  * "Connect your eBay account" card for Settings. Shows connection state,
@@ -37,7 +38,7 @@ export default function EbayConnect({ flash }) {
     try {
       const res = await fetch("/api/ebay/sync", { method: "POST" }).then((r) => r.json());
       if (res.ok) {
-        setMsg(`Synced ${res.count} active listing${res.count === 1 ? "" : "s"}.${res.truncated ? " (Capped — you have a lot of listings.)" : ""}`);
+        setMsg(`Synced ${res.count} active listing${res.count === 1 ? "" : "s"}.${res.truncated ? " (Capped — you have a lot of listings.)" : ""}${stackedNote(res.stacked)}`);
         await loadStatus();
       } else {
         setMsg(res.error || "Sync failed.");

@@ -6,6 +6,7 @@ import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { availableSkus, soldOutSkus } from "@/lib/stockcheck.js";
+import { importStackCards } from "@/lib/stackimport";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -101,40 +102,16 @@ export default function Stacks() {
     if (!confirm("Auto-create stacks from your eBay listing SKUs?\n\nEach SKU like A50 becomes Stack A, position 50. Existing stacks are reused and SKUs already added are skipped.")) return;
     setBusy(true);
     setMsg("");
-    const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title,ebay_item_id").not("sku", "is", null));
-    let unparseable = 0;
-    const parsed = [];
-    for (const l of listings) {
-      const m = String(l.sku).trim().match(/^([A-Za-z]+)[-_ ]?(\d{1,4})$/);
-      if (!m) { unparseable += 1; continue; }
-      parsed.push({ prefix: m[1].toUpperCase(), num: parseInt(m[2], 10), sku: String(l.sku).trim(), title: l.title || "", ebay_item_id: l.ebay_item_id || null });
+    // Same plan the listings sync now runs on its own (stackimport.js) — this
+    // button is for a first import, or for when you don't want to wait.
+    try {
+      const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title,ebay_item_id,quantity").not("sku", "is", null));
+      const r = await importStackCards(sb, user.id, listings);
+      setMsg(`Imported ${r.added} card(s)${r.created ? ` and created ${r.created} stack(s)` : ""}. Skipped ${r.already} already added${r.soldOut ? `, ${r.soldOut} sold out` : ""}${r.unparseable ? `, ${r.unparseable} with non-standard SKUs` : ""}.`);
+    } catch (e) {
+      setMsg(`Auto-import failed: ${e.message || e}`);
     }
-    const existing = await pagedSelect(() => sb.from("stack_cards").select("sku").not("sku", "is", null));
-    const have = new Set(existing.map((e) => String(e.sku).toLowerCase()));
-    const fresh = parsed.filter((p) => !have.has(p.sku.toLowerCase()));
-
-    const byPrefix = new Map();
-    for (const p of fresh) {
-      if (!byPrefix.has(p.prefix)) byPrefix.set(p.prefix, []);
-      byPrefix.get(p.prefix).push(p);
-    }
-    const stackByName = new Map(stacks.map((s) => [s.name.toUpperCase(), s.id]));
-    for (const prefix of byPrefix.keys()) {
-      if (!stackByName.has(prefix)) {
-        const { data } = await sb.from("card_stacks").insert({ user_id: user.id, name: prefix }).select("id,name").single();
-        if (data) stackByName.set(prefix, data.id);
-      }
-    }
-    const rows = [];
-    for (const [prefix, cs] of byPrefix) {
-      const sid = stackByName.get(prefix);
-      if (!sid) continue;
-      for (const c of cs) rows.push({ user_id: user.id, stack_id: sid, position: c.num, sku: c.sku, title: c.title, ebay_item_id: c.ebay_item_id });
-    }
-    for (let i = 0; i < rows.length; i += 500) await sb.from("stack_cards").insert(rows.slice(i, i + 500));
-
     setBusy(false);
-    setMsg(`Imported ${rows.length} card(s) into ${byPrefix.size} stack(s). Skipped ${parsed.length - fresh.length} already added${unparseable ? `, ${unparseable} with non-standard SKUs` : ""}.`);
     await loadStacks();
     await loadCards(selId);
   }

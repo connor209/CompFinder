@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { importStackCards } from "./stackimport.js";
 
 /**
  * eBay OAuth (user tokens) + read-only inventory pull.
@@ -906,5 +907,17 @@ export async function syncUserListings(admin, userId) {
     }
   }
   await admin.from("ebay_accounts").update({ last_synced_at: nowIso }).eq("user_id", userId);
-  return { connected: true, count: listings.length, truncated };
+
+  // New stack-style SKUs go into their stacks now, while the card is still
+  // listed — wait for somebody to press Auto-import and a card that sells
+  // first is never in a stack at all (see stackimport.js). Never costs the
+  // sync: the listings are already saved, and a stack failure is reported
+  // beside them rather than thrown.
+  let stacked = null;
+  try {
+    stacked = await importStackCards(admin, userId, listings, { onlyIfStacks: true });
+  } catch (err) {
+    stacked = { error: err.message || String(err) };
+  }
+  return { connected: true, count: listings.length, truncated, stacked };
 }

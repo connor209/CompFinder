@@ -156,6 +156,11 @@ stream` (the relay, only while streaming).
 - `scripts/check-stackpos.mjs` — where a card physically is: that pulled and
   checked-out cards close the numbering up behind them, and a grep against a
   fourth copy of the rule.
+- `scripts/check-stackimport.mjs` — which listings the sync puts into stacks:
+  `A50` is stack A position 50 and a dated batch SKU is nobody's, a sold shell
+  at quantity zero is never added as present, a pulled card is never added
+  twice, a user with no stacks is never handed any, a stack failure never fails
+  the sync, and a grep against a second reading of the SKU.
 - `scripts/check-labels.mjs` — the printer's file: the two columns in the
   printer's order, names cut to real label widths, and a workbook built for
   real and read back out of its own bytes.
