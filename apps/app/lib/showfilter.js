@@ -179,6 +179,35 @@ export function skuInBatch(sku, prefix) {
 }
 
 /**
+ * What open checkouts say is away, by stack card id and, for a checkout that
+ * names no stack card, by SKU. Every pool — show or stream box.
+ *
+ * Needed beside `stack_cards.checked_out_at` rather than instead of it: that
+ * flag is one column on one row, and returning ONE of two open checkouts for
+ * the same card clears it while the other is still out. A card with an open
+ * checkout is away whatever its flag says.
+ */
+export function openCheckoutIndex(checkouts) {
+  const ids = new Set();
+  const skus = new Set();
+  for (const co of checkouts || []) {
+    if (!co || co.resolved_at) continue;
+    if (co.stack_card_id != null) ids.add(String(co.stack_card_id));
+    else if (co.sku) skus.add(String(co.sku).trim().toLowerCase());
+  }
+  return { ids, skus };
+}
+
+/** Is this stack card away — flagged, or named by an open checkout? */
+export function isCardAway(card, away = null) {
+  if (!card) return true;
+  if (card.checked_out_at) return true;
+  if (!away) return false;
+  if (away.ids.has(String(card.id))) return true;
+  return !!card.sku && away.skus.has(String(card.sku).trim().toLowerCase());
+}
+
+/**
  * The cards still on the shelf that a SKU batch and/or a stack names — not
  * pulled, not already away at a show or in the stream box: the ones you could
  * pick up and check out right now. Either criterion alone works; both narrow.
@@ -187,11 +216,11 @@ export function skuInBatch(sku, prefix) {
  * the cards sit in it, so it reads top to bottom as you count through the box
  * (`rankOf` supplies the live rank). Asked by SKU, it runs AB2 before AB11.
  */
-export function skuBatch(cards, prefix, { stackId = "", rankOf = null } = {}) {
+export function skuBatch(cards, prefix, { stackId = "", rankOf = null, away = null } = {}) {
   const p = String(prefix || "").trim();
   if (!p && !stackId) return [];
   const rows = (cards || []).filter((c) =>
-    c && !c.pulled_at && !c.checked_out_at &&
+    c && !c.pulled_at && !isCardAway(c, away) &&
     (!stackId || String(c.stack_id) === String(stackId)) &&
     (!p || skuInBatch(c.sku, p))
   );

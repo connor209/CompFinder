@@ -1629,6 +1629,10 @@ stranger their card is worth.
   on the shelf are listed — a stack alone in the order they sit, otherwise
   in SKU order — none ticked. Letters alone name a batch exactly (`B` is never `BP12`); a digit
   makes it a plain prefix (`skuInBatch()` in `showfilter.js`).
+  A card counts as out if its stack card is flagged OR an open checkout of
+  any pool names it (`isCardAway()`): the flag is one column, and returning
+  one of two open checkouts for the same card clears it while the other is
+  still out — BC1 showed on the shelf that way on 2026-10-10.
 - **Migration 024** adds `sticker_pence` to `stock_checkouts` and `pool_name`
   to `price_batches`. `pool_name` is read and written OPTIONALLY: migrations
   here are applied by hand, so the code always ships first, and Postgres

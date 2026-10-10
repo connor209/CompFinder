@@ -486,7 +486,7 @@ const ok = (what, cond) => { if (!cond) fail(what); };
   ok("no stack data hides nothing", atHomeListings(listed, []).length === listed.length);
 }
 const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
-if (!/atHomeListings\(listings, stackCards\)/.test(deskSrc)) {
+if (!/atHomeListings\(listings, stackCards, awayIndex\)/.test(deskSrc)) {
   fail("ShowDesk.js no longer filters the online stock through atHomeListings() — checked-out cards reach the search again");
 }
 

@@ -312,21 +312,22 @@ export function onlineMatches(listings, { query = "", inBoxSkus = null, limit = 
  * stream-box card is never in the show box. A SKU with even one copy still on
  * the shelf stays — that copy is the one somebody can go and get.
  */
-export function awaySkus(stackCards) {
+export function awaySkus(stackCards, openIndex = null) {
   const away = new Set();
   const home = new Set();
   for (const c of stackCards || []) {
     if (!c?.sku || c.pulled_at) continue;
     const k = String(c.sku).trim().toLowerCase();
-    (c.checked_out_at ? away : home).add(k);
+    const out = c.checked_out_at || (openIndex && (openIndex.ids.has(String(c.id)) || openIndex.skus.has(k)));
+    (out ? away : home).add(k);
   }
   for (const k of home) away.delete(k);
   return away;
 }
 
 /** Listings minus those whose stock is all checked out — see awaySkus(). */
-export function atHomeListings(listings, stackCards) {
-  const away = awaySkus(stackCards);
+export function atHomeListings(listings, stackCards, openIndex = null) {
+  const away = awaySkus(stackCards, openIndex);
   if (away.size === 0) return listings || [];
   return (listings || []).filter((l) => !l?.sku || !away.has(String(l.sku).trim().toLowerCase()));
 }

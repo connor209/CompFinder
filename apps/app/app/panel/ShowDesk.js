@@ -16,6 +16,7 @@ import {
 import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
 import {
   showView, selectionFor, facetsOf, listingState, matchesQuery, skuBatch,
+  openCheckoutIndex, isCardAway,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
 import { counterView, onlineMatches, inBoxSkus, atHomeListings } from "@/lib/showcounter.js";
@@ -155,6 +156,9 @@ export default function ShowDesk() {
   const [images, setImages] = useState(new Map()); // sku -> eBay photo of THIS copy
   const [listings, setListings] = useState([]);    // live eBay stock, for the counter
   const [stackCards, setStackCards] = useState([]); // every unpulled card, for locating one
+  // EVERY open checkout, stream box included — `open` is show stock only. What
+  // the picker and the online list check "is this card already out?" against.
+  const [allOpen, setAllOpen] = useState([]);
   // Which online row has had its location revealed. One at a time, and never
   // by default: a stack name and a depth are picking data, and counter mode is
   // pointed at a customer. See the note on the reveal button below.
@@ -284,6 +288,7 @@ export default function ShowDesk() {
     // everything on this screen — the counter, the binder, the storefront it
     // feeds — would otherwise present it as being on the table.
     setOpen(showOnly(away));
+    setAllOpen(away || []);
 
     // A photo of THIS copy, for the counter view. Read from the listings we
     // already sync rather than fetched per row, and absent for anything
@@ -398,9 +403,9 @@ export default function ShowDesk() {
     const misses = [];
     for (const s of list) {
       const { data: matches } = await sb.from("stack_cards").select("*").ilike("sku", s);
-      const candidates = (matches || []).filter((c) => !c.pulled_at && !c.checked_out_at);
+      const candidates = (matches || []).filter((c) => !c.pulled_at && !isCardAway(c, awayIndex));
       if (candidates.length === 0) {
-        const gone = (matches || []).some((c) => c.checked_out_at && !c.pulled_at);
+        const gone = (matches || []).some((c) => !c.pulled_at && isCardAway(c, awayIndex));
         misses.push({ sku: s, ok: false, text: gone ? "already checked out — at a show or in the stream box" : "no unpulled card with that SKU" });
       } else {
         cards.push(candidates[0]);
@@ -460,10 +465,10 @@ export default function ShowDesk() {
     // looks exactly like a card we never had, and this one needs reconciling
     // rather than ignoring.
     setRecSkipped(
-      cards.filter((c) => !c.checked_out_at && c.sku && gone.has(String(c.sku).toLowerCase())).length
+      cards.filter((c) => !isCardAway(c, awayIndex) && c.sku && gone.has(String(c.sku).toLowerCase())).length
     );
     const ranked = cards
-      .filter((c) => !c.checked_out_at && c.sku && priceBySku.has(String(c.sku).toLowerCase()))
+      .filter((c) => !isCardAway(c, awayIndex) && c.sku && priceBySku.has(String(c.sku).toLowerCase()))
       .map((c) => ({
         card: c,
         pricePence: priceBySku.get(String(c.sku).toLowerCase()),
@@ -546,7 +551,8 @@ export default function ShowDesk() {
   );
   // Listed AND at home: a card checked out anywhere — the show box or the
   // stream box — is not one the online list may offer. See awaySkus().
-  const homeListings = useMemo(() => atHomeListings(listings, stackCards), [listings, stackCards]);
+  const awayIndex = useMemo(() => openCheckoutIndex(allOpen), [allOpen]);
+  const homeListings = useMemo(() => atHomeListings(listings, stackCards, awayIndex), [listings, stackCards, awayIndex]);
   const taggedListings = useMemo(
     () => homeListings.map((l) => ({ ...l, game: gameOf({ category: l?.extra?.category, title: l.title }, gameIndex) })),
     [homeListings, gameIndex]
@@ -628,12 +634,15 @@ export default function ShowDesk() {
   const locations = useMemo(() => locationsBySku(stackCards, stackName), [stackCards, stackName]);
   const batchRows = useMemo(() => {
     if (!batchPrefix.trim() && !batchStack) return [];
-    const ranks = liveRanks(stackCards);
-    const depths = stackDepths(stackCards);
-    return skuBatch(stackCards, batchPrefix, { stackId: batchStack, rankOf: (c) => ranks.get(c.id) }).map((card) => ({
+    // A card an open checkout names is off the shelf even when its flag was
+    // lost, so it must not hold a position the cards behind it count past.
+    const present = stackCards.map((c) => (!c.checked_out_at && isCardAway(c, awayIndex) ? { ...c, checked_out_at: "open" } : c));
+    const ranks = liveRanks(present);
+    const depths = stackDepths(present);
+    return skuBatch(present, batchPrefix, { stackId: batchStack, rankOf: (c) => ranks.get(c.id), away: awayIndex }).map((card) => ({
       card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null
     }));
-  }, [stackCards, batchPrefix, batchStack]);
+  }, [stackCards, batchPrefix, batchStack, awayIndex]);
   const batchOpen = !!(batchPrefix.trim() || batchStack);
   // Only ticks the list can still see: a card checked out since, or outside a
   // narrowed prefix, is never acted on — the selectionFor() rule.

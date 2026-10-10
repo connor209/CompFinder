@@ -37,6 +37,8 @@ import {
   selectionFor,
   skuInBatch,
   skuBatch,
+  openCheckoutIndex,
+  isCardAway,
   SHOW_SORTS,
   DEFAULT_SORT,
   STICKER_FILTERS,
@@ -284,6 +286,27 @@ eq("a card with no SKU is in no batch", skuInBatch("", "BP"), false);
     skuBatch(stacked, "BP", { stackId: "s1", rankOf: (c) => rank.get(c.id) }).map((c) => c.id), [2, 1]);
   eq("neither criterion lists nothing, not the whole shelf",
     skuBatch(stacked, " ", { stackId: "" }).length, 0);
+}
+// BC1, 2026-10-10: an OPEN checkout but no flag on its stack card — returning
+// one of two checkouts for the same card clears the flag while the other is
+// still out. The open checkout wins.
+{
+  const away = openCheckoutIndex([
+    { stack_card_id: "c1", sku: "BC1" },
+    { stack_card_id: null, sku: "BC9 " },
+    { stack_card_id: "c2", sku: "BC2", resolved_at: "2026-10-09" } // came home
+  ]);
+  const bc = [
+    { id: "c1", sku: "BC1", stack_id: "s" },
+    { id: "c2", sku: "BC2", stack_id: "s" },
+    { id: "c3", sku: "BC3", stack_id: "s" },
+    { id: "c9", sku: "bc9", stack_id: "s" }
+  ];
+  eq("a card an open checkout names is away whatever its flag", isCardAway(bc[0], away), true);
+  eq("a resolved checkout leaves its card home", isCardAway(bc[1], away), false);
+  eq("a checkout with no stack card matches on SKU", isCardAway(bc[3], away), true);
+  eq("the picker leaves out what is out",
+    skuBatch(bc, "BC", { away }).map((c) => c.id), ["c2", "c3"]);
 }
 
 if (failures) {
