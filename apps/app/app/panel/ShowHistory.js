@@ -129,7 +129,7 @@ export default function ShowHistory() {
       // A failure here costs the profit figures, never the rest of the screen.
       let costRows = [];
       try {
-        costRows = await pagedSelect(() => sb.from("listing_costs").select("ebay_item_id,cost_pence"));
+        costRows = await pagedSelect(() => sb.from("listing_costs").select("ebay_item_id,cost_pence"), { orderBy: "ebay_item_id" });
       } catch { /* no costs is a gap, not a failure */ }
       const ex = await loadExpenses(sb);
       if (!live) return;

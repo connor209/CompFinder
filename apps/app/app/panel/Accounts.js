@@ -59,7 +59,7 @@ export default function Accounts() {
     const { data: { user } } = await sb.auth.getUser();
     const [{ data: profile }, s, p, sh] = await Promise.all([
       sb.from("profiles").select("settings").eq("id", user.id).single(),
-      pagedSelect(() => sb.from("ebay_sales").select("sold_pence,sold_date,quantity")),
+      pagedSelect(() => sb.from("ebay_sales").select("sold_pence,sold_date,quantity"), { orderBy: "line_item_id" }),
       pagedSelect(() => sb.from("purchases").select("kind,category,amount_pence,purchased_at")),
       // Cash sales made at shows (Show desk) — table may not exist yet.
       pagedSelect(() => sb.from("stock_checkouts").select("sold_price_pence,resolved_at").eq("resolution", "sold")).catch(() => [])

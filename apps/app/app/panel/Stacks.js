@@ -161,7 +161,7 @@ export default function Stacks() {
     const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,quantity").not("sku", "is", null));
     const activeSet = availableSkus(listings);
     const outOfStock = soldOutSkus(listings);
-    const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date").not("sku", "is", null));
+    const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date,line_item_id").not("sku", "is", null), { orderBy: "line_item_id" });
     const saleMap = new Map();
     sales.forEach((s) => { const k = String(s.sku).toLowerCase(); if (!saleMap.has(k)) saleMap.set(k, s.sold_date); });
     const cards = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));

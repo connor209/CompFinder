@@ -26,8 +26,8 @@ export default function AccountData({ email }) {
       const [priceChecks, listings, costs, sales, stacks, stackCards, checkouts] = await Promise.all([
         pagedSelect(() => sb.from("price_checks").select("*")),
         pagedSelect(() => sb.from("ebay_listings").select("*")),
-        pagedSelect(() => sb.from("listing_costs").select("*")),
-        pagedSelect(() => sb.from("ebay_sales").select("*")),
+        pagedSelect(() => sb.from("listing_costs").select("*"), { orderBy: "ebay_item_id" }),
+        pagedSelect(() => sb.from("ebay_sales").select("*"), { orderBy: "line_item_id" }),
         pagedSelect(() => sb.from("card_stacks").select("*")),
         pagedSelect(() => sb.from("stack_cards").select("*")),
         pagedSelect(() => sb.from("stock_checkouts").select("*")).catch(() => [])

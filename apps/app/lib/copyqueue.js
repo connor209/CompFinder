@@ -71,7 +71,7 @@ export const COPY_STATE_TABLE = "listing_copy_state";
 export const MAX_PICTURES = 12;
 
 /** Lowercased SKU, or null. The key every SKU-shaped lookup here uses. */
-const skuKey = (v) => (v ? String(v).toLowerCase() : null);
+const skuKey = (v) => (v ? String(v).trim().toLowerCase() || null : null);
 
 /**
  * The order copies of one card are sold in.

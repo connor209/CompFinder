@@ -873,20 +873,34 @@ export async function fetchRecentOrders(accessToken, daysBack = 90) {
  * one row per line item. Requires the fulfillment scope.
  */
 export async function fetchPendingOrders(accessToken) {
-  const params = new URLSearchParams({ filter: "orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}", limit: "200" });
-  const res = await fetch(`${FULFILLMENT_ORDER}?${params}`, {
-    headers: { Authorization: `Bearer ${accessToken}`, "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE, Accept: "application/json" }
-  });
-  if (res.status === 403) {
-    const e = new Error("eBay sales access not granted — reconnect your account.");
-    e.scope = true;
-    throw e;
+  // getOrders returns at most 200 orders a page. One page was all this ever
+  // read, so after a big night every order past the 200th was simply not on
+  // the pull sheet. Page until eBay stops handing back a full one.
+  const PAGE = 200;
+  const orders = [];
+  for (let offset = 0; offset < 10000; offset += PAGE) {
+    const params = new URLSearchParams({ filter: "orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}", limit: String(PAGE), offset: String(offset) });
+    const res = await fetch(`${FULFILLMENT_ORDER}?${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE, Accept: "application/json" }
+    });
+    if (res.status === 403) {
+      const e = new Error("eBay sales access not granted — reconnect your account.");
+      e.scope = true;
+      throw e;
+    }
+    if (!res.ok) throw new Error(`eBay orders fetch failed (${res.status}).`);
+    const json = await res.json();
+    const page = json.orders || [];
+    orders.push(...page);
+    if (page.length < PAGE || (json.total != null && offset + PAGE >= Number(json.total))) break;
   }
-  if (!res.ok) throw new Error(`eBay orders fetch failed (${res.status}).`);
-  const json = await res.json();
 
   const lines = [];
-  for (const order of json.orders || []) {
+  const seenOrders = new Set(); // an order arriving mid-read can shift one onto two pages
+  for (const order of orders) {
+    const oid = String(order.orderId || "");
+    if (oid && seenOrders.has(oid)) continue;
+    seenOrders.add(oid);
     // Delivery (ship-to) name + city — the human name on the shipping label,
     // which often differs from the eBay username. Used to label order piles so
     // a physical pile is easy to attach to its order.
