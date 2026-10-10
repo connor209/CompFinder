@@ -75,6 +75,34 @@ function hideChip(co) {
   return { text: "no eBay listing", color: "var(--ink-faint)", title: "No active listing matched this SKU." };
 }
 
+/**
+ * The main list's frame. On the desk it is a Fold, so the away list can be
+ * shut while you work the checkout form or the recommendations above it. On
+ * the counter and the binder it is the plain panel it always was: a caret in
+ * front of a customer is one more thing to tap, and a shut list on a screen
+ * handed across a table reads as "nothing here". The mode buttons ride in the
+ * header either way, so the way back to the desk is never folded away.
+ */
+function ListPanel({ fold, title, badge, actions, children }) {
+  if (fold) {
+    return (
+      <Fold id="showdesk-list" title={title} count={badge} actions={actions}>
+        {children}
+      </Fold>
+    );
+  }
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <h3>{title}</h3>
+        <span className="badge2">{badge}</span>
+        {actions}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 export default function ShowDesk() {
   const [loading, setLoading] = useState(true);
   const [needsMigration, setNeedsMigration] = useState(false);
@@ -1368,18 +1396,22 @@ export default function ShowDesk() {
       {customerMode ? null : <StorefrontPanel event={event} />}
 
       {recs !== null && !customerMode ? (
-        <div className="panel">
-          <div className="panel-head">
-            <span className="eyebrow">Recommended show stock — highest value first</span>
-            <button className="btn btn-ghost" onClick={() => setRecPool(null)}>Close</button>
-          </div>
-          {recSkipped > 0 ? (
+        <Fold
+          id="showdesk-recs"
+          title="Recommended show stock — highest value first"
+          count={recPool.length ? `${recChosen.length} ticked` : null}
+          summary={recPool.length
+            ? `${recChosen.length} card${recChosen.length === 1 ? "" : "s"} ticked · ${pounds(recChosen.reduce((t, r) => t + r.pricePence, 0))} — open to review and check out.`
+            : "No stack cards matched a live listing price."}
+          actions={<button className="btn btn-ghost" onClick={() => setRecPool(null)}>Close</button>}
+          alert={recSkipped > 0 ? (
             <p className="hint hint-small" style={{ marginTop: 0, color: "var(--warn-ink)" }}>
               {recSkipped} card{recSkipped === 1 ? "" : "s"} left out: still in a stack, but the eBay listing is
               out of stock (quantity 0) — which is what a card that has already <b>sold</b> looks like.
               Run <b>Stacks → Reconcile</b> to pull them, or you&apos;ll be looking for cards that aren&apos;t there.
             </p>
           ) : null}
+        >
           {recPool.length === 0 ? (
             <p className="dd-empty">No stack cards matched a live listing price. Sync your eBay listings, then try again.</p>
           ) : (
@@ -1451,19 +1483,18 @@ export default function ShowDesk() {
               })()}
             </>
           )}
-        </div>
+        </Fold>
       ) : null}
 
       {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)", marginTop: -6 }}>{msg}</p> : null}
 
-      <div className="panel">
-        <div className="panel-head">
-          <h3>{binderMode ? "The binder" : counterMode ? "In stock today" : "Away at the show"}</h3>
-          <span className="badge2">
-            {binderMode
-              ? `${binder.cardCount} card${binder.cardCount === 1 ? "" : "s"}`
-              : counterMode ? `${counter.shown} card${counter.shown === 1 ? "" : "s"}` : `${open.length} out`}
-          </span>
+      <ListPanel
+        fold={!customerMode}
+        title={binderMode ? "The binder" : counterMode ? "In stock today" : "Away at the show"}
+        badge={binderMode
+          ? `${binder.cardCount} card${binder.cardCount === 1 ? "" : "s"}`
+          : counterMode ? `${counter.shown} card${counter.shown === 1 ? "" : "s"}` : `${open.length} out`}
+        actions={<>
           {open.length > 0 && !customerMode ? (
             <button
               className="btn btn-ghost"
@@ -1512,7 +1543,8 @@ export default function ShowDesk() {
               🔎 Asked for ({wantGroups.length})
             </button>
           ) : null}
-        </div>
+        </>}
+      >
         {open.length === 0 && !customerMode ? (
           /* The desk's empty state points at the checkout form, which counter
              mode does not render — so it would be telling a customer to enter
@@ -2097,7 +2129,7 @@ export default function ShowDesk() {
             ) : null}
           </>
         )}
-      </div>
+      </ListPanel>
 
       {/* The photo, big. eBay serves the gallery shot at thumbnail size and
           encodes the size in the filename, so this is the same picture asked
@@ -2116,12 +2148,13 @@ export default function ShowDesk() {
           which is a buying note to ourselves and nothing a customer should
           read over the counter. */}
       {showWants && !customerMode && !wantsMissing ? (
-        <div className="panel">
-          <div className="panel-head">
-            <span className="eyebrow">Asked for</span>
-            <span className="badge2">{wantGroups.filter((g) => g.misses > 0).length} we couldn&apos;t meet</span>
-            <button className="btn btn-ghost" onClick={() => setShowWants(false)}>Close</button>
-          </div>
+        <Fold
+          id="showdesk-wants"
+          title="Asked for"
+          count={`${wantGroups.filter((g) => g.misses > 0).length} we couldn’t meet`}
+          summary={`${wantGroups.length} thing${wantGroups.length === 1 ? "" : "s"} asked for at the table.`}
+          actions={<button className="btn btn-ghost" onClick={() => setShowWants(false)}>Close</button>}
+        >
           <p className="hint hint-small">
             What people asked for at the table. The ones we didn&apos;t have are the
             buying list — nothing else records them.
@@ -2145,7 +2178,7 @@ export default function ShowDesk() {
               </div>
             ))}
           </div>
-        </div>
+        </Fold>
       ) : null}
 
       {/* Folded shut by default: it is a long tail of what already happened,
