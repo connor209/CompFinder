@@ -1545,6 +1545,19 @@ html, body { overflow-x: clip; max-width: 100%; }
 .inv-upd.busy { color:var(--ink-soft); }
 
 /* Saved batch runs — the list, and the banner over a re-opened one */
+/* Fold.js — a section that folds shut. The header (title, count, summary,
+   actions) never folds; only the body does. Same look as Saved runs. */
+.fold-head { margin-bottom:0; }
+.fold-open > .fold-head { margin-bottom:8px; }
+.fold-toggle { display:inline-flex; align-items:center; gap:8px; border:0; background:transparent; padding:4px 0; cursor:pointer; color:inherit; text-align:left; min-height:32px; }
+.fold-caret { display:inline-block; width:10px; color:var(--ink-faint); font-size:11px; }
+.fold-title { font-family:var(--font-body); font-weight:var(--label-weight); font-size:11.5px; letter-spacing:var(--label-spacing); text-transform:var(--label-transform); color:var(--ink-faint); }
+.fold-toggle:hover .fold-title, .fold-toggle:hover .fold-caret { color:var(--ink-soft); }
+.fold-count { font-family:var(--font-mono); font-size:11px; font-weight:600; color:var(--ink-soft); background:var(--surface-sink); border:1px solid var(--line); border-radius:999px; padding:1px 8px; }
+.fold-actions { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.fold-summary { margin-top:2px; }
+.fold-inline { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
+.fold-body[hidden] { display:none; }
 .sb-toggle { display:inline-flex; align-items:center; gap:8px; border:0; background:transparent; padding:0; cursor:pointer; color:inherit; }
 .sb-toggle .eyebrow { cursor:pointer; }
 .sb-caret { display:inline-block; width:10px; color:var(--ink-faint); font-size:11px; }
