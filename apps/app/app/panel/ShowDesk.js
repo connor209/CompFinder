@@ -36,6 +36,8 @@ import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 import { showOnly } from "@/lib/streamstock.js";
 import { isSlabTitle } from "@/lib/showstock.js";
 
+const REC_NO_GRADED_KEY = "cf-rec-no-graded";
+
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
  * flags it away (stack numbering re-flows around it, like a pull you can undo)
@@ -166,7 +168,16 @@ export default function ShowDesk() {
   const [recCount, setRecCount] = useState(20);
   // Leave the slabs at home. Applied BEFORE the top N, like the game chips, so
   // "top 20" with it ticked is twenty raw cards rather than twenty minus slabs.
+  // Remembered on this device: it is a standing choice about what goes to a
+  // show, not something to re-tick every time the desk opens.
   const [recNoGraded, setRecNoGraded] = useState(false);
+  useEffect(() => {
+    try { if (localStorage.getItem(REC_NO_GRADED_KEY) === "on") setRecNoGraded(true); } catch { /* private mode — the default is fine */ }
+  }, []);
+  function saveRecNoGraded(on) {
+    setRecNoGraded(on);
+    try { localStorage.setItem(REC_NO_GRADED_KEY, on ? "on" : "off"); } catch { /* best-effort */ }
+  }
   const [recSkipped, setRecSkipped] = useState(0); // in a stack, but sold out on eBay
   // Once for the desk, then handed down — see the note on useDeal().
   const [deal, updateDeal] = useDeal();
@@ -1167,7 +1178,7 @@ export default function ShowDesk() {
                   games you picked. */}
               <GameChips facets={recFacets} chosen={recGames} onChange={setRecGames} customer={false} />
               <label className="sd-toggle" title="Leave out any card whose title names a grader — PSA, CGC, BGS, Beckett, SGC, TAG — or says graded/slab">
-                <input type="checkbox" checked={recNoGraded} onChange={(e) => setRecNoGraded(e.target.checked)} />
+                <input type="checkbox" checked={recNoGraded} onChange={(e) => saveRecNoGraded(e.target.checked)} />
                 No graded cards
                 {recNoGraded && recGradedOut > 0 ? (
                   <span className="hint hint-small">({recGradedOut} slab{recGradedOut === 1 ? "" : "s"} left out)</span>
