@@ -127,7 +127,7 @@ export default function PullSheet() {
     const awaySkus = new Set(); // checked out to a show — physically not here
     const order = new Map();
     for (const c of cards) {
-      const skl = c.sku ? String(c.sku).toLowerCase() : null;
+      const skl = c.sku ? String(c.sku).trim().toLowerCase() || null : null;
       if (c.pulled_at) {
         if (skl) pulledSkus.add(skl);
         continue;
@@ -148,7 +148,7 @@ export default function PullSheet() {
     const awayLines = [];
     let done = 0;
     for (const l of lines) {
-      const skl = l.sku ? l.sku.toLowerCase() : null;
+      const skl = l.sku ? l.sku.trim().toLowerCase() || null : null;
       // ONE LINE ITEM CAN BE SEVERAL CARDS. fetchPendingOrders has always
       // returned the quantity and this loop always ignored it, which is
       // invisible while every listing is a single card and is a card short the
@@ -198,11 +198,11 @@ export default function PullSheet() {
     // from the display sequence, so they form left-to-right as you deal.
     const anyBySku = new Map();
     for (const c of cards) {
-      const skl = c.sku ? String(c.sku).toLowerCase() : null;
+      const skl = c.sku ? String(c.sku).trim().toLowerCase() || null : null;
       if (skl && !anyBySku.has(skl)) anyBySku.set(skl, c);
     }
     const pack = lines.map((l) => {
-      const skl = l.sku ? l.sku.toLowerCase() : null;
+      const skl = l.sku ? l.sku.trim().toLowerCase() || null : null;
       const card = skl ? anyBySku.get(skl) : null;
       return {
         key: l.lineItemId,

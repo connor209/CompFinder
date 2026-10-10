@@ -138,7 +138,8 @@ export default function SellSheet() {
       sb.from("card_catalog")
         .select("cardmarket_id,name,collector_number,rarity,expansion,expansion_code,category")
         .eq("game", game)
-        .in("expansion", chosen)
+        .in("expansion", chosen),
+      { orderBy: "cardmarket_id" }
     );
     const real = rows.filter((r) => (r.category || "card") === "card" && String(r.collector_number || "").trim());
     real.sort((a, b) => {

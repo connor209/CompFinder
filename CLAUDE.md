@@ -219,6 +219,12 @@ stream` (the relay, only while streaming).
   decided about the stream box, so it never reaches the Show Desk, the binder
   or a stranger's phone.
 
+- `scripts/check-pagedselect.mjs` — a paged read misses nothing: every page is
+  in a total order, so 2,500 rows come back as 2,500 rather than ~1,800 with
+  some twice. Born from stack cards landing under the pull sheet's variation
+  picks because their page was never read. And a grep that a table not keyed
+  on `id` names its own key, since ordering by a missing column reads nothing.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
