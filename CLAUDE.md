@@ -1633,6 +1633,11 @@ stranger their card is worth.
   any pool names it (`isCardAway()`): the flag is one column, and returning
   one of two open checkouts for the same card clears it while the other is
   still out — BC1 showed on the shelf that way on 2026-10-10.
+  And a card that SOLD on eBay stays an unpulled stack card until somebody
+  commits the Pull Sheet, so the picker reads `offSaleReason()` in
+  `stockcheck.js` — the same reading Stacks → Reconcile uses — and leaves out
+  sold and sold-out cards by default, counted, with a toggle (BA1, the same
+  day).
 - **Migration 024** adds `sticker_pence` to `stock_checkouts` and `pool_name`
   to `price_batches`. `pool_name` is read and written OPTIONALLY: migrations
   here are applied by hand, so the code always ships first, and Postgres

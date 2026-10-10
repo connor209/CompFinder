@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/stackpos.js";
-import { isListingAvailable, soldOutSkus } from "@/lib/stockcheck.js";
+import { isListingAvailable, soldOutSkus, offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { gameOf, gameFacets, filterByGames, gameName, UNKNOWN_GAME } from "@/lib/games.js";
 import { getSetIndex } from "@/lib/set-index.js";
 import {
@@ -91,6 +91,10 @@ export default function ShowDesk() {
   // the lot.
   const [batchPrefix, setBatchPrefix] = useState("");
   const [batchStack, setBatchStack] = useState("");
+  // Cards the shelf still lists but eBay says have SOLD (or are listed at
+  // quantity 0). Hidden from the picker unless asked for — see offSaleReason().
+  const [batchShowGone, setBatchShowGone] = useState(false);
+  const [sales, setSales] = useState(null); // ebay_sales sku+date, or null if unread
   const [batchPick, setBatchPick] = useState(new Set());
   const [feedback, setFeedback] = useState([]); // recent checkout results
   const [busy, setBusy] = useState(false);
@@ -306,6 +310,15 @@ export default function ShowDesk() {
       setImages(bySku);
       setListings(live || []);
     } catch { /* no pictures and no online list is a gap, not a failure */ }
+    // eBay sales by SKU, so the stack picker can tell a card that sold online
+    // (and was never pulled on the Pull Sheet) from one still on the shelf.
+    // A failed read leaves it null and the picker falls back to the listings.
+    try {
+      setSales(await pagedSelect(
+        () => sb.from("ebay_sales").select("sku,sold_date,line_item_id").not("sku", "is", null),
+        { orderBy: "line_item_id" }
+      ));
+    } catch { setSales(null); }
 
     const w = await loadWants(sb);
     setWantsMissing(Boolean(w.missing));
@@ -639,14 +652,22 @@ export default function ShowDesk() {
     const present = stackCards.map((c) => (!c.checked_out_at && isCardAway(c, awayIndex) ? { ...c, checked_out_at: "open" } : c));
     const ranks = liveRanks(present);
     const depths = stackDepths(present);
+    // No listings read means no evidence either way: say nothing rather than
+    // call every card on the shelf "not listed".
+    const offSale = listings.length > 0 ? offSaleIndex(listings, sales || []) : null;
     return skuBatch(present, batchPrefix, { stackId: batchStack, rankOf: (c) => ranks.get(c.id), away: awayIndex }).map((card) => ({
-      card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null
+      card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null,
+      offSale: offSaleReason(card.sku, offSale)
     }));
-  }, [stackCards, batchPrefix, batchStack, awayIndex]);
+  }, [stackCards, batchPrefix, batchStack, awayIndex, listings, sales]);
+  // Sold and sold-out cards leave the picker unless asked for, and are counted:
+  // a card that sold online but was never pulled is still a row on the shelf.
+  const batchGone = batchRows.filter((r) => r.offSale === "sold" || r.offSale === "outofstock");
+  const batchShown = batchShowGone ? batchRows : batchRows.filter((r) => r.offSale !== "sold" && r.offSale !== "outofstock");
   const batchOpen = !!(batchPrefix.trim() || batchStack);
   // Only ticks the list can still see: a card checked out since, or outside a
   // narrowed prefix, is never acted on — the selectionFor() rule.
-  const batchChosen = batchRows.filter((r) => batchPick.has(r.card.id)).map((r) => r.card);
+  const batchChosen = batchShown.filter((r) => batchPick.has(r.card.id)).map((r) => r.card);
   const listingById = useMemo(() => {
     const m = new Map();
     for (const l of listings) if (l?.ebay_item_id) m.set(String(l.ebay_item_id), l);
@@ -1259,19 +1280,31 @@ export default function ShowDesk() {
             </p>
           ) : (
             <>
+              {batchGone.length > 0 ? (
+                <p className="hint hint-small" style={{ marginTop: 6 }}>
+                  {batchGone.length} card{batchGone.length === 1 ? "" : "s"} here eBay says ha{batchGone.length === 1 ? "s" : "ve"} sold
+                  {batchShowGone ? " — shown, marked below" : " — left out"}. Still on the shelf in the app because nobody
+                  pulled {batchGone.length === 1 ? "it" : "them"} on the Pull Sheet, so the positions count {batchGone.length === 1 ? "it" : "them"} too;
+                  Stacks → Reconcile pulls them for good.{" "}
+                  <button className="sd-clear-all" onClick={() => { setBatchShowGone((v) => !v); setBatchPick(new Set()); }}>
+                    {batchShowGone ? "Hide them" : "Show them"}
+                  </button>
+                </p>
+              ) : null}
               <div className="sd-bulkbar">
                 <label className="sd-toggle">
                   <input
                     type="checkbox"
-                    checked={batchChosen.length === batchRows.length}
-                    ref={(el) => { if (el) el.indeterminate = batchChosen.length > 0 && batchChosen.length < batchRows.length; }}
-                    onChange={(e) => setBatchPick(e.target.checked ? new Set(batchRows.map((r) => r.card.id)) : new Set())}
+                    checked={batchShown.length > 0 && batchChosen.length === batchShown.length}
+                    ref={(el) => { if (el) el.indeterminate = batchChosen.length > 0 && batchChosen.length < batchShown.length; }}
+                    onChange={(e) => setBatchPick(e.target.checked ? new Set(batchShown.map((r) => r.card.id)) : new Set())}
+                    disabled={batchShown.length === 0}
                   />
-                  {batchChosen.length > 0 ? `${batchChosen.length} of ${batchRows.length}` : `${batchRows.length} on the shelf`}
+                  {batchChosen.length > 0 ? `${batchChosen.length} of ${batchShown.length}` : `${batchShown.length} on the shelf`}
                 </label>
               </div>
               <div className="stack-list sd-batch-list">
-                {batchRows.map(({ card, rank, depth }) => (
+                {batchShown.map(({ card, rank, depth, offSale }) => (
                   <label className="ps-row sd-rec-row" key={card.id}>
                     <input
                       type="checkbox"
@@ -1281,6 +1314,15 @@ export default function ShowDesk() {
                     <span className="stack-sku" title="The card's SKU. A name, not an address — it does not move when the stack re-flows.">{card.sku}</span>
                     <span className="stack-pos" title="Live position — count this many from the top of the stack">{rank ?? "?"}</span>
                     <span className="stack-title">{card.title || <em>—</em>}</span>
+                    {offSale ? (
+                      <span
+                        className="badge2"
+                        style={{ color: offSale === "notlisted" ? undefined : "var(--bad-ink)" }}
+                        title={offSale === "sold" ? "This SKU is in your eBay sales and has no live listing" : offSale === "outofstock" ? "Listed at quantity 0 — eBay's sold-out marker" : "No live eBay listing for this SKU"}
+                      >
+                        {offSale === "sold" ? "sold on eBay" : offSale === "outofstock" ? "sold out on eBay" : "not listed"}
+                      </span>
+                    ) : null}
                     <span className="badge2" title="Where to walk, and how far to count">
                       {positionLabel(stackName.get(card.stack_id), rank, depth)}
                     </span>

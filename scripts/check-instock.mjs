@@ -25,7 +25,7 @@
  * - Too loose, and you drive to a show looking for cards that aren't there.
  */
 import { readFileSync } from "node:fs";
-import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock } from "../apps/app/lib/stockcheck.js";
+import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, offSaleIndex, offSaleReason } from "../apps/app/lib/stockcheck.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -68,6 +68,22 @@ eq("the SKUs that are listed but gone", [...soldOutSkus(LISTINGS)].sort(), ["b12
 eq("a SKU with a live second listing is NOT reported gone", soldOutSkus(LISTINGS).has("d9"), false);
 eq("SKUs are matched case-insensitively, as everywhere else", availableSkus([{ sku: "A50", quantity: 1 }]).has("a50"), true);
 eq("empty input is empty, not a crash", [[...availableSkus(null)], [...soldOutSkus(undefined)]], [[], []]);
+
+// Why a shelf card is not on sale — Stacks → Reconcile and the Show Desk's
+// stack picker read the same answer. BA1, 2026-10-10: sold on eBay, never
+// pulled on the Pull Sheet, so it was still offered for checking out.
+{
+  const idx = offSaleIndex(
+    [{ sku: "LIVE1", quantity: 1 }, { sku: "ZERO1", quantity: 0 }, { sku: "BOTH1", quantity: 0 }, { sku: "BOTH1", quantity: 2 }],
+    [{ sku: "BA1", sold_date: "2026-09-01" }, { sku: "BOTH1", sold_date: "2026-09-02" }]
+  );
+  eq("sold, no live listing", offSaleReason("ba1", idx), "sold");
+  eq("listed at quantity 0", offSaleReason("ZERO1", idx), "outofstock");
+  eq("no listing, no sale", offSaleReason("C9", idx), "notlisted");
+  eq("on sale is on sale", offSaleReason("LIVE1", idx), null);
+  eq("a sale beside a live second copy is still on sale", offSaleReason("BOTH1", idx), null);
+  eq("no index says nothing", offSaleReason("BA1", null), null);
+}
 
 // --- 2b. a zero has two causes, and they want opposite treatment -----------
 // eBay zeroes a listing when the card SELLS. We zero it ourselves when the
@@ -142,7 +158,7 @@ for (const [file, fn, what] of SCREENS) {
   if (!/ebay_listings"\)\.select\("[^"]*quantity/.test(body)) {
     fail(`${fn}() does not select quantity — ${what} cannot tell a sold card from a live one`);
   }
-  if (!/isListingAvailable|availableSkus|soldOutSkus/.test(body)) {
+  if (!/isListingAvailable|availableSkus|soldOutSkus|offSaleIndex/.test(body)) {
     fail(`${fn}() does not go through stockcheck.js — ${what} is deciding availability on its own`);
   }
   if (/quantity\s*(>|>=|===|!==|==|<|<=)/.test(body) || /\.quantity\s*\?\?/.test(body)) {

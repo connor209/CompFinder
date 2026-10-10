@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
-import { availableSkus, soldOutSkus } from "@/lib/stockcheck.js";
+import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -159,11 +159,8 @@ export default function Stacks() {
     setReconLoading(true);
     const sb = supabase();
     const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,quantity").not("sku", "is", null));
-    const activeSet = availableSkus(listings);
-    const outOfStock = soldOutSkus(listings);
     const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date,line_item_id").not("sku", "is", null), { orderBy: "line_item_id" });
-    const saleMap = new Map();
-    sales.forEach((s) => { const k = String(s.sku).toLowerCase(); if (!saleMap.has(k)) saleMap.set(k, s.sold_date); });
+    const offSale = offSaleIndex(listings, sales);
     const cards = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));
     const nameMap = new Map(stacks.map((s) => [s.id, s.name]));
     // Most-certain first, so the pre-ticked rows are the ones at the top.
@@ -173,13 +170,12 @@ export default function Stacks() {
       // That is also what keeps the quantity rule safe: checking a card out
       // sets its listing to quantity 0 too, and those rows never reach here.
       .filter((c) => !c.checked_out_at)
-      .filter((c) => c.sku && !activeSet.has(String(c.sku).toLowerCase()))
-      .map((c) => {
-        const k = String(c.sku).toLowerCase();
-        const sold = saleMap.get(k);
-        const reason = sold ? "sold" : outOfStock.has(k) ? "outofstock" : "notlisted";
-        return { id: c.id, sku: c.sku, title: c.title, stack: nameMap.get(c.stack_id) || "", soldDate: sold || null, reason };
-      })
+      .map((c) => ({ c, reason: offSaleReason(c.sku, offSale) }))
+      .filter(({ reason }) => reason)
+      .map(({ c, reason }) => ({
+        id: c.id, sku: c.sku, title: c.title, stack: nameMap.get(c.stack_id) || "",
+        soldDate: offSale.soldDate.get(String(c.sku).toLowerCase()) || null, reason
+      }))
       .sort((a, b) => (a.reason === b.reason ? (a.stack || "").localeCompare(b.stack || "") : rank[a.reason] - rank[b.reason]));
     setReconRows(cand);
     // Out-of-stock is pre-ticked alongside sold: a live card is never at

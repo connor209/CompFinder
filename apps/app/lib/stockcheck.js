@@ -333,6 +333,40 @@ export function availableSkus(listings) {
 }
 
 /**
+ * Why a stack card's SKU is not on sale, or null when it is.
+ *
+ * A stack card stays unpulled until somebody commits the Pull Sheet, so a card
+ * that sold on eBay can sit on the shelf in the data long after it left the
+ * building. Stacks → Reconcile and the Show Desk's stack picker both ask this,
+ * and one definition keeps them from disagreeing about the same card:
+ *
+ *   "sold"        no live listing, and the SKU is in eBay sales (90 days)
+ *   "outofstock"  still listed at quantity 0 — eBay's own sold marker
+ *   "notlisted"   no live listing for any other reason (ended, delisted)
+ *
+ * A SKU with ANY available listing is on sale, whatever else is true of it.
+ * Build the index once with offSaleIndex() and ask per card.
+ */
+export function offSaleIndex(listings, sales = []) {
+  const soldDate = new Map();
+  for (const s of sales || []) {
+    if (!s?.sku) continue;
+    const k = String(s.sku).toLowerCase();
+    if (!soldDate.has(k)) soldDate.set(k, s.sold_date || null);
+  }
+  return { available: availableSkus(listings), soldOut: soldOutSkus(listings), soldDate };
+}
+
+export function offSaleReason(sku, idx) {
+  if (!sku || !idx) return null;
+  const k = String(sku).toLowerCase();
+  if (idx.available.has(k)) return null;
+  if (idx.soldDate.has(k)) return "sold";
+  if (idx.soldOut.has(k)) return "outofstock";
+  return "notlisted";
+}
+
+/**
  * Index the checkouts that are still OUT, for the question below.
  * `checkouts` are `stock_checkouts` rows; resolved ones are ignored, because
  * a card that came home or was sold at the table is not away any more.
