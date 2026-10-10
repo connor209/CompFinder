@@ -834,20 +834,35 @@ export async function relistListing(accessToken, itemId) {
  */
 export async function fetchRecentOrders(accessToken, daysBack = 90) {
   const since = new Date(Date.now() - daysBack * 86_400_000).toISOString();
-  const params = new URLSearchParams({ filter: `creationdate:[${since}..]`, limit: "200" });
-  const res = await fetch(`${FULFILLMENT_ORDER}?${params}`, {
-    headers: { Authorization: `Bearer ${accessToken}`, "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE, Accept: "application/json" }
-  });
-  if (res.status === 403) {
-    const e = new Error("eBay sales access not granted — reconnect your account to enable sales tracking.");
-    e.scope = true;
-    throw e;
+  // getOrders returns at most 200 orders a page, and one page was all this
+  // ever read — so past the 200th order in the window, sales never reached
+  // ebay_sales, and Accounts and Stacks → Reconcile were short. Page until
+  // eBay stops handing back a full one, as fetchPendingOrders does.
+  const PAGE = 200;
+  const orders = [];
+  for (let offset = 0; offset < 10000; offset += PAGE) {
+    const params = new URLSearchParams({ filter: `creationdate:[${since}..]`, limit: String(PAGE), offset: String(offset) });
+    const res = await fetch(`${FULFILLMENT_ORDER}?${params}`, {
+      headers: { Authorization: `Bearer ${accessToken}`, "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE, Accept: "application/json" }
+    });
+    if (res.status === 403) {
+      const e = new Error("eBay sales access not granted — reconnect your account to enable sales tracking.");
+      e.scope = true;
+      throw e;
+    }
+    if (!res.ok) throw new Error(`eBay orders fetch failed (${res.status}).`);
+    const json = await res.json();
+    const page = json.orders || [];
+    orders.push(...page);
+    if (page.length < PAGE || (json.total != null && offset + PAGE >= Number(json.total))) break;
   }
-  if (!res.ok) throw new Error(`eBay orders fetch failed (${res.status}).`);
-  const json = await res.json();
 
   const lines = [];
-  for (const order of json.orders || []) {
+  const seenOrders = new Set(); // an order arriving mid-read can shift one onto two pages
+  for (const order of orders) {
+    const oid = String(order.orderId || "");
+    if (oid && seenOrders.has(oid)) continue;
+    seenOrders.add(oid);
     const soldDate = order.creationDate || null;
     for (const li of order.lineItems || []) {
       const unit = li.lineItemCost ? Number(li.lineItemCost.value) : null;
