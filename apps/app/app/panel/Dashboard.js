@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { awayIndex, stockUnits } from "@/lib/stockcheck.js";
 
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 
@@ -129,7 +130,7 @@ export default function Dashboard({ onNavigate }) {
     for (;;) {
       const { data, error } = await supabase
         .from("ebay_listings")
-        .select("ebay_item_id,price_value,price_currency,quantity,extra")
+        .select("ebay_item_id,sku,price_value,price_currency,quantity,extra")
         .range(from, from + 999);
       if (error || !data || data.length === 0) break;
       all = all.concat(data);
@@ -139,13 +140,30 @@ export default function Dashboard({ onNavigate }) {
     const { data: costRows } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
     const costMap = new Map((costRows || []).map((r) => [r.ebay_item_id, r.cost_pence]));
 
+    // A sold card stays in the ActiveList at quantity 0, so `all` holds shells
+    // of cards that have gone. stockUnits() tells those from a card we zeroed
+    // for a show or the stream box (still ours — both count in a valuation).
+    // A failed read leaves `away` null and counts every zero, as before.
+    let away = null;
+    try {
+      const { data: co, error: coErr } = await supabase
+        .from("stock_checkouts")
+        .select("sku,ebay_item_id,hide_method,resolved_at")
+        .is("resolved_at", null);
+      if (!coErr) away = awayIndex(co || []);
+    } catch { /* away stays null */ }
+
     let value = 0;
     let costBasis = 0;
     let costedValue = 0;
     let costedCount = 0;
     let aged = 0;
+    let held = 0;
+    let gone = 0;
     for (const l of all) {
-      const qty = l.quantity || 1;
+      const qty = stockUnits(l, away);
+      if (qty === 0) { gone += 1; continue; }
+      held += 1;
       const askP = l.price_value != null ? Math.round(l.price_value * 100) : 0;
       value += askP * qty;
       const c = costMap.get(l.ebay_item_id);
@@ -158,12 +176,13 @@ export default function Dashboard({ onNavigate }) {
       if (a != null && a > 90) aged += 1;
     }
     setStats({
-      count: all.length,
+      count: held,
+      gone,
       value,
       costBasis,
       costedValue,
       costedCount,
-      missingCost: all.length - costedCount,
+      missingCost: held - costedCount,
       potentialMargin: costedValue - costBasis,
       aged,
       lastSynced: s.lastSynced
@@ -255,6 +274,13 @@ export default function Dashboard({ onNavigate }) {
         </div>
         <div className="stat"><div className="k">Active listings</div><div className="v">{stats ? stats.count : "—"}</div></div>
       </div>
+      ) : null}
+      {stats && stats.gone > 0 ? (
+        // Said rather than silently dropped: the count moved, and a number
+        // that moved with no reason given looks like a bug.
+        <p className="hint hint-small" style={{ marginTop: -6, marginBottom: 12 }}>
+          {stats.gone} sold-out listing{stats.gone === 1 ? "" : "s"} left out — eBay keeps a sold card listed at quantity 0.
+        </p>
       ) : null}
 
       <div className="dash-grid">

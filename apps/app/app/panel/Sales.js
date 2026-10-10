@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import { currentSettings } from "@/lib/current-settings";
+import { pagedSelect } from "@/lib/pagedSelect";
 
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 // Shared default eBay final-value fee estimate — kept in step with Accounts.
@@ -18,6 +20,9 @@ function fmtDate(iso) {
  * fees and (where a cost is recorded) true profit. Sales come from the
  * Fulfillment API sync; fees are estimated with a configurable %.
  */
+
+// The window the tiles describe, and the window sync asks eBay for.
+const SALES_DAYS = 90;
 export default function Sales() {
   const [sales, setSales] = useState(null);
   const [costs, setCosts] = useState(new Map());
@@ -29,12 +34,19 @@ export default function Sales() {
 
   async function load() {
     const supabase = createClient();
-    const { data } = await supabase
-      .from("ebay_sales")
-      .select("line_item_id,ebay_item_id,sku,title,quantity,sold_pence,currency,sold_date")
-      .order("sold_date", { ascending: false })
-      .limit(500);
-    setSales(data || []);
+    // The last 90 days, all of them. This used to be the newest 500 rows under
+    // a "Revenue (90d)" label, so a busy quarter was quietly cut short and a
+    // quiet one reached back past ninety days.
+    const since = new Date(Date.now() - SALES_DAYS * 86400000).toISOString();
+    const data = await pagedSelect(
+      () => supabase
+        .from("ebay_sales")
+        .select("line_item_id,ebay_item_id,sku,title,quantity,sold_pence,currency,sold_date")
+        .gte("sold_date", since)
+        .order("sold_date", { ascending: false }),
+      { orderBy: "line_item_id" }
+    );
+    setSales(data);
     const { data: costRows } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
     setCosts(new Map((costRows || []).map((r) => [r.ebay_item_id, r.cost_pence])));
     // Share the eBay-fee % with the Accounts P&L so the same data reads the same
@@ -54,7 +66,8 @@ export default function Sales() {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const next = { ...settings, accounts: { ...(settings.accounts || {}), feePct: pct } };
+    const base = await currentSettings(supabase, user.id, settings);
+    const next = { ...base, accounts: { ...(base.accounts || {}), feePct: pct } };
     setSettings(next);
     await supabase.from("profiles").update({ settings: next }).eq("id", user.id);
   }
@@ -71,7 +84,7 @@ export default function Sales() {
       const res = await fetch("/api/ebay/sales/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ days: 90 })
+        body: JSON.stringify({ days: SALES_DAYS })
       }).then((r) => r.json());
       if (res.ok) {
         setNote(`Synced ${res.count} sale line(s).`);
@@ -93,7 +106,9 @@ export default function Sales() {
       const fees = revenue != null ? Math.round(revenue * (feePct / 100)) : null;
       const unitCost = costs.get(s.ebay_item_id);
       const cost = unitCost != null ? unitCost * (s.quantity || 1) : null;
-      const profit = revenue != null && fees != null ? revenue - fees - (cost || 0) : null;
+      // No cost recorded is UNKNOWN, never £0: treating it as free books the
+      // whole price as profit, the flattering direction (Show history's rule).
+      const profit = revenue != null && fees != null && cost != null ? revenue - fees - cost : null;
       return { ...s, revenue, fees, cost, profit, hasCost: cost != null };
     });
   }, [sales, costs, feePct]);
@@ -104,13 +119,14 @@ export default function Sales() {
     let cost = 0;
     let profit = 0;
     let costed = 0;
+    let costedRevenue = 0;
     for (const r of rows) {
       revenue += r.revenue || 0;
       fees += r.fees || 0;
-      if (r.hasCost) { cost += r.cost; costed += 1; }
-      profit += r.profit || 0;
+      if (r.hasCost) { cost += r.cost; costed += 1; costedRevenue += r.revenue || 0; }
+      if (r.profit != null) profit += r.profit;
     }
-    return { revenue, fees, cost, profit, count: rows.length, costed };
+    return { revenue, fees, cost, profit, count: rows.length, costed, costedRevenue };
   }, [rows]);
 
   if (sales === null) return <div className="panel"><span className="spinner" /> &nbsp;Loading sales…</div>;
@@ -118,14 +134,22 @@ export default function Sales() {
   return (
     <>
       <div className="stat-row">
-        <div className="stat"><div className="k">Revenue (90d)</div><div className="v">{pounds(totals.revenue)}</div></div>
+        <div className="stat"><div className="k">Revenue ({SALES_DAYS}d)</div><div className="v">{pounds(totals.revenue)}</div></div>
         <div className="stat"><div className="k">Est. fees</div><div className="v">{pounds(totals.fees)}</div></div>
         <div className="stat"><div className="k">Cost of sales</div><div className="v">{pounds(totals.cost)}</div></div>
         <div className="stat">
           <div className="k">Est. profit</div>
-          <div className="v" style={{ color: totals.profit > 0 ? "var(--good-ink)" : totals.profit < 0 ? "var(--bad-ink)" : "var(--ink)" }}>{pounds(totals.profit)}</div>
+          <div className="v" style={{ color: totals.profit > 0 ? "var(--good-ink)" : totals.profit < 0 ? "var(--bad-ink)" : "var(--ink)" }}>{totals.costed ? pounds(totals.profit) : "—"}</div>
         </div>
       </div>
+      {totals.count > totals.costed ? (
+        <p className="hint hint-small" style={{ marginTop: -6, marginBottom: 12 }}>
+          {totals.costed
+            ? `Profit is over the ${totals.costed} of ${totals.count} sales with a cost recorded (${pounds(totals.costedRevenue)} of ${pounds(totals.revenue)} revenue).`
+            : "No sale here has a cost recorded, so there is no profit figure yet."}
+          {" "}A sale with no cost is left out rather than counted as free.
+        </p>
+      ) : null}
 
       <div className="inv-bar">
         <label className="inv-sort">eBay fees %

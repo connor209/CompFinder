@@ -7,6 +7,8 @@
  * is filtered by user_id explicitly so it's correct even with RLS bypassed.
  */
 
+import { awayIndex, stockUnits } from "./stockcheck.js";
+
 async function pageAll(makeQuery, pageSize = 1000) {
   let from = 0;
   let all = [];
@@ -27,8 +29,22 @@ async function pageAll(makeQuery, pageSize = 1000) {
  */
 export async function snapshotUserPortfolio(db, userId, dateStr) {
   const listings = await pageAll(() =>
-    db.from("ebay_listings").select("ebay_item_id,price_value,quantity").eq("user_id", userId)
+    db.from("ebay_listings").select("ebay_item_id,sku,price_value,quantity").eq("user_id", userId)
   );
+  // Open checkouts, to tell a card we zeroed for a show or the stream box
+  // (still ours) from one eBay zeroed because it sold (gone). Both boxes
+  // count: this is a valuation, not a screen anybody else sees. A failed read
+  // leaves `away` null, and stockUnits() then counts every zero — the old
+  // figure, never a smaller wrong one.
+  let away = null;
+  try {
+    const { data, error } = await db
+      .from("stock_checkouts")
+      .select("sku,ebay_item_id,hide_method,resolved_at")
+      .eq("user_id", userId)
+      .is("resolved_at", null);
+    if (!error) away = awayIndex(data || []);
+  } catch { /* away stays null */ }
   const costRows = await pageAll(() =>
     db.from("listing_costs").select("ebay_item_id,cost_pence").eq("user_id", userId)
   );
@@ -37,8 +53,11 @@ export async function snapshotUserPortfolio(db, userId, dateStr) {
   let value = 0;
   let costBasis = 0;
   let itemCount = 0;
+  let held = 0;
   for (const l of listings) {
-    const qty = l.quantity || 1;
+    const qty = stockUnits(l, away);
+    if (qty === 0) continue;
+    held += 1;
     const askP = l.price_value != null ? Math.round(l.price_value * 100) : 0;
     value += askP * qty;
     itemCount += qty;
@@ -52,7 +71,7 @@ export async function snapshotUserPortfolio(db, userId, dateStr) {
     inventory_value_pence: value,
     cost_basis_pence: costBasis,
     item_count: itemCount,
-    listing_count: listings.length
+    listing_count: held
   };
   await db.from("portfolio_snapshots").upsert(row, { onConflict: "user_id,snapshot_date" });
   return row;

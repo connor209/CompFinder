@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Fold from "../panel/Fold";
-import { currentSettings } from "./current-settings";
+import { currentSettings } from "@/lib/current-settings";
 
 /**
  * Pick which eBay Business Policies (shipping, payment, return) CompFinder-

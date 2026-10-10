@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { pagedSelect } from "@/lib/pagedSelect";
+import { currentSettings } from "@/lib/current-settings";
 
 const pounds = (p) => (p == null ? "£0.00" : CompFinderPricing.toPoundsStr(Math.round(p)));
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -78,7 +79,10 @@ export default function Accounts() {
     try {
       const sb = createClient();
       const { data: { user } } = await sb.auth.getUser();
-      const nextSettings = { ...settings, accounts: { ...(settings.accounts || {}), businessType, feePct, ...patch } };
+      // Re-read first: the copy in state is from page load, and writing it back
+      // would undo anything saved elsewhere since (Settings, the Sales fee).
+      const base = await currentSettings(sb, user.id, settings);
+      const nextSettings = { ...base, accounts: { ...(base.accounts || {}), businessType, feePct, ...patch } };
       setSettings(nextSettings);
       await sb.from("profiles").update({ settings: nextSettings }).eq("id", user.id);
     } catch { /* best-effort */ }

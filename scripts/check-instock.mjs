@@ -25,7 +25,7 @@
  * - Too loose, and you drive to a show looking for cards that aren't there.
  */
 import { readFileSync } from "node:fs";
-import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, offSaleIndex, offSaleReason } from "../apps/app/lib/stockcheck.js";
+import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, stockUnits, offSaleIndex, offSaleReason } from "../apps/app/lib/stockcheck.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -138,6 +138,26 @@ eq("empty input is empty, not a crash", [[...availableSkus(null)], [...soldOutSk
 // stockcheck.js. A screen that tests `quantity` itself is how the two answers
 // start to disagree, and a disagreement here is invisible — one screen packs
 // a card for the show that the other has already written off.
+// ---- stockUnits: what a valuation counts -------------------------------
+// The Dashboard and the portfolio snapshot read `quantity || 1`, so a sold
+// shell at quantity 0 counted as one card still in hand.
+{
+  const away = awayIndex([
+    { sku: "S1", ebay_item_id: "900", hide_method: "quantity", resolved_at: null },
+    { sku: "S2", ebay_item_id: "901", hide_method: "quantity", resolved_at: null, pool: "stream" }
+  ]);
+  eq("a sold shell is worth no cards", stockUnits({ ebay_item_id: "111", sku: "X1", quantity: 0 }, away), 0);
+  eq("a live listing counts its quantity", stockUnits({ ebay_item_id: "112", quantity: 3 }, away), 3);
+  eq("a missing quantity is one card, never zero", stockUnits({ ebay_item_id: "113", quantity: null }, away), 1);
+  eq("a card we zeroed for a show is still ours", stockUnits({ ebay_item_id: "900", sku: "S1", quantity: 0 }, away), 1);
+  eq("so is one in the stream box", stockUnits({ ebay_item_id: "901", sku: "S2", quantity: 0 }, away), 1);
+  eq("a failed checkout probe counts the zero, as before", stockUnits({ ebay_item_id: "111", quantity: 0 }, null), 1);
+  for (const f of ["apps/app/app/panel/Dashboard.js", "apps/app/lib/portfolio.js"]) {
+    const src = readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
+    eq(`${f} values stock through stockUnits(), not quantity || 1`, /stockUnits\(/.test(src) && !/quantity \|\| 1/.test(src), true);
+  }
+}
+
 const read = (f) => readFileSync(new URL(`../${f}`, import.meta.url), "utf8");
 
 const SCREENS = [

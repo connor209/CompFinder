@@ -425,6 +425,31 @@ export function listingStock(listing, away) {
 }
 
 /**
+ * How many copies behind a listing are still OURS — for anything that puts a
+ * value on stock (the Dashboard, the portfolio snapshot).
+ *
+ * Both of those used `quantity || 1`, which reads eBay's sold shell — a
+ * listing left in the ActiveList at quantity 0 after the card sold — as one
+ * card still in hand, at its full asking price. The expensive cards are the
+ * ones that sell, so it was the dearest gone stock that padded the total.
+ *
+ * Off listingStock(), so it is the same reading My listings shows:
+ *   "live"    — the listed quantity (a missing one is one card, never zero).
+ *   "show"    — one: we zeroed it, the card is in a box and still ours.
+ *   "unknown" — one: no checkout data to ask, and a failed probe is not a sale.
+ *   "gone"    — zero.
+ */
+export function stockUnits(listing, away) {
+  const st = listingStock(listing, away);
+  if (st.state === "gone") return 0;
+  if (st.state === "live") {
+    const n = Number(listing?.quantity);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  }
+  return 1;
+}
+
+/**
  * The lowercased SKUs that are still listed but sold out — the ones a card
  * count based on `ebay_listings` alone gets wrong.
  *

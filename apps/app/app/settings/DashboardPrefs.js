@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import Fold from "../panel/Fold";
-import { currentSettings } from "./current-settings";
+import { currentSettings } from "@/lib/current-settings";
 
 /**
  * Dashboard visibility preferences — lets the user choose which cards appear on
