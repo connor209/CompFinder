@@ -1558,6 +1558,8 @@ html, body { overflow-x: clip; max-width: 100%; }
 .fold-summary { margin-top:2px; }
 .fold-inline { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); }
 .fold-body[hidden] { display:none; }
+/* Paper has no caret to click: a printed screen carries what is folded. */
+@media print { .fold-body[hidden] { display:block !important; } .fold-caret { display:none; } }
 .sb-toggle { display:inline-flex; align-items:center; gap:8px; border:0; background:transparent; padding:0; cursor:pointer; color:inherit; }
 .sb-toggle .eyebrow { cursor:pointer; }
 .sb-caret { display:inline-block; width:10px; color:var(--ink-faint); font-size:11px; }

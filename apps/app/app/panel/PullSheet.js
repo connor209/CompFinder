@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
+import Fold from "./Fold";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -510,10 +511,14 @@ export default function PullSheet() {
         <div className="panel"><p className="dd-empty">Nothing to pack — no open orders. 🎉</p></div>
       ) : (
         <>
-          <div className="panel">
-            <div className="panel-head"><span className="eyebrow">Order piles ({packView.piles.length})</span></div>
+          <Fold
+            id="pullsheet-piles"
+            title="Order piles"
+            count={packView.piles.length}
+            summary={`${packView.piles.filter((p) => placedInPile(p.pileNo) >= p.count).length} of ${packView.piles.length} complete${packPile != null ? ` · showing pile ${packPile} only` : ""}`}
+          >
             <p className="hint hint-small" style={{ marginTop: 0 }}>
-              Work through your stack in order below. Start a new numbered pile each time a new pile number appears — no need to label them; the buyer for each pile is shown here for when you reconcile at the end.
+              Start a new pile each time a new number appears below — no need to label them; each pile&apos;s buyer is here for reconciling at the end. Tap a pile to show only its cards.
             </p>
             <div className="pack-piles">
               {packView.piles.map((p) => {
@@ -537,7 +542,7 @@ export default function PullSheet() {
                 );
               })}
             </div>
-          </div>
+          </Fold>
 
           <div className="panel">
             <div className="panel-head">

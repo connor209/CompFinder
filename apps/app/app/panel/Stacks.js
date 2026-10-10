@@ -6,6 +6,7 @@ import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
+import Fold from "./Fold";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -29,7 +30,6 @@ export default function Stacks() {
   const [busy, setBusy] = useState(false);
   const [pulled, setPulled] = useState([]);
   const [awayCount, setAwayCount] = useState(0);
-  const [showPulled, setShowPulled] = useState(false);
   const [msg, setMsg] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerQuery, setPickerQuery] = useState("");
@@ -432,10 +432,9 @@ export default function Stacks() {
           ) : (
             <>
               <p className="hint hint-small" style={{ marginTop: 0 }}>
-                These are in a stack but no longer sellable. <b>sold</b> = matched in your sales history;
-                <b> out of stock</b> = still listed, but at quantity 0, which is what eBay leaves behind when a
-                card sells; <b>not listed</b> = gone from active listings (ended or delisted). The first two are
-                pre-ticked — pulling can be undone.
+                In a stack but no longer sellable. <b>sold</b> = in your sales history; <b>out of stock</b> = listed
+                at quantity 0, what eBay leaves when a card sells; <b>not listed</b> = ended or delisted. The first two
+                are pre-ticked — pulling can be undone.
               </p>
               <div className="stack-list">
                 {reconRows.map((r) => (
@@ -468,11 +467,13 @@ export default function Stacks() {
         <div className="panel"><p className="dd-empty">Create a stack, or use <b>Auto-import from listings</b> to build stacks from your eBay SKUs automatically.</p></div>
       ) : (
         <>
-          <div className="panel">
-            <div className="panel-head">
-              <span className="eyebrow">Add to {sel.name}</span>
-              <button className="btn btn-ghost" onClick={() => setShowBulk((v) => !v)}>{showBulk ? "Single" : "Bulk paste"}</button>
-            </div>
+          <Fold
+            id="stacks-add"
+            title={`Add to ${sel.name}`}
+            defaultOpen={false}
+            summary="Add one SKU, or bulk-paste a list — titles fill in from your listings."
+            actions={<button className="btn btn-ghost" onClick={() => setShowBulk((v) => !v)}>{showBulk ? "Single" : "Bulk paste"}</button>}
+          >
             {showBulk ? (
               <>
                 <p className="hint hint-small" style={{ marginTop: 0 }}>One card per line: <code>SKU</code> or <code>SKU, Title</code>. Titles auto-fill from your eBay listings where the SKU matches.</p>
@@ -488,7 +489,7 @@ export default function Stacks() {
                 <button className="btn btn-primary" onClick={addOne} disabled={busy || !addSku.trim()}>Add</button>
               </div>
             )}
-          </div>
+          </Fold>
 
           <div className="panel">
             <div className="panel-head">
@@ -517,12 +518,14 @@ export default function Stacks() {
           </div>
 
           {pulled.length > 0 ? (
-            <div className="panel">
-              <div className="panel-head">
-                <span className="eyebrow">Recently pulled ({pulled.length})</span>
-                <button className="btn btn-ghost" onClick={() => setShowPulled((v) => !v)}>{showPulled ? "Hide" : "Show"}</button>
-              </div>
-              {showPulled ? (
+            <Fold
+              id="stacks-pulled"
+              title="Recently pulled"
+              count={pulled.length}
+              defaultOpen={false}
+              lazy
+              summary="Pulled by mistake? Open this to undo."
+            >
                 <div className="stack-list">
                   {pulled.map((c) => (
                     <div className="stack-row" key={c.id}>
@@ -532,8 +535,7 @@ export default function Stacks() {
                     </div>
                   ))}
                 </div>
-              ) : null}
-            </div>
+            </Fold>
           ) : null}
         </>
       )}

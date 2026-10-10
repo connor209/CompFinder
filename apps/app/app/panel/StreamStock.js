@@ -24,6 +24,7 @@ import {
   recordAirings, deleteAiring, setAiringOutcome
 } from "@/lib/stream-store.js";
 import { storedRelayOrigin } from "./StreamBar";
+import Fold from "./Fold";
 
 /**
  * Stream stock — the box of cards pulled for eBay Live.
@@ -492,9 +493,8 @@ export default function StreamStock() {
           </div>
         </div>
         <p className="hint hint-small" style={{ marginTop: 0 }}>
-          A card stays in the box until it sells or has aired <b>{AIRINGS_BEFORE_RETURN} times</b> without selling
-          (or sat through {STREAMS_BACKSTOP} streams without being reached). Its eBay listing is hidden the whole
-          time and comes back when it goes home. Stream cards never show on the Show Desk.
+          A card stays until it sells or airs <b>{AIRINGS_BEFORE_RETURN} times</b> unsold (or sits through {STREAMS_BACKSTOP} streams
+          unreached). Its listing is hidden while it is out; stream cards never show on the Show Desk.
         </p>
         <div className="sd-opts">
           <label className="sd-toggle">
@@ -522,6 +522,19 @@ export default function StreamStock() {
             <span className="eyebrow">Recommended for the box — highest value first</span>
             <button className="btn btn-ghost" onClick={() => setRecOpen(false)}>Close</button>
           </div>
+          <Fold
+            id="stream-rec-filters"
+            panel={false}
+            title="Filters"
+            summary={[
+              `${count || topUp} wanted`,
+              minP || maxP ? `£${minP || "0"}–${maxP ? `£${maxP}` : "any"}` : null,
+              names.trim() ? names.trim() : null,
+              games.size ? `${games.size} game${games.size === 1 ? "" : "s"}` : null,
+              conds.size ? `${conds.size} condition${conds.size === 1 ? "" : "s"}` : null,
+              PICK_MODES.find((m) => m.key === pickMode)?.label
+            ].filter(Boolean).join(" · ")}
+          >
           <div className="ss-filters">
             <label>
               How many
@@ -584,6 +597,7 @@ export default function StreamStock() {
               </button>
             ))}
           </div>
+          </Fold>
           <p className="hint hint-small" style={{ marginTop: 0 }}>
             {rec.matched} card{rec.matched === 1 ? "" : "s"} in the stacks fit; picking {rec.picks.length}
             {pickMode === "spread" ? " spread across the price range" : ", dearest first"}.
@@ -646,14 +660,21 @@ export default function StreamStock() {
       {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{msg}</p> : null}
 
       {batch.length > 0 ? (
-        <div className="panel">
-          <div className="panel-head">
-            <span className="eyebrow">Pull sheet — added {String(batch[0].checked_out_at || "").slice(0, 10)}</span>
-            <button className="btn btn-ghost" onClick={downloadSheet}>⬇ CSV</button>
-          </div>
+        <Fold
+          id="stream-pullsheet"
+          title={`Pull sheet — added ${String(batch[0].checked_out_at || "").slice(0, 10)}`}
+          count={batch.length}
+          summary={`${sheet.stacks.length} stack${sheet.stacks.length === 1 ? "" : "s"}: ${sheet.stacks.map((g) => `${g.name} ×${g.rows.length}`).join(", ")}`}
+          actions={<button className="btn btn-ghost" onClick={downloadSheet}>⬇ CSV</button>}
+          alert={sheet.unplaced.length ? (
+            <p className="hint hint-small" style={{ color: "var(--warn-ink)" }}>
+              ⚠ {sheet.unplaced.length} card{sheet.unplaced.length === 1 ? "" : "s"} with no position to give — the stack card
+              has moved or gone: {sheet.unplaced.map((co) => co.sku || co.title).join(", ")}.
+            </p>
+          ) : null}
+        >
           <p className="hint hint-small" style={{ marginTop: 0 }}>
-            Numbered where each card <b>is</b> in its stack right now, and listed <b>deepest first</b>: pull from the back
-            forward and every number above stays true.
+            Numbered where each card <b>is</b> right now, <b>deepest first</b>: pull from the back and every number above stays true.
           </p>
           {sheet.stacks.map((g) => (
             <div key={g.stackId}>
@@ -669,26 +690,24 @@ export default function StreamStock() {
               </div>
             </div>
           ))}
-          {sheet.unplaced.length ? (
-            <p className="hint hint-small" style={{ color: "var(--warn-ink)" }}>
-              {sheet.unplaced.length} card{sheet.unplaced.length === 1 ? "" : "s"} with no position to give — the stack card
-              has moved or gone: {sheet.unplaced.map((co) => co.sku || co.title).join(", ")}.
-            </p>
-          ) : null}
-        </div>
+        </Fold>
       ) : null}
 
-      <div className="panel">
-        <div className="panel-head">
-          <h3>Streams</h3>
-          {streams.length ? (
-            <select className="sd-select" value={streamId} onChange={(e) => setStreamId(e.target.value)} aria-label="Which stream">
-              {streams.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}{s.closed_at ? " · closed" : ""}</option>
-              ))}
-            </select>
-          ) : null}
-        </div>
+      <Fold
+        id="stream-streams"
+        title="Streams"
+        count={streams.length || null}
+        summary={stream
+          ? `${stream.name}${stream.closed_at ? " (closed)" : ""} — ${tally.aired} aired · ${tally.sold} sold · ${tally.unsold} unsold${tally.pending ? ` · ${tally.pending} to pack` : ""}`
+          : "No streams yet."}
+        actions={streams.length ? (
+          <select className="sd-select" value={streamId} onChange={(e) => setStreamId(e.target.value)} aria-label="Which stream">
+            {streams.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}{s.closed_at ? " · closed" : ""}</option>
+            ))}
+          </select>
+        ) : null}
+      >
         <div className="sd-opts">
           <input
             className="stack-title-inp"
@@ -750,7 +769,7 @@ export default function StreamStock() {
         ) : (
           <p className="dd-empty">No streams yet. Start one before you go live, so what airs has somewhere to be recorded.</p>
         )}
-      </div>
+      </Fold>
 
       <div className="panel">
         <div className="panel-head">
