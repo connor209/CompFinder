@@ -390,15 +390,22 @@ export function subscribeDeal(fn) {
 
 /* -------------------------------------------------------------- selling it */
 
-/** The one place this file names the route that ends a listing. */
+/**
+ * The one place this file names the route that ends a listing.
+ *
+ * It asks for ONE copy: a listing with more copies behind it drops by one and
+ * stays live (`ended: false`, `remaining`), and only the last copy ends it.
+ */
 async function endListingViaApi(itemId) {
   try {
     const res = await fetch("/api/ebay/end-listing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId })
+      body: JSON.stringify({ itemId, oneCopy: true })
     }).then((r) => r.json());
-    return res && res.ok ? { ok: true } : { ok: false, error: (res && res.error) || "End failed" };
+    return res && res.ok
+      ? { ok: true, ended: res.ended !== false, remaining: res.remaining ?? null }
+      : { ok: false, error: (res && res.error) || "End failed" };
   } catch {
     return { ok: false, error: "Couldn't reach eBay to end the listing." };
   }
@@ -510,7 +517,11 @@ export async function sellLine(sb, line, pence, { event = null, userId = null, e
     did.push("listing was already ended");
   } else if (line.itemId) {
     const r = await endListing(line.itemId);
-    if (r && r.ok) {
+    if (r && r.ok && r.ended === false) {
+      // More copies behind this listing: one came off and the rest are still
+      // for sale, so the row must NOT claim the listing was ended.
+      did.push(r.remaining != null ? `one copy taken off the listing — ${r.remaining} still listed` : "one copy taken off the listing");
+    } else if (r && r.ok) {
       did.push("listing ended on eBay");
       if (checkoutId) {
         try { await sb.from("stock_checkouts").update({ hide_method: "ended" }).eq("id", checkoutId); } catch { /* cosmetic */ }
@@ -575,9 +586,12 @@ export async function retryEnds(sb, unended, { endListing = endListingViaApi } =
     // eslint-disable-next-line no-await-in-loop
     const res = await endListing(r.itemId);
     if (res && res.ok) {
-      if (r.checkoutId) {
+      if (r.checkoutId && res.ended !== false) {
         // eslint-disable-next-line no-await-in-loop
         try { await sb.from("stock_checkouts").update({ hide_method: "ended", hide_error: null }).eq("id", r.checkoutId); } catch { /* cosmetic */ }
+      } else if (r.checkoutId) {
+        // eslint-disable-next-line no-await-in-loop
+        try { await sb.from("stock_checkouts").update({ hide_error: null }).eq("id", r.checkoutId); } catch { /* cosmetic */ }
       }
     } else {
       still.push({ ...r, warning: `listing not ended: ${(res && res.error) || "unknown error"}` });

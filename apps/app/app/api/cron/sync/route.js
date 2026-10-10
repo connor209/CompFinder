@@ -12,7 +12,7 @@ import { snapshotUserPortfolio } from "@/lib/portfolio";
  * `Authorization: Bearer <CRON_SECRET>`. Set CRON_SECRET in the environment to
  * lock this route down.
  */
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function GET(request) {
   const secret = process.env.CRON_SECRET;

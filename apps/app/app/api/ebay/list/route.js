@@ -3,6 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, addFixedPriceListing, syncUserListings } from "@/lib/ebay";
 
+// A full listings sync reads every page of an account eBay has; on an
+// 8,000-listing account that is far past the default function time limit.
+export const maxDuration = 300;
+
 /** Create a new fixed-price listing on eBay (beta). */
 export async function POST(request) {
   const supabase = await createClient();

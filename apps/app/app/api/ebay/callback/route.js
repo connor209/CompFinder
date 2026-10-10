@@ -3,6 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { exchangeCodeForTokens, fetchEbayUsername, syncUserListings } from "@/lib/ebay";
 
+// A full listings sync reads every page of an account eBay has; on an
+// 8,000-listing account that is far past the default function time limit.
+export const maxDuration = 300;
+
 /**
  * eBay OAuth redirect target. Verifies the CSRF state, swaps the auth code for
  * user tokens, stores them (service-role only), records the username, and kicks

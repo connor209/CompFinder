@@ -281,6 +281,25 @@ console.log("5. what one tap actually does to each card");
     eq("an already-ended listing costs no call", calls, []);
     ok("and the receipt says so", r.did.includes("listing was already ended"));
   }
+
+  // (e) a quantity-3 listing, one copy sold at the table. The other two are
+  // still ours to sell: the listing drops by one and stays live, and the row
+  // must not claim it was ended — the claim that took the other copies out of
+  // every customer search on the Show Desk.
+  {
+    const sb = fakeSb();
+    const calls = [];
+    const oneOff = async (itemId) => { calls.push(itemId); return { ok: true, ended: false, remaining: 2 }; };
+    const line = listingLine({ ebay_item_id: "555", sku: "M3", title: "Gengar 94/203", price_value: 8 });
+    const r = await sellLine(sb, line, 800, { endListing: oneOff });
+    ok("sold", r.ok);
+    eq("one eBay call", calls, ["555"]);
+    ok("the receipt says one copy came off, and how many are left",
+      r.did.some((x) => /one copy/.test(x) && /2 still listed/.test(x)));
+    ok("and nothing calls the listing ended",
+      !sb._log.updates.some((u) => u.table === "stock_checkouts" && u.patch.hide_method === "ended"));
+    ok("nor is it reported as a failed end", !r.warning);
+  }
 }
 
 /* ============================================== 6. wifi, and the money first
