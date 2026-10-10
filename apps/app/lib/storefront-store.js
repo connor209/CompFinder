@@ -222,7 +222,10 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
   const checkoutQuery = (cols) => () => {
     let q = admin.from("stock_checkouts").select(cols).eq("user_id", owner).is("resolved_at", null);
     if (event) q = q.eq("event", event);
-    return q.order("checked_out_at", { ascending: true });
+    // A paged read needs a TOTAL order: ties on checked_out_at (a batch checked
+    // out in one go) let pages overlap or skip, and a skipped row is a card
+    // that silently is not on the storefront.
+    return q.order("checked_out_at", { ascending: true }).order("id", { ascending: true });
   };
 
   // Both reads and the view count at once: on venue wifi the visitor is
@@ -233,7 +236,9 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
       .then((r) => (r.error ? readAll(checkoutQuery(CHECKOUT_COLUMNS_PRE_024)) : r)),
     // Read even when the link leaves the online stock out: a checkout's photo
     // is on the listing it came from.
-    readAll(() => admin.from("ebay_listings").select(LISTING_COLUMNS).eq("user_id", owner)),
+    // Ordered for the same reason: unordered, every row of a sync shares one
+    // synced_at and nothing makes page two start where page one ended.
+    readAll(() => admin.from("ebay_listings").select(LISTING_COLUMNS).eq("user_id", owner).order("ebay_item_id", { ascending: true })),
     // The public catalogue's set list, for the set filter. A failure here
     // costs the filter, never the page.
     getSetIndex(admin).catch(() => ({ index: null })),
