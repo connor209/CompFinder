@@ -2506,6 +2506,15 @@ two Production builds and every push to a branch triggers two Previews. On
 Hobby plan's 100-deployment cap by early afternoon, and the last two fixes sat
 unbuilt for hours — with the live site quietly serving the commit before them.
 
+**Each project skips what it does not need** (`ignoreCommand` in each app's
+`vercel.json`, set 2026-10-10). Neither builds a Preview: branch pushes are
+skipped outright. `compfinder-public` builds Production only when `apps/public`,
+`packages/core` or the root package files changed since its last deploy
+(`VERCEL_GIT_PREVIOUS_SHA`), so an app-only merge never touches the public
+page. A Preview you do want is a **Redeploy** from the dashboard, or delete the
+line. If the previous SHA is missing from the shallow clone the diff errors,
+which counts as "build" — the safe direction.
+
 Verify locally (`npm run check`, `npm run build:public`), let fixes accumulate
 on the branch, and merge once you have something worth deploying. If the site
 stops reflecting a merge, check the Vercel dashboard before assuming the code
