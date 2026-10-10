@@ -1,14 +1,25 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getValidUserAccessToken, endListing } from "@/lib/ebay";
+import { getValidUserAccessToken, endListing, fetchItemQuantity, reviseItemQuantity } from "@/lib/ebay";
 
 /**
  * Delist — end a single active listing on eBay. Ownership-guarded (the item
  * must be in the signed-in user's synced inventory) and removes the row from
  * the cache on success.
  *
- * POST { itemId }
+ * POST { itemId, oneCopy? } → { ok, ended, remaining? }
+ *
+ * `oneCopy` is how a sale at the table asks: ONE card has gone, so a listing
+ * with more copies behind it drops by one and stays live, and only the last
+ * copy ends it. Ending a quantity-3 listing because one copy sold took the
+ * other two off eBay AND out of every customer search on the Show Desk, since
+ * the counter, the binder and the storefront all read `ebay_listings`.
+ *
+ * The count is read live (fetchItemQuantity), never off the synced row: a copy
+ * that sold online since the last sync would otherwise be put back on sale. If
+ * the live read fails we end nothing and say so — the sale is already
+ * recorded, an un-ended listing is a retry, and guessing either way is worse.
  */
 export async function POST(request) {
   const supabase = await createClient();
@@ -39,6 +50,25 @@ export async function POST(request) {
     const token = await getValidUserAccessToken(admin, user.id);
     if (!token) return NextResponse.json({ ok: false, error: "eBay account not connected." }, { status: 400 });
 
+    if (body.oneCopy) {
+      let live;
+      try {
+        live = await fetchItemQuantity(token, itemId);
+      } catch (err) {
+        return NextResponse.json({ ok: false, error: `couldn't read how many copies are left (${err.message || "eBay unreachable"})` }, { status: 502 });
+      }
+      if (live.available != null && live.available > 1) {
+        const remaining = live.available - 1;
+        await reviseItemQuantity(token, itemId, remaining);
+        try {
+          await admin.from("ebay_listings").update({ quantity: remaining }).eq("user_id", user.id).eq("ebay_item_id", itemId);
+        } catch {
+          /* the next sync corrects it */
+        }
+        return NextResponse.json({ ok: true, itemId, ended: false, remaining });
+      }
+    }
+
     await endListing(token, itemId);
     await admin.from("ebay_listings").delete().eq("user_id", user.id).eq("ebay_item_id", itemId);
 
@@ -57,7 +87,7 @@ export async function POST(request) {
       /* audit table optional */
     }
 
-    return NextResponse.json({ ok: true, itemId });
+    return NextResponse.json({ ok: true, itemId, ended: true });
   } catch (err) {
     return NextResponse.json({ ok: false, error: err.message || "End-listing failed." }, { status: 502 });
   }

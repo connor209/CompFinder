@@ -723,6 +723,56 @@ export async function fetchItemPictures(accessToken, itemId) {
 }
 
 /**
+ * How many copies a listing has left to sell RIGHT NOW (Trading API GetItem).
+ *
+ * Read live rather than off `ebay_listings`, because the synced row can be
+ * hours old: a copy that sold online since the last sync is still counted
+ * there, and decrementing from that number would put a card back on sale that
+ * no longer exists. Returns `{ quantity, sold, available }`, any of them null
+ * when eBay did not send it.
+ */
+export async function fetchItemQuantity(accessToken, itemId) {
+  const safeItem = String(itemId).replace(/[^0-9]/g, "");
+  if (!safeItem) throw new Error("Invalid item id.");
+
+  const body =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
+    `<ItemID>${safeItem}</ItemID>` +
+    `<OutputSelector>Item.Quantity</OutputSelector>` +
+    `<OutputSelector>Item.SellingStatus.QuantitySold</OutputSelector>` +
+    `</GetItemRequest>`;
+
+  const res = await fetch(TRADING_URL, {
+    method: "POST",
+    headers: {
+      "X-EBAY-API-CALL-NAME": "GetItem",
+      "X-EBAY-API-SITEID": SITE_ID_UK,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
+      "X-EBAY-API-IAF-TOKEN": accessToken,
+      "Content-Type": "text/xml"
+    },
+    body
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`eBay quantity fetch failed (${res.status}).`);
+
+  const doc = parser.parse(text);
+  const resp = doc?.GetItemResponse || {};
+  if (resp.Ack !== "Success" && resp.Ack !== "Warning") {
+    const errs = resp.Errors;
+    const msg = Array.isArray(errs) ? errs[0]?.LongMessage : errs?.LongMessage;
+    throw new Error(msg || "eBay rejected the quantity request.");
+  }
+  const quantity = numOrNull(resp.Item?.Quantity);
+  const sold = numOrNull(resp.Item?.SellingStatus?.QuantitySold);
+  // GetItem's Quantity is everything ever offered on the listing; what is
+  // left is that less what has sold.
+  const available = quantity == null ? null : Math.max(0, quantity - (sold || 0));
+  return { quantity, sold, available };
+}
+
+/**
  * Relist a previously-ended fixed-price listing (Trading API
  * RelistFixedPriceItem). Returns the NEW item id eBay assigns.
  */
