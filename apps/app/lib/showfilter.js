@@ -179,14 +179,24 @@ export function skuInBatch(sku, prefix) {
 }
 
 /**
- * The cards still in a batch, in SKU order: on a shelf, not pulled, not
- * already away at a show or in the stream box — the ones you could pick up
- * and check out right now.
+ * The cards still on the shelf that a SKU batch and/or a stack names — not
+ * pulled, not already away at a show or in the stream box: the ones you could
+ * pick up and check out right now. Either criterion alone works; both narrow.
+ *
+ * Order follows the question. Asked by STACK alone, the list runs in the order
+ * the cards sit in it, so it reads top to bottom as you count through the box
+ * (`rankOf` supplies the live rank). Asked by SKU, it runs AB2 before AB11.
  */
-export function skuBatch(cards, prefix) {
-  return (cards || [])
-    .filter((c) => c && !c.pulled_at && !c.checked_out_at && skuInBatch(c.sku, prefix))
-    .sort((a, b) => compareSku(a.sku, b.sku));
+export function skuBatch(cards, prefix, { stackId = "", rankOf = null } = {}) {
+  const p = String(prefix || "").trim();
+  if (!p && !stackId) return [];
+  const rows = (cards || []).filter((c) =>
+    c && !c.pulled_at && !c.checked_out_at &&
+    (!stackId || String(c.stack_id) === String(stackId)) &&
+    (!p || skuInBatch(c.sku, p))
+  );
+  if (!p && rankOf) return rows.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
+  return rows.sort((a, b) => compareSku(a.sku, b.sku));
 }
 
 /** Missing values sort last whichever way the column runs. */

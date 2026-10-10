@@ -270,6 +270,20 @@ eq("a card with no SKU is in no batch", skuInBatch("", "BP"), false);
   ];
   eq("the batch is what is on the shelf, AB2 before AB11",
     skuBatch(shelf, "BP").map((c) => c.id), [2, 1]);
+  const stacked = [
+    { id: 1, sku: "BP11", stack_id: "s1" },
+    { id: 2, sku: "BP2", stack_id: "s1" },
+    { id: 3, sku: "A7", stack_id: "s1" },
+    { id: 4, sku: "A1", stack_id: "s1", checked_out_at: "2026-10-01" },
+    { id: 5, sku: "BP3", stack_id: "s2" }
+  ];
+  const rank = new Map([[3, 1], [1, 2], [2, 3]]);
+  eq("a stack alone lists it in the order the cards sit, away cards out",
+    skuBatch(stacked, "", { stackId: "s1", rankOf: (c) => rank.get(c.id) }).map((c) => c.id), [3, 1, 2]);
+  eq("a stack and a SKU batch narrow each other, SKU order",
+    skuBatch(stacked, "BP", { stackId: "s1", rankOf: (c) => rank.get(c.id) }).map((c) => c.id), [2, 1]);
+  eq("neither criterion lists nothing, not the whole shelf",
+    skuBatch(stacked, " ", { stackId: "" }).length, 0);
 }
 
 if (failures) {

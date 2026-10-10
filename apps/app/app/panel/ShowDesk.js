@@ -89,6 +89,7 @@ export default function ShowDesk() {
   // specific cards, and a pre-ticked list of 140 is one tap from checking out
   // the lot.
   const [batchPrefix, setBatchPrefix] = useState("");
+  const [batchStack, setBatchStack] = useState("");
   const [batchPick, setBatchPick] = useState(new Set());
   const [feedback, setFeedback] = useState([]); // recent checkout results
   const [busy, setBusy] = useState(false);
@@ -623,13 +624,14 @@ export default function ShowDesk() {
   // easier is exactly the shortcut check-showcounter.mjs exists to refuse.
   const locations = useMemo(() => locationsBySku(stackCards, stackName), [stackCards, stackName]);
   const batchRows = useMemo(() => {
-    if (!batchPrefix.trim()) return [];
+    if (!batchPrefix.trim() && !batchStack) return [];
     const ranks = liveRanks(stackCards);
     const depths = stackDepths(stackCards);
-    return skuBatch(stackCards, batchPrefix).map((card) => ({
+    return skuBatch(stackCards, batchPrefix, { stackId: batchStack, rankOf: (c) => ranks.get(c.id) }).map((card) => ({
       card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null
     }));
-  }, [stackCards, batchPrefix]);
+  }, [stackCards, batchPrefix, batchStack]);
+  const batchOpen = !!(batchPrefix.trim() || batchStack);
   // Only ticks the list can still see: a card checked out since, or outside a
   // narrowed prefix, is never acted on — the selectionFor() rule.
   const batchChosen = batchRows.filter((r) => batchPick.has(r.card.id)).map((r) => r.card);
@@ -1220,16 +1222,28 @@ export default function ShowDesk() {
             placeholder="SKU batch (e.g. BP)"
             aria-label="SKU batch to pick from"
           />
-          {batchPrefix.trim() ? (
-            <button className="btn btn-ghost" onClick={() => { setBatchPrefix(""); setBatchPick(new Set()); }}>Close</button>
+          <select
+            className="sd-select"
+            value={batchStack}
+            onChange={(e) => { setBatchStack(e.target.value); setBatchPick(new Set()); }}
+            aria-label="Stack to pick from"
+          >
+            <option value="">any stack</option>
+            {stacks.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+          </select>
+          {batchOpen ? (
+            <button className="btn btn-ghost" onClick={() => { setBatchPrefix(""); setBatchStack(""); setBatchPick(new Set()); }}>Close</button>
           ) : (
-            <span className="hint hint-small">list a batch and tick the cards to take</span>
+            <span className="hint hint-small">list a stack or SKU batch and tick the cards to take</span>
           )}
         </div>
-        {batchPrefix.trim() ? (
+        {batchOpen ? (
           batchRows.length === 0 ? (
             <p className="hint hint-small">
-              No cards on the shelf under <b>{batchPrefix.trim().toUpperCase()}</b> — none with that SKU, or every one is already pulled or checked out.
+              No cards on the shelf
+              {batchPrefix.trim() ? <> under <b>{batchPrefix.trim().toUpperCase()}</b></> : null}
+              {batchStack ? <> in stack <b>{stackName.get(batchStack) || "?"}</b></> : null}
+              {" "}— none match, or every one is already pulled or checked out.
             </p>
           ) : (
             <>

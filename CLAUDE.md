@@ -1624,9 +1624,10 @@ stranger their card is worth.
   no sticker is named and left out, with a link to price just those —
   `/panel/batch?pool=show&ids=…`, the pool narrowed by checkout id. 💷 Price
   these does the same for whatever is ticked.
-- **A SKU batch can be listed and picked from.** Type `BP` under Check stock
-  out and the cards still on the shelf under it are listed in SKU order, none
-  ticked. Letters alone name a batch exactly (`B` is never `BP12`); a digit
+- **A stack or a SKU batch can be listed and picked from.** Choose a stack
+  or type `BP` under Check stock out (or both, to narrow) and the cards still
+  on the shelf are listed — a stack alone in the order they sit, otherwise
+  in SKU order — none ticked. Letters alone name a batch exactly (`B` is never `BP12`); a digit
   makes it a plain prefix (`skuInBatch()` in `showfilter.js`).
 - **Migration 024** adds `sticker_pence` to `stock_checkouts` and `pool_name`
   to `price_batches`. `pool_name` is read and written OPTIONALLY: migrations
