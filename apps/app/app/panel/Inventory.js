@@ -13,6 +13,7 @@ import { withPool, isStreamCheckout } from "@/lib/streamstock.js";
 import DealBar, { DealButton, useDeal } from "./DealBar";
 import { StreamBar, StreamButton, useRelay } from "./StreamBar";
 import { listingLine } from "@/lib/deal.js";
+import Fold from "./Fold";
 
 const settings = APP_SETTINGS;
 
@@ -1024,7 +1025,16 @@ export default function Inventory({ onDeepDive }) {
 
   return (
     <>
-      <div className="stat-row">
+      {/* The overview and the list each fold, and remember it. The headers keep
+          what matters shut: the count, the value, the last sync, and Sync
+          itself. Nothing that spends money is in a header — Price visible acts
+          on what is on screen, and a shut list puts nothing on screen. */}
+      <Fold
+        id="inventory-stats"
+        title="Overview"
+        summary={`${stats.count} listings · ${stats.uniqueCards} unique · ${stats.gbp ? pounds(Math.round(stats.value * 100)) : `~£${stats.value.toFixed(0)}`} · synced ${fmtWhen(status.lastSynced)}`}
+      >
+      <div className="stat-row" style={{ marginBottom: 0 }}>
         <div className="stat"><div className="k">Active listings</div><div className="v">{stats.count}</div></div>
         <div className="stat"><div className="k">Unique cards</div><div className="v">{stats.uniqueCards}</div></div>
         <div className="stat">
@@ -1033,9 +1043,22 @@ export default function Inventory({ onDeepDive }) {
         </div>
         <div className="stat"><div className="k">Last synced</div><div className="v" style={{ fontSize: 13 }}>{fmtWhen(status.lastSynced)}</div></div>
       </div>
+      </Fold>
 
       <StreamBar relay={relay} />
 
+      <Fold
+        id="inventory-list"
+        title="Your listings"
+        count={rows.length}
+        alert={note ? <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{note}</p> : null}
+        summary={`${rows.length} ${group || dupOnly ? "card(s)" : "listing(s)"}${filter.trim() ? ` matching “${filter.trim()}”` : ""}${awayCount > 0 ? ` · ${awayCount} at a show` : ""}${streamCount > 0 ? ` · ${streamCount} in the stream box` : ""}${goneCount > 0 ? ` · ${goneCount} sold out hidden` : ""} — open to browse, price or check out.`}
+        actions={
+          <button className="btn btn-ghost" onClick={handleSync} disabled={syncing}>
+            {syncing ? "Syncing…" : "↻ Sync"}
+          </button>
+        }
+      >
       <div className="inv-bar">
         <div className="inv-inp">
           <span className="mag" aria-hidden="true">🔍</span>
@@ -1081,9 +1104,6 @@ export default function Inventory({ onDeepDive }) {
             title={`Every card matching the filter (${rows.length}), not just the ones on screen`}
           >⤓ CSV</button>
           <button className="btn btn-ghost" aria-pressed={showActivity} onClick={() => setShowActivity((s) => !s)}>🕘 Activity</button>
-          <button className="btn btn-ghost" onClick={handleSync} disabled={syncing}>
-            {syncing ? "Syncing…" : "↻ Sync"}
-          </button>
         </div>
       </div>
 
@@ -1130,20 +1150,16 @@ export default function Inventory({ onDeepDive }) {
         ) : null}
       </div>
 
-      {note && <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{note}</p>}
-
       {showActivity ? <EbayActivity onChange={() => { loadStatus(); loadListings(); }} /> : null}
 
       {rows.length === 0 ? (
-        <div className="panel">
-          <p className="dd-empty">
-            {listings.length === 0
-              ? "No active listings cached yet — try Sync."
-              : dupOnly
-                ? "No duplicate listings — every card is listed once at a unique price."
-                : "No listings match that filter."}
-          </p>
-        </div>
+        <p className="dd-empty">
+          {listings.length === 0
+            ? "No active listings cached yet — try Sync."
+            : dupOnly
+              ? "No duplicate listings — every card is listed once at a unique price."
+              : "No listings match that filter."}
+        </p>
       ) : view === "table" ? (
         <div className="table-wrap" style={isStale ? { opacity: 0.55 } : undefined}>
           <table className="itbl">
@@ -1288,6 +1304,7 @@ export default function Inventory({ onDeepDive }) {
           </span>
         </div>
       ) : null}
+      </Fold>
 
       {/* A sold card's listing has been ended, but `ebay_listings` keeps the
           row until the next sync — so the rows are dropped here rather than
