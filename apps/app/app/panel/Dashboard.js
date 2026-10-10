@@ -201,6 +201,9 @@ export default function Dashboard({ onNavigate }) {
     : [];
   const doneCount = steps.filter((s) => s.done).length;
   const allDone = onboarding && doneCount === steps.length;
+  // Every card switched off in Settings would otherwise be a blank screen
+  // that looks like a page that failed to load.
+  const allHidden = prefs && ["portfolio", "valueChart", "costCoverage", "aged", "quickActions"].every((k) => !show(k));
   const marginPct = stats && stats.costBasis > 0 ? Math.round((stats.potentialMargin / stats.costBasis) * 100) : null;
 
   return (
@@ -233,6 +236,13 @@ export default function Dashboard({ onNavigate }) {
         </div>
       ) : (
       <>
+      {allHidden ? (
+        <div className="panel">
+          <p className="hint" style={{ margin: 0 }}>
+            Every dashboard card is switched off. Choose what shows here in <a href="/settings">Settings → Your dashboard</a>.
+          </p>
+        </div>
+      ) : null}
       {show("portfolio") ? (
       <div className="stat-row">
         <div className="stat"><div className="k">Portfolio value</div><div className="v">{stats ? pounds(stats.value) : "—"}</div></div>

@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import Fold from "../panel/Fold";
+import { currentSettings } from "./current-settings";
 
 /**
  * Pick which eBay Business Policies (shipping, payment, return) CompFinder-
@@ -19,6 +21,7 @@ export default function ListingPolicies({ initialSettings }) {
   const [returnPolicyId, setReturn] = useState(saved.returnPolicyId || "");
   const [msg, setMsg] = useState("");
   const [savingState, setSaving] = useState(false);
+  const [inEffect, setInEffect] = useState(saved); // what was last SAVED, for the shut header
 
   useEffect(() => {
     (async () => {
@@ -53,8 +56,10 @@ export default function ListingPolicies({ initialSettings }) {
       const {
         data: { user }
       } = await sb.auth.getUser();
-      const { error } = await sb.from("profiles").update({ settings: { ...initialSettings, ebayPolicies } }).eq("id", user.id);
+      const base = await currentSettings(sb, user.id, initialSettings);
+      const { error } = await sb.from("profiles").update({ settings: { ...base, ebayPolicies } }).eq("id", user.id);
       if (error) throw new Error(error.message);
+      setInEffect(ebayPolicies || {});
       setMsg(ebayPolicies ? "Saved — listings will use your selected policies." : "Saved — listings will use inline flat postage.");
     } catch (e) {
       setMsg(e.message || "Save failed.");
@@ -62,24 +67,35 @@ export default function ListingPolicies({ initialSettings }) {
     setSaving(false);
   }
 
-  return (
-    <section className="panel" style={{ maxWidth: 480, marginTop: 20 }}>
-      <div className="panel-head"><span className="eyebrow">eBay listing policies</span></div>
+  // What is in force now, so a shut section still says it — read from what
+  // was SAVED, not the dropdowns, which may hold a choice not yet saved.
+  const inForce = inEffect.fulfillmentPolicyId
+    ? `Shipping: ${inEffect.fulfillmentName || "a business policy"}`
+    : "Inline flat postage";
 
+  // A refusal or a reconnect is the thing on this section you have to see,
+  // so it sits outside the fold.
+  const alert =
+    state.status === "scope" ? (
+      <div style={{ marginTop: 6 }}>
+        <p className="hint hint-small" style={{ marginTop: 0 }}>
+          Reading your business policies needs one extra permission added after your first connect.
+        </p>
+        <a className="btn btn-primary" href="/api/ebay/connect" style={{ marginTop: 6 }}>Reconnect eBay account →</a>
+      </div>
+    ) : state.status === "error" ? (
+      <p className="compfinder-error" style={{ marginTop: 6 }}>{state.error || "Couldn't load policies."}</p>
+    ) : msg ? (
+      <p className="hint hint-small" style={{ color: msg.startsWith("Saved") ? "var(--conf-high)" : "var(--bad-ink)", marginTop: 6 }}>{msg}</p>
+    ) : null;
+
+  return (
+    <Fold id="settings-policies" title="eBay listing policies" defaultOpen={false} summary={inForce} alert={alert}>
       {state.status === "loading" ? (
         <p className="hint hint-small" style={{ marginTop: 0 }}><span className="spinner" /> &nbsp;Loading your eBay policies…</p>
       ) : state.status === "disconnected" ? (
         <p className="hint hint-small" style={{ marginTop: 0 }}>Connect your eBay account first to use business policies.</p>
-      ) : state.status === "scope" ? (
-        <div>
-          <p className="hint hint-small" style={{ marginTop: 0 }}>
-            Reading your business policies needs one extra permission added after your first connect.
-          </p>
-          <a className="btn btn-primary" href="/api/ebay/connect" style={{ marginTop: 6 }}>Reconnect eBay account →</a>
-        </div>
-      ) : state.status === "error" ? (
-        <p className="compfinder-error" style={{ marginTop: 0 }}>{state.error || "Couldn't load policies."}</p>
-      ) : policies.fulfillment.length === 0 ? (
+      ) : state.status === "scope" || state.status === "error" ? null : policies.fulfillment.length === 0 ? (
         <p className="hint hint-small" style={{ marginTop: 0 }}>
           No business policies found on your eBay account. Opt in via eBay <b>Account settings → Business policies</b>, create a
           shipping/return/payment policy, then reload. Until then, listings use inline flat postage.
@@ -113,9 +129,8 @@ export default function ListingPolicies({ initialSettings }) {
           <button className="btn btn-primary" onClick={save} disabled={savingState} style={{ marginTop: 12, justifyContent: "center" }}>
             {savingState ? "Saving…" : "Save policies"}
           </button>
-          {msg ? <p className="hint hint-small" style={{ color: "var(--conf-high)", marginTop: 8 }}>{msg}</p> : null}
         </>
       )}
-    </section>
+    </Fold>
   );
 }

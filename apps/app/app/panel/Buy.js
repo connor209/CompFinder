@@ -7,6 +7,7 @@ import { pagedSelect } from "@/lib/pagedSelect";
 import { resizeImage } from "@/lib/resizeImage";
 import CameraCapture from "./CameraCapture";
 import Icon from "./icons";
+import Fold from "./Fold";
 
 const BUCKET = "purchase-photos";
 const toPence = CompFinderPricing.toPence;
@@ -417,33 +418,18 @@ export default function Buy() {
     </>
   );
 
-  return (
-    <div className="rise-group">
-      {camTarget ? (
-        <CameraCapture label="Snap the receipt or haul" onCapture={onCameraCapture} onClose={() => setCamTarget(null)} />
+  // Shown whether the log is folded or not: a refused save, a failed attach,
+  // or agreed prices that already overrun the deal total.
+  const formAlert = (
+    <>
+      {kind === "deal" && deal.entryMode !== "bulk" && dealOver ? (
+        <p className="deal-sum-warn" style={{ marginTop: 8 }}>⚠ Agreed prices ({pounds(pricedSum)}) exceed the deal total ({pounds(totalEntered)}).</p>
       ) : null}
-      {addTarget ? (
-        <div className="buy-sheet-backdrop" onClick={() => setAddTarget(null)}>
-          <div className="buy-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Add a photo">
-            <button type="button" className="buy-sheet-btn" onClick={chooseCamera}><Icon name="camera" size={20} /> Take a photo</button>
-            <button type="button" className="buy-sheet-btn" onClick={chooseUpload}><Icon name="upload" size={20} /> Upload from device</button>
-            <button type="button" className="buy-sheet-cancel" onClick={() => setAddTarget(null)}>Cancel</button>
-          </div>
-        </div>
-      ) : null}
-      <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onHiddenFiles} />
-      <div className="stat-row">
-        <div className="stat"><div className="k">Spend ({periodLabel})</div><div className="v">{pounds(totals.spend)}</div></div>
-        <div className="stat"><div className="k">Cards bought</div><div className="v">{totals.cardUnits}</div></div>
-        <div className="stat"><div className="k">Other spend</div><div className="v">{pounds(totals.expense)}</div></div>
-        <div className="stat"><div className="k">Total invested</div><div className="v">{pounds(allTimeSpend)}</div></div>
-      </div>
-
-      <div className="panel" ref={formRef}>
-        <div className="panel-head">
-          <h3>{editing ? "Edit purchase" : "Log a purchase"}</h3>
-          {editing ? <button className="btn btn-ghost" onClick={cancelEdit}>Cancel edit</button> : null}
-        </div>
+      {error ? <p className="compfinder-error" style={{ marginTop: 8 }}>{error}</p> : null}
+    </>
+  );
+  const purchaseForm = (
+    <>
         {editing ? (
           <p className="hint hint-small" style={{ marginTop: 0 }}>
             Editing the {fmtDate(editing.purchased_at)} entry — change anything and save. Existing photos stay attached; anything added below is appended.
@@ -522,7 +508,7 @@ export default function Buy() {
                   <div className={`deal-summary${dealOver ? " over" : ""}`}>
                     <div className="deal-total">{pounds(dealComputedTotal)} <span className="buy-opt">· {dealCardCount} card{dealCardCount === 1 ? "" : "s"}</span></div>
                     {dealOver ? (
-                      <div className="deal-sum-warn">⚠ Agreed prices ({pounds(pricedSum)}) exceed the deal total ({pounds(totalEntered)}).</div>
+                      <div className="deal-sum-line">Agreed prices {pounds(pricedSum)} · deal total {pounds(totalEntered)}</div>
                     ) : useTotal ? (
                       <div className="deal-sum-line">
                         {pricedSum > 0 ? <>{pounds(pricedSum)} agreed · </> : null}
@@ -542,6 +528,8 @@ export default function Buy() {
             <div className="buy-actions">
               <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "+ Add deal"}</button>
             </div>
+            {/* Beside the button too: on a long deal form the alert above is off-screen when you press it. */}
+            {error ? <p className="compfinder-error" style={{ marginTop: 8 }}>{error}</p> : null}
           </form>
         ) : (
           <form className="buy-form" onSubmit={add}>
@@ -575,9 +563,57 @@ export default function Buy() {
             <div className="buy-actions">
               <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "+ Add spend"}</button>
             </div>
+            {/* Beside the button too: on a long deal form the alert above is off-screen when you press it. */}
+            {error ? <p className="compfinder-error" style={{ marginTop: 8 }}>{error}</p> : null}
           </form>
         )}
-        {error ? <p className="compfinder-error" style={{ marginTop: 8 }}>{error}</p> : null}
+    </>
+  );
+
+  return (
+    <div className="rise-group">
+      {camTarget ? (
+        <CameraCapture label="Snap the receipt or haul" onCapture={onCameraCapture} onClose={() => setCamTarget(null)} />
+      ) : null}
+      {addTarget ? (
+        <div className="buy-sheet-backdrop" onClick={() => setAddTarget(null)}>
+          <div className="buy-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Add a photo">
+            <button type="button" className="buy-sheet-btn" onClick={chooseCamera}><Icon name="camera" size={20} /> Take a photo</button>
+            <button type="button" className="buy-sheet-btn" onClick={chooseUpload}><Icon name="upload" size={20} /> Upload from device</button>
+            <button type="button" className="buy-sheet-cancel" onClick={() => setAddTarget(null)}>Cancel</button>
+          </div>
+        </div>
+      ) : null}
+      <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onHiddenFiles} />
+      <div className="stat-row">
+        <div className="stat"><div className="k">Spend ({periodLabel})</div><div className="v">{pounds(totals.spend)}</div></div>
+        <div className="stat"><div className="k">Cards bought</div><div className="v">{totals.cardUnits}</div></div>
+        <div className="stat"><div className="k">Other spend</div><div className="v">{pounds(totals.expense)}</div></div>
+        <div className="stat"><div className="k">Total invested</div><div className="v">{pounds(allTimeSpend)}</div></div>
+      </div>
+
+      {/* Editing is a plain panel, never a fold: ✎ on a row scrolls here,
+          and an edit form remembered shut would be a click that did nothing. */}
+      <div ref={formRef}>
+        {editing ? (
+          <div className="panel">
+            <div className="panel-head">
+              <h3>Edit purchase</h3>
+              <button className="btn btn-ghost" onClick={cancelEdit}>Cancel edit</button>
+            </div>
+            {formAlert}
+            {purchaseForm}
+          </div>
+        ) : (
+          <Fold
+            id="buy-log"
+            title="Log a purchase"
+            summary="A deal of cards, or any other spend — open to log one."
+            alert={formAlert}
+          >
+            {purchaseForm}
+          </Fold>
+        )}
       </div>
 
       <div className="inv-bar">

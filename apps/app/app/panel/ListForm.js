@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { createClient } from "@/lib/supabase/client";
 import { resizeImage } from "@/lib/resizeImage";
+import Fold from "./Fold";
 
 const CONDITIONS = [
   { l: "Near mint or better", v: "400010" },
@@ -146,7 +147,7 @@ export default function ListForm({ card, suggestedPence, language, imageUrl, onC
             <input type="text" maxLength={80} value={title} onChange={(e) => setTitle(e.target.value)} />
           </label>
 
-          <div className="filter-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+          <div className="filter-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
             <label className="field"><span>Price £</span><input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} /></label>
             <label className="field"><span>Quantity</span><input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} /></label>
             <label className="field"><span>Condition</span>
@@ -154,23 +155,40 @@ export default function ListForm({ card, suggestedPence, language, imageUrl, onC
                 {CONDITIONS.map((c) => <option key={c.v} value={c.v}>{c.l}</option>)}
               </select>
             </label>
-            <label className="field"><span>Category ID</span><input type="text" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} /></label>
-            <label className="field"><span>Postcode</span><input type="text" value={postcode} onChange={(e) => setPostcode(e.target.value)} placeholder="e.g. SW1A 1AA" /></label>
-            <label className="field"><span>Dispatch (days)</span><input type="number" min="0" value={dispatchDays} onChange={(e) => setDispatchDays(e.target.value)} /></label>
-            <label className="field"><span>Postage</span>
-              <select value={shippingService} onChange={(e) => setShippingService(e.target.value)}>
-                {SHIPPING.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-              </select>
-            </label>
-            <label className="field"><span>Postage £</span><input type="number" min="0" step="0.01" value={shippingCost} onChange={(e) => setShippingCost(e.target.value)} /></label>
-            <label className="field"><span>Returns</span>
-              <select value={returnsDays} onChange={(e) => setReturnsDays(e.target.value)}>
-                <option value="30">30 days</option>
-                <option value="14">14 days</option>
-                <option value="">No returns</option>
-              </select>
-            </label>
           </div>
+
+          {/* The fields that are the same for every card — set once, then out of
+              the way. The summary keeps what they say on screen while shut. */}
+          <Fold
+            id="listform-details"
+            panel={false}
+            defaultOpen={false}
+            title="Postage, returns & category"
+            summary={`${(SHIPPING.find((x) => x.v === shippingService) || {}).l || shippingService} £${Number(shippingCost || 0).toFixed(2)} · ${returnsDays ? `${returnsDays}-day returns` : "no returns"} · dispatch ${dispatchDays}d · category ${categoryId}${postcode ? ` · ${postcode}` : ""}`}
+          >
+            <div className="filter-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
+              <label className="field"><span>Category ID</span><input type="text" value={categoryId} onChange={(e) => setCategoryId(e.target.value)} /></label>
+              <label className="field"><span>Postcode</span><input type="text" value={postcode} onChange={(e) => setPostcode(e.target.value)} placeholder="e.g. SW1A 1AA" /></label>
+              <label className="field"><span>Dispatch (days)</span><input type="number" min="0" value={dispatchDays} onChange={(e) => setDispatchDays(e.target.value)} /></label>
+              <label className="field"><span>Postage</span>
+                <select value={shippingService} onChange={(e) => setShippingService(e.target.value)}>
+                  {SHIPPING.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                </select>
+              </label>
+              <label className="field"><span>Postage £</span><input type="number" min="0" step="0.01" value={shippingCost} onChange={(e) => setShippingCost(e.target.value)} /></label>
+              <label className="field"><span>Returns</span>
+                <select value={returnsDays} onChange={(e) => setReturnsDays(e.target.value)}>
+                  <option value="30">30 days</option>
+                  <option value="14">14 days</option>
+                  <option value="">No returns</option>
+                </select>
+              </label>
+            </div>
+            <p className="hint hint-small">
+              Category &amp; condition IDs are eBay-validated — the defaults suit UK Pokémon singles, but if eBay rejects them,
+              adjust here. If you&apos;ve linked eBay business policies in <a href="/settings">Settings</a>, those are applied and these postage/returns fields are ignored.
+            </p>
+          </Fold>
 
           <label className="field" style={{ marginTop: 10 }}>
             <span>Photo</span>
@@ -186,11 +204,6 @@ export default function ListForm({ card, suggestedPence, language, imageUrl, onC
             <span>Description (optional)</span>
             <textarea className="field" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder={title} />
           </label>
-
-          <p className="hint hint-small">
-            Category & condition IDs are eBay-validated — the defaults suit UK Pokémon singles, but if eBay rejects them,
-            adjust here. If you&apos;ve linked eBay business policies in <a href="/settings">Settings</a>, those are applied and these postage/returns fields are ignored.
-          </p>
 
           {result && !result.ok ? <p className="compfinder-error" style={{ marginTop: 8 }}>{result.error}</p> : null}
 

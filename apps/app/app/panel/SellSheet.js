@@ -11,6 +11,7 @@ import {
 import {
   EBAY_DEFAULTS, CONDITION_IDS, buildEbayVariationCsv, variationValue
 } from "@/lib/ebayvariation";
+import Fold from "./Fold";
 
 /**
  * Sell sheets — build the CSV that Cardmarket-family listing tools import.
@@ -314,11 +315,13 @@ export default function SellSheet() {
       </div>
 
       {game ? (
-        <div className="panel">
-          <div className="panel-head">
-            <span className="eyebrow">Sets {chosen.length ? `· ${chosen.length} selected` : ""}</span>
-            {chosen.length ? <button className="btn btn-ghost" onClick={() => setChosen([])}>Clear</button> : null}
-          </div>
+        <Fold
+          id="sellsheet-sets"
+          title="Sets"
+          count={chosen.length ? `${chosen.length} selected` : null}
+          summary={chosen.length ? chosen.join(" · ") : "None chosen — open to pick the sets to load."}
+          actions={chosen.length ? <button className="btn btn-ghost" onClick={() => setChosen([])}>Clear</button> : null}
+        >
           {loadingSets ? (
             <p className="hint hint-small"><span className="spinner" /> &nbsp;Loading sets…</p>
           ) : (
@@ -339,7 +342,7 @@ export default function SellSheet() {
               </button>
             </>
           )}
-        </div>
+        </Fold>
       ) : null}
 
       {cards.length > 0 ? (

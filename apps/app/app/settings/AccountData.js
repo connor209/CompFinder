@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
+import Fold from "../panel/Fold";
 
 /**
  * Account & data controls — profile info, export everything to JSON, and
@@ -74,8 +75,13 @@ export default function AccountData({ email }) {
   }
 
   return (
-    <section className="panel" style={{ maxWidth: 480, marginTop: 20 }}>
-      <div className="panel-head"><span className="eyebrow">Account &amp; data</span></div>
+    <Fold
+      id="settings-account"
+      title="Account & data"
+      defaultOpen={false}
+      summary={`Signed in as ${email} · export everything, or delete the account`}
+      alert={msg ? <p className="auth-error" style={{ marginTop: 6 }}>{msg}</p> : null}
+    >
 
       <p className="hint hint-small" style={{ marginTop: 0 }}>Signed in as <b>{email}</b>.</p>
 
@@ -101,8 +107,6 @@ export default function AccountData({ email }) {
           </button>
         </div>
       </div>
-
-      {msg && <p className="auth-error" style={{ marginTop: 10 }}>{msg}</p>}
-    </section>
+    </Fold>
   );
 }

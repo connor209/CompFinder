@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { showHistory, totalsOf, outcomeOf, pct, dayOf, historyCsv, costOf, eventKey } from "@/lib/showhistory.js";
 import { showOnly } from "@/lib/streamstock.js";
+import Fold from "./Fold";
 import {
   EXPENSE_CATEGORIES, categoryLabel, parseExpensePence, loadExpenses, addExpense, deleteExpense
 } from "@/lib/show-expenses-store.js";
@@ -242,15 +243,22 @@ export default function ShowHistory() {
           <span className="eyebrow">By show · {totals.shows}</span>
           <button className="btn btn-ghost" onClick={downloadCsv}>Download CSV</button>
         </div>
-        <p className="hint-small" style={{ marginTop: 0 }}>
-          Sell-through counts every card that didn't come back as sold — that's how the table works. Where
-          that differs from what was actually marked sold, the recorded figure is shown beside it.
-          {totals.directSold > 0 ? ` Cards sold straight off eBay stock are in the takings but not in "brought", since they were never in the box.` : ""}
-          {" "}Profit is takings less what each sold card cost (the cost on its eBay listing), only over sales that have a cost recorded.
-          Net profit takes the show's own costs — table, travel — off that. Open a show to add them.
-          {noStickers ? " Sticker figures need migration 024." : ""}
-          {expensesMissing ? " Show costs need migration 030." : ""}
-        </p>
+        {noStickers || expensesMissing ? (
+          <p className="hint-small" style={{ marginTop: 0, color: "var(--warn-ink)" }}>
+            {noStickers ? "Sticker figures need migration 024." : ""}
+            {noStickers && expensesMissing ? " " : ""}
+            {expensesMissing ? "Show costs need migration 030." : ""}
+          </p>
+        ) : null}
+        <Fold id="showhistory-howcounted" title="How these figures are counted" panel={false} defaultOpen={false}>
+          <p className="hint-small" style={{ marginTop: 0 }}>
+            Sell-through counts every card that didn't come back as sold — that's how the table works. Where
+            that differs from what was actually marked sold, the recorded figure is shown beside it.
+            {totals.directSold > 0 ? ` Cards sold straight off eBay stock are in the takings but not in "brought", since they were never in the box.` : ""}
+            {" "}Profit is takings less what each sold card cost (the cost on its eBay listing), only over sales that have a cost recorded.
+            Net profit takes the show's own costs — table, travel — off that. Open a show to add them.
+          </p>
+        </Fold>
         {expenseErr ? <p className="hint-small" style={{ color: "var(--bad-ink)" }}>Show costs: {expenseErr}</p> : null}
         {addShowForm}
 

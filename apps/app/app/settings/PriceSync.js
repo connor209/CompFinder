@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import Fold from "../panel/Fold";
 
 /**
  * Market prices — status per game and a manual pull.
@@ -70,28 +71,47 @@ export default function PriceSync() {
     await load();
   }
 
-  if (rows === null) return <div className="panel"><span className="spinner" /> &nbsp;Loading price sources…</div>;
-
-  if (unavailable) {
-    return (
-      <div className="panel">
-        <div className="panel-head"><h3>Market prices</h3></div>
-        <p className="hint hint-small">Run <code>017_price_guide.sql</code> to enable the daily Cardmarket price feed.</p>
-      </div>
-    );
-  }
-
-  const configured = rows.filter((r) => r.src);
+  const loading = rows === null;
+  const configured = (rows || []).filter((r) => r.src);
   const anyRun = configured.some((r) => r.src.last_rows);
+  const failing = configured.filter((r) => r.src.last_error);
+  const lastRun = configured.map((r) => r.src.last_run_at).filter(Boolean).sort().pop();
 
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <h3>Market prices</h3>
+    <Fold
+      id="settings-prices"
+      title="Market prices"
+      defaultOpen={false}
+      count={loading || unavailable ? null : `${configured.length} of ${rows.length}`}
+      summary={
+        loading ? "Loading price sources…"
+          : unavailable ? null
+          : `${configured.length} game${configured.length === 1 ? "" : "s"} configured · last pulled ${fmtWhen(lastRun)} · runs daily at 04:30`
+      }
+      actions={loading || unavailable ? null : (
         <button className="btn btn-primary" onClick={() => run(null)} disabled={!!busy || configured.length === 0}>
           {busy === "all" ? "Syncing…" : "↻ Sync all"}
         </button>
-      </div>
+      )}
+      alert={
+        <>
+          {unavailable ? (
+            // A pending migration is never folded away.
+            <p className="hint hint-small">Run <code>017_price_guide.sql</code> to enable the daily Cardmarket price feed.</p>
+          ) : null}
+          {failing.length ? (
+            <p className="hint hint-small" style={{ color: "var(--bad-ink)" }}>
+              ⚠ Last pull failed — {failing.map((r) => `${r.name}: ${r.src.last_error}`).join("; ")}
+            </p>
+          ) : null}
+          {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{msg}</p> : null}
+        </>
+      }
+    >
+      {loading ? (
+        <p className="hint hint-small"><span className="spinner" /> &nbsp;Loading price sources…</p>
+      ) : unavailable ? null : (
+      <>
       <p className="hint hint-small" style={{ marginTop: 0 }}>
         Cardmarket publish a price guide each day; these run automatically at 04:30.
         Pull one by hand here after adding a game, or to check a URL works.
@@ -102,7 +122,7 @@ export default function PriceSync() {
         {rows.map((g) => {
           const s = g.src;
           const state = !s ? "no URL configured"
-            : s.last_error ? `⚠ ${s.last_error}`
+            : s.last_error ? `failed: ${s.last_error}`
             : s.last_rows ? `${s.last_rows.toLocaleString()} prices · ${s.last_as_of || "?"} · ${fmtWhen(s.last_run_at)}`
             : "ready to pull";
           return (
@@ -121,7 +141,8 @@ export default function PriceSync() {
           );
         })}
       </div>
-      {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{msg}</p> : null}
-    </div>
+      </>
+      )}
+    </Fold>
   );
 }

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import Fold from "../panel/Fold";
+import { currentSettings } from "./current-settings";
 
 /**
  * Covers the two most operationally important settings — the SoldComps key
@@ -30,12 +32,13 @@ export default function SettingsForm({ initialApiKey, initialSettings }) {
       data: { user }
     } = await supabase.auth.getUser();
 
+    const base = await currentSettings(supabase, user.id, initialSettings);
     const { error: saveError } = await supabase
       .from("profiles")
       .update({
         soldcomps_api_key: apiKey.trim(),
         settings: {
-          ...initialSettings,
+          ...base,
           soldCompsItemLocation: itemLocation,
           soldCompsMonthlyQuota: Number(monthlyQuota),
           ebayUsername: ebayUsername.trim()
@@ -52,10 +55,12 @@ export default function SettingsForm({ initialApiKey, initialSettings }) {
   }
 
   return (
-    <section className="panel" style={{ maxWidth: 480 }}>
-      <div className="panel-head">
-        <span className="eyebrow">SoldComps account</span>
-      </div>
+    <Fold
+      id="settings-soldcomps"
+      title="SoldComps account"
+      summary={`${apiKey.trim() ? "API key set" : "No API key yet"} · ${monthlyQuota} requests a month`}
+      alert={error ? <p className="auth-error">{error}</p> : null}
+    >
 
       <form className="auth-form" onSubmit={handleSave}>
         <label>
@@ -101,13 +106,12 @@ export default function SettingsForm({ initialApiKey, initialSettings }) {
           Optional. When set, a price check flags cards you already have listed on eBay (requires the app's eBay API keys to be configured).
         </p>
 
-        {error && <p className="auth-error">{error}</p>}
         {saved && <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>Saved.</p>}
 
         <button type="submit" className="btn btn-primary" disabled={saving} style={{ justifyContent: "center", marginTop: 4 }}>
           {saving ? "Saving…" : "Save settings"}
         </button>
       </form>
-    </section>
+    </Fold>
   );
 }

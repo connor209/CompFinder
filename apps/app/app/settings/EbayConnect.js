@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Fold from "../panel/Fold";
 
 /**
  * "Connect your eBay account" card for Settings. Shows connection state,
@@ -61,10 +62,17 @@ export default function EbayConnect({ flash }) {
   }
 
   return (
-    <section className="panel" style={{ maxWidth: 480, marginTop: 20 }}>
-      <div className="panel-head">
-        <span className="eyebrow">eBay account</span>
-      </div>
+    <Fold
+      id="settings-ebay"
+      title="eBay account"
+      summary={
+        status.loading ? "Checking connection…"
+          : !status.configured ? "Not configured on the server"
+          : status.connected ? `Connected${status.username ? ` as ${status.username}` : ""} · ${status.count} listings · synced ${fmtWhen(status.lastSynced)}`
+          : "Not connected"
+      }
+      alert={msg ? <p className="hint hint-small" style={{ marginTop: 6, color: "var(--accent-2)" }}>{msg}</p> : null}
+    >
 
       {status.loading ? (
         <p className="hint hint-small"><span className="spinner" /> &nbsp;Checking connection…</p>
@@ -94,8 +102,6 @@ export default function EbayConnect({ flash }) {
           <a className="btn btn-primary" href="/api/ebay/connect" style={{ marginTop: 8 }}>Connect eBay account</a>
         </>
       )}
-
-      {msg && <p className="hint hint-small" style={{ marginTop: 10, color: "var(--accent-2)" }}>{msg}</p>}
-    </section>
+    </Fold>
   );
 }

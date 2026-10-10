@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import Fold from "../panel/Fold";
+import { currentSettings } from "./current-settings";
 
 /**
  * Dashboard visibility preferences — lets the user choose which cards appear on
@@ -23,6 +25,7 @@ export default function DashboardPrefs({ initialSettings }) {
   for (const c of DASHBOARD_CARDS) initial[c.key] = initialSettings?.dashboard?.[c.key] !== false;
   const [prefs, setPrefs] = useState(initial);
   const [status, setStatus] = useState("");
+  const shown = DASHBOARD_CARDS.filter((c) => prefs[c.key]).length;
 
   async function toggle(key) {
     const next = { ...prefs, [key]: !prefs[key] };
@@ -33,9 +36,10 @@ export default function DashboardPrefs({ initialSettings }) {
       const {
         data: { user }
       } = await supabase.auth.getUser();
+      const base = await currentSettings(supabase, user.id, initialSettings);
       const { error } = await supabase
         .from("profiles")
-        .update({ settings: { ...initialSettings, dashboard: next } })
+        .update({ settings: { ...base, dashboard: next } })
         .eq("id", user.id);
       if (error) throw new Error(error.message);
       setStatus("saved");
@@ -45,11 +49,15 @@ export default function DashboardPrefs({ initialSettings }) {
   }
 
   return (
-    <section className="panel" style={{ maxWidth: 480, marginTop: 20 }}>
-      <div className="panel-head">
-        <span className="eyebrow">Your dashboard</span>
-        {status === "saving" ? <span className="badge2">Saving…</span> : status === "saved" ? <span className="badge2" style={{ color: "var(--conf-high)" }}>Saved ✓</span> : status === "error" ? <span className="badge2" style={{ color: "var(--bad-ink)" }}>Save failed</span> : null}
-      </div>
+    <Fold
+      id="settings-dashboard"
+      title="Your dashboard"
+      defaultOpen={false}
+      count={`${shown} of ${DASHBOARD_CARDS.length}`}
+      summary="Which cards show on your home screen."
+      actions={status === "saving" ? <span className="badge2">Saving…</span> : status === "saved" ? <span className="badge2" style={{ color: "var(--conf-high)" }}>Saved ✓</span> : null}
+      alert={status === "error" ? <p className="auth-error">Save failed — that change was not kept. Try the switch again.</p> : null}
+    >
       <p className="hint hint-small" style={{ marginTop: 0 }}>Choose what shows on your home screen. Changes save automatically.</p>
       <div className="pref-list">
         {DASHBOARD_CARDS.map((c) => (
@@ -68,6 +76,6 @@ export default function DashboardPrefs({ initialSettings }) {
           </div>
         ))}
       </div>
-    </section>
+    </Fold>
   );
 }

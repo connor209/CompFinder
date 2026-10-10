@@ -12,6 +12,7 @@ import { effectivePence, isOverridden, overrideNote, withOverride } from "@/lib/
 import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
 import PriceOverride from "./PriceOverride";
+import Fold from "./Fold";
 
 const settings = APP_SETTINGS;
 
@@ -869,11 +870,14 @@ export default function QuickSearch({ seed }) {
           })()}
 
           {view.graded.length > 0 ? (
-            <div className="panel">
-              <div className="panel-head">
-                <h3>Graded values</h3>
-                <span className="badge2 badge-muted">raw {pounds(view.rec.finalPence)}</span>
-              </div>
+            <Fold
+              id="quick-graded"
+              title="Graded values"
+              count={view.graded.length}
+              defaultOpen={false}
+              summary={view.graded.slice(0, 3).map((g) => `${g.company} ${g.grade} ${pounds(g.medianPence)}`).join(" · ")}
+              actions={<span className="badge2 badge-muted">raw {pounds(view.rec.finalPence)}</span>}
+            >
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 Priced from graded sold listings for this card — separate from the raw price above. Slab premiums vary; treat low-count tiers as a guide.
               </p>
@@ -890,22 +894,25 @@ export default function QuickSearch({ seed }) {
                   </div>
                 ))}
               </div>
-            </div>
+            </Fold>
           ) : null}
 
-          <div className="panel">
-            <div className="panel-head"><h3>Price trend</h3></div>
+          <Fold id="quick-trend" title="Price trend">
             <TrendChart sales={view.chartSales} medianPence={view.med} />
-          </div>
+          </Fold>
 
-          <div className="panel">
-            <div className="panel-head">
-              <h3>Recent sales</h3>
+          <Fold
+            id="quick-sales"
+            title="Recent sales"
+            count={view.sales.length}
+            summary={view.sales.length ? `Latest ${pounds(view.sales[0].price)} · ${fmtDate(view.sales[0].date)}` : null}
+            actions={
               <div className="scope" role="group" aria-label="Location">
                 <button aria-pressed={scope === "uk"} onClick={() => setScope("uk")}>🇬🇧 UK</button>
                 <button aria-pressed={scope === "ww"} onClick={() => setScope("ww")}>🌍 Worldwide</button>
               </div>
-            </div>
+            }
+          >
             {view.gradedTotal > 0 ? (
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 {view.gradedTotal} graded sale{view.gradedTotal === 1 ? "" : "s"} in this data — flagged with a slab chip (e.g. <span className="sale-grade grade-psa">PSA 10</span>).
@@ -931,13 +938,15 @@ export default function QuickSearch({ seed }) {
                 ))}
               </div>
             )}
-          </div>
+          </Fold>
 
-          <div className="panel">
-            <div className="panel-head">
-              <h3>{view.activeListings.length > 0 ? "Buy one now" : "Active listings"}</h3>
-              <span className="badge2">live listings</span>
-            </div>
+          <Fold
+            id="quick-active"
+            title={view.activeListings.length > 0 ? "Buy one now" : "Active listings"}
+            count={view.active && view.active.included ? view.active.included.length : null}
+            summary={view.active && view.active.finalPence != null ? `Median ${pounds(view.active.finalPence)} asking` : null}
+            actions={<span className="badge2">live listings</span>}
+          >
             {view.activeLoading ? (
               <p className="hint" style={{ marginTop: 0 }}><span className="spinner" /> &nbsp;Checking current asking prices…</p>
             ) : view.active && view.active.included && view.active.included.length > 0 ? (
@@ -990,7 +999,7 @@ export default function QuickSearch({ seed }) {
             ) : (
               <p className="dd-empty">No active listings found for this card.</p>
             )}
-          </div>
+          </Fold>
         </div>
       )}
     </>

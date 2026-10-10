@@ -45,12 +45,16 @@ export default async function SettingsPage({ searchParams }) {
         </div>
       </header>
 
-      <SettingsForm initialApiKey={profile?.soldcomps_api_key || ""} initialSettings={settings} />
-      <DashboardPrefs initialSettings={settings} />
-      <EbayConnect flash={flash} />
-      <ListingPolicies initialSettings={settings} />
-      <PriceSync />
-      <AccountData email={user.email} />
+      {/* One column of folds: the two you set up first open, the rest shut
+          with a line saying what is in them. Each remembers its own state. */}
+      <div style={{ maxWidth: 560 }}>
+        <SettingsForm initialApiKey={profile?.soldcomps_api_key || ""} initialSettings={settings} />
+        <EbayConnect flash={flash} />
+        <ListingPolicies initialSettings={settings} />
+        <DashboardPrefs initialSettings={settings} />
+        <PriceSync />
+        <AccountData email={user.email} />
+      </div>
     </div>
   );
 }

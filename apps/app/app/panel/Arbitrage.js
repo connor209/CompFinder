@@ -195,7 +195,7 @@ export default function Arbitrage() {
           </div>
         </div>
 
-        <div className="filter-grid" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
+        <div className="filter-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
           <label className="field">
             <span>Listings to scan</span>
             <select value={count} onChange={(e) => setCount(Number(e.target.value))}>
@@ -212,7 +212,7 @@ export default function Arbitrage() {
           </label>
         </div>
 
-        <div className="row" style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
+        <div className="row" style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <button className="btn btn-primary" onClick={scan} disabled={scanning}>
             {scanning ? "Scanning…" : `Scan ${count} listings`}
           </button>

@@ -109,7 +109,7 @@ export default function HistoryView({ initialChecks }) {
     <section className="panel results-panel">
       <div className="panel-head">
         <span className="eyebrow">Price-check history</span>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="btn btn-ghost" disabled={filtered.length === 0} onClick={exportCsv}>
             Export CSV
           </button>
