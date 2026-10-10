@@ -34,6 +34,7 @@ import WishPickup from "./WishPickup";
 import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 import { showOnly } from "@/lib/streamstock.js";
+import { isSlabTitle } from "@/lib/showstock.js";
 
 /**
  * Show desk — check stock out to shows and back in again. Checking a card out
@@ -163,6 +164,9 @@ export default function ShowDesk() {
   const [recOff, setRecOff] = useState(new Set());
   const [recGames, setRecGames] = useState(new Set()); // empty = every game
   const [recCount, setRecCount] = useState(20);
+  // Leave the slabs at home. Applied BEFORE the top N, like the game chips, so
+  // "top 20" with it ticked is twenty raw cards rather than twenty minus slabs.
+  const [recNoGraded, setRecNoGraded] = useState(false);
   const [recSkipped, setRecSkipped] = useState(0); // in a stack, but sold out on eBay
   // Once for the desk, then handed down — see the note on useDeal().
   const [deal, updateDeal] = useDeal();
@@ -440,6 +444,7 @@ export default function ShowDesk() {
         pricePence: priceBySku.get(String(c.sku).toLowerCase()),
         rank: ranks.get(c.id) ?? null,
         depth: depths.get(c.stack_id) ?? null,
+        graded: isSlabTitle(c.title),
         game: gameOf({ category: categoryBySku.get(String(c.sku).toLowerCase()), title: c.title }, sets.gameIndex)
       }))
       .sort((a, b) => b.pricePence - a.pricePence);
@@ -451,8 +456,15 @@ export default function ShowDesk() {
   // some of it; the list is the chosen games, THEN the top N.
   const recFacets = useMemo(() => (recPool ? gameFacets(recPool) : []), [recPool]);
   const recs = useMemo(
-    () => (recPool === null ? null : filterByGames(recPool, recGames).slice(0, Math.max(1, Math.min(200, Number(recCount) || 20)))),
-    [recPool, recGames, recCount]
+    () => (recPool === null ? null : filterByGames(recPool, recGames)
+      .filter((r) => !(recNoGraded && r.graded))
+      .slice(0, Math.max(1, Math.min(200, Number(recCount) || 20)))),
+    [recPool, recGames, recCount, recNoGraded]
+  );
+  // Counted over the chosen games, and shown: a card left out says so.
+  const recGradedOut = useMemo(
+    () => (recPool && recNoGraded ? filterByGames(recPool, recGames).filter((r) => r.graded).length : 0),
+    [recPool, recGames, recNoGraded]
   );
   // What the check-out button acts on: rows on screen that you have not
   // unticked. A ticked card the filter has hidden is never checked out.
@@ -1154,6 +1166,13 @@ export default function ShowDesk() {
               {/* The top N is taken AFTER these, so it is the top N of the
                   games you picked. */}
               <GameChips facets={recFacets} chosen={recGames} onChange={setRecGames} customer={false} />
+              <label className="sd-toggle" title="Leave out any card whose title names a grader — PSA, CGC, BGS, Beckett, SGC, TAG — or says graded/slab">
+                <input type="checkbox" checked={recNoGraded} onChange={(e) => setRecNoGraded(e.target.checked)} />
+                No graded cards
+                {recNoGraded && recGradedOut > 0 ? (
+                  <span className="hint hint-small">({recGradedOut} slab{recGradedOut === 1 ? "" : "s"} left out)</span>
+                ) : null}
+              </label>
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 The SKU comes first, then the <b>live position</b> — count that many from the top of the
                 stack. The two are not the same number: a SKU is a name and never moves, while positions

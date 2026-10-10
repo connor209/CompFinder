@@ -34,7 +34,8 @@ import {
   stickerSummary,
   toPoundPence,
   STICKER_MIN_PENCE,
-  HELD_CONFIDENCE
+  HELD_CONFIDENCE,
+  isSlabTitle
 } from "../apps/app/lib/showstock.js";
 import { batchColumns, isMissingPoolName } from "../apps/app/lib/batch-store.js";
 
@@ -319,6 +320,31 @@ for (const col of ["sticker_pence", "sticker_set_at", "sticker_batch_id"]) {
 }
 if (!/add column if not exists/i.test(migration)) {
   fail("migration 024 must be re-runnable — it is applied by hand in the SQL editor");
+}
+
+// --- 8. "No graded cards" on ★ Recommend show stock -------------------------
+// A grader named with or without its number is a slab. The false positives
+// matter more: TAG TEAM and ACE SPEC are raw cards, and a seller writing
+// "raw" or "not graded" is telling you it is one.
+for (const [title, want] of [
+  ["PSA 10 Charizard 4/102 Base Set", true],
+  ["Umbreon VMAX 215/203 CGC 9.5", true],
+  ["Rayquaza BGS Pristine 10", true],
+  ["Pikachu Illustrator Beckett 9", true],
+  ["Mewtwo GX PSA", true],
+  ["TAG 10 Gengar", true],
+  ["Mew ex TAG graded", true],
+  ["Lugia V Alt Art slab", true],
+  ["Pikachu & Zekrom GX TAG TEAM 33/181", false],
+  ["Prime Catcher ACE SPEC 157/162", false],
+  ["Charizard 4/102 raw, PSA 10 candidate", false],
+  ["Charizard 4/102 not graded", false],
+  ["Gengar 94/203 Evolving Skies NM", false],
+  ["", false]
+]) eq(`isSlabTitle(${JSON.stringify(title)})`, isSlabTitle(title), want);
+
+if (!/filterByGames\(recPool, recGames\)\s*\.filter\(\(r\) => !\(recNoGraded && r\.graded\)\)\s*\.slice\(/.test(desk)) {
+  fail("the graded filter on recommendations must run BEFORE the top-N slice, or 'top 20' with it ticked shows fewer than 20");
 }
 
 if (failures) {

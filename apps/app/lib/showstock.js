@@ -330,3 +330,31 @@ export function stickerSummary(rows) {
   const held = (rows || []).length - priced;
   return { priced, held };
 }
+
+/* ------------------------------------------------------ slabs off the list */
+
+// A grading company named on its own, no grade after it: "PSA Charizard",
+// "…Beckett". Core's subjectGradeFrom() needs the number, which is right for
+// pricing and too narrow for "leave the slabs at home" — a slab whose grade
+// the seller didn't type is still a slab. TAG and ACE are left out here on
+// purpose: TAG TEAM and ACE SPEC are raw cards, so those two only count with a
+// digit (core's rule) or "graded"/"slab" written straight after them.
+const SLAB_COMPANY = /\b(?:psa|cgc|bgs|sgc|beckett|mgc|ags|graad)\b/i;
+const SLAB_TAG_ACE = /\b(?:tag|ace)[\s-]*(?:grad(?:e|ed|ing)|slab(?:bed)?)\b/i;
+// The seller saying what the card ISN'T — the same guard core keeps on the
+// subject side. "Raw Charizard, PSA 10 candidate" is a card for the box.
+const SAYS_RAW = /\b(?:un|non[\s-]?|not\s+)graded\b|\braw\b/i;
+
+/**
+ * Does this title describe a slab? For the "No graded cards" tick on
+ * ★ Recommend show stock. Errs toward YES on a company name — the cost of a
+ * false positive is one card missing from a suggestion list, where it can be
+ * checked out by SKU as ever.
+ */
+export function isSlabTitle(title) {
+  const t = String(title || "");
+  if (!t) return false;
+  if (CompFinderPricing.subjectGradeFrom(t) != null) return true;
+  if (SAYS_RAW.test(t)) return false;
+  return SLAB_COMPANY.test(t) || SLAB_TAG_ACE.test(t);
+}

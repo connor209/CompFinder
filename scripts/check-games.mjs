@@ -117,7 +117,9 @@ eq("unknown is choosable", filterByGames(rows, new Set([UNKNOWN_GAME])).map((r) 
 
 // ---- The Show Desk: filter THEN cut, and act only on what is on screen -------
 const desk = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
-if (!/filterByGames\(recPool, recGames\)\.slice\(/.test(desk)) {
+// The graded tick may sit between the two; it is a filter too, so it also
+// runs before the cut (check-showstock.mjs pins that half).
+if (!/filterByGames\(recPool, recGames\)(?:\s*\.filter\([^\n]*\))*\s*\.slice\(/.test(desk)) {
   fail("ShowDesk.js must filter the pool by game BEFORE taking the top N — otherwise \"top 20 One Piece\" is whatever One Piece made the overall top 20");
 }
 if (!/const chosen = recChosen\.map/.test(desk) || !/\(recs \|\| \[\]\)\.filter\(\(r\) => !recOff\.has/.test(desk)) {
