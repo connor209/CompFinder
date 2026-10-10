@@ -15,7 +15,7 @@ import {
 } from "@/lib/checkout";
 import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
 import {
-  showView, selectionFor, facetsOf, listingState, matchesQuery,
+  showView, selectionFor, facetsOf, listingState, matchesQuery, skuBatch,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
 import { counterView, onlineMatches, inBoxSkus } from "@/lib/showcounter.js";
@@ -34,7 +34,8 @@ import WishPickup from "./WishPickup";
 import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 import { showOnly } from "@/lib/streamstock.js";
-import { isSlabTitle } from "@/lib/showstock.js";
+import { isSlabTitle, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
+import { checkoutLabelRows, labelWorkbook, LABEL_NAME_KEY } from "@/lib/labelexport.js";
 
 const REC_NO_GRADED_KEY = "cf-rec-no-graded";
 
@@ -83,10 +84,20 @@ export default function ShowDesk() {
   const [sku, setSku] = useState("");
   const [bulk, setBulk] = useState("");
   const [showBulk, setShowBulk] = useState(false);
+  // A SKU batch ("BP") opened as a list to pick from: the cards still on the
+  // shelf under that prefix, NONE ticked by default — the point is choosing
+  // specific cards, and a pre-ticked list of 140 is one tap from checking out
+  // the lot.
+  const [batchPrefix, setBatchPrefix] = useState("");
+  const [batchPick, setBatchPick] = useState(new Set());
   const [feedback, setFeedback] = useState([]); // recent checkout results
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [msg, setMsg] = useState("");
+  // Ticked cards the last label export had no sticker for — offered for
+  // pricing on their own, so three bare cards never cost a whole-pool run.
+  const [labelGap, setLabelGap] = useState([]);
+  useEffect(() => { setLabelGap([]); }, [sel]);
   const [sel, setSel] = useState(new Set());
   // How the away list is being read right now. Not persisted: a search is
   // about the card in your hand a moment ago, and coming back tomorrow to a
@@ -481,6 +492,18 @@ export default function ShowDesk() {
   // unticked. A ticked card the filter has hidden is never checked out.
   const recChosen = useMemo(() => (recs || []).filter((r) => !recOff.has(r.card.id)), [recs, recOff]);
 
+  async function checkoutBatch() {
+    if (batchChosen.length === 0) return;
+    setBusy(true);
+    setMsg("");
+    const results = await checkoutCards(batchChosen);
+    setFeedback(results);
+    setProgress("");
+    setBusy(false);
+    setBatchPick(new Set());
+    await load();
+  }
+
   async function checkoutRecs() {
     const chosen = recChosen.map((r) => r.card);
     if (chosen.length === 0) return;
@@ -597,6 +620,17 @@ export default function ShowDesk() {
   // of state it already holds. Putting the SKU on the row to make the lookup
   // easier is exactly the shortcut check-showcounter.mjs exists to refuse.
   const locations = useMemo(() => locationsBySku(stackCards, stackName), [stackCards, stackName]);
+  const batchRows = useMemo(() => {
+    if (!batchPrefix.trim()) return [];
+    const ranks = liveRanks(stackCards);
+    const depths = stackDepths(stackCards);
+    return skuBatch(stackCards, batchPrefix).map((card) => ({
+      card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null
+    }));
+  }, [stackCards, batchPrefix]);
+  // Only ticks the list can still see: a card checked out since, or outside a
+  // narrowed prefix, is never acted on — the selectionFor() rule.
+  const batchChosen = batchRows.filter((r) => batchPick.has(r.card.id)).map((r) => r.card);
   const listingById = useMemo(() => {
     const m = new Map();
     for (const l of listings) if (l?.ebay_item_id) m.set(String(l.ebay_item_id), l);
@@ -903,6 +937,54 @@ export default function ShowDesk() {
   }
 
   /**
+   * Labels for the ticked cards, off the stickers they already carry — no
+   * batch run. Pricing the whole pool to reprint three labels spends a
+   * SoldComps request per card on cards that already have a price.
+   *
+   * Acts on `selected`, so on what is on screen and nothing else, like every
+   * other button in this bar. The label width is the one the Batch screen's
+   * sticker panel remembers: same printer, same roll.
+   *
+   * A ticked card with no sticker is not labelled — a label with no price is
+   * worse than none — and the message NAMES it, with a way to price just
+   * those cards, rather than the file coming back short with nothing said.
+   */
+  function downloadSelectedLabels() {
+    let nameMax = DEFAULT_NAME_MAX;
+    try {
+      const saved = Number(localStorage.getItem(LABEL_NAME_KEY));
+      if (saved > 0) nameMax = saved;
+    } catch { /* private mode — the default is fine */ }
+    const { rows, unpriced } = checkoutLabelRows(selected, { nameMax });
+    setLabelGap(unpriced.filter((c) => c.title).map((c) => c.id));
+    const named = unpriced.slice(0, 3).map((c) => c.sku || c.title || "untitled").join(", ");
+    const more = unpriced.length > 3 ? ` and ${unpriced.length - 3} more` : "";
+    const gap = unpriced.length
+      ? ` ${unpriced.length} ticked card${unpriced.length === 1 ? " has" : "s have"} no sticker and ${unpriced.length === 1 ? "was" : "were"} left out: ${named}${more}.`
+      : "";
+    if (rows.length === 0) {
+      setMsg(`No labels — none of the ticked cards has a sticker price yet.${gap}`);
+      return;
+    }
+    const blob = new Blob([labelWorkbook(rows)], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `labels-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMsg(`${rows.length} label${rows.length === 1 ? "" : "s"} exported.${gap}`);
+  }
+
+  /** Price only the ticked cards — the pool route, narrowed by id. */
+  function priceSelected(ids) {
+    if (!ids.length) return;
+    router.push(`/panel/batch?pool=show&ids=${ids.map(encodeURIComponent).join(",")}`);
+  }
+
+  /**
    * Set — or clear — the sticker price on one card, here at the desk.
    *
    * The Batch screen's stickers are the normal way in: price the pool, and
@@ -1128,6 +1210,61 @@ export default function ShowDesk() {
             </button>
           </div>
         )}
+        <div className="sd-recbar">
+          <input
+            className="stack-title-inp sd-batch-inp"
+            value={batchPrefix}
+            onChange={(e) => { setBatchPrefix(e.target.value); setBatchPick(new Set()); }}
+            placeholder="SKU batch (e.g. BP)"
+            aria-label="SKU batch to pick from"
+          />
+          {batchPrefix.trim() ? (
+            <button className="btn btn-ghost" onClick={() => { setBatchPrefix(""); setBatchPick(new Set()); }}>Close</button>
+          ) : (
+            <span className="hint hint-small">list a batch and tick the cards to take</span>
+          )}
+        </div>
+        {batchPrefix.trim() ? (
+          batchRows.length === 0 ? (
+            <p className="hint hint-small">
+              No cards on the shelf under <b>{batchPrefix.trim().toUpperCase()}</b> — none with that SKU, or every one is already pulled or checked out.
+            </p>
+          ) : (
+            <>
+              <div className="sd-bulkbar">
+                <label className="sd-toggle">
+                  <input
+                    type="checkbox"
+                    checked={batchChosen.length === batchRows.length}
+                    ref={(el) => { if (el) el.indeterminate = batchChosen.length > 0 && batchChosen.length < batchRows.length; }}
+                    onChange={(e) => setBatchPick(e.target.checked ? new Set(batchRows.map((r) => r.card.id)) : new Set())}
+                  />
+                  {batchChosen.length > 0 ? `${batchChosen.length} of ${batchRows.length}` : `${batchRows.length} on the shelf`}
+                </label>
+              </div>
+              <div className="stack-list sd-batch-list">
+                {batchRows.map(({ card, rank, depth }) => (
+                  <label className="ps-row sd-rec-row" key={card.id}>
+                    <input
+                      type="checkbox"
+                      checked={batchPick.has(card.id)}
+                      onChange={() => setBatchPick((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
+                    />
+                    <span className="stack-sku" title="The card's SKU. A name, not an address — it does not move when the stack re-flows.">{card.sku}</span>
+                    <span className="stack-pos" title="Live position — count this many from the top of the stack">{rank ?? "?"}</span>
+                    <span className="stack-title">{card.title || <em>—</em>}</span>
+                    <span className="badge2" title="Where to walk, and how far to count">
+                      {positionLabel(stackName.get(card.stack_id), rank, depth)}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <button className="btn btn-primary" onClick={checkoutBatch} disabled={busy || batchChosen.length === 0} style={{ marginTop: 10 }}>
+                {busy ? progress || "Checking out…" : `Check out ${batchChosen.length} card(s)`}
+              </button>
+            </>
+          )
+        ) : null}
         <div className="sd-recbar">
           <button className="btn btn-ghost" onClick={buildRecs} disabled={busy || recsLoading}>
             {recsLoading ? "Ranking your stock…" : "★ Recommend show stock"}
@@ -1436,7 +1573,17 @@ export default function ShowDesk() {
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy || selCount === 0}>↩ Return to spots</button>
                 <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
+                <button className="btn btn-ghost" onClick={downloadSelectedLabels} disabled={busy || selCount === 0} title="Label file (.xlsx) for these cards, from the sticker prices they already carry — no pricing run">🏷 Labels ({selCount})</button>
+                <button className="btn btn-ghost" onClick={() => priceSelected(selected.filter((o) => o.title).map((o) => o.id))} disabled={busy || selCount === 0} title="Price just these cards on the Batch screen and get sticker prices for them, rather than the whole pool">💷 Price these ({selCount})</button>
               </div>
+              {labelGap.length > 0 ? (
+                <p className="hint hint-small" style={{ marginTop: 6 }}>
+                  <button className="sd-clear-all" onClick={() => priceSelected(labelGap)}>
+                    Price the {labelGap.length} without a sticker
+                  </button>
+                  {" "}— a run of just those cards, not the whole pool.
+                </p>
+              ) : null}
             </div>
             )}
 

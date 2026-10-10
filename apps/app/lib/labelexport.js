@@ -21,10 +21,15 @@
  * Everything here is framework-free and app-import-free, so the check script
  * can build a real file under bare node and read its bytes back.
  */
-import { stickerRows } from "./showstock.js";
+import { stickerRows, labelName, DEFAULT_NAME_MAX } from "./showstock.js";
 
 /** The printer's columns, in the printer's order. Do not reorder. */
 export const LABEL_COLUMNS = ["Price", "Name"];
+
+/** Where the label width preference lives — the Batch screen and the Show
+ *  Desk both export labels, and a roll of stationery is the same roll on
+ *  either screen. */
+export const LABEL_NAME_KEY = "cf-label-name-max";
 
 /**
  * Sticker pence as the label prints it.
@@ -208,4 +213,32 @@ export function labelWorkbook(rows, columns = LABEL_COLUMNS) {
 export function labelFile(results, opts = {}) {
   const rows = labelRows(results, opts);
   return rows.length === 0 ? new Uint8Array(0) : labelWorkbook(rows);
+}
+
+/**
+ * Labels straight off Show Desk checkouts — the stickers already on them, no
+ * batch run. For the ticked handful: a card added to the box after the run, a
+ * sticker changed at the desk, a reprint of three labels that peeled.
+ *
+ * Read off `sticker_pence` as stored. That is the price a run wrote back or
+ * somebody typed at the desk, so it is already the label and is NOT laddered
+ * again — the same rule as a price typed in the sticker box.
+ *
+ * A checkout with no sticker is returned as `unpriced` rather than dropped:
+ * the screen names those cards, because a label run that quietly came back
+ * short is how a card reaches the table bare.
+ */
+export function checkoutLabelRows(checkouts, { nameMax = DEFAULT_NAME_MAX } = {}) {
+  const rows = [];
+  const unpriced = [];
+  for (const c of checkouts || []) {
+    if (!c) continue;
+    const pence = c.sticker_pence == null ? null : Number(c.sticker_pence);
+    if (pence == null || !Number.isFinite(pence) || pence <= 0) {
+      unpriced.push(c);
+      continue;
+    }
+    rows.push({ Price: labelPrice(pence), Name: labelName(c.title || c.sku || "", nameMax) });
+  }
+  return { rows, unpriced };
 }

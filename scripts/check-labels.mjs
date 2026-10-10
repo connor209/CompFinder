@@ -23,7 +23,7 @@
  */
 import { readFileSync } from "node:fs";
 import { labelName, fit, stickerRows, NAME_LENGTHS, DEFAULT_NAME_MAX } from "../apps/app/lib/showstock.js";
-import { labelRows, labelPrice, labelWorkbook, labelFile, xmlText, LABEL_COLUMNS } from "../apps/app/lib/labelexport.js";
+import { checkoutLabelRows, labelRows, labelPrice, labelWorkbook, labelFile, xmlText, LABEL_COLUMNS } from "../apps/app/lib/labelexport.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -202,6 +202,19 @@ eq("the panel and the file agree on a hand-set price",
 eq("and the file carries every priced card the panel shows",
   labelRows(RESULTS, opts).length,
   stickerRows(RESULTS, opts).filter((r) => !r.held).length);
+
+// --- labels straight off desk checkouts, no run ----------------------------
+{
+  const { rows, unpriced } = checkoutLabelRows([
+    { id: "a", sku: "BP1", title: "Umbreon VMAX 215/203 Evolving Skies Alt Art NM", sticker_pence: 82500 },
+    { id: "b", sku: "BP2", title: "Gengar 5/62 Fossil", sticker_pence: null },
+    { id: "c", sku: "BP3", title: "Pikachu 25/102", sticker_pence: 700 },
+    { id: "d", sku: "BP4", title: "Eevee 1/1", sticker_pence: 0 }
+  ], { nameMax: 30 });
+  eq("a sticker prints as it stands, not re-laddered", rows.map((r) => r.Price), ["£825", "£7"]);
+  eq("the name is cut by the same rule as a run's", rows[0].Name, labelName("Umbreon VMAX 215/203 Evolving Skies Alt Art NM", 30));
+  eq("a card with no sticker is handed back, not dropped", unpriced.map((c) => c.id), ["b", "d"]);
+}
 
 const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
 if (!panel.includes("labelFile(")) {

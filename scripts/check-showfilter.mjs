@@ -35,6 +35,8 @@ import {
   isFiltering,
   facetsOf,
   selectionFor,
+  skuInBatch,
+  skuBatch,
   SHOW_SORTS,
   DEFAULT_SORT,
   STICKER_FILTERS,
@@ -246,6 +248,28 @@ for (const f of LISTING_FILTERS) {
   if (!EVERY_STATE.some((c) => matchesFilters(c, { listing: f.key }))) {
     fail(`the "${f.label}" listing option can never match a card`);
   }
+}
+
+// --- a SKU batch picked off the shelf -------------------------------------
+// Letters alone name the batch EXACTLY: "B" is not the start of "BP".
+eq("BP is in batch BP", skuInBatch("BP12", "bp"), true);
+eq("BP is not in batch B", skuInBatch("BP12", "B"), false);
+eq("B7 is in batch B", skuInBatch("b7", "B"), true);
+eq("a digit makes it a plain prefix", skuInBatch("BP104", "BP1"), true);
+eq("…which BP2 is not in", skuInBatch("BP2", "BP1"), false);
+eq("an empty prefix lists nothing", skuInBatch("BP1", " "), false);
+eq("a card with no SKU is in no batch", skuInBatch("", "BP"), false);
+{
+  const shelf = [
+    { id: 1, sku: "BP11" },
+    { id: 2, sku: "BP2" },
+    { id: 3, sku: "BP3", checked_out_at: "2026-10-01" },
+    { id: 4, sku: "BP4", pulled_at: "2026-10-01" },
+    { id: 5, sku: "B1" },
+    { id: 6, sku: "BPX1" }
+  ];
+  eq("the batch is what is on the shelf, AB2 before AB11",
+    skuBatch(shelf, "BP").map((c) => c.id), [2, 1]);
 }
 
 if (failures) {

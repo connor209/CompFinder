@@ -23,12 +23,16 @@ export default async function PanelPage({ params, searchParams }) {
   const pool = Array.isArray(query.pool) ? query.pool[0] : query.pool;
   // ?import=<id> is the same idea as ?pool=show: a set of cards named before a
   // run exists to have an id of its own.
+  // ?ids=a,b,c narrows the pool to the cards ticked on the Show Desk, so a few
+  // bare cards never cost a run over everything that is away.
+  const ids = Array.isArray(query.ids) ? query.ids[0] : query.ids;
   const imported = Array.isArray(query.import) ? query.import[0] : query.import;
   return (
     <Panel
       initialSection={slug?.[0] || "dashboard"}
       initialBatchId={slug?.[1] || null}
       initialPool={pool || null}
+      initialPoolIds={ids ? String(ids).split(",").filter(Boolean) : null}
       initialImport={imported || null}
     />
   );

@@ -27,7 +27,7 @@ import { effectivePence, isOverridden, overrideNote, withOverride } from "@/lib/
 import { exportGuard, exportPence, isUnpriced } from "@/lib/zero-price.js";
 import { buildPool, poolLabel, stickerRows, stickerSummary, toPoundPence, NAME_LENGTHS, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
 import SoldCompsApi from "@compfinder/core/soldcomps.js";
-import { labelFile } from "@/lib/labelexport.js";
+import { labelFile, LABEL_NAME_KEY } from "@/lib/labelexport.js";
 import { epnLink, relFor } from "@compfinder/core/epn.js";
 import QuickSearch from "./QuickSearch";
 import Inventory from "./Inventory";
@@ -59,8 +59,6 @@ const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 // Supabase (migration 023); this is only what covers the gap between finishing
 // a run and it being saved, and the case where saving isn't available at all.
 const LIVE_BATCH_KEY = "cf-batch-live";
-// How wide the labels being printed on are, in characters of card name.
-const LABEL_NAME_KEY = "cf-label-name-max";
 // Whether a result row shows its working — the query it searched on and the
 // engine's note under the price. Remembered rather than re-chosen every run:
 // a fifty-card run is a wall of prose on a laptop, and somebody who has turned
@@ -233,7 +231,7 @@ function heldRec(rec, soldCount, fetched, activeCount, apiDiagnostic, disagrees 
   };
 }
 
-export default function Panel({ initialSection = "dashboard", initialBatchId = null, initialPool = null, initialImport = null }) {
+export default function Panel({ initialSection = "dashboard", initialBatchId = null, initialPool = null, initialPoolIds = null, initialImport = null }) {
   const [pastedText, setPastedText] = useState("");
   // A CSV that has been READ but not yet priced. Uploading used to start the
   // run in the same tick as the file landed, which put every filter — search
@@ -660,7 +658,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           .order("checked_out_at", { ascending: true }), "id,sku,title,event,stack_name,sticker_pence");
         if (error) throw error;
         if (cancelled) return;
-        const data = showOnly(rows);
+        // Ticked on the desk: only those. A ticked card that has since been
+        // sold or returned is simply not in the open set any more.
+        const wanted = initialPoolIds ? new Set(initialPoolIds) : null;
+        const data = showOnly(rows).filter((r) => !wanted || wanted.has(r.id));
         const { items, skipped } = buildPool(data);
         setPool({ items, skipped, label: poolLabel(data) });
       } catch (err) {
@@ -676,7 +677,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       }
     })();
     return () => { cancelled = true; };
-  }, [stream, initialPool]);
+  }, [stream, initialPool, initialPoolIds]);
 
   /**
    * Price the cards on screen again, with the filters as they stand NOW.
@@ -2294,7 +2295,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             ) : (
               <>
                 <p className="hint">
-                  Every card checked out to <b>{pool.label}</b>. Pricing them costs up to{" "}
+                  {initialPoolIds ? <>The {pool.items.length} card{pool.items.length === 1 ? "" : "s"} ticked on the Show desk, checked out to</> : "Every card checked out to"} <b>{pool.label}</b>. Pricing them costs up to{" "}
                   <b>{pool.items.length * searchDepth}</b> SoldComps request
                   {pool.items.length * searchDepth === 1 ? "" : "s"} at the <b>search depth</b> set below, and takes
                   roughly {Math.max(1, Math.round((pool.items.length * 3) / 60))} minute

@@ -162,6 +162,33 @@ export function compareSku(a, b) {
   return ra < rb ? -1 : ra > rb ? 1 : 0;
 }
 
+/**
+ * Is this SKU in the batch the prefix names? "BP" is BP1, BP2 … BP140.
+ *
+ * A prefix of LETTERS ONLY names a batch exactly: "B" is B1, B2 and never
+ * BP12, because a batch is its letters and "B" being the start of "BP" says
+ * nothing about the card. Type a digit and it is a plain prefix again, so
+ * "BP1" narrows to BP1, BP10–BP19, BP100… — what you'd expect from a box.
+ */
+export function skuInBatch(sku, prefix) {
+  const s = String(sku || "").trim().toLowerCase();
+  const p = String(prefix || "").trim().toLowerCase();
+  if (!s || !p) return false;
+  if (/^[a-z]+$/.test(p)) return s.match(SKU_PARTS)[1] === p;
+  return s.startsWith(p);
+}
+
+/**
+ * The cards still in a batch, in SKU order: on a shelf, not pulled, not
+ * already away at a show or in the stream box — the ones you could pick up
+ * and check out right now.
+ */
+export function skuBatch(cards, prefix) {
+  return (cards || [])
+    .filter((c) => c && !c.pulled_at && !c.checked_out_at && skuInBatch(c.sku, prefix))
+    .sort((a, b) => compareSku(a.sku, b.sku));
+}
+
 /** Missing values sort last whichever way the column runs. */
 function nullsLast(a, b, dir) {
   if (a == null || b == null) return (a == null ? 1 : 0) - (b == null ? 1 : 0);
