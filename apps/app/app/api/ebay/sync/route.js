@@ -3,6 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncUserListings } from "@/lib/ebay";
 
+// A full listings sync reads every page of an account eBay has; on an
+// 8,000-listing account that is far past the default function time limit.
+export const maxDuration = 300;
+
 /** Re-pull the connected user's active listings into the cache. */
 export async function POST() {
   const supabase = await createClient();

@@ -327,19 +327,36 @@ async function getMyeBaySellingPage(accessToken, pageNumber) {
 }
 
 /**
- * Pull ALL of the connected user's active listings (paginated). Capped at
- * MAX_PAGES so a huge account can't run away — the cap is surfaced by the
- * caller via the count.
+ * Pull ALL of the connected user's active listings (paginated, 200 a page).
+ *
+ * The cap used to be 25 pages — 5,000 listings — and an account past that
+ * synced its first 5,000 and silently dropped the rest: every screen that
+ * reads `ebay_listings` (My listings, the Show Desk, the QR storefront) then
+ * behaved as if those cards did not exist. MAX_LISTING_PAGES is now far past
+ * any account here; reaching it still comes back `truncated`, and the sync
+ * then refuses to delete anything it did not get to read.
+ *
+ * Pages after the first are fetched a few at a time: 40 pages one after the
+ * other is most of a serverless function's time limit on its own.
  */
-export async function fetchAllActiveListings(accessToken, { maxPages = 25 } = {}) {
+export const MAX_LISTING_PAGES = 150; // 30,000 listings
+const LISTING_PAGE_CONCURRENCY = 5;
+
+export async function fetchAllActiveListings(accessToken, { maxPages = MAX_LISTING_PAGES } = {}) {
   const first = await getMyeBaySellingPage(accessToken, 1);
-  let all = first.items;
   const pages = Math.min(first.totalPages, maxPages);
-  for (let p = 2; p <= pages; p++) {
-    const next = await getMyeBaySellingPage(accessToken, p);
-    all = all.concat(next.items);
+  const rest = [];
+  for (let p = 2; p <= pages; p += LISTING_PAGE_CONCURRENCY) {
+    const batch = [];
+    for (let q = p; q < p + LISTING_PAGE_CONCURRENCY && q <= pages; q++) batch.push(getMyeBaySellingPage(accessToken, q));
+    // eslint-disable-next-line no-await-in-loop
+    for (const r of await Promise.all(batch)) rest.push(...r.items);
   }
-  return { listings: all, totalPages: first.totalPages, truncated: first.totalPages > maxPages };
+  // A listing that moved between pages while they were being read comes back
+  // twice; one row per item id, or the upsert refuses the whole chunk.
+  const byId = new Map();
+  for (const l of [...first.items, ...rest]) byId.set(l.ebay_item_id, l);
+  return { listings: [...byId.values()], totalPages: first.totalPages, truncated: first.totalPages > maxPages };
 }
 
 /**
@@ -927,8 +944,14 @@ export async function syncUserSales(admin, userId, daysBack = 90) {
 /**
  * Refresh the cached ebay_listings for a connected user. Requires a
  * service-role `admin` client. Returns { connected, count, truncated }.
- * Replaces the user's cached rows wholesale — syncs are infrequent (on
- * connect + manual refresh) and rows are cheap, so this stays simple.
+ *
+ * Upsert first, then delete only the rows this sync did not see. The old way
+ * deleted everything and re-inserted, so a sync that failed partway — a
+ * timeout on a big account, one bad chunk — left the cache with whatever had
+ * gone in so far, and thousands of real listings missing until the next run.
+ * Now a failed sync leaves the previous rows standing. A TRUNCATED sync
+ * deletes nothing: a listing it never reached is not evidence the listing
+ * has gone.
  */
 export async function syncUserListings(admin, userId) {
   const token = await getValidUserAccessToken(admin, userId);
@@ -937,22 +960,27 @@ export async function syncUserListings(admin, userId) {
   const { listings, truncated } = await fetchAllActiveListings(token);
   const nowIso = new Date().toISOString();
 
-  await admin.from("ebay_listings").delete().eq("user_id", userId);
   if (listings.length) {
     const rows = listings.map((l) => ({ ...l, user_id: userId, synced_at: nowIso }));
-    // Insert with the extra JSONB; if that column doesn't exist yet (migration
+    // Write with the extra JSONB; if that column doesn't exist yet (migration
     // 004 not run), retry without it so sync still works.
     let dropExtra = false;
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500);
       const payload = dropExtra ? chunk.map(({ extra, ...r }) => r) : chunk;
-      let { error } = await admin.from("ebay_listings").insert(payload);
+      let { error } = await admin.from("ebay_listings").upsert(payload, { onConflict: "user_id,ebay_item_id" });
       if (error && !dropExtra && /extra/.test(error.message || "")) {
         dropExtra = true;
-        ({ error } = await admin.from("ebay_listings").insert(chunk.map(({ extra, ...r }) => r)));
+        ({ error } = await admin.from("ebay_listings").upsert(chunk.map(({ extra, ...r }) => r), { onConflict: "user_id,ebay_item_id" }));
       }
       if (error) throw new Error(error.message);
     }
+  }
+  // Everything still current was just stamped nowIso; anything older is a
+  // listing eBay no longer reports as active.
+  if (!truncated) {
+    const { error } = await admin.from("ebay_listings").delete().eq("user_id", userId).lt("synced_at", nowIso);
+    if (error) throw new Error(error.message);
   }
   await admin.from("ebay_accounts").update({ last_synced_at: nowIso }).eq("user_id", userId);
   return { connected: true, count: listings.length, truncated };

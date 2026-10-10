@@ -3,6 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, reviseItemQuantity, relistListing, syncUserListings } from "@/lib/ebay";
 
+// A full listings sync reads every page of an account eBay has; on an
+// 8,000-listing account that is far past the default function time limit.
+export const maxDuration = 300;
+
 /**
  * Bring a hidden listing back when its card is checked back in. The reverse of
  * /api/ebay/hide: quantity-hidden items go back to quantity 1 (same item id);
