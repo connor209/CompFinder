@@ -12,6 +12,7 @@ import {
   DEFAULT_EXPIRY_DAYS
 } from "@/lib/storefront-store.js";
 import { qrPath, qrSvg } from "@/lib/qr.js";
+import Fold from "./Fold";
 
 /**
  * The QR on the table: make a link, print it, switch it off.
@@ -155,21 +156,39 @@ export default function StorefrontPanel({ event = "" }) {
 
   if (!loaded) return null;
 
+  // Folded shut by default — a QR is made once a show, not once a sale. The
+  // header still says how many links are live and how many people looked,
+  // since that view count is the whole question this panel exists to answer.
+  // A pending migration and any error stay outside the fold.
+  const views = live.reduce((n, r) => n + (r.views || 0), 0);
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <span className="eyebrow">QR for visitors — browse the box on their own phone</span>
-        {!missing && !making ? (
+    <Fold
+      id="showdesk-storefront"
+      title="QR for visitors"
+      count={live.length > 0 ? `${live.length} live` : null}
+      defaultOpen={false}
+      summary={
+        missing ? null
+          : live.length > 0 ? `${views} view${views === 1 ? "" : "s"} so far — open to print the sign, copy the link or switch it off.`
+          : "Browse the box on their own phone — a read-only binder behind a QR, printed as a sign."
+      }
+      alert={
+        <>
+          {missing ? (
+            <p className="hint hint-small" style={{ marginTop: 0 }}>
+              Needs a one-off setup: run <code>supabase/migrations/029_show_storefronts.sql</code> in the Supabase SQL editor. Nothing else on this screen depends on it.
+            </p>
+          ) : null}
+          {msg ? <p className="hint hint-small">{msg}</p> : null}
+        </>
+      }
+    >
+      {!missing && !making ? (
+        <div className="sf-actions" style={{ marginBottom: 10 }}>
           <button className="btn btn-ghost" onClick={() => setMaking(true)}>
             {live.length > 0 ? "＋ Another link" : "＋ Make a QR"}
           </button>
-        ) : null}
-      </div>
-
-      {missing ? (
-        <p className="hint hint-small" style={{ marginTop: 0 }}>
-          Needs a one-off setup: run <code>supabase/migrations/029_show_storefronts.sql</code> in the Supabase SQL editor. Nothing else on this screen depends on it.
-        </p>
+        </div>
       ) : null}
 
       {!missing && live.length === 0 && !making ? (
@@ -243,8 +262,6 @@ export default function StorefrontPanel({ event = "" }) {
           ))}
         </div>
       ) : null}
-
-      {msg ? <p className="hint hint-small">{msg}</p> : null}
-    </div>
+    </Fold>
   );
 }

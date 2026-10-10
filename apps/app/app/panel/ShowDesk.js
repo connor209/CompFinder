@@ -32,6 +32,7 @@ import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
 import DealBar, { DealButton, DealTally, useDeal } from "./DealBar";
 import StorefrontPanel from "./StorefrontPanel";
 import WishPickup from "./WishPickup";
+import Fold from "./Fold";
 import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 import { showOnly } from "@/lib/streamstock.js";
@@ -1203,11 +1204,24 @@ export default function ShowDesk() {
           away — not rendered. A customer holding the tablet can scroll, and a
           "£ Sold" button that is merely off-palette is still a button. */}
       {customerMode ? null : (
-      <div className="panel">
-        <div className="panel-head">
-          <span className="eyebrow">Check stock out</span>
-          <button className="btn btn-ghost" onClick={() => setShowBulk((v) => !v)}>{showBulk ? "Single" : "Bulk paste"}</button>
-        </div>
+      <Fold
+        id="showdesk-checkout"
+        title="Check stock out"
+        summary={
+          event.trim()
+            ? `Tagging checkouts “${event.trim()}” · hide on eBay: ${(HIDE_MODES.find((m) => m.key === hideMode) || {}).label || hideMode}`
+            : "By SKU, bulk paste, a stack or SKU batch, or ★ Recommend show stock."
+        }
+        alert={feedback.length > 0 ? (
+          <div className="sd-feedback">
+            {feedback.map((f, i) => (
+              <p key={i} className="hint hint-small" style={{ margin: "4px 0", color: f.ok ? "var(--conf-high)" : "var(--bad-ink)" }}>
+                {f.ok ? "✓" : "✕"} <b>{f.sku}</b> — {f.text}
+              </p>
+            ))}
+          </div>
+        ) : null}
+      >
         <div className="sd-opts">
           <input
             className="stack-title-inp"
@@ -1222,6 +1236,7 @@ export default function ShowDesk() {
               {HIDE_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
           </label>
+          <button className="btn btn-ghost" onClick={() => setShowBulk((v) => !v)}>{showBulk ? "Single SKU" : "Bulk paste"}</button>
         </div>
         {showBulk ? (
           <>
@@ -1345,16 +1360,7 @@ export default function ShowDesk() {
             by value
           </label>
         </div>
-        {feedback.length > 0 ? (
-          <div className="sd-feedback">
-            {feedback.map((f, i) => (
-              <p key={i} className="hint hint-small" style={{ margin: "4px 0", color: f.ok ? "var(--conf-high)" : "var(--bad-ink)" }}>
-                {f.ok ? "✓" : "✕"} <b>{f.sku}</b> — {f.text}
-              </p>
-            ))}
-          </div>
-        ) : null}
-      </div>
+      </Fold>
       )}
 
       {/* The QR on the table: the binder below, on a visitor's own phone.
@@ -1380,6 +1386,8 @@ export default function ShowDesk() {
             <>
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 Your live stock ranked by listing price. Untick anything staying home, then check the rest out in one go.
+                Each row is the SKU, then the <b>live position</b> to count to — not the same number: a SKU never
+                moves, positions close up behind every card pulled or taken to a show.
               </p>
               {/* The top N is taken AFTER these, so it is the top N of the
                   games you picked. */}
@@ -1391,11 +1399,6 @@ export default function ShowDesk() {
                   <span className="hint hint-small">({recGradedOut} slab{recGradedOut === 1 ? "" : "s"} left out)</span>
                 ) : null}
               </label>
-              <p className="hint hint-small" style={{ marginTop: 0 }}>
-                The SKU comes first, then the <b>live position</b> — count that many from the top of the
-                stack. The two are not the same number: a SKU is a name and never moves, while positions
-                close up behind every card pulled or taken to a show.
-              </p>
               <div className="sd-bulkbar">
                 <label className="sd-toggle">
                   <input
@@ -1744,7 +1747,7 @@ export default function ShowDesk() {
               <p className="dd-empty">
                 Nothing checked out matches that.{" "}
                 {q.trim() && pastMatches.length > 0
-                  ? `${pastMatches.length} card${pastMatches.length === 1 ? "" : "s"} in Recent activity below ${pastMatches.length === 1 ? "does" : "do"} — it may already be sold or back in its stack. `
+                  ? `${pastMatches.length} card${pastMatches.length === 1 ? "" : "s"} in Recent activity (further down — open it) ${pastMatches.length === 1 ? "does" : "do"} — it may already be sold or back in its stack. `
                   : ""}
                 <button className="sd-clear-all" onClick={clearFilters}>Clear the search</button>
               </p>
@@ -2145,16 +2148,26 @@ export default function ShowDesk() {
         </div>
       ) : null}
 
+      {/* Folded shut by default: it is a long tail of what already happened,
+          under the list you are working from. The header keeps the day's
+          takings and the search's match count, so a shut fold still answers
+          "did that card sell?" at a glance. */}
       {history.length > 0 && !customerMode ? (
-        <div className="panel">
-          <div className="panel-head">
-            <span className="eyebrow">Recent activity</span>
-            {/* The takings are the day's, not the search's: a total that moved
-                while you looked for one card would be read as money going
-                missing. */}
-            {soldRows.length > 0 ? <span className="badge2">{soldRows.length} sold · {pounds(takings)}</span> : null}
-            {q.trim() ? <span className="badge2">{pastMatches.length} of {history.length} match your search</span> : null}
-          </div>
+        <Fold
+          id="showdesk-history"
+          title="Recent activity"
+          count={history.length}
+          defaultOpen={false}
+          actions={
+            <>
+              {/* The takings are the day's, not the search's: a total that moved
+                  while you looked for one card would be read as money going
+                  missing. */}
+              {soldRows.length > 0 ? <span className="badge2">{soldRows.length} sold · {pounds(takings)}</span> : null}
+              {q.trim() ? <span className="badge2">{pastMatches.length} of {history.length} match your search</span> : null}
+            </>
+          }
+        >
           {q.trim() && pastMatches.length === 0 ? (
             <p className="dd-empty">Nothing here matches “{q.trim()}” either.</p>
           ) : null}
@@ -2176,7 +2189,7 @@ export default function ShowDesk() {
               </div>
             ))}
           </div>
-        </div>
+        </Fold>
       ) : null}
 
       {/* The basket, with the sell button on it. `dealMode` rather than

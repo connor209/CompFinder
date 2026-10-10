@@ -221,7 +221,7 @@ export function StreamBar({ relay }) {
         </>
       ) : (
         <span className="hint-small sb-bad">
-          {relay.checked ? <>Relay not reachable at <code>{relay.origin}</code> — run <code>node tools/stream-relay/server.mjs</code> and make sure it accepts <code>{typeof window === "undefined" ? "" : window.location.origin}</code>.</> : "Looking for the relay…"}
+          {relay.checked ? <>Relay not reachable at <code>{relay.origin}</code> — double-click <b>Start Stream Relay</b> at the repo root (or <code>npm run stream</code>) and make sure it accepts <code>{typeof window === "undefined" ? "" : window.location.origin}</code>.</> : "Looking for the relay…"}
         </span>
       )}
     </div>
