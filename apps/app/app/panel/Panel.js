@@ -47,6 +47,7 @@ import Browse from "./Browse";
 import Scan from "./Scan";
 import BulkListModal from "./BulkListModal";
 import SavedBatches from "./SavedBatches";
+import Fold from "./Fold";
 import Imports from "./Imports";
 import PriceOverride from "./PriceOverride";
 import MarketLinks from "./MarketLinks";
@@ -2351,8 +2352,26 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           <span className="hint-small">Snap a card to fill the box — you confirm before it searches.</span>
         </div>
 
-        <div className="filters">
-          <span className="eyebrow eyebrow-small">SoldComps filters</span>
+        {/* Set once a session and then read past on every run, so it folds —
+            but the summary is what a run is about to spend under, depth
+            first, so a shut fold still says it before you press anything. */}
+        <Fold
+          id="batch-filters"
+          panel={false}
+          defaultOpen={false}
+          title="SoldComps filters"
+          summary={[
+            `Depth ${searchDepth}${searchDepth > 1 ? ` (up to ${searchDepth} searches a card)` : ""}`,
+            ebaySite,
+            `sold within ${soldWithin} days`,
+            itemLocation !== "default" ? itemLocation : null,
+            itemCondition !== "any" ? itemCondition : null,
+            minPrice || maxPrice ? `£${minPrice || "0"}–${maxPrice ? `£${maxPrice}` : "any"}` : null,
+            includeCondition && !useFullTitle ? "condition in query" : null,
+            useFullTitle ? "full title" : null,
+            fetchActiveAlways ? "active listings for every card (≈2× quota)" : null,
+          ].filter(Boolean).join(" · ")}
+        >
           <div className="filter-grid">
             <label className="field">
               <span>eBay marketplace</span>
@@ -2434,7 +2453,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             <input type="checkbox" checked={fetchActiveAlways} onChange={(e) => setFetchActiveAlways(e.target.checked)} />
             <span>Also fetch active (asking-price) listings for every item — uses ≈2× your SoldComps quota</span>
           </label>
-        </div>
+        </Fold>
 
         <div className="row">
           <button className="btn btn-primary" disabled={running} onClick={() => runBatch(getPastedItems())}>
@@ -2508,13 +2527,24 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       ) : null}
 
       {poolRun && stickers.length > 0 ? (
-        <section className="panel">
-          <div className="panel-head">
-            <span className="eyebrow">Sticker prices — {poolRun}</span>
-            <span className="badge2">
-              {stickerCounts.priced} priced{stickerCounts.held ? ` · ${stickerCounts.held} held` : ""}
-            </span>
-          </div>
+        /* A row per card in the pool, above the results — two hundred of them
+           is a long way to scroll to reach the run. Folds like everything
+           else; the counts stay in the header, and a save's outcome is the
+           alert, so a failed write says so shut or open. */
+        <Fold
+          id="batch-stickers"
+          title={`Sticker prices — ${poolRun}`}
+          count={`${stickerCounts.priced} priced${stickerCounts.held ? ` · ${stickerCounts.held} held` : ""}`}
+          summary={`${stickers.length} card${stickers.length === 1 ? "" : "s"} — open to check, type over or save the stickers and download the label file.`}
+          alert={stickerNotice ? <p className="hint hint-small sb-notice">{stickerNotice}</p> : null}
+        >
+          <Fold
+            id="batch-stickers-how"
+            panel={false}
+            defaultOpen={false}
+            title="How a sticker is worked out"
+            summary="Cash ladder off the recommended price; thin prices held; your own price never held; graded cards start from our eBay ask."
+          >
           <p className="hint">
             Cash-rounded from the recommended price — £1 steps to £20, £5 to £100, £10 above — because
             nobody hands 50p pieces across a table. A thin price is held back rather than printed: a
@@ -2530,6 +2560,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             in ninety days — and the price on our own listing was decided with that exact copy in hand.
             The comps figure is still on the row, and the box still wins over both.
           </p>
+          </Fold>
           <div className="stack-list">
             {stickers.map((r, i) => (
               <div className="ps-row" key={i}>
@@ -2654,8 +2685,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               ⬇ Label file (.xlsx)
             </button>
           </div>
-          {stickerNotice ? <p className="hint hint-small sb-notice">{stickerNotice}</p> : null}
-        </section>
+        </Fold>
       ) : null}
 
       <section className="panel results-panel">
@@ -2768,16 +2798,22 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 </>
               )}
             </p>
-            {/* Above the filters and in its own line, not folded into the
-                summary above: a run that cannot be exported has to say so
-                before you reach for the button, and the count IS the whole
-                message — every one of these is a card nothing has priced. */}
             {/* What the depth actually bought. The button quotes a ceiling;
                 this is the bill, and the two are usually far apart because a
                 full page or a pool that is already big enough stops a card's
                 ladder. Shown whenever more than one search was ASKED for —
                 at depth 1 there is nothing to report. */}
+            {/* The bill stays in the header; how each card's ladder ended is
+                the working, and folds. */}
             {depthUsed && depthUsed.depth > 1 ? (
+              <Fold
+                id="batch-depth-bill"
+                panel={false}
+                defaultOpen={false}
+                title={`Search depth ${depthUsed.depth}`}
+                count={`${depthUsed.requests} of ${depthUsed.ceiling} searches`}
+                summary={`${depthUsed.requests} search${depthUsed.requests === 1 ? "" : "es"} across ${depthUsed.cards} card${depthUsed.cards === 1 ? "" : "s"}; the wider searches added ${depthUsed.extra} sale${depthUsed.extra === 1 ? "" : "s"}.`}
+              >
               <p className="hint hint-small" role="status">
                 <strong>Search depth {depthUsed.depth}</strong> — {depthUsed.requests} search
                 {depthUsed.requests === 1 ? "" : "es"} across {depthUsed.cards} card
@@ -2789,6 +2825,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 {" "}The wider searches added <strong>{depthUsed.extra}</strong> sale
                 {depthUsed.extra === 1 ? "" : "s"} the first search had not found.
               </p>
+              </Fold>
             ) : null}
             {staleCount > 0 ? (
               <p className="hint hint-small zero-warn" role="status">
@@ -2797,6 +2834,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 bring {staleCount === 1 ? "it" : "them"} in line, or set {staleCount === 1 ? "a price" : "prices"} by hand.
               </p>
             ) : null}
+            {/* Above the filters and in its own line, not folded into the
+                summary above: a run that cannot be exported has to say so
+                before you reach for the button, and the count IS the whole
+                message — every one of these is a card nothing has priced. */}
             {unpricedCount > 0 ? (
               <p className="hint hint-small zero-warn" role="status">
                 <strong>{unpricedCount} card{unpricedCount === 1 ? "" : "s"} at £0.00</strong> — nothing priced {unpricedCount === 1 ? "it" : "them"}, so {unpricedCount === 1 ? "it has" : "they have"} no price rather than a cheap one.

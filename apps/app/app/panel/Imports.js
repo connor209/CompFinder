@@ -7,6 +7,7 @@ import {
   saveImport, listImports, loadImport, updateItem, revertTitle, deleteImport, isEdited
 } from "@/lib/import-store.js";
 import { SpecificsEditor, TitleEditor, StockFields } from "./CardFields";
+import Fold from "./Fold";
 
 /**
  * Imports — a CardUploader export, brought in whole.
@@ -183,33 +184,41 @@ export default function Imports({ onPrice }) {
 
   return (
     <>
-      <section className="panel">
-        <div className="panel-head">
-          <span className="eyebrow">Imports</span>
-          <span className="hint-small">A CardUploader export, with its scans and card details</span>
-        </div>
-
+      {/* The list of earlier imports folds once one is open — the open
+          import is what you came for, and a month of files above it is a
+          scroll. The import button, the pending-migration note and any
+          notice stay outside the fold. */}
+      <Fold
+        id="imports-list"
+        title="Imports"
+        count={rows ? rows.length : null}
+        summary={open ? `Showing “${open.imported.label}”` : rows && rows.length === 0 ? "Nothing imported yet" : "A CardUploader export, with its scans and card details"}
+        actions={
+          <>
+            <label className="btn btn-primary file-label" htmlFor="importCsv">Import CardUploader CSV</label>
+            <input
+              id="importCsv" type="file" accept=".csv" onChange={onCsvSelected}
+              style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
+            />
+          </>
+        }
+        alert={
+          <>
+            {missing ? (
+              <p className="hint hint-small">
+                <b>Migration 028 is still to run.</b> Paste <code>supabase/migrations/028_card_imports.sql</code>{" "}
+                into the Supabase SQL editor. Until then an import opens and can be edited, but only in this tab.
+              </p>
+            ) : null}
+            {notice ? <p className={`hint hint-small${noticeIsError ? " compfinder-error" : ""}`}>{notice}</p> : null}
+          </>
+        }
+      >
         <p className="hint">
           The file already carries a photograph of every card and its set, rarity, year, illustrator and
           type. Reading it here means a row can show you the card instead of only its title — and a title
           that is wrong can be fixed <b>before</b> it is searched on, which is what decides the price.
         </p>
-
-        <div className="row row-file">
-          <label className="btn btn-primary file-label" htmlFor="importCsv">Import CardUploader CSV</label>
-          <input
-            id="importCsv" type="file" accept=".csv" onChange={onCsvSelected}
-            style={{ position: "absolute", width: 1, height: 1, opacity: 0 }}
-          />
-        </div>
-
-        {missing ? (
-          <p className="hint hint-small">
-            <b>Migration 028 is still to run.</b> Paste <code>supabase/migrations/028_card_imports.sql</code>{" "}
-            into the Supabase SQL editor. Until then an import opens and can be edited, but only in this tab.
-          </p>
-        ) : null}
-        {notice ? <p className={`hint hint-small${noticeIsError ? " compfinder-error" : ""}`}>{notice}</p> : null}
 
         {rows && rows.length > 0 ? (
           <div className="sb-list">
@@ -221,7 +230,7 @@ export default function Imports({ onPrice }) {
                 </div>
                 <div className="sb-acts">
                   <button className="btn btn-ghost" onClick={() => openImport(row.id)} disabled={busy || open?.imported?.id === row.id}>
-                    {open?.imported?.id === row.id ? "Open" : "Open"}
+                    {open?.imported?.id === row.id ? "Showing" : "Open"}
                   </button>
                   <button className="btn btn-ghost" onClick={() => removeImport(row)} disabled={busy}>Delete</button>
                 </div>
@@ -231,7 +240,7 @@ export default function Imports({ onPrice }) {
         ) : rows && !missing ? (
           <p className="hint hint-small">Nothing imported yet. A CardUploader export puts every card here, scans and all.</p>
         ) : null}
-      </section>
+      </Fold>
 
       {open ? (
         <section className="panel">

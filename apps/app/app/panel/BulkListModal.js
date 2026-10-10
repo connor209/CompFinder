@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { resizeImage } from "@/lib/resizeImage";
+import Fold from "./Fold";
 
 const LISTING_BUCKET = "listing-photos";
 
@@ -222,7 +223,21 @@ export default function BulkListModal({ cards, onClose, onDone }) {
           <button className="btn btn-ghost" onClick={onClose}>Close</button>
         </div>
 
-        {/* Shared settings */}
+        {/* Shared settings — saved between runs, so after the first one
+            they are read rather than changed, and fold to one line saying
+            what every listing will go up with. */}
+        <Fold
+          id="bulk-shared"
+          panel={false}
+          defaultOpen={false}
+          title="Shared settings"
+          summary={[
+            CONDITIONS.find((c) => c.v === conditionId)?.l || null,
+            linkedPolicy ? `eBay policies${linkedPolicy.fulfillmentName ? ` (${linkedPolicy.fulfillmentName})` : ""}` : `${SHIPPING.find((x) => x.v === shippingService)?.l || shippingService} £${shippingCost || "0"}`,
+            postcode ? `from ${postcode}` : "no postcode set",
+            `category ${categoryId}`,
+          ].filter(Boolean).join(" · ")}
+        >
         <div className="bulk-shared">
           <label className="field bulk-wide">
             <span>Title template <span className="buy-opt">tokens: {"{title} {name} {number} {set} {sku} {condition}"}</span></span>
@@ -269,6 +284,7 @@ export default function BulkListModal({ cards, onClose, onDone }) {
             </div>
           </div>
         </div>
+        </Fold>
 
         {/* Per-row table */}
         <div className="table-wrap bulk-rows">
