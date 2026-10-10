@@ -1750,6 +1750,11 @@ sort, projected.
   `isListingAvailable()` — and a missing quantity is silence, not a zero, or
   real stock is hidden. The eBay price shows as it stands, which is the right
   number for a card that would be posted.
+- **Listed is not the same as at home.** A card checked out anywhere —
+  including the stream box, which is never in the show box — can still have a
+  listing that reads as available. `atHomeListings()` drops a listing whose
+  every shelf copy is checked out before the counter list, the binder or the
+  wish pickup sees it; one copy still on the shelf keeps it.
 
 **This is the projection the public storefront needs.** See
 `docs/SHOW_STOREFRONT.md`: an anonymous route serves exactly this shape and

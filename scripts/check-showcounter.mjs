@@ -34,6 +34,8 @@ import {
   conditionOf,
   largeImage,
   onlineMatches,
+  awaySkus,
+  atHomeListings,
   inBoxSkus,
   ONLINE_LIMIT,
   counterName,
@@ -460,6 +462,32 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(counterLib)) {
 // column leaks; see the header.
 if (/\.\.\.co\b/.test(counterLib)) {
   fail("counterRow spreads the checkout row — it must build the allowed keys, or the next column added leaks");
+}
+
+// --- the online list is "listed AND at home" --------------------------------
+const ok = (what, cond) => { if (!cond) fail(what); };
+// A stream-box card is checked out but never in the show box, so the box's own
+// SKUs could not keep it out of a search. A SKU with one copy still on the
+// shelf stays: that copy is the one somebody can fetch.
+{
+  const shelf = [
+    { sku: "S1", checked_out_at: "2026-10-01" },              // stream box
+    { sku: "A2" },                                           // at home
+    { sku: "Q3", checked_out_at: "2026-10-01" }, { sku: "q3 " }, // one of two away
+    { sku: "P4", checked_out_at: "2026-10-01", pulled_at: "2026-10-02" } // gone for good
+  ];
+  const away = awaySkus(shelf);
+  ok("a checked-out SKU is away", away.has("s1"));
+  ok("a SKU with a copy still on the shelf is not", !away.has("q3") && !away.has("a2"));
+  ok("a pulled card says nothing", !away.has("p4"));
+  const listed = [{ sku: "S1", title: "Gengar" }, { sku: "A2", title: "Gengar" }, { sku: "Q3" }, { title: "no sku" }];
+  ok("the stream-box card is dropped, everything else kept",
+    JSON.stringify(atHomeListings(listed, shelf).map((l) => l.sku ?? null)) === JSON.stringify(["A2", "Q3", null]));
+  ok("no stack data hides nothing", atHomeListings(listed, []).length === listed.length);
+}
+const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
+if (!/atHomeListings\(listings, stackCards\)/.test(deskSrc)) {
+  fail("ShowDesk.js no longer filters the online stock through atHomeListings() — checked-out cards reach the search again");
 }
 
 if (failures) {

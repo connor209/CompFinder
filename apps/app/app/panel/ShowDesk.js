@@ -18,7 +18,7 @@ import {
   showView, selectionFor, facetsOf, listingState, matchesQuery, skuBatch,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
-import { counterView, onlineMatches, inBoxSkus } from "@/lib/showcounter.js";
+import { counterView, onlineMatches, inBoxSkus, atHomeListings } from "@/lib/showcounter.js";
 import {
   binderView, clampPage, turnPage, swipeDirection, copyLocations,
   BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS,
@@ -544,9 +544,12 @@ export default function ShowDesk() {
     () => open.map((co) => ({ ...co, game: gameOf({ category: categoryOf(co), title: co.title }, gameIndex) })),
     [open, categoryOf, gameIndex]
   );
+  // Listed AND at home: a card checked out anywhere — the show box or the
+  // stream box — is not one the online list may offer. See awaySkus().
+  const homeListings = useMemo(() => atHomeListings(listings, stackCards), [listings, stackCards]);
   const taggedListings = useMemo(
-    () => listings.map((l) => ({ ...l, game: gameOf({ category: l?.extra?.category, title: l.title }, gameIndex) })),
-    [listings, gameIndex]
+    () => homeListings.map((l) => ({ ...l, game: gameOf({ category: l?.extra?.category, title: l.title }, gameIndex) })),
+    [homeListings, gameIndex]
   );
   const awayGames = useMemo(() => gameFacets(taggedOpen), [taggedOpen]);
 
@@ -684,8 +687,8 @@ export default function ShowDesk() {
   // Every pocket, unfiltered — the visitor's list is matched against all the
   // stock, not whatever the binder happens to be narrowed to right now.
   const wishCards = useMemo(
-    () => (wishCodesIn.length > 0 ? binderView(open, { sort: DEFAULT_BINDER_SORT, scope: DEFAULT_SCOPE }, { images, listings }).cards : []),
-    [wishCodesIn, open, images, listings]
+    () => (wishCodesIn.length > 0 ? binderView(open, { sort: DEFAULT_BINDER_SORT, scope: DEFAULT_SCOPE }, { images, listings: homeListings }).cards : []),
+    [wishCodesIn, open, images, homeListings]
   );
   function wishPlaces(card) {
     return new Map(copyLocations(card, { rowsById, skuByListing: skuByListingId, locations }).map((f) => [f.id, f.location]));

@@ -303,6 +303,34 @@ export function onlineMatches(listings, { query = "", inBoxSkus = null, limit = 
   return out.slice(0, Math.max(0, limit)).map(listingRow);
 }
 
+/**
+ * SKUs whose every stack card is checked out — at a show, or in the stream box.
+ *
+ * The online list is "listed, and at home". A card checked out anywhere is not
+ * at home, and its listing can still read as available (hidden by ending it,
+ * or not synced yet), so the box's own SKUs are not enough to keep it out: a
+ * stream-box card is never in the show box. A SKU with even one copy still on
+ * the shelf stays — that copy is the one somebody can go and get.
+ */
+export function awaySkus(stackCards) {
+  const away = new Set();
+  const home = new Set();
+  for (const c of stackCards || []) {
+    if (!c?.sku || c.pulled_at) continue;
+    const k = String(c.sku).trim().toLowerCase();
+    (c.checked_out_at ? away : home).add(k);
+  }
+  for (const k of home) away.delete(k);
+  return away;
+}
+
+/** Listings minus those whose stock is all checked out — see awaySkus(). */
+export function atHomeListings(listings, stackCards) {
+  const away = awaySkus(stackCards);
+  if (away.size === 0) return listings || [];
+  return (listings || []).filter((l) => !l?.sku || !away.has(String(l.sku).trim().toLowerCase()));
+}
+
 /** The lowercased SKUs currently in the box, for keeping the two lists apart. */
 export function inBoxSkus(checkouts) {
   const set = new Set();
