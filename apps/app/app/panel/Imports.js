@@ -264,7 +264,7 @@ export default function Imports({ onPrice }) {
               <button
                 className="btn btn-primary"
                 onClick={() => onPrice(open.imported.id)}
-                title="Price every card in this import — one SoldComps request each, searched on the titles as they stand now"
+                title="Price every card in this import, searched on the titles as they stand now — one SoldComps request a card at search depth 1, up to one per rung at a deeper depth (the Batch screen quotes the exact ceiling before you start)"
               >
                 🏷 Price these {items.length}
               </button>

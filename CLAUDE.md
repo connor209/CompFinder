@@ -618,6 +618,9 @@ that far back.** Confirmed 2026-09-13. The long options are inert — they ask
 for a window the source cannot serve, and the answer comes back the same ~40
 results. Anything above 90 is a promise the dropdown cannot keep.
 
+**The 6- and 12-month options were removed on 2026-10-10** for that reason; a
+saved run made under one still restores it, labelled with what it covered.
+
 So for cheap commons there is no time lever, which leaves only the query and
 the filter — and the filter is not where the loss is. Measured on a 50-card
 reverse-holo commons run: SoldComps RETURNED a median of 11 per card (six cards

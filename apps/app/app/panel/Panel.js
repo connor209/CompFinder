@@ -2425,8 +2425,14 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 <option value="30">Last 30 days</option>
                 <option value="60">Last 60 days</option>
                 <option value="90">Last 90 days</option>
-                <option value="180">Last 6 months</option>
-                <option value="365">Last 12 months</option>
+                {/* 6 and 12 months are gone: SoldComps holds about 90 days, so
+                    they asked for a window the source cannot serve and came back
+                    with the same page as 90. A saved run made under one still
+                    restores it, and says what it actually covered rather than
+                    leaving the control blank. */}
+                {Number(soldWithin) > 90 ? (
+                  <option value={soldWithin}>{soldWithin} days (saved run — SoldComps holds ~90)</option>
+                ) : null}
               </select>
             </label>
             <label className="field">
