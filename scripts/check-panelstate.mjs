@@ -130,6 +130,48 @@ if (checked === 0) fail("no panel component called a setter — this check is no
   }
 }
 
+// --- a hook's deps array naming a const declared further down ---------------
+// The Show Desk white-screened on 2026-10-10 with `useEffect(…, [sel])` placed
+// one line above `const [sel, setSel] = useState(…)`. A deps array is read
+// DURING render, so that is a temporal-dead-zone ReferenceError on every
+// visit — and like setPhoto it builds clean and passes every grep. The rule:
+// each name in a `}, [ … ]);` deps array must have its first `const`/`let`
+// declaration ABOVE that array. A name with no declaration in the file (a
+// prop, an import) is not this check's business.
+export function depsDeclaredLate(src) {
+  // Scoped to the top-level function the array sits in: a file holds several
+  // components, and a `sales` prop on one is not the `const sales` in another.
+  const tops = [...src.matchAll(/^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s+\w+\s*\(([^)]*)\)/gm)]
+    .map((m) => ({ at: m.index, params: m[1] }));
+  const late = [];
+  for (const m of src.matchAll(/\}\s*,\s*\[([^\]]*)\]\s*\)/g)) {
+    const i = tops.findLastIndex((t) => t.at < m.index);
+    const from = i >= 0 ? tops[i].at : 0;
+    const to = i + 1 < tops.length ? tops[i + 1].at : src.length;
+    const params = i >= 0 ? tops[i].params : "";
+    const body = src.slice(from, to);
+    for (const name of m[1].match(/[A-Za-z_$][\w$]*/g) || []) {
+      if (new RegExp(`\\b${name}\\b`).test(params)) continue;
+      const decl = body.match(new RegExp(`\\b(?:const|let)\\s+(?:\\[[^\\]=]*\\b${name}\\b[^\\]=]*\\]|\\{[^}=]*\\b${name}\\b[^}=]*\\}|${name}\\b)`));
+      if (decl && from + decl.index > m.index) {
+        late.push({ name, line: src.slice(0, m.index).split("\n").length });
+      }
+    }
+  }
+  return late;
+}
+{
+  const bad = "function A() {\n  useEffect(() => { go(); }, [sel]);\n  const [sel, setSel] = useState(1);\n}";
+  const good = "function A() {\n  const [sel, setSel] = useState(1);\n  useEffect(() => { go(); }, [sel]);\n}";
+  if (depsDeclaredLate(bad).length !== 1) fail("the late-deps check no longer catches the [sel] white screen it was written for");
+  if (depsDeclaredLate(good).length !== 0) fail("the late-deps check flags a deps array declared in the right order");
+}
+for (const file of files) {
+  for (const { name, line } of depsDeclaredLate(readFileSync(join(dir, file), "utf8"))) {
+    fail(`${file}:${line} — a hook's deps array names \`${name}\`, which is declared further down. That throws on render.`);
+  }
+}
+
 if (failures) {
   console.error(`\ncheck-panelstate: ${failures} failure(s)\n`);
   process.exit(1);

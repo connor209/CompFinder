@@ -97,8 +97,10 @@ export default function ShowDesk() {
   // Ticked cards the last label export had no sticker for — offered for
   // pricing on their own, so three bare cards never cost a whole-pool run.
   const [labelGap, setLabelGap] = useState([]);
-  useEffect(() => { setLabelGap([]); }, [sel]);
   const [sel, setSel] = useState(new Set());
+  // Declared after `sel`: a deps array is read during render, so naming a
+  // const declared further down throws before the desk ever draws.
+  useEffect(() => { setLabelGap([]); }, [sel]);
   // How the away list is being read right now. Not persisted: a search is
   // about the card in your hand a moment ago, and coming back tomorrow to a
   // list still filtered to Saturday's show would look like missing stock.

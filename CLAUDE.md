@@ -144,6 +144,9 @@ stream` (the relay, only while streaming).
   It also holds the rows that must WRAP — an inline flex row of buttons and a
   fixed-column filter grid both put controls off the side of a phone, with
   nothing to scroll to reach them — and that re-running a batch confirms first.
+  And a hook's deps array naming a `const` declared further down the same
+  component — `[sel]` one line above `useState`, which white-screened the Show
+  Desk on 2026-10-10 for the same reason: read during render, invisible to a build.
 - `scripts/check-override.mjs` — a price you typed: what counts as one, that
   the recommendation is never edited, that the sticker gate lets yours through,
   and a grep over every path that spends money for a direct read of
