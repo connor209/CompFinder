@@ -14,6 +14,16 @@ import DealBar, { DealButton, useDeal } from "./DealBar";
 import { StreamBar, StreamButton, useRelay } from "./StreamBar";
 import { listingLine } from "@/lib/deal.js";
 import Fold from "./Fold";
+import { getSetIndex, setMatcher } from "@/lib/set-index.js";
+import {
+  tagListing,
+  matchesListingFilters,
+  isListingFiltering,
+  listingFacets,
+  EMPTY_LISTING_FILTERS,
+  PRINTING_FILTERS,
+  ASK_FILTERS
+} from "@/lib/listingfilter.js";
 
 const settings = APP_SETTINGS;
 
@@ -188,6 +198,23 @@ function AwayChip({ away }) {
   );
 }
 
+/**
+ * One filter dropdown whose options come from the listings. The chosen value
+ * is always an option, at a count of 0 if nothing carries it any more.
+ */
+function FilterSelect({ label, value, options, all, onChange }) {
+  const opts = value && !options.some((o) => o.key === value) ? [...options, { key: value, label: value, count: 0 }] : options;
+  return (
+    <label className="inv-sort">
+      {label}
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{all}</option>
+        {opts.map((o) => <option key={o.key} value={o.key}>{o.label} ({o.count})</option>)}
+      </select>
+    </label>
+  );
+}
+
 function skusOf(g) {
   const s = g._items.map((i) => i.sku).filter(Boolean);
   return s.length ? s.join(", ") : "—";
@@ -354,6 +381,12 @@ export default function Inventory({ onDeepDive }) {
   const [sort, setSort] = useState("title");
   const [group, setGroup] = useState(true);
   const [dupOnly, setDupOnly] = useState(false);
+  // Game, set, condition, printing, price — see lib/listingfilter.js.
+  const [narrow, setNarrow] = useState(EMPTY_LISTING_FILTERS);
+  // The catalogue's set list, for reading a set out of a title. null until it
+  // loads, and null for good if it can't: every set then reads "No set found"
+  // and the other filters carry on.
+  const [setIndex, setSetIndex] = useState(null);
   // The cards checked out to a show, so a zeroed listing can say WHY it is
   // zero. `null` means we could not ask — see loadAway(); that is not the same
   // as "none are away", and nothing is hidden on the strength of it.
@@ -476,6 +509,7 @@ export default function Inventory({ onDeepDive }) {
         loadListings();
         loadCosts();
         loadAway();
+        getSetIndex(createClient()).then((r) => setSetIndex(r?.index ? r : null), () => {});
       }
     })();
   }, []);
@@ -548,6 +582,22 @@ export default function Inventory({ onDeepDive }) {
     [listings, stock, showGone]
   );
 
+  // What each listing IS — game, set, condition, printing — read once per
+  // listing rather than per keystroke: the set match walks the whole catalogue.
+  const tags = useMemo(() => {
+    const setOf = setMatcher(setIndex?.index || null);
+    const gameIndex = setIndex?.gameIndex || null;
+    const m = new Map();
+    for (const l of listings) m.set(l.ebay_item_id, tagListing(l, { setOf, gameIndex }));
+    return m;
+  }, [listings, setIndex]);
+
+  // Options from what is on the list, so a choice that finds nothing is never
+  // offered. A choice that has since gone (a sync took its last card) is kept
+  // in its dropdown at 0, or the select would show a value it cannot name.
+  const facets = useMemo(() => listingFacets(sellable.map((l) => tags.get(l.ebay_item_id))), [sellable, tags]);
+  const filtering = isListingFiltering(narrow);
+
   // --- portfolio stats (over the whole inventory, minus what has sold) ---
   const stats = useMemo(() => {
     let value = 0;
@@ -565,12 +615,15 @@ export default function Inventory({ onDeepDive }) {
   const rows = useMemo(() => {
     const f = deferredFilter.trim().toLowerCase();
     const words = f ? f.split(/\s+/).filter(Boolean) : [];
+    const narrowed = filtering
+      ? sellable.filter((l) => matchesListingFilters(l, tags.get(l.ebay_item_id), narrow))
+      : sellable;
     const shown = words.length
-      ? sellable.filter((l) => {
+      ? narrowed.filter((l) => {
           const t = (l.title || "").toLowerCase();
           return words.every((w) => t.includes(w));
         })
-      : sellable;
+      : narrowed;
 
     const useGroup = group || dupOnly;
     let groups;
@@ -611,7 +664,7 @@ export default function Inventory({ onDeepDive }) {
     groups.sort(sorters[sort] || sorters.title);
 
     return dupOnly ? groups.filter((g) => g._count > 1) : groups;
-  }, [sellable, stock, deferredFilter, sort, group, dupOnly, priced]);
+  }, [sellable, stock, deferredFilter, sort, group, dupOnly, priced, tags, narrow, filtering]);
 
   // What is actually on screen. Every bulk action below reads THIS, not `rows`.
   const shown = useMemo(() => (rows.length <= limit ? rows : rows.slice(0, limit)), [rows, limit]);
@@ -619,7 +672,7 @@ export default function Inventory({ onDeepDive }) {
 
   // A new result set starts at the top again — carrying a "show more" over
   // from the last search would open the next one part-way down.
-  useEffect(() => { setLimit(PAGE); }, [deferredFilter, sort, group, dupOnly]);
+  useEffect(() => { setLimit(PAGE); }, [deferredFilter, sort, group, dupOnly, narrow]);
 
   useEffect(() => {
     // .24s of nth-child delay plus a .34s rise; the keyframe ends on the
@@ -1052,7 +1105,7 @@ export default function Inventory({ onDeepDive }) {
         title="Your listings"
         count={rows.length}
         alert={note ? <p className="hint hint-small" style={{ color: "var(--accent-2)" }}>{note}</p> : null}
-        summary={`${rows.length} ${group || dupOnly ? "card(s)" : "listing(s)"}${filter.trim() ? ` matching “${filter.trim()}”` : ""}${awayCount > 0 ? ` · ${awayCount} at a show` : ""}${streamCount > 0 ? ` · ${streamCount} in the stream box` : ""}${goneCount > 0 ? ` · ${goneCount} sold out hidden` : ""} — open to browse, price or check out.`}
+        summary={`${rows.length} ${group || dupOnly ? "card(s)" : "listing(s)"}${filter.trim() ? ` matching “${filter.trim()}”` : ""}${filtering ? " (filtered)" : ""}${awayCount > 0 ? ` · ${awayCount} at a show` : ""}${streamCount > 0 ? ` · ${streamCount} in the stream box` : ""}${goneCount > 0 ? ` · ${goneCount} sold out hidden` : ""} — open to browse, price or check out.`}
         actions={
           <button className="btn btn-ghost" onClick={handleSync} disabled={syncing}>
             {syncing ? "Syncing…" : "↻ Sync"}
@@ -1107,6 +1160,33 @@ export default function Inventory({ onDeepDive }) {
         </div>
       </div>
 
+      {/* Filters by what a card IS. Each narrows what is on screen, and what
+          is on screen is what "Price visible" and the bulk buttons act on. */}
+      <div className="inv-controls inv-filters">
+        <FilterSelect label="Game" value={narrow.game} options={facets.games} all="All games"
+          onChange={(v) => setNarrow((n) => ({ ...n, game: v }))} />
+        <FilterSelect label="Set" value={narrow.set} options={facets.sets}
+          all={setIndex ? "All sets" : "All sets (catalogue not loaded)"}
+          onChange={(v) => setNarrow((n) => ({ ...n, set: v }))} />
+        <FilterSelect label="Condition" value={narrow.condition} options={facets.conditions} all="Any condition"
+          onChange={(v) => setNarrow((n) => ({ ...n, condition: v }))} />
+        <label className="inv-sort">
+          Printing
+          <select value={narrow.printing} onChange={(e) => setNarrow((n) => ({ ...n, printing: e.target.value }))}>
+            {PRINTING_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+        </label>
+        <label className="inv-sort">
+          Ask
+          <select value={narrow.price} onChange={(e) => setNarrow((n) => ({ ...n, price: e.target.value }))}>
+            {ASK_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </select>
+        </label>
+        {filtering ? (
+          <button className="btn btn-ghost" onClick={() => setNarrow(EMPTY_LISTING_FILTERS)}>✕ Clear filters</button>
+        ) : null}
+      </div>
+
       <div className="inv-controls">
         <label className="inv-sort">
           Sort
@@ -1158,7 +1238,9 @@ export default function Inventory({ onDeepDive }) {
             ? "No active listings cached yet — try Sync."
             : dupOnly
               ? "No duplicate listings — every card is listed once at a unique price."
-              : "No listings match that filter."}
+              : filtering
+                ? "No listings match those filters."
+                : "No listings match that filter."}
         </p>
       ) : view === "table" ? (
         <div className="table-wrap" style={isStale ? { opacity: 0.55 } : undefined}>

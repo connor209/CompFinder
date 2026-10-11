@@ -1444,6 +1444,8 @@ html, body { overflow-x: clip; max-width: 100%; }
 .inv-check input { accent-color:var(--accent); }
 .inv-check input:disabled { opacity:.5; }
 .inv-summary { margin-left:auto; color:var(--ink-faint); }
+.inv-filters { gap:10px 14px; margin-bottom:10px; }
+.inv-filters .inv-sort select { max-width:220px; }
 .col-picker { position:relative; }
 .col-menu-backdrop { position:fixed; inset:0; z-index:20; }
 .col-menu { position:absolute; right:0; top:calc(100% + 6px); z-index:21; background:var(--surface); border:1px solid var(--line-strong); border-radius:12px; box-shadow:var(--shadow-2); padding:8px; display:grid; gap:2px; min-width:170px; }
