@@ -102,6 +102,22 @@ export const STOREFRONT_SCOPES = [
   { key: ONLINE, label: "Also in stock" }
 ];
 
+/**
+ * A shop link's wording. Same two sections — the never-merge rule holds,
+ * since a card at a show this weekend is not one we can post today — but
+ * named for somebody who is NOT standing at our table, and with the stock
+ * that is at home first, because for them that is the stock.
+ */
+export const SHOP_SECTION_LABELS = {
+  [BOX]: { title: "Out at a show", note: "On our table at a show right now — back in stock after." },
+  [ONLINE]: { title: "In stock", note: "Ask us about any card and we'll check it for you." }
+};
+export const SHOP_SCOPES = [
+  { key: "all", label: "Everything" },
+  { key: ONLINE, label: "In stock" },
+  { key: BOX, label: "Out at a show" }
+];
+
 /** A price that is really a price, or null. */
 function pence(n) {
   const v = n == null ? NaN : Number(n);
@@ -283,7 +299,7 @@ export function cardMatches(card, query) {
  * page is never half box and half online; and a page is nine pockets, the last
  * one padded, so "it's on page four" means the same thing on every phone.
  */
-export function storefrontView(cards, { query = "", sort = DEFAULT_STOREFRONT_SORT, price = "any", scope = "all", set = "", condition = "" } = {}) {
+export function storefrontView(cards, { query = "", sort = DEFAULT_STOREFRONT_SORT, price = "any", scope = "all", set = "", condition = "", onlineFirst = false } = {}) {
   const cmp = COMPARATORS[sort] || COMPARATORS[DEFAULT_STOREFRONT_SORT];
   const keep = (c) =>
     cardMatches(c, query) &&
@@ -303,9 +319,13 @@ export function storefrontView(cards, { query = "", sort = DEFAULT_STOREFRONT_SO
   const boxPages = binderPages(box);
   const onlinePages = binderPages(online);
   const total = (cards || []).filter(Boolean).length;
+  // Which section opens the binder. Still whole sections either way, so a
+  // page is never half one and half the other.
+  const first = onlineFirst ? [onlinePages, ONLINE] : [boxPages, BOX];
+  const second = onlineFirst ? [boxPages, BOX] : [onlinePages, ONLINE];
   return {
-    pages: [...boxPages, ...onlinePages],
-    pageKinds: [...boxPages.map(() => BOX), ...onlinePages.map(() => ONLINE)],
+    pages: [...first[0], ...second[0]],
+    pageKinds: [...first[0].map(() => first[1]), ...second[0].map(() => second[1])],
     pageCount: boxPages.length + onlinePages.length,
     box: box.length,
     online: online.length,

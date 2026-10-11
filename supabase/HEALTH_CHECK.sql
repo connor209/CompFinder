@@ -152,6 +152,10 @@ with schema_checks as (
         then '✅ present' else '❌ missing' end),
     (35, 'SCHEMA · 031 stream stock', 'live_streams + stream_airings tables',
       case when to_regclass('public.live_streams') is not null and to_regclass('public.stream_airings') is not null
+        then '✅ present' else '❌ missing' end),
+    (36, 'SCHEMA · 032 storefront shop links', 'show_storefronts.kind column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='show_storefronts' and column_name='kind')
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),

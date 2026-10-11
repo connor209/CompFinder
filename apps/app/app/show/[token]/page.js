@@ -38,6 +38,11 @@ const ENDED = {
     title: "This show has finished",
     body: "The link on that sign has been switched off. Come and find us at the next one."
   },
+  // A shop QR lives in somebody's wallet, not on a table: no show to have ended.
+  "ended-shop": {
+    title: "This link has been switched off",
+    body: "Ask us for a fresh one — we'll still have plenty in stock."
+  },
   error: {
     title: "Couldn't load the stock",
     body: "Venue wifi, probably. Pull down to try again, or ask at the table."
@@ -56,7 +61,7 @@ export default async function StorefrontPage({ params }) {
   }
 
   if (!result.ok) {
-    const copy = ENDED[result.reason] || ENDED["not-found"];
+    const copy = ENDED[result.reason === "ended" && result.shop ? "ended-shop" : result.reason] || ENDED["not-found"];
     return (
       <main className="sf-shell">
         <div className="sf-ended">

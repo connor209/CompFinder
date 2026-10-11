@@ -35,7 +35,7 @@ import { binderView } from "../apps/app/lib/binder.js";
 import { buildSetIndex } from "@compfinder/core/setmatch.js";
 import {
   loadPublicStorefront, newToken, isWellFormedToken, storefrontStatus, expiresAtFor,
-  storefrontUrl, CHECKOUT_COLUMNS, LISTING_COLUMNS
+  storefrontUrl, CHECKOUT_COLUMNS, LISTING_COLUMNS, newStorefrontRow, isShopLink, SHOP, SHOW
 } from "../apps/app/lib/storefront-store.js";
 import { qrMatrix, qrPath } from "../apps/app/lib/qr.js";
 import { BINDER_PAGE } from "../apps/app/lib/binder.js";
@@ -151,7 +151,7 @@ const listings = [
 }
 
 // --- The loader, against a fake service-role client ----------------------
-function fakeAdmin({ link, checkoutsError = null, missingTable = false } = {}) {
+function fakeAdmin({ link, checkoutsError = null, missingTable = false, missingKind = false } = {}) {
   const calls = [];
   const tables = {
     stock_checkouts: checkouts,
@@ -170,6 +170,7 @@ function fakeAdmin({ link, checkoutsError = null, missingTable = false } = {}) {
         order() { return b; },
         async maybeSingle() {
           if (missingTable) return { data: null, error: { code: "42P01", message: 'relation "public.show_storefronts" does not exist' } };
+          if (missingKind && /\bkind\b/.test(q.select || "")) return { data: null, error: { code: "42703", message: "column show_storefronts.kind does not exist" } };
           const tok = q.filters.find((f) => f[1] === "token")?.[2];
           return { data: link && link.token === tok ? link : null, error: null };
         },
@@ -241,6 +242,47 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   const broken = await loadPublicStorefront(fakeAdmin({ link: LINK, checkoutsError: { message: "boom" } }), TOKEN, { now: at });
   ok(!broken.ok && broken.reason === "error", "a failed read of the box served an empty binder as if it were the answer");
 }
+// --- A shop link: the whole stock, for good --------------------------------
+{
+  const at = new Date("2026-09-24T12:00:00Z");
+  // A shop row edited by hand to look like a narrow show link must still
+  // serve everything: the QR is already in somebody's wallet.
+  const SHOP_LINK = { ...LINK, kind: SHOP, event: "Event Secret London", include_online: false };
+  const admin = fakeAdmin({ link: SHOP_LINK });
+  const r = await loadPublicStorefront(admin, TOKEN, { now: at });
+  ok(r.ok && r.storefront.shop === true, "a shop link did not load as a shop");
+  ok(r.storefront.includeOnline === true && r.stock.online === 1, `a shop link left the online stock out: ${r.stock?.online}`);
+  ok(r.stock.box === 2, `a shop link left out the cards away at a show: ${r.stock?.box}`);
+  const co = admin.calls.find((c) => c.table === "stock_checkouts");
+  ok(!co?.filters.some((f) => f[1] === "event"), "a shop link was narrowed to one show's event");
+  const json = JSON.stringify(r);
+  for (const p of PRIVATE) ok(!json.includes(p), `a shop link's payload carries a private value: ${p}`);
+  const off = await loadPublicStorefront(fakeAdmin({ link: { ...SHOP_LINK, revoked_at: "2026-09-24T10:00:00Z" } }), TOKEN, { now: at });
+  ok(!off.ok && off.reason === "ended" && off.shop === true && !off.stock, "a switched-off shop link served stock, or did not say it was a shop");
+
+  // Before 032 there is no kind column: every link is a show link, and none breaks.
+  const pre = await loadPublicStorefront(fakeAdmin({ link: LINK, missingKind: true }), TOKEN, { now: at });
+  ok(pre.ok && pre.storefront.shop === false, "a database without 032 stopped serving show links");
+  const show = await loadPublicStorefront(fakeAdmin({ link: LINK }), TOKEN, { now: at });
+  ok(show.ok && show.storefront.shop === false, "a link with no kind read as a shop");
+
+  const sr = newStorefrontRow(OWNER, { kind: SHOP, event: "Glasgow", includeOnline: false, days: 3 }, at);
+  ok(sr.kind === SHOP && sr.event === null && sr.include_online === true && sr.expires_at === null, `a new shop link is not the whole stock for good: ${JSON.stringify(sr)}`);
+  const sh = newStorefrontRow(OWNER, { kind: SHOW, event: "Glasgow", includeOnline: false, days: 3 }, at);
+  ok(!("kind" in sh), "a show link names the kind column, so it cannot be made before 032");
+  ok(sh.event === "Glasgow" && sh.include_online === false && sh.expires_at === "2026-09-27T12:00:00.000Z", "a show link lost its own settings");
+  ok(isShopLink({ kind: SHOP }) && !isShopLink({}) && !isShopLink({ kind: SHOW }), "isShopLink() misreads a row");
+
+  // The stock at home opens a shop binder; sections still never share a page.
+  const mixed = [];
+  for (let i = 0; i < 10; i++) mixed.push({ key: `box-${i}`, source: BOX, name: `Box ${i}`, pricePence: 100, priceText: "", copies: [] });
+  for (let i = 0; i < 3; i++) mixed.push({ key: `online-${i}`, source: ONLINE, name: `Listed ${i}`, pricePence: 100, priceText: "", copies: [] });
+  const v = storefrontView(mixed, { onlineFirst: true });
+  ok(JSON.stringify(v.pageKinds) === JSON.stringify([ONLINE, BOX, BOX]), `a shop binder does not open on the stock at home: ${v.pageKinds}`);
+  ok(v.pages.every((p, i) => p.every((c) => c == null || c.source === v.pageKinds[i])), "a shop page carries a card from the other section");
+  ok(storefrontView(mixed, { onlineFirst: true, query: "listed 2" }).shown === 1, "a shop search did not reach the stock at home");
+}
+
 ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|event/.test(CHECKOUT_COLUMNS), `the checkout read asks for columns the projection never uses: ${CHECKOUT_COLUMNS}`);
 
 // --- Sets, filters -----------------------------------------------------------

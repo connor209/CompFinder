@@ -8,6 +8,9 @@ import {
   revokeStorefront,
   storefrontUrl,
   storefrontStatus,
+  isShopLink,
+  SHOW,
+  SHOP,
   EXPIRY_CHOICES,
   DEFAULT_EXPIRY_DAYS
 } from "@/lib/storefront-store.js";
@@ -21,6 +24,10 @@ import Fold from "./Fold";
  * read-only, no request flow, no account. That is the cheapest honest test
  * docs/SHOW_STOREFRONT.md asks for before anything bigger: a sign, a list,
  * and a count of how many people looked. The count is on this panel.
+ *
+ * Two kinds of link. A SHOW link is the sign on the table, for one show and
+ * a few days. A SHOP link is the QR customers keep — business cards, packing
+ * slips — and is the whole stock, for good, until switched off.
  *
  * Desk chrome: ShowDesk renders it only when nobody but us is looking.
  */
@@ -42,7 +49,7 @@ function when(iso) {
  * than the software. Opened in its own window so the print is the sign and
  * nothing of the desk comes with it.
  */
-function printSign(url, title) {
+function printSign(url, title, shop = false) {
   const w = window.open("", "_blank");
   if (!w) return false;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Scan to browse</title>
@@ -55,9 +62,9 @@ function printSign(url, title) {
   p { font-size: 17pt; margin: 6mm 0 0; }
   .small { font-size: 11pt; color: #555; margin-top: 3mm; }
 </style></head><body>
-<h1>More cards than fit on this table</h1>
+<h1>${shop ? "Browse our whole stock" : "More cards than fit on this table"}</h1>
 <div class="qr">${qrSvg(url)}</div>
-<p>Scan to flip through everything we&rsquo;ve brought</p>
+<p>${shop ? "Scan to search every card we have, any time" : "Scan to flip through everything we&rsquo;ve brought"}</p>
 ${title ? `<p class="small">${escapeHtml(title)}</p>` : ""}
 <script>window.onload = function () { window.print(); };</script>
 </body></html>`);
@@ -96,6 +103,8 @@ export default function StorefrontPanel({ event = "" }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [making, setMaking] = useState(false);
+  const [kind, setKind] = useState(SHOW);
+  const [needsKind, setNeedsKind] = useState(false);
   const [title, setTitle] = useState("");
   const [forEvent, setForEvent] = useState(true);
   const [includeOnline, setIncludeOnline] = useState(true);
@@ -122,14 +131,17 @@ export default function StorefrontPanel({ event = "" }) {
   async function make() {
     setBusy(true);
     setMsg("");
+    const shop = kind === SHOP;
     const r = await createStorefront(createClient(), {
-      title: title.trim() || showName || "",
+      kind,
+      title: title.trim() || (shop ? "" : showName) || "",
       event: forEvent ? showName : "",
       includeOnline,
       days
     });
     setBusy(false);
     if (r.missing) { setMissing(true); return; }
+    if (r.missingKind) { setNeedsKind(true); return; }
     if (!r.ok) { setMsg(r.error || "Couldn't make the link."); return; }
     setMaking(false);
     setTitle("");
@@ -137,7 +149,10 @@ export default function StorefrontPanel({ event = "" }) {
   }
 
   async function switchOff(row) {
-    if (!window.confirm("Switch this link off? Anybody scanning the sign will be told the show has finished.")) return;
+    const warn = isShopLink(row)
+      ? "Switch this shop link off? Every QR you have handed out with it stops working, for good."
+      : "Switch this link off? Anybody scanning the sign will be told the show has finished.";
+    if (!window.confirm(warn)) return;
     setBusy(true);
     const r = await revokeStorefront(createClient(), row.id);
     setBusy(false);
@@ -179,6 +194,11 @@ export default function StorefrontPanel({ event = "" }) {
               Needs a one-off setup: run <code>supabase/migrations/029_show_storefronts.sql</code> in the Supabase SQL editor. Nothing else on this screen depends on it.
             </p>
           ) : null}
+          {needsKind ? (
+            <p className="hint hint-small" style={{ marginTop: 0 }}>
+              A shop QR needs a one-off setup: run <code>supabase/migrations/032_storefront_shop.sql</code> in the Supabase SQL editor. Show links still work without it.
+            </p>
+          ) : null}
           {msg ? <p className="hint hint-small">{msg}</p> : null}
         </>
       }
@@ -193,19 +213,28 @@ export default function StorefrontPanel({ event = "" }) {
 
       {!missing && live.length === 0 && !making ? (
         <p className="hint hint-small" style={{ marginTop: 0 }}>
-          A read-only binder of what&apos;s checked out — and, if you like, what&apos;s listed online — behind a QR code. No SKUs, no stack positions, nothing a visitor can press but the pages. Print it as a sign for the table.
+          A read-only binder behind a QR code. A <b>show</b> link is a sign for the table: what&apos;s checked out and, if you like, what&apos;s listed online. A <b>shop</b> link is for customers to keep: the whole stock, for good. No SKUs, no stack positions, nothing a visitor can press but the pages.
         </p>
       ) : null}
 
       {making ? (
         <div className="sf-form">
+          <select className="sd-select" value={kind} onChange={(e) => setKind(e.target.value)} aria-label="What the link is for">
+            <option value={SHOW}>Show sign — this table, a few days</option>
+            <option value={SHOP}>Shop QR — whole stock, never expires</option>
+          </select>
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder={showName ? `Heading visitors see — e.g. ${showName}` : "Heading visitors see — e.g. your shop name"}
+            placeholder={kind === SHOP ? "Heading visitors see — e.g. your shop name" : showName ? `Heading visitors see — e.g. ${showName}` : "Heading visitors see — e.g. your shop name"}
             aria-label="Heading visitors see"
           />
+          {kind === SHOP ? (
+            <span className="hint-small" style={{ marginTop: 0 }}>
+              Everything listed online, plus whatever is out at a show — until you switch it off.
+            </span>
+          ) : (<>
           <label className="sf-check" title={showName ? `Only cards checked out with the show name "${showName}"` : "Set a show name above to limit this link to one show"}>
             <input type="checkbox" checked={forEvent && Boolean(showName)} disabled={!showName} onChange={(e) => setForEvent(e.target.checked)} />
             {showName ? `Only “${showName}”` : "Every card checked out"}
@@ -217,6 +246,7 @@ export default function StorefrontPanel({ event = "" }) {
           <select className="sd-select" value={days} onChange={(e) => setDays(Number(e.target.value))} aria-label="How long the link stays up">
             {EXPIRY_CHOICES.map((c) => <option key={c.days} value={c.days}>Live {c.label}</option>)}
           </select>
+          </>)}
           <button className="btn btn-primary" onClick={make} disabled={busy}>{busy ? "Making…" : "Make the link"}</button>
           <button className="btn btn-ghost" onClick={() => setMaking(false)} disabled={busy}>Cancel</button>
         </div>
@@ -231,9 +261,15 @@ export default function StorefrontPanel({ event = "" }) {
               <strong>{row.title || "Our stock"}</strong>
               <span className="sf-url">{url}</span>
               <span className="hint-small" style={{ marginTop: 0 }}>
-                {row.event ? `Cards checked out for “${row.event}”` : "Every card checked out"}
-                {row.include_online ? " + what's listed online" : ""}
-                {" · "}{row.expires_at ? `until ${when(row.expires_at)}` : "until you switch it off"}
+                {isShopLink(row) ? (
+                  "Shop QR · the whole stock · until you switch it off"
+                ) : (
+                  <>
+                    {row.event ? `Cards checked out for “${row.event}”` : "Every card checked out"}
+                    {row.include_online ? " + what's listed online" : ""}
+                    {" · "}{row.expires_at ? `until ${when(row.expires_at)}` : "until you switch it off"}
+                  </>
+                )}
               </span>
               {/* Whether anybody scans is the question that decides whether
                   any of the rest of docs/SHOW_STOREFRONT.md is worth building. */}
@@ -241,7 +277,7 @@ export default function StorefrontPanel({ event = "" }) {
                 <b>{row.views || 0}</b> view{row.views === 1 ? "" : "s"}{row.last_viewed_at ? ` · last ${when(row.last_viewed_at)}` : ""}
               </span>
               <div className="sf-actions">
-                <button className="btn btn-primary" onClick={() => { if (!printSign(url, row.title)) setMsg("Allow pop-ups to print the sign."); }}>🖨 Print sign</button>
+                <button className="btn btn-primary" onClick={() => { if (!printSign(url, row.title, isShopLink(row))) setMsg("Allow pop-ups to print the sign."); }}>🖨 Print sign</button>
                 <button className="btn btn-ghost" onClick={() => copy(url)}>Copy link</button>
                 <button className="btn btn-ghost" onClick={() => downloadSvg(url, `storefront-qr-${row.token.slice(0, 6)}.svg`)}>QR as SVG</button>
                 <a className="btn btn-ghost" href={url} target="_blank" rel="noreferrer">Open</a>

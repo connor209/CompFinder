@@ -98,6 +98,32 @@ export function isLive(row, now = new Date()) {
   return storefrontStatus(row, now) === "live";
 }
 
+/**
+ * What a link is FOR.
+ *
+ * A **show** link is the sign on the table (029): the box first, optionally
+ * what's listed online behind it, optionally one show's checkouts only, and an
+ * expiry because a printed sign outlives the show.
+ *
+ * A **shop** link is a QR customers keep — a business card, a packing slip —
+ * and is the whole stock or nothing: every card listed online plus whatever
+ * is out at a show, never one event, never running out on its own. Those are
+ * forced on creation AND on read, so a row edited by hand cannot turn a shop
+ * QR already in somebody's wallet into a partial one. Migration 032.
+ */
+export const SHOW = "show";
+export const SHOP = "shop";
+
+export function isShopLink(row) {
+  return row?.kind === SHOP;
+}
+
+/** Does this error mean "migration 032's column isn't there"? */
+export function isMissingKind(err) {
+  const msg = String(err?.message || err || "");
+  return err?.code === "42703" || err?.code === "PGRST204" || /\bkind\b/i.test(msg);
+}
+
 /** Does this error mean "migration 029 hasn't been run"? */
 export function isMissingTable(err) {
   const msg = String(err?.message || err || "");
@@ -109,13 +135,18 @@ export function isMissingTable(err) {
 /** How many links the desk lists. Old ones are history, not a to-do list. */
 export const STOREFRONTS_LIMIT = 20;
 
+const DESK_COLUMNS = "id,token,title,event,include_online,created_at,expires_at,revoked_at,views,last_viewed_at";
+
 export async function loadStorefronts(sb) {
   try {
-    const { data, error } = await sb
+    const list = (cols) => sb
       .from("show_storefronts")
-      .select("id,token,title,event,include_online,created_at,expires_at,revoked_at,views,last_viewed_at")
+      .select(cols)
       .order("created_at", { ascending: false })
       .limit(STOREFRONTS_LIMIT);
+    // With 032's kind where it exists; without it every link is a show link.
+    let { data, error } = await list(`${DESK_COLUMNS},kind`);
+    if (error) ({ data, error } = await list(DESK_COLUMNS));
     if (error) return isMissingTable(error) ? { ok: false, missing: true, rows: [] } : { ok: false, error: error.message, rows: [] };
     return { ok: true, rows: data || [] };
   } catch (e) {
@@ -123,23 +154,40 @@ export async function loadStorefronts(sb) {
   }
 }
 
-export async function createStorefront(sb, { title = "", event = "", includeOnline = true, days = DEFAULT_EXPIRY_DAYS } = {}) {
+/**
+ * The row a new link is written as. A shop link is the whole stock for good —
+ * no event, online included, no expiry — whatever the form said; a show link
+ * never names `kind`, so it can still be made before 032 is applied.
+ */
+export function newStorefrontRow(userId, { kind = SHOW, title = "", event = "", includeOnline = true, days = DEFAULT_EXPIRY_DAYS } = {}, now = new Date()) {
+  const shop = kind === SHOP;
+  const row = {
+    user_id: userId,
+    token: newToken(),
+    title: String(title || "").trim().slice(0, 80) || null,
+    event: shop ? null : String(event || "").trim() || null,
+    include_online: shop ? true : Boolean(includeOnline),
+    expires_at: shop ? null : expiresAtFor(days, now)
+  };
+  if (shop) row.kind = SHOP;
+  return row;
+}
+
+export async function createStorefront(sb, opts = {}) {
   try {
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return { ok: false, error: "Not signed in." };
+    const row = newStorefrontRow(user.id, opts);
     const { data, error } = await sb
       .from("show_storefronts")
-      .insert({
-        user_id: user.id,
-        token: newToken(),
-        title: String(title || "").trim().slice(0, 80) || null,
-        event: String(event || "").trim() || null,
-        include_online: Boolean(includeOnline),
-        expires_at: expiresAtFor(days)
-      })
-      .select("id,token,title,event,include_online,created_at,expires_at,revoked_at,views,last_viewed_at")
+      .insert(row)
+      .select(row.kind ? `${DESK_COLUMNS},kind` : DESK_COLUMNS)
       .single();
-    if (error) return isMissingTable(error) ? { ok: false, missing: true } : { ok: false, error: error.message };
+    if (error) {
+      if (isMissingTable(error) && !isMissingKind(error)) return { ok: false, missing: true };
+      if (row.kind && isMissingKind(error)) return { ok: false, missingKind: true };
+      return { ok: false, error: error.message };
+    }
     return { ok: true, row: data };
   } catch (e) {
     return { ok: false, error: String(e?.message || e) };
@@ -180,6 +228,8 @@ export const CHECKOUT_COLUMNS_PRE_024 = "id,title,sku";
 export const POOL_COLUMN = "pool";
 export const LISTING_COLUMNS = "ebay_item_id,sku,title,price_value,quantity,image_url";
 const LINK_COLUMNS = "id,user_id,title,event,include_online,expires_at,revoked_at";
+/** 032's column, read where it exists: without it every link is a show link. */
+const LINK_KIND_COLUMN = "kind";
 
 /** A paged read that reports its error, where pagedSelect() swallows it. */
 async function readAll(makeQuery, pageSize = 1000) {
@@ -208,17 +258,24 @@ async function readAll(makeQuery, pageSize = 1000) {
 export async function loadPublicStorefront(admin, token, { now = new Date() } = {}) {
   if (!isWellFormedToken(token)) return { ok: false, reason: "not-found" };
 
-  const { data: link, error: linkErr } = await admin
+  const readLink = (cols) => admin
     .from("show_storefronts")
-    .select(LINK_COLUMNS)
+    .select(cols)
     .eq("token", token)
     .maybeSingle();
+  let { data: link, error: linkErr } = await readLink(`${LINK_COLUMNS},${LINK_KIND_COLUMN}`);
+  // Any failure is asked again without it: a missing column reads like a
+  // missing table to isMissingTable(), and a real outage just fails twice.
+  if (linkErr) ({ data: link, error: linkErr } = await readLink(LINK_COLUMNS));
   if (linkErr) return { ok: false, reason: isMissingTable(linkErr) ? "not-found" : "error" };
   if (!link || !link.user_id) return { ok: false, reason: "not-found" };
-  if (!isLive(link, now)) return { ok: false, reason: "ended" };
+  const shop = isShopLink(link);
+  if (!isLive(link, now)) return { ok: false, reason: "ended", shop };
 
   const owner = link.user_id;
-  const event = String(link.event || "").trim();
+  // A shop link is the whole stock, read that way whatever the row says.
+  const event = shop ? "" : String(link.event || "").trim();
+  const includeOnline = shop || Boolean(link.include_online);
   const checkoutQuery = (cols) => () => {
     let q = admin.from("stock_checkouts").select(cols).eq("user_id", owner).is("resolved_at", null);
     if (event) q = q.eq("event", event);
@@ -255,11 +312,12 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
       // The title is written FOR visitors. The event is our name for the trip
       // and stays here, like the event filter the counter view hides.
       title: String(link.title || "").trim() || null,
-      includeOnline: Boolean(link.include_online),
+      includeOnline,
+      shop,
       at: now.toISOString()
     },
     stock: storefrontStock(showOnly(box.rows), live.error ? [] : live.rows, {
-      includeOnline: Boolean(link.include_online),
+      includeOnline,
       setOf: setMatcher(sets?.index)
     })
   };

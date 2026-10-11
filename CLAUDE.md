@@ -1920,6 +1920,14 @@ Last Comp's proposition is having no stake in the number.
   fetched from eBay's CDN — a default Referer would hand the token to a third
   party's logs on every image. The QR is drawn locally for the same reason: a
   QR image service would be handed every token we print.
+- **A shop link is the whole stock, for good** (migration 032, `kind =
+  'shop'`). A QR customers keep — a business card, a packing slip — not a
+  sign on one show's table: everything listed online plus whatever is out at
+  a show, no event filter, no expiry, worded as the shop, and the stock at
+  home opens the binder. Forced on creation AND on read, so a hand-edited row
+  cannot narrow a QR already in somebody's wallet. Same two sections and the
+  same allow-list — a card at a show this weekend still is not one we can
+  post today. Show links never name `kind`, so they work before 032 is run.
 - **The view count is a number and nothing else.** `storefront_hit()` is
   revoked from anon, or anybody holding the anon key could inflate it.
 - **A visitor can filter by set, price band and condition.** The set is the

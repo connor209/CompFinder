@@ -9,6 +9,9 @@ import {
   STOREFRONT_PRICE_FILTERS,
   STOREFRONT_SCOPES,
   SECTION_LABELS,
+  SHOP_SECTION_LABELS,
+  SHOP_SCOPES,
+  BOX,
   ONLINE
 } from "@/lib/storefront.js";
 import { BLANK_PAGE, clampPage, turnPage, swipeDirection } from "@/lib/binder.js";
@@ -37,9 +40,16 @@ import { qrPath } from "@/lib/qr.js";
  * What it adds is the visitor's own list (lib/wishlist.js): ♡ on the cards
  * they like, and one screen to show us at the table. It is kept on their
  * phone and never sent anywhere.
+ *
+ * A SHOP link (storefront.shop) is the same binder for somebody who is not at
+ * our table — a QR on a business card. Same pages, same sections, other
+ * words, and the stock at home opens the binder rather than the show box.
  */
 export default function Storefront({ storefront, stock }) {
   const cards = stock?.cards || [];
+  const shop = Boolean(storefront?.shop);
+  const labels = shop ? SHOP_SECTION_LABELS : SECTION_LABELS;
+  const scopes = shop ? SHOP_SCOPES : STOREFRONT_SCOPES;
   const both = (stock?.box || 0) > 0 && (stock?.online || 0) > 0;
   const facets = useMemo(() => storefrontFacets(cards), [cards]);
   const [q, setQ] = useState("");
@@ -73,8 +83,8 @@ export default function Storefront({ storefront, stock }) {
   }
 
   const view = useMemo(
-    () => storefrontView(cards, { query: q, sort, price, scope, set, condition }),
-    [cards, q, sort, price, scope, set, condition]
+    () => storefrontView(cards, { query: q, sort, price, scope, set, condition, onlineFirst: shop }),
+    [cards, q, sort, price, scope, set, condition, shop]
   );
   const list = useMemo(() => reconcileWishlist(wish, cards), [wish, cards]);
   // The QR our phone scans: the list itself, in the URL, opening the desk.
@@ -139,12 +149,14 @@ export default function Storefront({ storefront, stock }) {
       <header className="sf-head">
         <h1 className="sf-title">{title}</h1>
         <p className="hint sf-lede">
-          Flip through what we&apos;ve brought. Tap ♡ on anything you like, then show us your list at the table.
+          {shop
+            ? "Everything we have in stock. Search for a card, tap ♡ on anything you like, and show us your list — at a show, or send us a screenshot."
+            : "Flip through what we've brought. Tap ♡ on anything you like, then show us your list at the table."}
         </p>
       </header>
 
       {cards.length === 0 ? (
-        <p className="dd-empty bn-blank">Nothing to show just yet — ask at the table.</p>
+        <p className="dd-empty bn-blank">{shop ? "Nothing to show just yet — check back soon." : "Nothing to show just yet — ask at the table."}</p>
       ) : (
         <>
           <div className="sd-find">
@@ -180,7 +192,7 @@ export default function Storefront({ storefront, stock }) {
             ) : null}
             {both ? (
               <select className="sd-select" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Which stock">
-                {STOREFRONT_SCOPES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                {scopes.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
             ) : null}
             <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Order">
@@ -194,8 +206,8 @@ export default function Storefront({ storefront, stock }) {
           <div className="bn-wrap">
             {view.pageCount > 0 ? (
               <div className={kind === ONLINE ? "bn-section bn-section-online" : "bn-section"}>
-                <span className="eyebrow">{SECTION_LABELS[kind]?.title}</span>
-                <span className="hint-small">{SECTION_LABELS[kind]?.note}</span>
+                <span className="eyebrow">{labels[kind]?.title}</span>
+                <span className="hint-small">{labels[kind]?.note}</span>
               </div>
             ) : null}
             <div
@@ -206,7 +218,7 @@ export default function Storefront({ storefront, stock }) {
               aria-label={view.pageCount === 0 ? "The binder, empty" : `Page ${at + 1} of ${view.pageCount}`}
             >
               {view.pageCount === 0 ? (
-                <p className="dd-empty bn-blank">Nothing matches that — ask at the table, we may still have one.</p>
+                <p className="dd-empty bn-blank">{shop ? "Nothing matches that — ask us, we may still have one." : "Nothing matches that — ask at the table, we may still have one."}</p>
               ) : (
                 <>
                   <span className="bn-rings" aria-hidden="true" />
@@ -229,7 +241,12 @@ export default function Storefront({ storefront, stock }) {
                             <span className="bn-art bn-noart" aria-hidden="true">no photo</span>
                           )}
                           {hasWish(wish, c) ? <span className="sf-heart" aria-label="On your list">♥</span> : null}
-                          {c.source === ONLINE ? (
+                          {/* The flag marks the section that is NOT the
+                              visitor's: "ask" at the table, "at a show" in
+                              the shop. */}
+                          {shop && c.source === BOX ? (
+                            <span className="bn-copies bn-flag">{c.count > 1 ? `at a show ×${c.count}` : "at a show"}</span>
+                          ) : !shop && c.source === ONLINE ? (
                             <span className="bn-copies bn-flag">{c.count > 1 ? `ask ×${c.count}` : "ask"}</span>
                           ) : c.count > 1 ? (
                             <span className="bn-copies">×{c.count}</span>
@@ -255,7 +272,9 @@ export default function Storefront({ storefront, stock }) {
               <span className="bn-pageno">
                 {view.pageCount === 0 ? "No pages" : `Page ${at + 1} of ${view.pageCount}`}
                 <span className="hint-small">
-                  {view.box} at the table{view.online > 0 ? ` · ${view.online} more in stock` : ""}
+                  {shop
+                    ? `${view.online} in stock${view.box > 0 ? ` · ${view.box} out at a show` : ""}`
+                    : `${view.box} at the table${view.online > 0 ? ` · ${view.online} more in stock` : ""}`}
                   {view.filtering ? ` · of ${view.total}` : ""}
                 </span>
               </span>
@@ -269,7 +288,9 @@ export default function Storefront({ storefront, stock }) {
       {note ? <p className="hint hint-small sf-note">{note}</p> : null}
 
       <footer className="hint hint-small sf-foot">
-        Prices are for cash at the table{updated ? ` · as of ${updated}` : ""}. Pull down to refresh.
+        {shop
+          ? "Prices are what we ask online; a card out at a show carries its table price"
+          : "Prices are for cash at the table"}{updated ? ` · as of ${updated}` : ""}. Pull down to refresh.
         {" "}Your list stays on this phone — we never see it until you show us.
       </footer>
 
@@ -308,9 +329,11 @@ export default function Storefront({ storefront, stock }) {
                 {hasWish(wish, open) ? "♥ On your list — remove" : "♡ Add to my list"}
               </button>
               <p className="hint hint-small bn-preview-count">
-                {open.source === ONLINE
-                  ? `${SECTION_LABELS[ONLINE].note}`
-                  : open.count === 1 ? "One copy at the table." : `${open.count} copies at the table.`}
+                {shop
+                  ? `${open.count === 1 ? "One copy" : `${open.count} copies`}${open.source === BOX ? " out at a show right now" : " in stock"}. ${labels[ONLINE].note}`
+                  : open.source === ONLINE
+                    ? `${SECTION_LABELS[ONLINE].note}`
+                    : open.count === 1 ? "One copy at the table." : `${open.count} copies at the table.`}
               </p>
               {open.count > 1 ? (
                 <div className="bn-copylist">
@@ -335,7 +358,7 @@ export default function Storefront({ storefront, stock }) {
           <div className="sf-list-head">
             <div>
               <h2 className="sf-list-title">My list</h2>
-              <p className="sf-list-sub">Show this to us at the table</p>
+              <p className="sf-list-sub">{shop ? "Show us at a show, or send us a screenshot" : "Show this to us at the table"}</p>
             </div>
             <button className="bn-close sf-list-close" onClick={() => setShowList(false)} aria-label="Back to the binder">×</button>
           </div>
@@ -354,7 +377,7 @@ export default function Storefront({ storefront, stock }) {
                   <span className="sf-list-info">
                     <span className="sf-list-name">{r.name}</span>
                     <span className="sf-list-meta">
-                      {[r.set, r.condition, r.source === ONLINE ? "ask — may be at home" : null].filter(Boolean).join(" · ")}
+                      {[r.set, r.condition, shop ? (r.source === BOX ? "out at a show" : null) : r.source === ONLINE ? "ask — may be at home" : null].filter(Boolean).join(" · ")}
                     </span>
                     {r.gone ? <span className="sf-list-meta sf-list-warn">No longer in the binder — ask us</span> : null}
                   </span>
