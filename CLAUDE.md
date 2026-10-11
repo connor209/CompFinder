@@ -222,6 +222,13 @@ stream` (the relay, only while streaming).
   decided about the stream box, so it never reaches the Show Desk, the binder
   or a stranger's phone.
 
+- `scripts/check-listingfilter.mjs` — the game, set, condition, printing and
+  asking-price filters on My listings: each read through the module that
+  already owns it (the set off the catalogue matcher the pull sheet uses, the
+  printing off `printingOf()`), a title with no set or no condition is a
+  bucket of its own rather than dropped, and a grep against the screen
+  reading either off a title by itself.
+
 - `scripts/check-pagedselect.mjs` — a paged read misses nothing: every page is
   in a total order, so 2,500 rows come back as 2,500 rather than ~1,800 with
   some twice. Born from stack cards landing under the pull sheet's variation
