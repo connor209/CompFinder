@@ -159,6 +159,10 @@ stream` (the relay, only while streaming).
 - `scripts/check-stackpos.mjs` — where a card physically is: that pulled and
   checked-out cards close the numbering up behind them, and a grep against a
   fourth copy of the rule.
+- `scripts/check-piles.mjs` — which pile a pull-sheet card is dealt into: a
+  pile is one buyer at one ADDRESS, not one order, so a buyer's separate
+  checkouts fold into one envelope, the same buyer to two addresses stays two,
+  and an order with no username is never guessed into anybody's pile.
 - `scripts/check-labels.mjs` — the printer's file: the two columns in the
   printer's order, names cut to real label widths, and a workbook built for
   real and read back out of its own bytes.

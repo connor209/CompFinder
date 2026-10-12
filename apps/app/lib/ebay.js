@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { shipKeyOf } from "./piles.js";
 
 /**
  * eBay OAuth (user tokens) + read-only inventory pull.
@@ -922,6 +923,9 @@ export async function fetchPendingOrders(accessToken) {
     const shipTo = order.fulfillmentStartInstructions?.[0]?.shippingStep?.shipTo;
     const deliveryName = shipTo?.fullName || null;
     const deliveryCity = shipTo?.contactAddress?.city || null;
+    // Postcode + first line, flattened: the pull sheet folds a buyer's
+    // separate orders into one pile only when they go to the same address.
+    const shipKey = shipKeyOf(shipTo?.contactAddress);
     for (const li of order.lineItems || []) {
       // Variation listings (e.g. "pick your single") carry the chosen card in
       // variationAspects rather than a per-card SKU — join it into a readable
@@ -939,6 +943,7 @@ export async function fetchPendingOrders(accessToken) {
         buyer: order.buyer?.username || null,
         deliveryName,
         deliveryCity,
+        shipKey,
         orderDate: order.creationDate || null
       });
     }

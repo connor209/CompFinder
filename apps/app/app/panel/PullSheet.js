@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
+import { buildPiles } from "@/lib/piles";
 import Fold from "./Fold";
 
 /**
@@ -213,11 +214,12 @@ export default function PullSheet() {
         variation: l.variation,
         buyer: l.buyer || "",
         deliveryName: l.deliveryName || "",
+        shipKey: l.shipKey || "",
         stackNm: card ? nameMap.get(card.stack_id) || "" : "",
         position: card ? card.position : null,
         nk: numKey(l.variation || l.title || l.sku),
         matched: !!card,
-        // Pack deals ONE pile per order line — one buyer, one envelope — so a
+        // Pack deals ONE entry per order line — one buyer, one envelope — so a
         // quantity-2 line stays a single entry and carries the count instead.
         // Splitting it here would have you dealing two piles to one address.
         qty: Math.max(1, Number(l.quantity) || 1),
@@ -303,23 +305,12 @@ export default function PullSheet() {
 
   // Pack sequence + piles, derived from the deal order. Piles are numbered by
   // first appearance in that sequence, so they form left-to-right as you deal
-  // (Pile 1 = the first order you hit) — no need to pre-label piles by buyer.
+  // (Pile 1 = the first buyer you hit) — no need to pre-label piles by buyer.
+  // A pile is one buyer at one address, not one order: a buyer's separate
+  // checkouts land in the same envelope. lib/piles.js owns the rule.
   const packView = useMemo(() => {
     const seq = packReverse ? [...packItems].reverse() : packItems;
-    const orderPile = new Map();
-    const pileList = [];
-    for (const it of seq) {
-      if (!orderPile.has(it.orderId)) {
-        orderPile.set(it.orderId, pileList.length + 1);
-        pileList.push({ pileNo: pileList.length + 1, orderId: it.orderId, buyer: it.buyer || "", deliveryName: it.deliveryName || "", count: 0 });
-      }
-    }
-    const byOrder = new Map(pileList.map((p) => [p.orderId, p]));
-    for (const it of seq) byOrder.get(it.orderId).count += 1;
-    // seqNo is the card's place in the FULL deal sequence — it stays stable
-    // when filters hide rows, so "card 47" is still card 47 in your hand.
-    const items = seq.map((it, i) => ({ ...it, pileNo: orderPile.get(it.orderId), seqNo: i + 1 }));
-    return { items, piles: pileList };
+    return buildPiles(seq);
   }, [packItems, packReverse]);
 
   // Filtered view of the deal sequence — with 100+ cards the flat list is
@@ -518,7 +509,7 @@ export default function PullSheet() {
             summary={`${packView.piles.filter((p) => placedInPile(p.pileNo) >= p.count).length} of ${packView.piles.length} complete${packPile != null ? ` · showing pile ${packPile} only` : ""}`}
           >
             <p className="hint hint-small" style={{ marginTop: 0 }}>
-              Start a new pile each time a new number appears below — no need to label them; each pile&apos;s buyer is here for reconciling at the end. Tap a pile to show only its cards.
+              Start a new pile each time a new number appears below — no need to label them; each pile&apos;s buyer is here for reconciling at the end. A buyer who checked out more than once gets ONE pile when the orders go to the same address, marked with how many orders it holds. Tap a pile to show only its cards.
             </p>
             <div className="pack-piles">
               {packView.piles.map((p) => {
@@ -537,7 +528,7 @@ export default function PullSheet() {
                     <div className="pack-pile-no">Pile {p.pileNo}</div>
                     <div className="pack-pile-buyer">{p.deliveryName || p.buyer || "Buyer"}</div>
                     {p.deliveryName && p.buyer ? <div className="pack-pile-user">@{p.buyer}</div> : null}
-                    <div className="pack-pile-meta">{got}/{p.count} card{p.count === 1 ? "" : "s"}{full ? " ✓" : ""}</div>
+                    <div className="pack-pile-meta">{got}/{p.count} card{p.count === 1 ? "" : "s"}{p.orderIds.length > 1 ? ` · ${p.orderIds.length} orders` : ""}{full ? " ✓" : ""}</div>
                   </button>
                 );
               })}
@@ -618,7 +609,7 @@ export default function PullSheet() {
           </div>
 
           {placedCount === packView.items.length ? (
-            <div className="panel"><p className="dd-empty" style={{ color: "var(--conf-high)" }}>All {packView.items.length} cards sorted into {packView.piles.length} order pile(s) — ready to pack &amp; ship. 🎉</p></div>
+            <div className="panel"><p className="dd-empty" style={{ color: "var(--conf-high)" }}>All {packView.items.length} cards sorted into {packView.piles.length} pile(s) — ready to pack &amp; ship. 🎉</p></div>
           ) : null}
         </>
       )}
