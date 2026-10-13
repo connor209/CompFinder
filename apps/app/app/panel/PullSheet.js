@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
-import { buildPiles, currentPileNo, handPositions, pilePullOrder } from "@/lib/piles";
+import { buildPiles, currentPileNo, handPositions, pileLivePositions, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 
 /**
@@ -371,6 +371,7 @@ export default function PullSheet() {
     () => (pileNo != null ? pilePullOrder(packView.items, pileNo, hand.pos) : []),
     [packView.items, pileNo, hand]
   );
+  const pileLive = useMemo(() => pileLivePositions(pileCards, hand.pos, placed), [pileCards, hand, placed]);
   const pilesLeft = useMemo(() => new Set(packView.items.filter((i) => !doneKeys.has(i.key)).map((i) => i.pileNo)).size, [packView.items, doneKeys]);
 
   function completePile() {
@@ -388,6 +389,19 @@ export default function PullSheet() {
     // since to eBay a printed label already means dispatched.
     recordPacked(markOrdersPacked, pile.orderIds);
     setLabelled((prev) => prev.filter((id) => !pile.orderIds.includes(id)));
+  }
+
+  // One tap for a pile already dealt by hand; a second unticks it all again.
+  function tickWholePile() {
+    const allIn = pileCards.every((c) => placed.has(c.key));
+    setPlaced((prev) => {
+      const n = new Set(prev);
+      for (const c of pileCards) {
+        if (allIn) n.delete(c.key);
+        else n.add(c.key);
+      }
+      return n;
+    });
   }
 
   function ordersOfKeys(keys) {
@@ -650,15 +664,18 @@ export default function PullSheet() {
               </span>
             </div>
             <span className="badge2">{pileTicked}/{pileCards.length} in pile</span>
+            <button className="btn btn-ghost" onClick={tickWholePile}>
+              {pileTicked === pileCards.length ? "↺ Untick all" : "✓ All in pile"}
+            </button>
             {pileCards.some((c) => c.labelPrinted) ? <span className="badge2" title="eBay already has a label for this parcel">🏷 label printed</span> : null}
           </div>
           <p className="hint hint-small" style={{ marginTop: 0 }}>
-            Card 1 is the top of your hand. Take these out back-first, as listed, so every number stays true until the pile is done.
+            Card 1 is the top of your hand. Tick each card as it goes in the pile — the numbers below it move up straight away.
           </p>
           <div className="stack-list">
             {pileCards.map((it) => {
               const done = placed.has(it.key);
-              const at = hand.pos.get(it.key);
+              const at = pileLive.get(it.key);
               return (
                 <label className={`ps-row pack-row${done ? " done" : ""}`} key={it.key}>
                   <input type="checkbox" checked={done} onChange={() => togglePlaced(it.key)} />

@@ -12,7 +12,7 @@
  * guessed into anybody else's pile.
  */
 import { readFileSync } from "node:fs";
-import { buildPiles, currentPileNo, handPositions, pileKeyOf, pilePullOrder, shipKeyOf } from "../apps/app/lib/piles.js";
+import { buildPiles, currentPileNo, handPositions, pileKeyOf, pileLivePositions, pilePullOrder, shipKeyOf } from "../apps/app/lib/piles.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -93,8 +93,20 @@ eq("a postcode alone still compares", shipKeyOf({ postalCode: "G1 1AA" }), "G11A
   eq("a quantity-2 line takes two numbers", at(h.pos, "d"), [4, 5]);
   eq("and the card behind it counts both", at(h.pos, "e"), [6, 6]);
   eq("the deal starts on pile 1", currentPileNo(items, done), 1);
-  eq("a pile is pulled back-first, so no number moves under you",
-    pilePullOrder(items, 1, h.pos).map((i) => i.key), ["c", "a"]);
+  const p1 = pilePullOrder(items, 1, h.pos);
+  eq("a pile lists the top of the hand first", p1.map((i) => i.key), ["a", "c"]);
+  eq("before a tick, the live number is the hand number",
+    at(pileLivePositions(p1, h.pos, new Set()), "c"), [3, 3]);
+  eq("ticking card 1 moves card 3 up to 2 at once",
+    at(pileLivePositions(p1, h.pos, new Set(["a"])), "c"), [2, 2]);
+  eq("a ticked card has no live number", pileLivePositions(p1, h.pos, new Set(["a"])).has("a"), false);
+  {
+    // Brock's quantity-2 line (cards 4–5) then a card behind it in the same pile.
+    const two = buildPiles([line("x", "o1", "brock", HOME, { qty: 2 }), line("y", "o2", "brock")]).items;
+    const hp = handPositions(two, new Set()).pos;
+    eq("a ticked quantity-2 line moves the next card up by two",
+      at(pileLivePositions(pilePullOrder(two, 1, hp), hp, new Set(["x"])), "y"), [1, 1]);
+  }
 
   // Pile 1 complete: cards 1 and 3 leave, the rest close up.
   done = new Set(["a", "c"]);

@@ -165,7 +165,8 @@ stream` (the relay, only while streaming).
   and an order with no username is never guessed into anybody's pile. And
   packing is one pile at a time: a completed pile's cards leave the hand and
   the rest renumber (what was card 2 is card 1), a quantity-2 line takes two
-  numbers, and a pile is pulled back-first so no number moves mid-pile.
+  numbers, a pile lists top-first, and ticking a card moves the numbers below
+  it up at once.
 - `scripts/check-packed.mjs` — which orders stay on the pull sheet once eBay
   calls them dispatched: a printed label is not a packed parcel, a failed read
   never puts a week of sent orders back, and a pile completed this deal stays

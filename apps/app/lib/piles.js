@@ -115,14 +115,37 @@ export function currentPileNo(items, doneKeys) {
 }
 
 /**
- * One pile's cards in the order to take them out of the hand: DEEPEST FIRST.
- * The numbers only renumber on Pile complete, so pulling card 2 before card 9
- * would leave "9" pointing at what is now card 8. Taking the back one first
- * disturbs nothing in front of it, so every number on screen stays true while
- * you work through the pile.
+ * One pile's cards top of the hand first — card 1 at the head of the list.
  */
 export function pilePullOrder(items, pileNo, pos) {
   return (items || [])
     .filter((it) => it.pileNo === pileNo && pos.has(it.key))
-    .sort((a, b) => pos.get(b.key).from - pos.get(a.key).from);
+    .sort((a, b) => pos.get(a.key).from - pos.get(b.key).from);
+}
+
+/**
+ * Where each still-unticked card in the pile is NOW, with the ticked ones
+ * already out of the hand. Listed top-first, taking card 2 moves what was
+ * card 9 up to 8 — so the number has to move the moment the tick lands, not
+ * at Pile complete, or the second card you reach for is the wrong one.
+ * Pile complete then makes the same closing-up permanent for the next pile.
+ *
+ * `cards` is pilePullOrder()'s list, `pos` handPositions().pos, `ticked` the
+ * set of line keys already dealt. Returns Map<key, {from,to}> for unticked
+ * cards only.
+ */
+export function pileLivePositions(cards, pos, ticked) {
+  const done = ticked || new Set();
+  const out = new Map();
+  let gone = 0; // ticked cards above this one, counted in units
+  for (const it of cards || []) {
+    const at = pos.get(it.key);
+    if (!at) continue;
+    if (done.has(it.key)) {
+      gone += at.to - at.from + 1;
+      continue;
+    }
+    out.set(it.key, { from: at.from - gone, to: at.to - gone });
+  }
+  return out;
 }
