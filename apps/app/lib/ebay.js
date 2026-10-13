@@ -901,7 +901,11 @@ async function fetchOrdersWhere(accessToken, filter) {
       e.scope = true;
       throw e;
     }
-    if (!res.ok) throw new Error(`eBay orders fetch failed (${res.status}).`);
+    if (!res.ok) {
+      // eBay says WHY in the body; a bare status code cost a round trip once.
+      const why = await res.json().then((j) => j?.errors?.[0]?.longMessage || j?.errors?.[0]?.message, () => null);
+      throw new Error(`eBay orders fetch failed (${res.status})${why ? `: ${why}` : "."}`);
+    }
     const json = await res.json();
     const page = json.orders || [];
     orders.push(...page);
@@ -928,8 +932,13 @@ export async function fetchPendingOrders(accessToken, { labelledWithinDays = 0 }
   if (labelledWithinDays > 0) {
     const since = new Date(Date.now() - labelledWithinDays * 86_400_000).toISOString();
     try {
-      const labelled = await fetchOrdersWhere(accessToken, `lastmodifieddate:[${since}..],orderfulfillmentstatus:{FULFILLED}`);
+      // eBay accepts exactly two status sets here — {NOT_STARTED|IN_PROGRESS}
+      // and {FULFILLED|IN_PROGRESS} — and answers a bare {FULFILLED} with a
+      // 400. So ask for the pair and keep the FULFILLED ones; IN_PROGRESS
+      // orders already came back from the read above.
+      const labelled = await fetchOrdersWhere(accessToken, `lastmodifieddate:[${since}..],orderfulfillmentstatus:{FULFILLED|IN_PROGRESS}`);
       for (const o of labelled) {
+        if (o.orderFulfillmentStatus !== "FULFILLED") continue;
         // A cancelled order is nobody's parcel, label or not.
         if (o.cancelStatus?.cancelState === "CANCELED") continue;
         orders.push({ order: o, labelPrinted: true });

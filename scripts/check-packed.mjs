@@ -47,7 +47,11 @@ eq("an ordinary failure is not a missing migration", isMissingTable({ message: "
 const root = new URL("../", import.meta.url);
 const read = (p) => readFileSync(new URL(p, root), "utf8");
 const ebay = read("apps/app/lib/ebay.js");
-if (!/orderfulfillmentstatus:\{FULFILLED\}/.test(ebay)) fail("fetchPendingOrders no longer asks for label-printed (FULFILLED) orders — printing labels first empties the sheet again");
+if (!/orderfulfillmentstatus:\{FULFILLED\|IN_PROGRESS\}/.test(ebay)) fail("fetchPendingOrders no longer asks for label-printed (FULFILLED) orders — printing labels first empties the sheet again");
+// eBay 400s on any status set but these two; a bare {FULFILLED} shipped once.
+for (const m of ebay.matchAll(/orderfulfillmentstatus:\{([^}]*)\}/g)) {
+  if (!["NOT_STARTED|IN_PROGRESS", "FULFILLED|IN_PROGRESS"].includes(m[1])) fail(`orderfulfillmentstatus:{${m[1]}} — eBay accepts only {NOT_STARTED|IN_PROGRESS} or {FULFILLED|IN_PROGRESS}`);
+}
 if (!/labelPrinted/.test(ebay)) fail("order lines no longer say whether a label was printed");
 const route = read("apps/app/app/api/ebay/orders/pending/route.js");
 if (!/labelledWithinDays/.test(route)) fail("the pending-orders route stopped asking for label-printed orders");
