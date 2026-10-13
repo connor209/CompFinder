@@ -166,6 +166,10 @@ stream` (the relay, only while streaming).
   packing is one pile at a time: a completed pile's cards leave the hand and
   the rest renumber (what was card 2 is card 1), a quantity-2 line takes two
   numbers, and a pile is pulled back-first so no number moves mid-pile.
+- `scripts/check-packed.mjs` — which orders stay on the pull sheet once eBay
+  calls them dispatched: a printed label is not a packed parcel, a failed read
+  never puts a week of sent orders back, and a pile completed this deal stays
+  on Pack so nothing renumbers.
 - `scripts/check-labels.mjs` — the printer's file: the two columns in the
   printer's order, names cut to real label widths, and a workbook built for
   real and read back out of its own bytes.
@@ -2463,6 +2467,30 @@ node scripts/copyqueue-run.mjs --item <id> --apply  # send one, on purpose
 
 `--apply` requires `--item`: the first live test is one listing you chose, not
 every listing you happen to hold two of.
+
+## A printed label is not a packed parcel
+
+Printing a postage label through eBay uploads its tracking, and eBay marks the
+order **dispatched** (`FULFILLED`) there and then. The pull sheet read "still to
+do" straight off that status, so printing the labels before making the piles
+emptied the sheet of exactly the orders about to be packed.
+
+eBay's dispatched is now read as **label printed**, and done is ours: a pile
+completed on **Pack** writes its orders to `packed_orders` (migration 033,
+named only in `apps/app/lib/packed-store.js`). `fetchPendingOrders` also asks
+for FULFILLED orders touched in the last `LABELLED_WINDOW_DAYS` (7), marked
+`labelPrinted`, and `sheetLines()` keeps each until it is packed.
+
+- **Unknown is the old behaviour, not a flood.** Migration pending or the read
+  failed, label-printed orders stay off as they always did and the sheet says
+  why — guessing "none packed" would put a week of sent parcels back on it.
+- **A pile completed this deal stays on Pack** until the deal's 12 hours are
+  up, so a refresh never renumbers the piles under somebody's hand. Reopen and
+  Start over un-record the orders they put back.
+- **"These are already sent"** clears the label-printed orders packed some
+  other way — and the first run after 033, which finds a week of them.
+- An order not yet labelled is on the sheet whatever was recorded: packing
+  first and printing after still works exactly as before.
 
 ## The label file, and why it is a real .xlsx
 

@@ -884,18 +884,15 @@ export async function fetchRecentOrders(accessToken, daysBack = 90) {
   return lines;
 }
 
-/**
- * Fetch orders that still need picking/shipping (not yet fulfilled). Returns
- * one row per line item. Requires the fulfillment scope.
- */
-export async function fetchPendingOrders(accessToken) {
+/** Every order matching one getOrders filter, paged until eBay stops. */
+async function fetchOrdersWhere(accessToken, filter) {
   // getOrders returns at most 200 orders a page. One page was all this ever
   // read, so after a big night every order past the 200th was simply not on
   // the pull sheet. Page until eBay stops handing back a full one.
   const PAGE = 200;
   const orders = [];
   for (let offset = 0; offset < 10000; offset += PAGE) {
-    const params = new URLSearchParams({ filter: "orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}", limit: String(PAGE), offset: String(offset) });
+    const params = new URLSearchParams({ filter, limit: String(PAGE), offset: String(offset) });
     const res = await fetch(`${FULFILLMENT_ORDER}?${params}`, {
       headers: { Authorization: `Bearer ${accessToken}`, "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE, Accept: "application/json" }
     });
@@ -910,10 +907,44 @@ export async function fetchPendingOrders(accessToken) {
     orders.push(...page);
     if (page.length < PAGE || (json.total != null && offset + PAGE >= Number(json.total))) break;
   }
+  return orders;
+}
+
+/**
+ * Fetch orders that still need picking/packing. Returns one row per line item.
+ * Requires the fulfillment scope.
+ *
+ * Printing a label through eBay uploads tracking and eBay calls the order
+ * FULFILLED there and then, before anything has been pulled or packed. So with
+ * `labelledWithinDays` this also returns FULFILLED orders touched in that
+ * window, each line marked `labelPrinted` — the pull sheet decides which of
+ * those it has already packed (lib/packed-store.js). Without it, this is the
+ * old unshipped-only read. Returns `{ lines, labelledError }`.
+ */
+export async function fetchPendingOrders(accessToken, { labelledWithinDays = 0 } = {}) {
+  let labelledError = null;
+  const orders = (await fetchOrdersWhere(accessToken, "orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}"))
+    .map((o) => ({ order: o, labelPrinted: false }));
+  if (labelledWithinDays > 0) {
+    const since = new Date(Date.now() - labelledWithinDays * 86_400_000).toISOString();
+    try {
+      const labelled = await fetchOrdersWhere(accessToken, `lastmodifieddate:[${since}..],orderfulfillmentstatus:{FULFILLED}`);
+      for (const o of labelled) {
+        // A cancelled order is nobody's parcel, label or not.
+        if (o.cancelStatus?.cancelState === "CANCELED") continue;
+        orders.push({ order: o, labelPrinted: true });
+      }
+    } catch (e) {
+      // The unshipped orders are the sheet; the label-printed ones are the
+      // extra. Losing the extra must not cost the sheet — say so instead.
+      if (e.scope) throw e;
+      labelledError = e.message || "Couldn't read label-printed orders.";
+    }
+  }
 
   const lines = [];
   const seenOrders = new Set(); // an order arriving mid-read can shift one onto two pages
-  for (const order of orders) {
+  for (const { order, labelPrinted } of orders) {
     const oid = String(order.orderId || "");
     if (oid && seenOrders.has(oid)) continue;
     seenOrders.add(oid);
@@ -944,11 +975,12 @@ export async function fetchPendingOrders(accessToken) {
         deliveryName,
         deliveryCity,
         shipKey,
-        orderDate: order.creationDate || null
+        orderDate: order.creationDate || null,
+        labelPrinted
       });
     }
   }
-  return lines;
+  return { lines, labelledError };
 }
 
 /**

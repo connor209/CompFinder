@@ -156,6 +156,9 @@ with schema_checks as (
     (36, 'SCHEMA · 032 storefront shop links', 'show_storefronts.kind column',
       case when exists (select 1 from information_schema.columns
                         where table_schema='public' and table_name='show_storefronts' and column_name='kind')
+        then '✅ present' else '❌ missing' end),
+    (37, 'SCHEMA · 033 packed orders', 'packed_orders table',
+      case when to_regclass('public.packed_orders') is not null
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),

@@ -6,6 +6,7 @@ import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
 import { buildPiles, currentPileNo, handPositions, pilePullOrder } from "@/lib/piles";
+import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -88,6 +89,11 @@ export default function PullSheet() {
   // the finished piles were still in it — that would send you to the wrong
   // card. Gone after DEAL_TTL_MS: a deal is one sitting, not tomorrow's.
   const [doneLog, setDoneLog] = useState(() => readDoneLog());
+  // eBay calls an order dispatched the moment its label is printed, so those
+  // come back marked labelPrinted and stay until their pile is complete here.
+  const [labelled, setLabelled] = useState([]); // order ids: label printed, not yet packed
+  const [packedMissing, setPackedMissing] = useState(false); // migration 033 not run
+  const [packedNote, setPackedNote] = useState(""); // a packed read/write that failed
 
   const supabase = () => createClient();
 
@@ -109,7 +115,27 @@ export default function PullSheet() {
       setLoading(false);
       return;
     }
-    const lines = ordersRes.lines || [];
+    // Which label-printed orders have we already packed? A failed read leaves
+    // them OFF the sheet (sheetLines with null) — the old behaviour — rather
+    // than putting a week of sent orders back on it.
+    const rawLines = ordersRes.lines || [];
+    const labelledIds = [...new Set(rawLines.filter((l) => l.labelPrinted).map((l) => l.orderId))];
+    let packedIds = new Set();
+    setPackedMissing(false);
+    setPackedNote(ordersRes.labelledError ? `Couldn't read orders with a label printed: ${ordersRes.labelledError}` : "");
+    if (labelledIds.length) {
+      const res = await loadPackedOrderIds(supabase(), labelledIds);
+      if (res.ok) packedIds = res.ids;
+      else {
+        packedIds = null;
+        if (res.missing) setPackedMissing(true);
+        else setPackedNote(`Couldn't check which label-printed orders are packed: ${res.error}`);
+      }
+    }
+    // Read off storage, not state: on mount this closure holds the first
+    // render's log, and a pile completed this sitting must stay on the deal.
+    const lines = sheetLines(rawLines, packedIds, new Set(readDoneLog().flat()));
+    setLabelled([...new Set(lines.filter((l) => l.labelPrinted && !packedIds?.has(String(l.orderId))).map((l) => l.orderId))]);
 
     // Resolve each listing title to a catalogue set (name + code). eBay sends
     // no item specifics with an order, so the set is read out of the title —
@@ -244,6 +270,7 @@ export default function PullSheet() {
         // quantity-2 line stays a single entry and carries the count instead.
         // Splitting it here would have you dealing two piles to one address.
         qty: Math.max(1, Number(l.quantity) || 1),
+        labelPrinted: !!l.labelPrinted,
         ...setInfo(l.title)
       };
     });
@@ -357,10 +384,27 @@ export default function PullSheet() {
     const next = [...doneLog, pileCards.map((c) => c.key)];
     setDoneLog(next);
     writeDoneLog(next);
+    // A completed pile is a packed parcel — the one thing eBay can't tell us,
+    // since to eBay a printed label already means dispatched.
+    recordPacked(markOrdersPacked, pile.orderIds);
+    setLabelled((prev) => prev.filter((id) => !pile.orderIds.includes(id)));
+  }
+
+  function ordersOfKeys(keys) {
+    const want = new Set(keys);
+    return [...new Set(packItems.filter((i) => want.has(i.key)).map((i) => i.orderId))];
+  }
+
+  async function recordPacked(fn, orderIds) {
+    const res = await fn(supabase(), orderIds);
+    if (res.ok) return;
+    if (res.missing) setPackedMissing(true);
+    else setPackedNote(`Couldn't record which orders are packed: ${res.error}`);
   }
 
   function reopenLastPile() {
     if (!doneLog.length) return;
+    recordPacked(unmarkOrdersPacked, ordersOfKeys(doneLog[doneLog.length - 1]));
     const next = doneLog.slice(0, -1);
     setDoneLog(next);
     writeDoneLog(next);
@@ -368,9 +412,24 @@ export default function PullSheet() {
 
   function startOver() {
     if (!confirm("Start the deal again from Pile 1? Every completed pile goes back into the hand.")) return;
+    recordPacked(unmarkOrdersPacked, ordersOfKeys(doneLog.flat()));
     setDoneLog([]);
     writeDoneLog([]);
     setPlaced(new Set());
+  }
+
+  // For orders that went out before this sheet kept a record — or were packed
+  // some other way. Names the count, and confirms, because they leave the sheet.
+  async function markLabelledSent() {
+    if (!labelled.length) return;
+    if (!confirm(`Mark ${labelled.length} label-printed order(s) as already packed and sent? They leave the pull sheet.`)) return;
+    const res = await markOrdersPacked(supabase(), labelled);
+    if (!res.ok) {
+      if (res.missing) setPackedMissing(true);
+      else setPackedNote(`Couldn't record which orders are packed: ${res.error}`);
+      return;
+    }
+    await load();
   }
 
   // group active rows by stack for display
@@ -446,6 +505,32 @@ export default function PullSheet() {
           ) : null}
         </div>
       </div>
+
+      {packedMissing ? (
+        <div className="mine-banner">
+          <span className="mine-ic" aria-hidden="true">⚠</span>
+          <div>
+            <strong>Orders with a label printed drop off this sheet</strong>
+            <p className="hint hint-small" style={{ marginTop: 4 }}>
+              eBay counts a printed label as dispatched. Run migration 033 (packed_orders) in Supabase and they stay here until their pile is complete.
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {packedNote ? <p className="compfinder-error">{packedNote}</p> : null}
+      {labelled.length > 0 ? (
+        <div className="mine-banner">
+          <span className="mine-ic" aria-hidden="true">🏷</span>
+          <div>
+            <strong>{labelled.length} order(s) have a label printed but aren&apos;t packed yet</strong>
+            <p className="hint hint-small" style={{ marginTop: 4 }}>
+              eBay already calls these dispatched. They stay on the sheet until you complete their pile on Pack
+              (labels printed in the last {LABELLED_WINDOW_DAYS} days).
+            </p>
+            <button className="btn btn-ghost" style={{ marginTop: 6 }} onClick={markLabelledSent}>These are already sent</button>
+          </div>
+        </div>
+      ) : null}
 
       {mode === "pick" ? (
       <>
@@ -565,6 +650,7 @@ export default function PullSheet() {
               </span>
             </div>
             <span className="badge2">{pileTicked}/{pileCards.length} in pile</span>
+            {pileCards.some((c) => c.labelPrinted) ? <span className="badge2" title="eBay already has a label for this parcel">🏷 label printed</span> : null}
           </div>
           <p className="hint hint-small" style={{ marginTop: 0 }}>
             Card 1 is the top of your hand. Take these out back-first, as listed, so every number stays true until the pile is done.
