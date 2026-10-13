@@ -12,7 +12,7 @@
  * guessed into anybody else's pile.
  */
 import { readFileSync } from "node:fs";
-import { buildPiles, pileKeyOf, shipKeyOf } from "../apps/app/lib/piles.js";
+import { buildPiles, currentPileNo, handPositions, pileKeyOf, pilePullOrder, shipKeyOf } from "../apps/app/lib/piles.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -76,9 +76,45 @@ eq("a postcode alone still compares", shipKeyOf({ postalCode: "G1 1AA" }), "G11A
     pileKeyOf(line("x", "o1", "")), pileKeyOf(line("y", "o1", "")));
 }
 
+// --- one pile at a time: a finished pile leaves the hand ---------------------
+{
+  // Hand top to bottom: a(Ash) b(Misty) c(Ash) d(Brock ×2) e(Misty)
+  const { items } = buildPiles([
+    line("a", "o1", "ash"),
+    line("b", "o2", "misty"),
+    line("c", "o3", "ash"),
+    line("d", "o4", "brock", HOME, { qty: 2 }),
+    line("e", "o5", "misty"),
+  ]);
+  const at = (pos, k) => pos.get(k) && [pos.get(k).from, pos.get(k).to];
+  let done = new Set();
+  let h = handPositions(items, done);
+  eq("before anything, the hand counts every card", h.depth, 6);
+  eq("a quantity-2 line takes two numbers", at(h.pos, "d"), [4, 5]);
+  eq("and the card behind it counts both", at(h.pos, "e"), [6, 6]);
+  eq("the deal starts on pile 1", currentPileNo(items, done), 1);
+  eq("a pile is pulled back-first, so no number moves under you",
+    pilePullOrder(items, 1, h.pos).map((i) => i.key), ["c", "a"]);
+
+  // Pile 1 complete: cards 1 and 3 leave, the rest close up.
+  done = new Set(["a", "c"]);
+  h = handPositions(items, done);
+  eq("what was card 2 is card 1 once pile 1 is done", at(h.pos, "b"), [1, 1]);
+  eq("and everything behind closes up", at(h.pos, "e"), [4, 4]);
+  eq("a finished card has no number", h.pos.has("a"), false);
+  eq("pile 2 is next", currentPileNo(items, done), 2);
+
+  // A refresh brings a new line for Ash: pile 1 comes back round, first.
+  const more = buildPiles([...items.map(({ pileNo, pileOrders, seqNo, ...it }) => it), line("f", "o6", "ash")]).items;
+  eq("a completed pile that gains a card is not skipped", currentPileNo(more, new Set(["a", "c", "b", "e"])), 1);
+
+  eq("every pile done is null, not pile 1", currentPileNo(items, new Set(["a", "b", "c", "d", "e"])), null);
+}
+
 // --- greps: one definition --------------------------------------------------
 const sheet = readFileSync(new URL("../apps/app/app/panel/PullSheet.js", import.meta.url), "utf8");
 if (!/buildPiles\(/.test(sheet)) fail("PullSheet.js no longer builds piles through lib/piles.js");
+if (!/handPositions\(/.test(sheet)) fail("PullSheet.js numbers the hand itself — use handPositions(), or a finished pile stays counted");
 if (/orderPile\s*=\s*new Map/.test(sheet)) fail("PullSheet.js is numbering piles per ORDER again — use buildPiles()");
 const ebay = readFileSync(new URL("../apps/app/lib/ebay.js", import.meta.url), "utf8");
 if (!/shipKey/.test(ebay)) fail("fetchPendingOrders no longer sends shipKey — every buyer's orders would fold regardless of address");

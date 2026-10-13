@@ -69,3 +69,60 @@ export function buildPiles(seq) {
   });
   return { items, piles };
 }
+
+/**
+ * Where each card is in the HAND — the pile of cards just pulled for the
+ * orders, dealt from the top — once the completed piles have left it.
+ *
+ * Piles are dealt one at a time, and a finished pile's cards are out of your
+ * hand: if Pile 1 took card 1, what was card 2 is card 1 when Pile 2 starts.
+ * So the number is a live rank among the cards still held, never the card's
+ * place in the original deal.
+ *
+ * A quantity-2 line is two cards in the hand, so it takes two numbers
+ * ({ from: 3, to: 4 }) and everything after it counts both.
+ *
+ * `items` is buildPiles().items in deal order; `doneKeys` holds the line keys
+ * of every completed pile. Returns { pos: Map<key, {from,to}>, depth }.
+ */
+export function handPositions(items, doneKeys) {
+  const done = doneKeys || new Set();
+  const pos = new Map();
+  let n = 0;
+  for (const it of items || []) {
+    if (done.has(it.key)) continue;
+    const q = Math.max(1, Number(it.qty) || 1);
+    pos.set(it.key, { from: n + 1, to: n + q });
+    n += q;
+  }
+  return { pos, depth: n };
+}
+
+/**
+ * The pile being dealt now: the lowest-numbered pile with a card still in the
+ * hand, or null when every pile is complete. A pile that gains a line on a
+ * refresh (the same buyer ordered again) comes back round rather than being
+ * skipped, because its envelope is not finished.
+ */
+export function currentPileNo(items, doneKeys) {
+  const done = doneKeys || new Set();
+  let best = null;
+  for (const it of items || []) {
+    if (done.has(it.key)) continue;
+    if (best == null || it.pileNo < best) best = it.pileNo;
+  }
+  return best;
+}
+
+/**
+ * One pile's cards in the order to take them out of the hand: DEEPEST FIRST.
+ * The numbers only renumber on Pile complete, so pulling card 2 before card 9
+ * would leave "9" pointing at what is now card 8. Taking the back one first
+ * disturbs nothing in front of it, so every number on screen stays true while
+ * you work through the pile.
+ */
+export function pilePullOrder(items, pileNo, pos) {
+  return (items || [])
+    .filter((it) => it.pileNo === pileNo && pos.has(it.key))
+    .sort((a, b) => pos.get(b.key).from - pos.get(a.key).from);
+}

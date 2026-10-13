@@ -5,8 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
-import { buildPiles } from "@/lib/piles";
-import Fold from "./Fold";
+import { buildPiles, currentPileNo, handPositions, pilePullOrder } from "@/lib/piles";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -33,6 +32,28 @@ function pileCompare(a, b) {
   const letterB = /^[A-Za-z]+$/.test(nb);
   if (letterA && letterB && na.length !== nb.length) return na.length - nb.length;
   return na.localeCompare(nb, undefined, { numeric: true, sensitivity: "base" });
+}
+
+const DONE_KEY = "cf-pullsheet-done";
+const DEAL_TTL_MS = 12 * 60 * 60 * 1000;
+
+function readDoneLog() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DONE_KEY) || "null");
+    if (!raw || !Array.isArray(raw.log) || Date.now() - (raw.at || 0) > DEAL_TTL_MS) return [];
+    return raw.log.filter((k) => Array.isArray(k));
+  } catch {
+    return [];
+  }
+}
+
+function writeDoneLog(log) {
+  try {
+    if (log.length) localStorage.setItem(DONE_KEY, JSON.stringify({ at: Date.now(), log }));
+    else localStorage.removeItem(DONE_KEY);
+  } catch {
+    /* private window — the deal still works, it just won't survive a reload */
+  }
 }
 
 /**
@@ -62,11 +83,11 @@ export default function PullSheet() {
   // Default: last-pulled card on top of the hand (LIFO), so we deal in reverse
   // pull order. Toggle for anyone who holds the stack the other way up.
   const [packReverse, setPackReverse] = useState(true);
-  // Pack-mode filters — a 100+ card deal is unreadable as one flat list.
-  const [packPile, setPackPile] = useState(null); // pile number, or null for all
-  const [packQuery, setPackQuery] = useState(""); // buyer / card / set search
-  const [packType, setPackType] = useState("all"); // all | stack | loose
-  const [packHideDone, setPackHideDone] = useState(false);
+  // Completed piles, one array of line keys per Pile complete, oldest first.
+  // Kept on this device so a reload mid-deal doesn't renumber the hand as if
+  // the finished piles were still in it — that would send you to the wrong
+  // card. Gone after DEAL_TTL_MS: a deal is one sitting, not tomorrow's.
+  const [doneLog, setDoneLog] = useState(() => readDoneLog());
 
   const supabase = () => createClient();
 
@@ -313,23 +334,44 @@ export default function PullSheet() {
     return buildPiles(seq);
   }, [packItems, packReverse]);
 
-  // Filtered view of the deal sequence — with 100+ cards the flat list is
-  // unreadable, so you can narrow to one pile, one buyer, or just the loose
-  // picks, without disturbing the underlying order.
-  const packVisible = useMemo(() => {
-    const q = packQuery.trim().toLowerCase();
-    return packView.items.filter((it) => {
-      if (packPile != null && it.pileNo !== packPile) return false;
-      if (packType === "stack" && !it.matched) return false;
-      if (packType === "loose" && it.matched) return false;
-      if (packHideDone && placed.has(it.key)) return false;
-      if (!q) return true;
-      return [it.buyer, it.deliveryName, it.variation, it.sku, it.setName, it.setCode, it.title]
-        .some((v) => String(v || "").toLowerCase().includes(q));
-    });
-  }, [packView.items, packPile, packType, packQuery, packHideDone, placed]);
+  // The hand, pile by pile. A completed pile's cards are out of the hand, so
+  // every number is a live rank among what is still held (lib/piles.js).
+  const doneKeys = useMemo(() => new Set(doneLog.flat()), [doneLog]);
+  const hand = useMemo(() => handPositions(packView.items, doneKeys), [packView.items, doneKeys]);
+  const pileNo = useMemo(() => currentPileNo(packView.items, doneKeys), [packView.items, doneKeys]);
+  const pile = pileNo != null ? packView.piles[pileNo - 1] : null;
+  const pileCards = useMemo(
+    () => (pileNo != null ? pilePullOrder(packView.items, pileNo, hand.pos) : []),
+    [packView.items, pileNo, hand]
+  );
+  const pilesLeft = useMemo(() => new Set(packView.items.filter((i) => !doneKeys.has(i.key)).map((i) => i.pileNo)).size, [packView.items, doneKeys]);
 
-  const packFiltered = packVisible.length !== packView.items.length;
+  function completePile() {
+    if (!pile || pileCards.length === 0) return;
+    const missing = pileCards.filter((c) => !placed.has(c.key));
+    if (missing.length) {
+      const names = missing.slice(0, 3).map((c) => c.variation || c.sku || c.title || "a card").join(", ");
+      const more = missing.length > 3 ? ` and ${missing.length - 3} more` : "";
+      if (!confirm(`${missing.length} card(s) in Pile ${pile.pileNo} aren't ticked: ${names}${more}.\n\nComplete the pile anyway? They come out of the hand and the rest renumbers.`)) return;
+    }
+    const next = [...doneLog, pileCards.map((c) => c.key)];
+    setDoneLog(next);
+    writeDoneLog(next);
+  }
+
+  function reopenLastPile() {
+    if (!doneLog.length) return;
+    const next = doneLog.slice(0, -1);
+    setDoneLog(next);
+    writeDoneLog(next);
+  }
+
+  function startOver() {
+    if (!confirm("Start the deal again from Pile 1? Every completed pile goes back into the hand.")) return;
+    setDoneLog([]);
+    writeDoneLog([]);
+    setPlaced(new Set());
+  }
 
   // group active rows by stack for display
   const groups = useMemo(() => {
@@ -375,8 +417,7 @@ export default function PullSheet() {
 
   const total = rows.length;
   const pickedInSheet = rows.filter((r) => picked.has(r.cardId)).length;
-  const placedCount = packView.items.filter((i) => placed.has(i.key)).length;
-  const placedInPile = (pileNo) => packView.items.filter((i) => i.pileNo === pileNo && placed.has(i.key)).length;
+  const pileTicked = pileCards.filter((c) => placed.has(c.key)).length;
 
   return (
     <>
@@ -387,7 +428,12 @@ export default function PullSheet() {
         </div>
         <div className="ps-actions">
           {mode === "pack" ? (
-            <button className="btn btn-ghost" onClick={() => setPackReverse((v) => !v)} title="Which end of your pulled stack you start from">
+            <button
+              className="btn btn-ghost"
+              onClick={() => setPackReverse((v) => !v)}
+              disabled={doneLog.length > 0}
+              title={doneLog.length ? "Locked once a pile is complete — flipping now would renumber the hand under you" : "Which end of your pulled stack you start from"}
+            >
               ⇅ {packReverse ? "Last pulled on top" : "First pulled on top"}
             </button>
           ) : null}
@@ -493,125 +539,69 @@ export default function PullSheet() {
       ) : null}
       </>
       ) : (
-      /* ---- PACK MODE ---- */
+      /* ---- PACK MODE: one pile at a time ---- */
       <>
-      <div className="ps-progress" style={{ marginBottom: 12 }}>
-        <b>{placedCount}</b> / {packView.items.length} sorted into orders
-      </div>
       {packView.items.length === 0 ? (
         <div className="panel"><p className="dd-empty">Nothing to pack — no open orders. 🎉</p></div>
-      ) : (
-        <>
-          <Fold
-            id="pullsheet-piles"
-            title="Order piles"
-            count={packView.piles.length}
-            summary={`${packView.piles.filter((p) => placedInPile(p.pileNo) >= p.count).length} of ${packView.piles.length} complete${packPile != null ? ` · showing pile ${packPile} only` : ""}`}
-          >
-            <p className="hint hint-small" style={{ marginTop: 0 }}>
-              Start a new pile each time a new number appears below — no need to label them; each pile&apos;s buyer is here for reconciling at the end. A buyer who checked out more than once gets ONE pile when the orders go to the same address, marked with how many orders it holds. Tap a pile to show only its cards.
-            </p>
-            <div className="pack-piles">
-              {packView.piles.map((p) => {
-                const got = placedInPile(p.pileNo);
-                const full = got >= p.count;
-                const on = packPile === p.pileNo;
-                return (
-                  <button
-                    type="button"
-                    className={`pack-pile${full ? " full" : ""}${on ? " on" : ""}`}
-                    key={p.pileNo}
-                    aria-pressed={on}
-                    onClick={() => setPackPile(on ? null : p.pileNo)}
-                    title={on ? "Show all piles" : `Show only pile ${p.pileNo}`}
-                  >
-                    <div className="pack-pile-no">Pile {p.pileNo}</div>
-                    <div className="pack-pile-buyer">{p.deliveryName || p.buyer || "Buyer"}</div>
-                    {p.deliveryName && p.buyer ? <div className="pack-pile-user">@{p.buyer}</div> : null}
-                    <div className="pack-pile-meta">{got}/{p.count} card{p.count === 1 ? "" : "s"}{p.orderIds.length > 1 ? ` · ${p.orderIds.length} orders` : ""}{full ? " ✓" : ""}</div>
-                  </button>
-                );
-              })}
-            </div>
-          </Fold>
-
-          <div className="panel">
-            <div className="panel-head">
-              <h3>Your pulled stack — in order</h3>
-              <span className="badge2">{packReverse ? "last pulled first" : "first pulled first"}</span>
-            </div>
-            <p className="hint hint-small" style={{ marginTop: 0 }}>Take each card off the top and drop it into the pile shown. Tick as you go.</p>
-
-            <div className="pack-filters">
-              <div className="pills" role="group" aria-label="Card type">
-                <button aria-pressed={packType === "all"} onClick={() => setPackType("all")}>All</button>
-                <button aria-pressed={packType === "stack"} onClick={() => setPackType("stack")}>Stack</button>
-                <button aria-pressed={packType === "loose"} onClick={() => setPackType("loose")}>Variations</button>
-              </div>
-              <input
-                className="pack-search"
-                type="search"
-                value={packQuery}
-                onChange={(e) => setPackQuery(e.target.value)}
-                placeholder="Filter by buyer, card or set…"
-                aria-label="Filter pack list"
-              />
-              <label className="sd-toggle">
-                <input type="checkbox" checked={packHideDone} onChange={(e) => setPackHideDone(e.target.checked)} />
-                Hide sorted
-              </label>
-              {packFiltered ? (
-                <button className="btn btn-ghost" onClick={() => { setPackPile(null); setPackQuery(""); setPackType("all"); setPackHideDone(false); }}>
-                  ✕ Clear filters
-                </button>
-              ) : null}
-            </div>
-            {packFiltered ? (
-              <p className="hint hint-small" style={{ margin: "0 0 6px" }}>
-                Showing <b>{packVisible.length}</b> of {packView.items.length}
-                {packPile != null ? ` · pile ${packPile} only` : ""} — numbers stay in full deal order.
-              </p>
-            ) : null}
-
-            {packVisible.length === 0 ? (
-              <p className="dd-empty">Nothing matches those filters.</p>
-            ) : (
-              <div className="stack-list">
-                {packVisible.map((it) => {
-                  const done = placed.has(it.key);
-                  return (
-                    <label className={`ps-row pack-row${done ? " done" : ""}`} key={it.key}>
-                      <input type="checkbox" checked={done} onChange={() => togglePlaced(it.key)} />
-                      <span className="stack-pos">{it.seqNo}</span>
-                      <span className="pack-card">
-                        <span className="stack-sku">
-                          {it.variation || it.sku || "no SKU"}
-                          {it.qty > 1 ? <span className="badge2"> ×{it.qty}</span> : null}
-                        </span>
-                        {it.matched ? (
-                          <span className="stack-title">{it.title || <em>—</em>}</span>
-                        ) : (
-                          <span className="pack-set">
-                            {it.setName || <em>—</em>}
-                            {it.setCode ? <span className="loose-set-code">{it.setCode}</span> : null}
-                          </span>
-                        )}
-                      </span>
-                      <span className="pack-dest" aria-label={`Pile ${it.pileNo}, ${it.deliveryName || it.buyer}`}>
-                        <span className="pack-dest-no">Pile {it.pileNo}</span>
-                        <span className="pack-dest-buyer">{it.deliveryName || it.buyer || "Buyer"}</span>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
+      ) : pile == null ? (
+        <div className="panel">
+          <p className="dd-empty" style={{ color: "var(--conf-high)" }}>All {packView.piles.length} pile(s) complete — ready to pack &amp; ship. 🎉</p>
+          <div className="ps-pile-nav">
+            <button className="btn btn-ghost" onClick={reopenLastPile}>‹ Reopen last pile</button>
+            <button className="btn btn-ghost" onClick={startOver}>↺ Start over</button>
           </div>
-
-          {placedCount === packView.items.length ? (
-            <div className="panel"><p className="dd-empty" style={{ color: "var(--conf-high)" }}>All {packView.items.length} cards sorted into {packView.piles.length} pile(s) — ready to pack &amp; ship. 🎉</p></div>
-          ) : null}
-        </>
+        </div>
+      ) : (
+        <div className="panel ps-pile">
+          <div className="ps-progress" style={{ marginBottom: 10 }}>
+            Pile <b>{pile.pileNo}</b> of {packView.piles.length} · {pilesLeft} to go · {hand.depth} card{hand.depth === 1 ? "" : "s"} left in your hand
+          </div>
+          <div className="panel-head">
+            <div className="ps-pile-who">
+              <h3>Pile {pile.pileNo} — {pile.deliveryName || pile.buyer || "Buyer"}</h3>
+              <span className="pack-pile-user">
+                {pile.deliveryName && pile.buyer ? `@${pile.buyer}` : ""}
+                {pile.orderIds.length > 1 ? `${pile.deliveryName && pile.buyer ? " · " : ""}${pile.orderIds.length} orders, one envelope` : ""}
+              </span>
+            </div>
+            <span className="badge2">{pileTicked}/{pileCards.length} in pile</span>
+          </div>
+          <p className="hint hint-small" style={{ marginTop: 0 }}>
+            Card 1 is the top of your hand. Take these out back-first, as listed, so every number stays true until the pile is done.
+          </p>
+          <div className="stack-list">
+            {pileCards.map((it) => {
+              const done = placed.has(it.key);
+              const at = hand.pos.get(it.key);
+              return (
+                <label className={`ps-row pack-row${done ? " done" : ""}`} key={it.key}>
+                  <input type="checkbox" checked={done} onChange={() => togglePlaced(it.key)} />
+                  <span className="stack-pos" title="Position in your hand, counting from the top">
+                    {done ? "✓" : at.from === at.to ? at.from : `${at.from}–${at.to}`}
+                  </span>
+                  <span className="pack-card">
+                    <span className="stack-sku">
+                      {it.variation || it.sku || "no SKU"}
+                      {it.qty > 1 ? <span className="badge2"> ×{it.qty}</span> : null}
+                    </span>
+                    {it.matched ? (
+                      <span className="stack-title">{it.title || <em>—</em>}</span>
+                    ) : (
+                      <span className="pack-set">
+                        {it.setName || <em>—</em>}
+                        {it.setCode ? <span className="loose-set-code">{it.setCode}</span> : null}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="ps-pile-nav">
+            {doneLog.length ? <button className="btn btn-ghost" onClick={reopenLastPile}>‹ Reopen last pile</button> : null}
+            <button className="btn btn-primary" onClick={completePile}>✓ Pile {pile.pileNo} complete</button>
+          </div>
+        </div>
       )}
       </>
       )}
