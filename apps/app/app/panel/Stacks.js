@@ -6,6 +6,7 @@ import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
+import { isToploaderStack, compareByTitle } from "@/lib/toploader.js";
 import Fold from "./Fold";
 
 /**
@@ -347,6 +348,9 @@ export default function Stacks() {
   }
 
   const sel = useMemo(() => stacks.find((s) => s.id === selId), [stacks, selId]);
+  // The toploader box is a stack with no order: listed by name, never numbered.
+  const selBox = isToploaderStack(sel);
+  const shownCards = useMemo(() => (selBox ? [...cards].sort(compareByTitle) : cards), [cards, selBox]);
   // Alphabetise: shorter names first (A–Z, then AA–AH, then longer like ACE /
   // GRADED), alphabetical within each length.
   const sortedStacks = useMemo(
@@ -493,20 +497,26 @@ export default function Stacks() {
 
           <div className="panel">
             <div className="panel-head">
-              <h3>{sel.name}</h3>
-              <span className="badge2">{cards.length} in stack</span>
+              <h3>{selBox ? `🗂 ${sel.name}` : sel.name}</h3>
+              <span className="badge2">{cards.length} {selBox ? "in the box" : "in stack"}</span>
             </div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>
-              Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up.
-              {awayCount > 0 ? <> &nbsp;<b>{awayCount} checked out to a show</b> — numbering skips them (see Show desk).</> : null}
+              {selBox
+                ? "The toploader box: cards kept priced and sleeved between shows, listed by name — there are no positions to count. Check-ins from the Show desk file into it with 🗂 To toploaders."
+                : "Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up."}
+              {awayCount > 0 ? <> &nbsp;<b>{awayCount} checked out to a show</b>{selBox ? "." : " — numbering skips them (see Show desk)."}</> : null}
             </p>
             {cards.length === 0 ? (
-              <p className="dd-empty">No cards in this stack yet.</p>
+              <p className="dd-empty">{selBox ? "Nothing in the box." : "No cards in this stack yet."}</p>
             ) : (
               <div className="stack-list rise-group">
-                {cards.map((c, idx) => (
+                {shownCards.map((c, idx) => (
                   <div className="stack-row" key={c.id}>
-                    <span className="stack-pos" title="Live position (count from top)">{idx + 1}</span>
+                    {selBox ? (
+                      <span className="stack-pos" title="In the toploader box — no positions">🗂</span>
+                    ) : (
+                      <span className="stack-pos" title="Live position (count from top)">{idx + 1}</span>
+                    )}
                     <span className="stack-sku">{c.sku}</span>
                     <span className="stack-title">{c.title || <em>—</em>}</span>
                     <button className="stack-pull" onClick={() => checkOut(c)} disabled={busy} title="Take to a show — hides the listing, numbering re-flows">⤴ Show</button>

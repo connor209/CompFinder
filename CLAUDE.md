@@ -159,6 +159,12 @@ stream` (the relay, only while streaming).
 - `scripts/check-stackpos.mjs` — where a card physically is: that pulled and
   checked-out cards close the numbering up behind them, and a grep against a
   fourth copy of the rule.
+- `scripts/check-toploader.mjs` — the toploader box: that it never shows a
+  position, that no filing plan (Reallocate, Pick a stack, the stream box's
+  return) can choose it, that a card's sticker comes out of the box with it —
+  only off a checkout that came BACK, never into the stream box — that
+  recommended show stock leads with it, and that the pull sheet's pick list
+  and pack hand walk it in the same order.
 - `scripts/check-piles.mjs` — which pile a pull-sheet card is dealt into: a
   pile is one buyer at one ADDRESS, not one order, so a buyer's separate
   checkouts fold into one envelope, the same buyer to two addresses stays two,
@@ -2386,6 +2392,42 @@ knowing:
   `{ ok: false, missing: true }` until 026 is run and the desk carries on
   working. A desk that white-screens at a show because a migration is pending
   is a worse outcome than no want list.
+
+## The toploader box: priced, sleeved, and not in a stack
+
+A month with a show every weekend made the check-in the expensive half: pull
+cards from the stacks, price them, sleeve them in toploaders, then file them
+back on Sunday only to do it all again on Friday. **🗂 To toploaders** on the
+Show Desk's check-in bar files them into the box instead. `lib/toploader.js`
+owns it.
+
+- **The box is a stack with a reserved name** ("Toploaders", spelled once, in
+  `TOPLOADER_STACK_NAME`), made the first time anything is filed into it. That
+  is why the pull sheet, Stacks, the counter's ⌖ locate and "Return to spots"
+  all find a card there with no new code — and why it needs **no migration**.
+  `return_mode` is free text in 016; a box check-in writes `toploader`.
+- **It has no positions.** You flick through a box of toploaders by name, so a
+  number would send somebody counting to a card 37 that is not in any order.
+  `positionLabel()` asks `isToploaderStack()` and says "🗂 Toploaders"; the
+  pull sheet lists the box by name AFTER every stack, and Pack deals it in that
+  same order, because the hand is the order you picked in.
+- **No filing plan chooses it.** It is always the emptiest "stack", so the
+  tightest-fit rule would pick it the first time a return fitted.
+  `fileableStacks()` is what Reallocate, Pick a stack and the stream box's
+  return plan over.
+- **The listing goes back up**, exactly as any check-in: `restoreCheckout()`.
+  A card sold online midweek is on the pull sheet under the box.
+- **The sticker comes out with the card.** The label is still on the
+  toploader, so `checkoutStackCard()` copies the sticker off the card's last
+  checkout — only if that checkout came BACK, only for a show, and only for a
+  card currently in the box. Re-pricing (💷 Price these, ✎ £) writes over it
+  like any sticker, which is how a price gets interrogated. Named on the insert
+  only when found, so a database without 024 never sees the column.
+- **🗂 Toploaders (N)** under Check stock out opens the picker on the box with
+  everything ticked, rather than checking it out blind: the list is still what
+  leaves out a card that sold on eBay since, and what lets one stay home.
+- **★ Recommend show stock leads with the box**, then by value
+  (`compareRecs`) — already priced and sleeved, so bringing one costs nothing.
 
 ## A SKU is a name; a position is an address
 

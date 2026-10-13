@@ -38,6 +38,10 @@ import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 import { showOnly } from "@/lib/streamstock.js";
 import { isSlabTitle, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
 import { checkoutLabelRows, labelWorkbook, LABEL_NAME_KEY } from "@/lib/labelexport.js";
+import {
+  isToploaderStack, toploaderStackOf, fileableStacks, ensureToploaderStack,
+  compareRecs, compareByTitle, TOPLOADER_STACK_NAME, TOPLOADER_RETURN_MODE
+} from "@/lib/toploader.js";
 
 const REC_NO_GRADED_KEY = "cf-rec-no-graded";
 
@@ -47,7 +51,9 @@ const REC_NO_GRADED_KEY = "cf-rec-no-graded";
  * and hides its eBay listing so it can't double-sell. From the desk you then
  * either mark it SOLD at the show (permanent pull + cash-sale record for P&L,
  * listing ended) or check it back in: to its old spot, to the back of a
- * chosen stack, or into a freshly allocated stack.
+ * chosen stack, into a freshly allocated stack, or into the toploader box —
+ * priced and sleeved, back on eBay, and ready for next weekend (see
+ * lib/toploader.js).
  */
 
 const pounds = (pence) => `£${((pence || 0) / 100).toFixed(2)}`;
@@ -404,6 +410,10 @@ export default function ShowDesk() {
   }, [loading, needsMigration, wantsMissing]);
 
   const stackName = useMemo(() => new Map(stacks.map((s) => [s.id, s.name])), [stacks]);
+  // The toploader box, if one has ever been filed into. See lib/toploader.js.
+  const toploaderBox = useMemo(() => toploaderStackOf(stacks), [stacks]);
+  // Set by "🗂 Toploaders": once the picker has listed the box, tick all of it.
+  const tickBoxOnOpen = useRef(false);
 
   // ---- Checkout ------------------------------------------------------------
 
@@ -430,7 +440,8 @@ export default function ShowDesk() {
         : r.hideMethod === "quantity" ? "listing hidden (qty 0)"
         : r.hideMethod === "ended" ? "listing ended — relists at check-in"
         : r.itemId ? "listing left live" : "no listing found";
-      results.push({ sku: card.sku, ok: true, text: `out of ${stackName.get(card.stack_id) || "stack"} · ${hideText}` });
+      const carried = r.stickerPence != null ? ` · sticker ${pounds(r.stickerPence)} carried over` : "";
+      results.push({ sku: card.sku, ok: true, text: `out of ${stackName.get(card.stack_id) || "stack"} · ${hideText}${carried}` });
     }
     return results;
   }
@@ -517,9 +528,11 @@ export default function ShowDesk() {
         rank: ranks.get(c.id) ?? null,
         depth: depths.get(c.stack_id) ?? null,
         graded: isSlabTitle(c.title),
+        toploaded: isToploaderStack(stackName.get(c.stack_id)),
         game: gameOf({ category: categoryBySku.get(String(c.sku).toLowerCase()), title: c.title }, sets.gameIndex)
       }))
-      .sort((a, b) => b.pricePence - a.pricePence);
+      // Toploaded cards first: already priced, stickered and sleeved.
+      .sort(compareRecs);
     setRecPool(ranked);
     setRecsLoading(false);
   }
@@ -684,11 +697,14 @@ export default function ShowDesk() {
     // No listings read means no evidence either way: say nothing rather than
     // call every card on the shelf "not listed".
     const offSale = listings.length > 0 ? offSaleIndex(listings, sales || []) : null;
-    return skuBatch(present, batchPrefix, { stackId: batchStack, rankOf: (c) => ranks.get(c.id), away: awayIndex }).map((card) => ({
+    // The toploader box has no order to walk, so it lists by name.
+    const picked = skuBatch(present, batchPrefix, { stackId: batchStack, rankOf: (c) => ranks.get(c.id), away: awayIndex });
+    if (!batchPrefix.trim() && isToploaderStack(stackName.get(batchStack))) picked.sort(compareByTitle);
+    return picked.map((card) => ({
       card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null,
       offSale: offSaleReason(card.sku, offSale)
     }));
-  }, [stackCards, batchPrefix, batchStack, awayIndex, listings, sales]);
+  }, [stackCards, batchPrefix, batchStack, awayIndex, listings, sales, stackName]);
   // Sold and sold-out cards leave the picker unless asked for, and are counted:
   // a card that sold online but was never pulled is still a row on the shelf.
   const batchGone = batchRows.filter((r) => r.offSale === "sold" || r.offSale === "outofstock");
@@ -697,6 +713,26 @@ export default function ShowDesk() {
   // Only ticks the list can still see: a card checked out since, or outside a
   // narrowed prefix, is never acted on — the selectionFor() rule.
   const batchChosen = batchShown.filter((r) => batchPick.has(r.card.id)).map((r) => r.card);
+  // How many cards are in the box right now — on the button that lists them.
+  const toploaderCount = useMemo(
+    () => (toploaderBox ? stackCards.filter((c) => c.stack_id === toploaderBox.id && !c.pulled_at && !isCardAway(c, awayIndex)).length : 0),
+    [toploaderBox, stackCards, awayIndex]
+  );
+  // "Check out the toploaders" is the picker opened on the box with every card
+  // ticked, rather than a button that checks them out blind: the list is what
+  // shows a card that sold on eBay since, and what lets one stay home.
+  useEffect(() => {
+    if (!tickBoxOnOpen.current || !toploaderBox || batchStack !== toploaderBox.id) return;
+    tickBoxOnOpen.current = false;
+    setBatchPick(new Set(batchShown.map((r) => r.card.id)));
+  }, [batchShown, batchStack, toploaderBox]);
+  function openToploaders() {
+    if (!toploaderBox) return;
+    tickBoxOnOpen.current = true;
+    setBatchPrefix("");
+    setBatchStack(toploaderBox.id);
+    setBatchPick(new Set());
+  }
   const listingById = useMemo(() => {
     const m = new Map();
     for (const l of listings) if (l?.ebay_item_id) m.set(String(l.ebay_item_id), l);
@@ -893,9 +929,11 @@ export default function ShowDesk() {
     setSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
 
-  // Stacks with their live count + free space, in warehouse order.
+  // Stacks with their live count + free space, in warehouse order. Never the
+  // toploader box: it has its own button, and a filing plan that picked it as
+  // "the tightest fit" would hide cards in the one place with no positions.
   const stacksWithSpace = useMemo(
-    () => stacks.map((s) => {
+    () => fileableStacks(stacks).map((s) => {
       const used = usedByStack.get(s.id) || 0;
       return { ...s, used, free: Math.max(0, capacity - used) };
     }),
@@ -975,6 +1013,11 @@ export default function ShowDesk() {
 
     let stackId = chosenStackId;
     let newStackNote = "";
+    if (mode === TOPLOADER_RETURN_MODE) {
+      const box = await ensureToploaderStack(sb, user.id, stacks);
+      if (!box.ok) { setBusy(false); setMsg(box.error); return; }
+      stackId = box.id;
+    }
     if (mode === "new_stack") {
       const name = nextStackName(stacks.map((s) => s.name));
       const { data: created } = await sb.from("card_stacks").insert({ user_id: user.id, name }).select("id,name").single();
@@ -983,7 +1026,9 @@ export default function ShowDesk() {
       newStackNote = ` into new stack ${created.name}`;
     }
     let base = 0;
-    if (mode === "back" || mode === "new_stack") base = await maxPosition(sb, stackId);
+    // The box has no order, but a position is still the sort key every stack
+    // row carries, so a filed card goes behind what is there.
+    if (mode === "back" || mode === "new_stack" || mode === TOPLOADER_RETURN_MODE) base = await maxPosition(sb, stackId);
 
     let restored = 0;
     const warnings = [];
@@ -997,7 +1042,10 @@ export default function ShowDesk() {
     }
     setProgress("");
     setBusy(false);
-    const modeText = mode === "spot" ? "to their original spots" : mode === "back" ? ` to the back of ${stackName.get(stackId) || "the stack"}` : newStackNote;
+    const modeText = mode === "spot" ? "to their original spots"
+      : mode === "back" ? ` to the back of ${stackName.get(stackId) || "the stack"}`
+      : mode === TOPLOADER_RETURN_MODE ? "into the toploader box — back on sale on eBay, stickers kept for the next show"
+      : newStackNote;
     setMsg(`Checked in ${restored} card(s) ${modeText}.${warnings.length ? ` ⚠ ${warnings.join(" · ")}` : ""}`.trim());
     await load();
   }
@@ -1307,6 +1355,16 @@ export default function ShowDesk() {
             <option value="">any stack</option>
             {stacks.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
           </select>
+          {toploaderBox ? (
+            <button
+              className="btn btn-ghost"
+              onClick={openToploaders}
+              disabled={busy || toploaderCount === 0}
+              title="List everything in the toploader box, all ticked — untick anything staying home, then check out. Each card takes its sticker with it."
+            >
+              🗂 {TOPLOADER_STACK_NAME} ({toploaderCount})
+            </button>
+          ) : null}
           {batchOpen ? (
             <button className="btn btn-ghost" onClick={() => { setBatchPrefix(""); setBatchStack(""); setBatchPick(new Set()); }}>Close</button>
           ) : (
@@ -1355,7 +1413,11 @@ export default function ShowDesk() {
                       onChange={() => setBatchPick((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
                     />
                     <span className="stack-sku" title="The card's SKU. A name, not an address — it does not move when the stack re-flows.">{card.sku}</span>
-                    <span className="stack-pos" title="Live position — count this many from the top of the stack">{rank ?? "?"}</span>
+                    {isToploaderStack(stackName.get(card.stack_id)) ? (
+                      <span className="stack-pos" title="In the toploader box — no positions, find it by name">🗂</span>
+                    ) : (
+                      <span className="stack-pos" title="Live position — count this many from the top of the stack">{rank ?? "?"}</span>
+                    )}
                     <span className="stack-title">{card.title || <em>—</em>}</span>
                     {offSale ? (
                       <span
@@ -1398,7 +1460,7 @@ export default function ShowDesk() {
       {recs !== null && !customerMode ? (
         <Fold
           id="showdesk-recs"
-          title="Recommended show stock — highest value first"
+          title="Recommended show stock — toploaded first, then highest value"
           count={recPool.length ? `${recChosen.length} ticked` : null}
           summary={recPool.length
             ? `${recChosen.length} card${recChosen.length === 1 ? "" : "s"} ticked · ${pounds(recChosen.reduce((t, r) => t + r.pricePence, 0))} — open to review and check out.`
@@ -1417,7 +1479,8 @@ export default function ShowDesk() {
           ) : (
             <>
               <p className="hint hint-small" style={{ marginTop: 0 }}>
-                Your live stock ranked by listing price. Untick anything staying home, then check the rest out in one go.
+                Your live stock ranked by listing price, with the toploader box first — those are already priced and
+                sleeved. Untick anything staying home, then check the rest out in one go.
                 Each row is the SKU, then the <b>live position</b> to count to — not the same number: a SKU never
                 moves, positions close up behind every card pulled or taken to a show.
               </p>
@@ -1451,7 +1514,7 @@ export default function ShowDesk() {
                 </label>
               </div>
               <div className="stack-list">
-                {recs.map(({ card, pricePence, rank, depth }) => (
+                {recs.map(({ card, pricePence, rank, depth, toploaded }) => (
                   <label className="ps-row sd-rec-row" key={card.id}>
                     <input
                       type="checkbox"
@@ -1461,9 +1524,13 @@ export default function ShowDesk() {
                     <span className="stack-sku" title="The card's SKU. A name, not an address — it does not move when the stack re-flows.">
                       {card.sku}
                     </span>
-                    <span className="stack-pos" title="Live position — count this many from the top of the stack">
-                      {rank ?? "?"}
-                    </span>
+                    {toploaded ? (
+                      <span className="stack-pos" title="In the toploader box — already priced and sleeved">🗂</span>
+                    ) : (
+                      <span className="stack-pos" title="Live position — count this many from the top of the stack">
+                        {rank ?? "?"}
+                      </span>
+                    )}
                     <span className="stack-title">{card.title || <em>—</em>}</span>
                     <span className="badge2" title="Where to walk, and how far to count">
                       {positionLabel(stackName.get(card.stack_id), rank, depth)}
@@ -1676,6 +1743,7 @@ export default function ShowDesk() {
               <div className="ps-actions">
                 <button className="btn btn-primary" onClick={buildPlan} disabled={busy || selCount === 0}>✨ Reallocate ({selCount})</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy || selCount === 0}>↩ Return to spots</button>
+                <button className="btn btn-ghost" onClick={() => checkin(selected, TOPLOADER_RETURN_MODE)} disabled={busy || selCount === 0} title="Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out">🗂 To toploaders ({selCount})</button>
                 <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
                 <button className="btn btn-ghost" onClick={downloadSelectedLabels} disabled={busy || selCount === 0} title="Label file (.xlsx) for these cards, from the sticker prices they already carry — no pricing run">🏷 Labels ({selCount})</button>

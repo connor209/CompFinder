@@ -4,6 +4,7 @@
  * skips it), writes a ledger row in stock_checkouts, and (best-effort) hides
  * the eBay listing via /api/ebay/hide.
  */
+import { isToploaderStack, carriedSticker } from "./toploader.js";
 
 /**
  * How to take the listing off sale at checkout. "auto" tries the out-of-stock
@@ -71,7 +72,9 @@ const STREAM_MIGRATION_MSG = "Run migration 031_stream_stock.sql in the Supabase
  * the live-stream box (migration 031; see lib/streamstock.js).
  * `card` is a stack_cards row ({ id, stack_id, sku, title, ebay_item_id }).
  * `hideMode` is a HIDE_MODES key (defaults to the saved preference).
- * Returns { ok, checkoutId, itemId, hideMethod, hideError } or { ok:false, error }.
+ * Returns { ok, checkoutId, itemId, hideMethod, hideError, stickerPence } or
+ * { ok:false, error }. `stickerPence` is the label carried out of the
+ * toploader box (see lib/toploader.js), or null.
  *
  * A show checkout never NAMES the pool column: the column defaults to 'show',
  * and a show checkout that named it would stop working on a database that has
@@ -109,6 +112,25 @@ export async function checkoutStackCard(sb, { card, stackName, event, hideMode, 
     hide_method: "none"
   };
   if (stream) row.pool = "stream";
+
+  // A card out of the toploader box still has its label on, so the checkout
+  // starts with the sticker that label says. Read with `select *` and only
+  // named on the insert when found, so a database without 024 never sees the
+  // column — a previous checkout cannot carry a sticker 024 never stored.
+  let stickerPence = null;
+  if (!stream && isToploaderStack(stackName)) {
+    const { data: prev } = await sb
+      .from("stock_checkouts")
+      .select("*")
+      .eq("stack_card_id", card.id)
+      .not("resolved_at", "is", null)
+      .order("resolved_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    stickerPence = carriedSticker(prev);
+    if (stickerPence != null) row.sticker_pence = stickerPence;
+  }
+
   const { data: co, error: coErr } = await sb
     .from("stock_checkouts")
     .insert(row)
@@ -145,7 +167,7 @@ export async function checkoutStackCard(sb, { card, stackName, event, hideMode, 
     await sb.from("stock_checkouts").update({ hide_method: hideMethod, hide_error: hideError }).eq("id", co.id);
   }
 
-  return { ok: true, checkoutId: co.id, itemId, hideMethod, hideError };
+  return { ok: true, checkoutId: co.id, itemId, hideMethod, hideError, stickerPence };
 }
 
 /**

@@ -10,6 +10,7 @@ import { listingState, matchesQuery, compareSku } from "@/lib/showfilter.js";
 import { relayUrl } from "@/lib/livestream.js";
 import { checkoutLine, sellLine } from "@/lib/deal.js";
 import { parseOverridePence } from "@/lib/price-override.js";
+import { fileableStacks } from "@/lib/toploader.js";
 import {
   checkoutStackCard, getHideMode, maxPosition, restoreCheckout,
   planReallocation, nextStackName, DEFAULT_STACK_CAPACITY
@@ -434,7 +435,8 @@ export default function StreamStock() {
       // The fewest stacks touched — the Show Desk's reallocation, unchanged.
       const used = new Map();
       for (const c of cards) if (!c.checked_out_at) used.set(c.stack_id, (used.get(c.stack_id) || 0) + 1);
-      const { groups } = planReallocation(list.length, stacks.map((s) => ({ ...s, used: used.get(s.id) || 0 })), capacity);
+      // Never into the toploader box: it has no positions, see lib/toploader.js.
+      const { groups } = planReallocation(list.length, fileableStacks(stacks).map((s) => ({ ...s, used: used.get(s.id) || 0 })), capacity);
       const { data: { user } } = await sb.auth.getUser();
       const names = stacks.map((s) => s.name);
       let cursor = 0;
