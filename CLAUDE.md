@@ -120,7 +120,9 @@ stream` (the relay, only while streaming).
 - `scripts/check-games.mjs` — which game a card of ours is, for the game chips
   on the Show Desk (**★ Recommend show stock**, the away list, the counter and
   the binder): eBay's category, then the title naming the game, then a
-  catalogue set name only one game uses. Every refusal errs to "Unidentified",
+  catalogue set name only one game uses. Yu-Gi-Oh is also read off a card code
+  carrying its language (LOB-EN001), since most YGO titles name no game; a
+  bare code (OP01-013, BT1-001) or a Weiss one (KS/W49-E001) is not it. Every refusal errs to "Unidentified",
   which stays on screen: bare "magic" is not MTG (Magic Cylinder), a one-word
   set is not evidence ("Judgment Dragon"), a shared set name says nothing. And
   that the recommendations are the chosen games THEN the top N, that one chip

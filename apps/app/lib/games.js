@@ -39,7 +39,12 @@ export const GAMES = [
   { slug: "pokemon", name: "Pokémon", pattern: /\bpok[eé]mon\b/i },
   { slug: "onepiece", name: "One Piece", pattern: /\bone\s*piece\b|\b(?:OP|ST|EB|PRB)\d{2}-\d{3}\b/i },
   { slug: "magic", name: "Magic", pattern: /\bmtg\b|\bmagic\s*:?\s*the\s+gathering\b/i },
-  { slug: "yugioh", name: "Yu-Gi-Oh!", pattern: /\byu-?gi-?oh\b/i },
+  // Yu-Gi-Oh by name in any of its spellings ("Yu Gi Oh", "Yugioh", "YGO"), or
+  // by a card code carrying its language (LOB-EN001, RA01-EN054) — most YGO
+  // titles name only the card and its code. The language is what makes the
+  // code Yu-Gi-Oh: a bare OP01-013 is One Piece and BT1-001 Digimon, and the
+  // character before it must not be "/" so a Weiss code (KS/W49-E001) stays out.
+  { slug: "yugioh", name: "Yu-Gi-Oh!", pattern: /\byu[\s-]?gi[\s-]?oh\b|\bygo\b|(?:^|[^\w/])[A-Z0-9]{2,5}-(?:EN|DE|FR|IT|SP|PT|JP|KR|AE)\d{3}\b/i },
   { slug: "lorcana", name: "Lorcana", pattern: /\blorcana\b/i },
   { slug: "dragonball", name: "Dragon Ball", pattern: /\bdragon\s*ball\b/i },
   { slug: "digimon", name: "Digimon", pattern: /\bdigimon\b/i },
