@@ -25,6 +25,20 @@
 import { isToploaderStack } from "./toploader.js";
 
 /**
+ * The stack and position an eBay SKU was written as, for Auto-import: `A50` is
+ * Stack A, position 50. A game tag may sit in front of the stack letters —
+ * `YGO-A12` (or `YGO A12`, `YGO_A12`) is Stack YGO-A, position 12, a stack of
+ * its own and never Pokémon's Stack A. Anything else is null, and the import
+ * counts it as non-standard rather than guessing where it lives.
+ */
+export function stackFromSku(sku) {
+  const m = String(sku || "").trim().match(/^([A-Za-z]+)(?:[-_ ]([A-Za-z]+))?[-_ ]?(\d{1,4})$/);
+  if (!m) return null;
+  const prefix = (m[2] ? `${m[1]}-${m[2]}` : m[1]).toUpperCase();
+  return { prefix, num: parseInt(m[3], 10) };
+}
+
+/**
  * Live 1-based position of every card that is physically in its stack.
  *
  * Two kinds of card are absent and both close the numbering up behind them:

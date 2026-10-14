@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
-import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
+import { liveRanks, stackDepths, positionLabel, stackFromSku } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, compareByTitle } from "@/lib/toploader.js";
@@ -93,22 +93,23 @@ export default function Stacks() {
   }, [selId]);
 
   // Auto-create stacks from eBay listing SKUs (prefix = stack, number =
-  // position). e.g. A50 -> Stack A, position 50. Reuses existing stacks and
+  // position). e.g. A50 -> Stack A, position 50; YGO-A12 -> Stack YGO-A,
+  // position 12 (see stackFromSku). Reuses existing stacks and
   // skips SKUs already added.
   async function autoImport() {
     const sb = supabase();
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return;
-    if (!confirm("Auto-create stacks from your eBay listing SKUs?\n\nEach SKU like A50 becomes Stack A, position 50. Existing stacks are reused and SKUs already added are skipped.")) return;
+    if (!confirm("Auto-create stacks from your eBay listing SKUs?\n\nEach SKU like A50 becomes Stack A, position 50 (YGO-A12 becomes Stack YGO-A, position 12). Existing stacks are reused and SKUs already added are skipped.")) return;
     setBusy(true);
     setMsg("");
     const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title,ebay_item_id").not("sku", "is", null));
     let unparseable = 0;
     const parsed = [];
     for (const l of listings) {
-      const m = String(l.sku).trim().match(/^([A-Za-z]+)[-_ ]?(\d{1,4})$/);
-      if (!m) { unparseable += 1; continue; }
-      parsed.push({ prefix: m[1].toUpperCase(), num: parseInt(m[2], 10), sku: String(l.sku).trim(), title: l.title || "", ebay_item_id: l.ebay_item_id || null });
+      const at = stackFromSku(l.sku);
+      if (!at) { unparseable += 1; continue; }
+      parsed.push({ prefix: at.prefix, num: at.num, sku: String(l.sku).trim(), title: l.title || "", ebay_item_id: l.ebay_item_id || null });
     }
     const existing = await pagedSelect(() => sb.from("stack_cards").select("sku").not("sku", "is", null));
     const have = new Set(existing.map((e) => String(e.sku).toLowerCase()));

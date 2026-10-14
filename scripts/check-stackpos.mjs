@@ -18,7 +18,7 @@
  * time anything is pulled.
  */
 import { readFileSync } from "node:fs";
-import { liveRanks, stackDepths, positionLabel } from "../apps/app/lib/stackpos.js";
+import { liveRanks, stackDepths, positionLabel, stackFromSku } from "../apps/app/lib/stackpos.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -115,6 +115,20 @@ for (const screen of ["apps/app/app/panel/ShowDesk.js", "apps/app/app/panel/Stac
     fail(`${screen} still counts positions by hand — that is the copy this file replaced`);
   }
 }
+// Auto-import: which stack a SKU files into. A game tag in front makes a stack
+// of its own — YGO-A12 never lands in Pokémon's Stack A.
+for (const [sku, want] of [
+  ["A50", "A 50"], ["ab-12", "AB 12"], ["AB_7", "AB 7"], ["ACE 3", "ACE 3"],
+  ["YGO-A12", "YGO-A 12"], ["YGO A12", "YGO-A 12"], ["ygo_ab-5", "YGO-AB 5"], ["YGO-A-12", "YGO-A 12"],
+  ["A12Y", null], ["12", null], ["YGO-12345", null], ["", null], [null, null]
+]) {
+  const got = stackFromSku(sku);
+  eq(`stackFromSku(${JSON.stringify(sku)})`, got ? `${got.prefix} ${got.num}` : null, want);
+}
+if (!/stackFromSku\(l\.sku\)/.test(read("apps/app/app/panel/Stacks.js")) || /match\(\/\^\(\[A-Za-z\]\+\)/.test(read("apps/app/app/panel/Stacks.js"))) {
+  fail("Stacks.js auto-import must read SKUs through stackFromSku(), not a regex of its own");
+}
+
 if (/^\s*import\s+.*from\s+["']@\//m.test(read("apps/app/lib/stackpos.js"))) {
   fail("stackpos.js has picked up an app-aliased import — it has to stay loadable under bare node");
 }
