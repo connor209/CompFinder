@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import {
   poolOf, isShowCheckout, isStreamCheckout, showOnly, streamOnly, isMissingPool, withPool,
   streamHideMode, conditionCode, nameTerms, matchesNames, streamCandidates, recommendStream,
-  duplicateKey, priceBands, CONDITIONS, DEFAULT_PICK_MODE, DEFAULT_MAX_COPIES,
+  duplicateKey, oneOfEach, priceBands, CONDITIONS, DEFAULT_PICK_MODE, DEFAULT_MAX_COPIES,
   airingCounts, boxStatus, topUpCount, pullSheet, latestBatch, matchAired, streamTally,
   AIRINGS_BEFORE_RETURN, STREAMS_BACKSTOP, SHOW_POOL, STREAM_POOL
 } from "../apps/app/lib/streamstock.js";
@@ -174,6 +174,17 @@ eq("the default is a spread", DEFAULT_PICK_MODE, "spread");
 eq("the default is no duplicates", DEFAULT_MAX_COPIES, 1);
 ok("two copies of one card are one key", duplicateKey("Charizard V 17/189 Darkness Ablaze") === duplicateKey("Charizard V 17/189 NM"));
 ok("a reverse holo is not the plain copy", duplicateKey("Emboar 33/236 Reverse Holo") !== duplicateKey("Emboar 33/236"));
+{
+  // ★ Recommend show stock: one copy each, the first-ranked copy kept, and a
+  // card already at a show is not offered again.
+  const r = (id, title) => ({ card: { id, title } });
+  const { rows, dropped } = oneOfEach([
+    r("box", "Charizard V 17/189 Darkness Ablaze"), r("dear", "Charizard V 17/189 NM"),
+    r("rev", "Emboar 33/236 Reverse Holo"), r("plain", "Emboar 33/236"), r("away", "Umbreon VMAX 215/203")
+  ], ["Umbreon VMAX 215/203 Evolving Skies"]);
+  ok("show recs keep the first copy of each card", rows.map((x) => x.card.id).join() === "box,rev,plain");
+  ok("show recs count what they left out", dropped === 2);
+}
 ok("a stamped copy is not the plain one", duplicateKey("Shedinja 14/107 Prerelease Stamp") !== duplicateKey("Shedinja 14/107"));
 ok("different numbers are different cards", duplicateKey("Pikachu 58/102") !== duplicateKey("Pikachu 60/64"));
 ok("a title with no number still dedupes against itself", duplicateKey("Mystery Lot Card") === duplicateKey("mystery lot card"));

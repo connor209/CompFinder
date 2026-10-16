@@ -281,6 +281,26 @@ export function duplicateKey(title) {
 }
 
 /**
+ * One copy of each card, for ★ Recommend show stock on the Show Desk. Keeps
+ * the FIRST copy of each `duplicateKey()` in the order given — so whatever the
+ * caller ranked first (the toploaded copy, then the dearest) is the one that
+ * stays — and drops any card already at a show (`held`, their titles).
+ * Returns { rows, dropped }; the count goes on screen, never quietly.
+ */
+export function oneOfEach(rows, held = []) {
+  const seen = new Set((held || []).filter(Boolean).map(duplicateKey));
+  const out = [];
+  let dropped = 0;
+  for (const r of rows || []) {
+    const k = duplicateKey(r.title ?? r.card?.title ?? "");
+    if (seen.has(k)) { dropped += 1; continue; }
+    seen.add(k);
+    out.push(r);
+  }
+  return { rows: out, dropped };
+}
+
+/**
  * Price bands for a spread: equal steps on a LOG scale between the cheapest
  * and dearest card that fit. Equal-width pound bands would put £2 to £160 in
  * one band beside a card at £800; log steps give £2–£6, £6–£20, £20–£60 and so

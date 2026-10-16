@@ -35,7 +35,7 @@ import WishPickup from "./WishPickup";
 import Fold from "./Fold";
 import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
-import { showOnly } from "@/lib/streamstock.js";
+import { showOnly, oneOfEach } from "@/lib/streamstock.js";
 import { isSlabTitle, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
 import { checkoutLabelRows, labelWorkbook, LABEL_NAME_KEY } from "@/lib/labelexport.js";
 import {
@@ -540,11 +540,20 @@ export default function ShowDesk() {
   // The chips come from the whole pool, so a game is offered only if we hold
   // some of it; the list is the chosen games, THEN the top N.
   const recFacets = useMemo(() => (recPool ? gameFacets(recPool) : []), [recPool]);
+  // One copy of each card, counting what is already at a show: a second
+  // Charizard in the box is table space a different card could have had. Taken
+  // BEFORE the top N, so the N are N different cards.
+  const recDistinct = useMemo(
+    () => (recPool === null ? null : oneOfEach(
+      filterByGames(recPool, recGames).filter((r) => !(recNoGraded && r.graded)),
+      open.map((co) => co.title)
+    )),
+    [recPool, recGames, recNoGraded, open]
+  );
   const recs = useMemo(
-    () => (recPool === null ? null : filterByGames(recPool, recGames)
-      .filter((r) => !(recNoGraded && r.graded))
+    () => (recDistinct === null ? null : recDistinct.rows
       .slice(0, Math.max(1, Math.min(200, Number(recCount) || 20)))),
-    [recPool, recGames, recCount, recNoGraded]
+    [recDistinct, recCount]
   );
   // Counted over the chosen games, and shown: a card left out says so.
   const recGradedOut = useMemo(
@@ -1494,6 +1503,12 @@ export default function ShowDesk() {
                   <span className="hint hint-small">({recGradedOut} slab{recGradedOut === 1 ? "" : "s"} left out)</span>
                 ) : null}
               </label>
+              {recDistinct?.dropped > 0 ? (
+                <p className="hint hint-small">
+                  {recDistinct.dropped} duplicate{recDistinct.dropped === 1 ? "" : "s"} left out — one copy of each card
+                  is recommended, and a card already at a show is not offered again.
+                </p>
+              ) : null}
               <div className="sd-bulkbar">
                 <label className="sd-toggle">
                   <input

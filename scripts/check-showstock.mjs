@@ -343,8 +343,11 @@ for (const [title, want] of [
   ["", false]
 ]) eq(`isSlabTitle(${JSON.stringify(title)})`, isSlabTitle(title), want);
 
-if (!/filterByGames\(recPool, recGames\)\s*\.filter\(\(r\) => !\(recNoGraded && r\.graded\)\)\s*\.slice\(/.test(desk)) {
-  fail("the graded filter on recommendations must run BEFORE the top-N slice, or 'top 20' with it ticked shows fewer than 20");
+// The graded filter and the one-copy-each dedupe both run BEFORE the top-N
+// slice, or "top 20" with either in play shows fewer than 20.
+if (!/oneOfEach\(\s*filterByGames\(recPool, recGames\)\.filter\(\(r\) => !\(recNoGraded && r\.graded\)\)/.test(desk) ||
+    !/recDistinct\.rows\s*\.slice\(/.test(desk)) {
+  fail("the graded filter and the duplicate filter on recommendations must run BEFORE the top-N slice, or 'top 20' shows fewer than 20");
 }
 
 if (failures) {
