@@ -1,19 +1,21 @@
 /**
- * Comp Finder — the storefront: the binder, on a stranger's phone.
+ * Comp Finder — the storefront: our stock, on a stranger's phone.
  *
- * The binder (binder.js) is the show stock laid out nine to a page for a
- * customer, and it works — but only while the tablet is in their hands. A
- * table has room for one conversation at a time and a box of cards nobody can
- * see. This is the same binder behind a QR on the table: somebody waiting, or
- * browsing the next table along, flips through the box on their own phone and
- * points at what they want.
+ * Somebody scans the QR on the table (or on a business card), sees our
+ * dearest cards, and types what they are after. It used to be the Show
+ * Desk's binder, nine to a page — and to page through a binder the browser
+ * needs every card, so the first load shipped the WHOLE inventory, thousands
+ * of cards with two picture URLs each, inline in the HTML, over venue wifi.
+ * That was the slow part. Now the page opens on storefrontLanding() — a few
+ * dozen cards and the filter options — and the search box asks the server for
+ * storefrontSearch(), a page at a time.
  *
  * **This is the app's first anonymous surface**, and that is what shapes the
  * file. On the Show Desk the allow-list runs in a browser that is already
  * logged in and already holds every checkout row, SKUs and all — the pocket is
  * an allow-list so the SCREEN cannot show a private field. Here the rows never
- * reach the browser at all. The server builds the binder, projects it through
- * `storefrontCard()`, and ships that and nothing else, so a private field is
+ * reach the browser at all. The server builds the pockets, projects them
+ * through `storefrontCard()`, and ships slices of that and nothing else, so a private field is
  * not hidden from a stranger, it is absent from anything they could download.
  *
  * Three things the desk's pocket carries that a stranger's does not:
@@ -37,7 +39,8 @@
  */
 import { normalise } from "./showfilter.js";
 import { counterPrice } from "./showcounter.js";
-import { binderView, binderPages, binderKey, BOX, ONLINE, SECTION_LABELS, ASK_TEXT } from "./binder.js";
+import { binderView, binderKey, BOX, ONLINE, SECTION_LABELS, ASK_TEXT } from "./binder.js";
+import { gameOf, gameFacets, UNKNOWN_GAME } from "./games.js";
 
 export { BOX, ONLINE, SECTION_LABELS, ASK_TEXT };
 
@@ -47,25 +50,25 @@ export { BOX, ONLINE, SECTION_LABELS, ASK_TEXT };
  * so adding one is a deliberate act with a test behind it.
  */
 export const STOREFRONT_FIELDS = [
-  "key", "source", "name", "set", "condition", "pricePence", "priceText", "priceFrom",
+  "key", "source", "name", "set", "game", "condition", "pricePence", "priceText", "priceFrom",
   "image", "imageLarge", "count", "copies"
 ];
 export const STOREFRONT_COPY_FIELDS = ["condition", "pricePence", "priceText"];
 
 /**
- * How a visitor can order the binder.
+ * How a visitor can order a search.
  *
- * binder.js's list minus "Order packed", which is how WE packed the box — it
- * means nothing to a stranger, and the server has already put everything in
- * A–Z before it leaves.
+ * binder.js's list minus "Order packed", which is how WE packed the box and
+ * means nothing to a stranger. Dearest first by default, because the page
+ * opens on our best cards and a search should read the same way.
  */
 export const STOREFRONT_SORTS = [
-  { key: "name", label: "A–Z" },
-  { key: "name-desc", label: "Z–A" },
   { key: "value-desc", label: "Dearest first" },
-  { key: "value-asc", label: "Cheapest first" }
+  { key: "value-asc", label: "Cheapest first" },
+  { key: "name", label: "A–Z" },
+  { key: "name-desc", label: "Z–A" }
 ];
-export const DEFAULT_STOREFRONT_SORT = "name";
+export const DEFAULT_STOREFRONT_SORT = "value-desc";
 
 /**
  * The price filter, in a visitor's words: bands a pocket's CHEAPEST copy falls
@@ -95,13 +98,6 @@ export function priceMatches(card, key = "any") {
   return p != null && p >= band.min && p <= band.max;
 }
 
-/** Which stock is on screen. Only offered when the link carries both. */
-export const STOREFRONT_SCOPES = [
-  { key: "all", label: "Everything" },
-  { key: BOX, label: "At the table" },
-  { key: ONLINE, label: "Also in stock" }
-];
-
 /**
  * A shop link's wording. Same two sections — the never-merge rule holds,
  * since a card at a show this weekend is not one we can post today — but
@@ -112,12 +108,6 @@ export const SHOP_SECTION_LABELS = {
   [BOX]: { title: "Out at a show", note: "On our table at a show right now — back in stock after." },
   [ONLINE]: { title: "In stock", note: "Ask us about any card and we'll check it for you." }
 };
-export const SHOP_SCOPES = [
-  { key: "all", label: "Everything" },
-  { key: ONLINE, label: "In stock" },
-  { key: BOX, label: "Out at a show" }
-];
-
 /** A price that is really a price, or null. */
 function pence(n) {
   const v = n == null ? NaN : Number(n);
@@ -141,7 +131,7 @@ export function storefrontCopy(copy) {
  * already an allow-list, but it is an allow-list for a screen WE hold, and it
  * carries ids that are fine there and not here. See the file header.
  */
-export function storefrontCard(pocket, index, set = null) {
+export function storefrontCard(pocket, index, set = null, game = null) {
   const source = pocket?.source === ONLINE ? ONLINE : BOX;
   const copies = Array.isArray(pocket?.copies) ? pocket.copies.map(storefrontCopy) : [];
   const p = pence(pocket?.pricePence);
@@ -150,6 +140,7 @@ export function storefrontCard(pocket, index, set = null) {
     source,
     name: String(pocket?.name || "Card"),
     set: set ? String(set) : null,
+    game: game ? String(game) : UNKNOWN_GAME,
     condition: pocket?.condition ?? null,
     pricePence: p,
     priceText: counterPrice(p),
@@ -180,18 +171,27 @@ export function imagesBySku(listings) {
 /**
  * The whole storefront, built on the SERVER from rows a stranger never sees.
  *
- * Returns projected cards only. Everything that crosses to the browser comes
- * out of this function, which is why check-storefront.mjs stuffs the rows it
- * is handed with every private value the app knows and searches the result.
+ * Returns projected cards only. Nothing here goes to the browser whole any
+ * more — storefrontLanding() and storefrontSearch() hand over a slice — but
+ * every slice is cut from THIS, which is why check-storefront.mjs stuffs the
+ * rows it is handed with every private value the app knows and searches the
+ * result.
+ *
+ * `gameIndex` is buildSetGameIndex()'s, from the same catalogue read as the
+ * set matcher. Without it a card is still read by its eBay category and its
+ * title; what it loses is the set-name fallback.
  */
-export function storefrontStock(checkouts, listings, { includeOnline = true, setOf = null } = {}) {
-  const sets = setsByKey(checkouts, includeOnline ? listings : [], listings, setOf);
+export function storefrontStock(checkouts, listings, { includeOnline = true, setOf = null, gameIndex = null } = {}) {
+  const tags = tagsByKey(checkouts, includeOnline ? listings : [], listings, setOf, gameIndex);
   const view = binderView(
     checkouts || [],
-    { sort: DEFAULT_STOREFRONT_SORT, scope: includeOnline ? "all" : BOX },
+    { sort: "name", scope: includeOnline ? "all" : BOX },
     { images: imagesBySku(listings), listings: includeOnline ? listings || [] : [] }
   );
-  const cards = view.cards.map((pocket, i) => storefrontCard(pocket, i, sets.get(`${pocket.source}|${pocket.key}`) || null));
+  const cards = view.cards.map((pocket, i) => {
+    const t = tags.get(`${pocket.source}|${pocket.key}`) || {};
+    return storefrontCard(pocket, i, t.set || null, t.game || null);
+  });
   return {
     cards,
     box: cards.filter((c) => c.source === BOX).length,
@@ -200,38 +200,48 @@ export function storefrontStock(checkouts, listings, { includeOnline = true, set
 }
 
 /**
- * Which set each pocket is in, read off the titles on the SERVER.
+ * Which set and which GAME each pocket is, read off the titles on the SERVER.
  *
  * The set is the part of a title counterName() cuts away — "Gengar VMAX
  * 020/198 Chilling Reign" becomes "Gengar VMAX 020/198" — so it has to be read
  * before the projection, from the rows a stranger never sees, and handed over
  * as a plain name. Keyed the way binder.js groups (binderKey), so the pocket
- * and its set are the same card by construction.
+ * and its tags are the same card by construction.
+ *
+ * The game is games.js's gameOf(), the reading the Show Desk's chips use, so a
+ * stranger's "Pokémon" and ours are the same set of cards. A box row borrows
+ * the eBay category of the listing it came out of, since a checkout has none.
  *
  * A checkout's own title often omits the set where its listing carries it, so
  * a box row falls back to the title on the listing it was checked out of. The
  * first copy that names a set answers for the pocket; a card nothing names
  * gets no set, and "All sets" still shows it.
  */
-function setsByKey(checkouts, onlineListings, allListings, setOf) {
+function tagsByKey(checkouts, onlineListings, allListings, setOf, gameIndex) {
   const out = new Map();
-  if (typeof setOf !== "function") return out;
-  const listingTitle = new Map();
+  const listingBySku = new Map();
   for (const l of allListings || []) {
-    if (l?.sku && l?.title) listingTitle.set(String(l.sku).toLowerCase(), l.title);
+    if (l?.sku) listingBySku.set(String(l.sku).toLowerCase(), l);
   }
-  const note = (source, title, fallbackTitle) => {
+  const note = (source, title, listing) => {
     const key = binderKey({ title });
     if (!key) return;
     const id = `${source}|${key}`;
-    if (out.has(id)) return;
-    const hit = setOf(title) || (fallbackTitle ? setOf(fallbackTitle) : null);
-    if (hit?.name) out.set(id, hit.name);
+    const cur = out.get(id) || {};
+    if (!cur.game || cur.game === UNKNOWN_GAME) {
+      const g = gameOf({ category: listing?.category, title }, gameIndex);
+      cur.game = g !== UNKNOWN_GAME || !listing?.title ? g : gameOf({ category: listing.category, title: listing.title }, gameIndex);
+    }
+    if (!cur.set && typeof setOf === "function") {
+      const hit = setOf(title) || (listing?.title && listing.title !== title ? setOf(listing.title) : null);
+      if (hit?.name) cur.set = hit.name;
+    }
+    out.set(id, cur);
   };
   for (const co of checkouts || []) {
-    note(BOX, co?.title, co?.sku ? listingTitle.get(String(co.sku).toLowerCase()) : null);
+    note(BOX, co?.title, co?.sku ? listingBySku.get(String(co.sku).toLowerCase()) : null);
   }
-  for (const l of onlineListings || []) note(ONLINE, l?.title, null);
+  for (const l of onlineListings || []) note(ONLINE, l?.title, l);
   return out;
 }
 
@@ -239,18 +249,33 @@ function setsByKey(checkouts, onlineListings, allListings, setOf) {
  * The options a visitor can narrow by, built from the cards themselves so an
  * option that finds nothing is never offered — the same rule the desk's event
  * and stack dropdowns follow. Counted, and sorted A–Z.
+ *
+ * Sets are listed PER GAME: the set dropdown only exists once a game is
+ * chosen, and then offers that game's sets alone — a Pokémon shopper should
+ * not scroll past forty Magic sets to reach Evolving Skies.
  */
 export function storefrontFacets(cards) {
-  const sets = new Map();
+  const setsByGame = new Map();
   const conditions = new Map();
   for (const c of cards || []) {
     if (!c) continue;
-    if (c.set) sets.set(c.set, (sets.get(c.set) || 0) + 1);
+    if (c.set) {
+      const g = c.game || UNKNOWN_GAME;
+      if (!setsByGame.has(g)) setsByGame.set(g, new Map());
+      const m = setsByGame.get(g);
+      m.set(c.set, (m.get(c.set) || 0) + 1);
+    }
     const conds = new Set([c.condition, ...(c.copies || []).map((cp) => cp?.condition)].filter(Boolean));
     for (const k of conds) conditions.set(k, (conditions.get(k) || 0) + 1);
   }
   const list = (m) => [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
-  return { sets: list(sets), conditions: list(conditions) };
+  const sets = {};
+  for (const [g, m] of setsByGame) sets[g] = list(m);
+  return {
+    games: gameFacets((cards || []).filter(Boolean), (c) => c.game),
+    sets,
+    conditions: list(conditions)
+  };
 }
 
 /** Does a card have a copy in this condition? A pocket can hold an NM and an LP. */
@@ -291,46 +316,112 @@ export function cardMatches(card, query) {
   return tokens.every((t) => hay.includes(t));
 }
 
+/** How many cards one search answers with; "Show more" asks for the next lot. */
+export const STOREFRONT_PAGE = 30;
+/** How many of the dearest cards each section opens on, before anybody types. */
+export const FEATURED_PER_SECTION = 9;
+
 /**
- * The storefront as it should appear, in the BROWSER, over projected cards.
- *
- * The same two rules as binderView(), because it is the same binder: each
- * section is sorted and paginated on its own and the pages concatenated, so a
- * page is never half box and half online; and a page is nine pockets, the last
- * one padded, so "it's on page four" means the same thing on every phone.
+ * The only keys a search carries. The browser builds its request through
+ * searchQueryString() and the server reads it back through searchCriteria(),
+ * so nothing but these — no wish list, nothing about the visitor — can ride
+ * along to the server, and nothing but these is acted on there.
  */
-export function storefrontView(cards, { query = "", sort = DEFAULT_STOREFRONT_SORT, price = "any", scope = "all", set = "", condition = "", onlineFirst = false } = {}) {
+export const SEARCH_KEYS = ["q", "game", "set", "price", "condition", "sort"];
+
+export function searchCriteria(params) {
+  const get = (k) => {
+    const v = typeof params?.get === "function" ? params.get(k) : params?.[k];
+    return v == null ? "" : String(v).slice(0, 80);
+  };
+  const sort = get("sort");
+  const price = get("price");
+  const offset = Number.parseInt(get("offset"), 10);
+  return {
+    query: get("q"),
+    game: get("game"),
+    set: get("set"),
+    condition: get("condition"),
+    price: STOREFRONT_PRICE_FILTERS.some((f) => f.key === price) ? price : "any",
+    sort: STOREFRONT_SORTS.some((x) => x.key === sort) ? sort : DEFAULT_STOREFRONT_SORT,
+    offset: Number.isFinite(offset) && offset > 0 ? Math.min(offset, 100000) : 0
+  };
+}
+
+export function searchQueryString({ query = "", game = "", set = "", price = "any", condition = "", sort = DEFAULT_STOREFRONT_SORT } = {}, offset = 0) {
+  const p = new URLSearchParams();
+  const put = (k, v) => { if (v) p.set(k, String(v)); };
+  put("q", String(query || "").trim());
+  put("game", game);
+  // A set means nothing without its game: the dropdown only offers one inside a game.
+  if (game) put("set", set);
+  if (price && price !== "any") put("price", price);
+  put("condition", condition);
+  if (sort && sort !== DEFAULT_STOREFRONT_SORT) put("sort", sort);
+  if (offset > 0) put("offset", offset);
+  return p.toString();
+}
+
+/** Is a visitor asking for anything, or looking at the front page? */
+export function isSearching({ query = "", game = "", set = "", price = "any", condition = "" } = {}) {
+  return Boolean(normalise(query) || game || set || (price && price !== "any") || condition);
+}
+
+/**
+ * One search, on the SERVER, over projected cards: what matches, sorted, a
+ * page of it at a time.
+ *
+ * The two sections are never merged: every match from the visitor's own
+ * section comes first, then the other, and the browser draws a heading where
+ * the section changes. A card that might be at home is not one we can hand
+ * over, and a list that interleaves the two is a list where nobody can tell
+ * which is which.
+ */
+export function storefrontSearch(cards, { query = "", game = "", set = "", price = "any", condition = "", sort = DEFAULT_STOREFRONT_SORT, offset = 0 } = {}, { limit = STOREFRONT_PAGE, onlineFirst = false } = {}) {
   const cmp = COMPARATORS[sort] || COMPARATORS[DEFAULT_STOREFRONT_SORT];
   const keep = (c) =>
     cardMatches(c, query) &&
     priceMatches(c, price) &&
-    (!set || c.set === set) &&
+    (!game || (c.game || UNKNOWN_GAME) === game) &&
+    (!game || !set || c.set === set) &&
     conditionMatches(c, condition);
-  const section = (source) => {
-    if (scope !== "all" && scope !== source) return [];
-    return (cards || [])
-      .filter((c) => c && c.source === source && keep(c))
-      .map((c, i) => ({ c, i, _n: normalise(c.name), pricePence: c.pricePence }))
-      .sort((a, b) => cmp(a, b) || a.i - b.i)
-      .map((x) => x.c);
-  };
+  const section = (source) => (cards || [])
+    .filter((c) => c && c.source === source && keep(c))
+    .map((c, i) => ({ c, i, _n: normalise(c.name), pricePence: c.pricePence }))
+    .sort((a, b) => cmp(a, b) || a.i - b.i)
+    .map((x) => x.c);
   const box = section(BOX);
   const online = section(ONLINE);
-  const boxPages = binderPages(box);
-  const onlinePages = binderPages(online);
-  const total = (cards || []).filter(Boolean).length;
-  // Which section opens the binder. Still whole sections either way, so a
-  // page is never half one and half the other.
-  const first = onlineFirst ? [onlinePages, ONLINE] : [boxPages, BOX];
-  const second = onlineFirst ? [boxPages, BOX] : [onlinePages, ONLINE];
+  const all = onlineFirst ? [...online, ...box] : [...box, ...online];
+  const from = Math.max(0, Number(offset) || 0);
+  const page = all.slice(from, from + limit);
   return {
-    pages: [...first[0], ...second[0]],
-    pageKinds: [...first[0].map(() => first[1]), ...second[0].map(() => second[1])],
-    pageCount: boxPages.length + onlinePages.length,
+    cards: page,
     box: box.length,
     online: online.length,
-    shown: box.length + online.length,
-    total,
-    filtering: Boolean(normalise(query) || (price && price !== "any") || (scope && scope !== "all") || set || condition)
+    shown: all.length,
+    offset: from,
+    next: from + page.length < all.length ? from + page.length : null
+  };
+}
+
+/**
+ * What the page opens on before anybody types: the dearest priced cards in
+ * each section, the visitor's own first, plus the options to narrow by. This
+ * is the WHOLE of what the first load sends — a few dozen cards, not the
+ * inventory — and the search box fetches the rest a page at a time.
+ */
+export function storefrontLanding(stock, { onlineFirst = false, perSection = FEATURED_PER_SECTION } = {}) {
+  const cards = stock?.cards || [];
+  const top = (source) => cards
+    .filter((c) => c && c.source === source && c.pricePence != null)
+    .sort((a, b) => b.pricePence - a.pricePence)
+    .slice(0, perSection);
+  const featured = onlineFirst ? [...top(ONLINE), ...top(BOX)] : [...top(BOX), ...top(ONLINE)];
+  return {
+    featured,
+    facets: storefrontFacets(cards),
+    box: stock?.box || 0,
+    online: stock?.online || 0
   };
 }

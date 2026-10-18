@@ -1910,12 +1910,36 @@ Desk rather than a replacement for either of the other two.
   item — honest enough in a section whose promise is "ask and we'll check",
   and better than a number this file would have to guess at.
 
-## The binder behind a QR, on a stranger's phone
+## The stock behind a QR, on a stranger's phone
 
 The binder works while the tablet is in a customer's hands, and the table has
-room for one conversation at a time. The **storefront** is the same binder
-behind a link, printed as a sign: somebody waiting, or browsing the next table
-along, flips through the box on their own phone and shows us the card.
+room for one conversation at a time. The **storefront** is our stock behind a
+link, printed as a sign: somebody waiting, or browsing the next table along,
+searches the box on their own phone and shows us the card.
+
+**It opens on our dearest cards and the search box drives it** (2026-10-18).
+It used to BE the binder, and paging a binder in the browser needs every card
+in the browser — so the first load shipped the whole inventory, two picture
+URLs a card, inline in the HTML and again as hydration data: several megabytes
+over venue wifi, which is why the QR was slow. The page now sends
+`storefrontLanding()` — nine of the dearest priced cards per section and the
+filter options — and `/show/<token>/search` answers `storefrontSearch()` a
+page of 30 at a time, keeping the two sections apart (yours, then the other,
+each under its heading). The search reads the inventory through
+`loadPublicStorefrontCached()`, a minute per token on a warm instance, and
+re-reads the one link row on every hit so a switched-off link stops answering
+at once. A search is never counted as a view. `check-storefront.mjs` greps the
+page for handing the whole stock over again.
+
+- **Filters are game, then set.** The game is `gameOf()` (the Show Desk's
+  chips: eBay category, title, then a one-game set name), read on the server,
+  with a box card borrowing its listing's category. The set dropdown appears
+  only once a game is chosen (or when only one game is in stock) and offers
+  that game's sets alone; a set is never sent without its game. There is no
+  "Everything / At the table" dropdown — both sections are always shown, apart.
+- **The component's one request is the search**, built by
+  `searchQueryString()`, which carries `SEARCH_KEYS` and nothing else, and the
+  route acts only on `searchCriteria()`. The check fails on any other `fetch`.
 **Read-only, no request flow, no account** — the cheapest honest test
 `docs/SHOW_STOREFRONT.md` asks for before anything bigger, with a view count
 on the desk to answer whether anybody scans.
@@ -1969,9 +1993,11 @@ Last Comp's proposition is having no stake in the number.
   screen to hand across the table. No table, no route, nothing collected —
   the storefront is still read-only. Items are keyed on what the card IS
   (section + name), because storefront keys are positions and move when stock
-  does; on every render the list is matched back to the binder, so it shows
-  the CURRENT price, and a card that has gone says so and drops out of the
-  total rather than quoting a figure we no longer stand behind.
+  does. Since the list never leaves the phone and the phone no longer holds
+  the whole stock, it is matched against the cards THIS VISIT has seen
+  (`reconcileWishlist(…, { complete: false })`): a seen card shows its
+  current price, an unseen one keeps the price it was saved at and says so,
+  and the desk's scan is what catches a card that has really gone.
 - **The list reaches us as a QR on THEIR screen**, scanned by our phone —
   still no network, still nothing stored. It carries each card as a short
   hash of its wish key (`wishCode`, FNV-1a) so a full list stays a QR one

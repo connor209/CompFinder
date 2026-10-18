@@ -1,7 +1,7 @@
 /**
  * Comp Finder — a visitor's wish list on the storefront.
  *
- * Somebody flips the binder on their phone, taps ♡ on what they like, and at
+ * Somebody browses our stock on their phone, taps ♡ on what they like, and at
  * the table shows us one screen: every card they picked, with its picture, its
  * price and a total. That screen replaces "the Gengar, no, the other one,
  * page four I think" — which is the request flow docs/SHOW_STOREFRONT.md
@@ -16,9 +16,9 @@
  * **What is kept is a snapshot, and the live card wins.** Card keys on the
  * storefront are positions ("box-3"), which move the moment stock changes, so
  * an item is keyed on what the card IS — its section and its name. On every
- * render the list is matched back to the binder: a card still there shows its
- * CURRENT price, and one that has gone (sold, returned, re-priced out of the
- * box) says so rather than quoting a figure we no longer stand behind.
+ * render the list is matched back to the cards on screen: a card still there
+ * shows its CURRENT price, and one not seen this visit keeps its saved price
+ * and says so (see reconcileWishlist()).
  *
  * **A snapshot is an allow-list too.** It is built key by key from a
  * projected card, which is already public, so nothing private can reach it;
@@ -99,14 +99,22 @@ export function removeWish(list, id) {
 }
 
 /**
- * The list against the binder as it stands now.
+ * The list against the cards as they stand now.
  *
  * Each row is the live card when there is one — current price, current
- * picture — and the snapshot marked `gone` when there is not. A gone card has
- * no price in the total: we would be quoting a figure for a card we may no
+ * picture — and otherwise the snapshot. With `complete` (the cards are the
+ * whole stock, as the desk's binder is) a card that is not there has GONE: no
+ * price in the total, since we would be quoting a figure for a card we may no
  * longer have.
+ *
+ * The storefront is not complete. It holds only the cards this visit has
+ * been shown — the front page and whatever was searched — because the list
+ * never leaves the phone, so the server cannot be asked about it. A card not
+ * among those is UNCHECKED rather than gone: it keeps the price it was saved
+ * at and says so, and the desk's scan (matchWishCodes) is what finds a card
+ * that has really gone.
  */
-export function reconcileWishlist(list, cards) {
+export function reconcileWishlist(list, cards, { complete = true } = {}) {
   const live = new Map();
   for (const c of cards || []) {
     const id = wishKey(c);
@@ -114,8 +122,8 @@ export function reconcileWishlist(list, cards) {
   }
   const rows = (list || []).map((it) => {
     const card = live.get(it.id);
-    if (!card) return { ...it, gone: true, card: null };
-    return { ...wishItem(card, it.addedAt), id: it.id, gone: false, card };
+    if (!card) return complete ? { ...it, gone: true, unchecked: false, card: null } : { ...it, gone: false, unchecked: true, card: null };
+    return { ...wishItem(card, it.addedAt), id: it.id, gone: false, unchecked: false, card };
   });
   const priced = rows.filter((r) => !r.gone && r.pricePence != null);
   return {
@@ -123,6 +131,7 @@ export function reconcileWishlist(list, cards) {
     count: rows.length,
     available: rows.filter((r) => !r.gone).length,
     gone: rows.filter((r) => r.gone).length,
+    unchecked: rows.filter((r) => r.unchecked).length,
     ask: rows.filter((r) => !r.gone && r.pricePence == null).length,
     // "from" prices are the cheapest copy, so the total is a floor when any is.
     totalPence: priced.reduce((n, r) => n + r.pricePence, 0),

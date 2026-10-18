@@ -2,68 +2,84 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  storefrontView,
-  storefrontFacets,
   STOREFRONT_SORTS,
   DEFAULT_STOREFRONT_SORT,
   STOREFRONT_PRICE_FILTERS,
-  STOREFRONT_SCOPES,
   SECTION_LABELS,
   SHOP_SECTION_LABELS,
-  SHOP_SCOPES,
+  searchQueryString,
+  isSearching,
   BOX,
   ONLINE
 } from "@/lib/storefront.js";
-import { BLANK_PAGE, clampPage, turnPage, swipeDirection } from "@/lib/binder.js";
+import { UNKNOWN_GAME } from "@/lib/games.js";
 import { counterPrice } from "@/lib/showcounter.js";
 import {
-  hasWish, toggleWish, removeWish, reconcileWishlist,
+  hasWish, toggleWish, removeWish, reconcileWishlist, wishKey,
   loadWishlist, saveWishlist, wishStorageKey, WISHLIST_MAX,
   wishCodes, wishHandoffUrl
 } from "@/lib/wishlist.js";
 import { qrPath } from "@/lib/qr.js";
 
+/** How long typing pauses before the search goes. Short: it is one cheap request. */
+const SEARCH_DELAY_MS = 250;
+
 /**
- * The binder, on a visitor's own phone.
+ * Our stock, on a visitor's own phone.
  *
- * Handed projected cards and nothing else — see lib/storefront.js. This file
- * imports no database client and nothing from the desk: everything it can show arrived
- * in its props, which is what makes "a stranger cannot see our shelf addresses" a fact
- * about the payload rather than about this markup.
+ * It opens on our dearest cards (`landing`, built on the server) and the
+ * search box drives everything after that: each search asks ./search for one
+ * page of matching cards, already projected. It used to be the Show Desk's
+ * binder, which needed the whole inventory in the browser to page through —
+ * thousands of cards in the first load, which is what made the QR slow.
  *
- * The markup follows the Show Desk's binder (the bn-* classes) on purpose:
- * the same frame, the same nine pockets, the same page numbers — so "it's on
- * page four" means the same thing on their phone as on the tablet at the
- * table. What it drops is everything the desk resolves on a tap: where a copy
- * is, and adding it to a deal. A visitor points; we fetch.
+ * This file imports no database client and nothing from the desk: everything
+ * it can show arrived as projected cards, which is what makes "a stranger
+ * cannot see our shelf addresses" a fact about the payload rather than about
+ * this markup. Its one request is the search, built by searchQueryString(),
+ * which carries the search and nothing else.
  *
  * What it adds is the visitor's own list (lib/wishlist.js): ♡ on the cards
  * they like, and one screen to show us at the table. It is kept on their
- * phone and never sent anywhere.
+ * phone and never sent anywhere — so it is matched against the cards this
+ * visit has SEEN, and a card not among them keeps its saved price.
  *
- * A SHOP link (storefront.shop) is the same binder for somebody who is not at
- * our table — a QR on a business card. Same pages, same sections, other
- * words, and the stock at home opens the binder rather than the show box.
+ * The two sections — at the table, and in stock at home — are never merged:
+ * results come one section then the other, each under its own heading. A
+ * SHOP link (storefront.shop) is the same page for somebody who is not at our
+ * table, with the stock at home first.
  */
-export default function Storefront({ storefront, stock }) {
-  const cards = stock?.cards || [];
+export default function Storefront({ storefront, landing }) {
+  const featured = landing?.featured || [];
+  const facets = landing?.facets || { games: [], sets: {}, conditions: [] };
+  const total = (landing?.box || 0) + (landing?.online || 0);
   const shop = Boolean(storefront?.shop);
   const labels = shop ? SHOP_SECTION_LABELS : SECTION_LABELS;
-  const scopes = shop ? SHOP_SCOPES : STOREFRONT_SCOPES;
-  const both = (stock?.box || 0) > 0 && (stock?.online || 0) > 0;
-  const facets = useMemo(() => storefrontFacets(cards), [cards]);
   const [q, setQ] = useState("");
-  const [sort, setSort] = useState(DEFAULT_STOREFRONT_SORT);
-  const [price, setPrice] = useState("any");
-  const [scope, setScope] = useState("all");
+  const [game, setGame] = useState("");
   const [set, setSet] = useState("");
+  const [price, setPrice] = useState("any");
   const [condition, setCondition] = useState("");
-  const [page, setPage] = useState(0);
+  const [sort, setSort] = useState(DEFAULT_STOREFRONT_SORT);
+  const [browse, setBrowse] = useState(false);
+  const [results, setResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [seen, setSeen] = useState(featured);
   const [open, setOpen] = useState(null);
   const [wish, setWish] = useState([]);
   const [showList, setShowList] = useState(false);
   const [note, setNote] = useState("");
   const storeKey = useRef("");
+  const searchSeq = useRef(0);
+
+  // A set only means something inside a game. With one game in stock there is
+  // nothing to choose, and its sets are offered straight away.
+  const soleGame = facets.games.length === 1 ? facets.games[0].slug : "";
+  const setGameKey = game || soleGame;
+  const gameSets = setGameKey ? facets.sets[setGameKey] || [] : [];
+  const criteria = { query: q, game: game || (set ? soleGame : ""), set, price, condition, sort };
+  const searching = browse || isSearching(criteria);
 
   // The list is read after mount: localStorage does not exist on the server,
   // and reading it during render would hydrate differently from the HTML.
@@ -82,11 +98,46 @@ export default function Storefront({ storefront, stock }) {
     updateWish(r.list);
   }
 
-  const view = useMemo(
-    () => storefrontView(cards, { query: q, sort, price, scope, set, condition, onlineFirst: shop }),
-    [cards, q, sort, price, scope, set, condition, shop]
-  );
-  const list = useMemo(() => reconcileWishlist(wish, cards), [wish, cards]);
+  // Every card this visit has been shown, newest answer first, for the list
+  // to match against. Keyed on what the card IS, like the list itself.
+  function remember(cards) {
+    setSeen((cur) => {
+      const byId = new Map(cur.map((c) => [wishKey(c), c]));
+      for (const c of cards || []) byId.set(wishKey(c), c);
+      return [...byId.values()];
+    });
+  }
+
+  async function runSearch(offset) {
+    const seq = ++searchSeq.current;
+    setLoading(true);
+    setFailed(false);
+    try {
+      const res = await fetch(`${window.location.pathname.replace(/\/+$/, "")}/search?${searchQueryString(criteria, offset)}`, { cache: "no-store", referrerPolicy: "no-referrer" });
+      const body = await res.json();
+      if (seq !== searchSeq.current) return;
+      if (!res.ok || !body?.ok) { setFailed(true); return; }
+      remember(body.cards);
+      setResults((cur) => (offset > 0 && cur ? { ...body, cards: [...cur.cards, ...body.cards] } : body));
+    } catch {
+      if (seq === searchSeq.current) setFailed(true);
+    } finally {
+      if (seq === searchSeq.current) setLoading(false);
+    }
+  }
+
+  // A new search starts from the top. Typing waits for a pause; everything
+  // else goes at once.
+  const criteriaKey = searchQueryString(criteria);
+  useEffect(() => {
+    if (!searching) { searchSeq.current++; setResults(null); setLoading(false); setFailed(false); return undefined; }
+    const t = setTimeout(() => runSearch(0), SEARCH_DELAY_MS);
+    return () => clearTimeout(t);
+    // runSearch reads the criteria this key was built from.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [criteriaKey, searching]);
+
+  const list = useMemo(() => reconcileWishlist(wish, seen, { complete: false }), [wish, seen]);
   // The QR our phone scans: the list itself, in the URL, opening the desk.
   // Nothing is sent anywhere — it is drawn here and read off this screen.
   const [origin, setOrigin] = useState("");
@@ -96,53 +147,80 @@ export default function Storefront({ storefront, stock }) {
     if (!origin || codes.length === 0) return null;
     return qrPath(wishHandoffUrl(origin, codes));
   }, [origin, list.rows]);
-  const at = clampPage(page, view.pageCount);
-  const kind = view.pageKinds[at];
-
-  // A new search is a new binder, and it opens at the front.
-  useEffect(() => { setPage(0); }, [q, sort, price, scope, set, condition]);
 
   function clearFilters() {
-    setQ(""); setPrice("any"); setScope("all"); setSet(""); setCondition("");
-  }
-
-  function turn(dir) {
-    setPage((cur) => turnPage(cur, dir, view.pageCount));
-    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  // A ref, not state: it changes every frame of a drag, and re-rendering nine
-  // pictures mid-swipe is how the gesture judders on the phone it is for.
-  const touchAt = useRef(null);
-  function touchStart(e) {
-    const t = e.touches?.[0];
-    touchAt.current = t ? { x: t.clientX, y: t.clientY } : null;
-  }
-  function touchEnd(e) {
-    const from = touchAt.current;
-    const t = e.changedTouches?.[0];
-    touchAt.current = null;
-    if (!from || !t) return;
-    const dir = swipeDirection(t.clientX - from.x, t.clientY - from.y);
-    if (dir) turn(dir);
+    setQ(""); setGame(""); setSet(""); setPrice("any"); setCondition(""); setBrowse(false);
   }
 
   useEffect(() => {
     function onKey(e) {
-      if (e.key === "Escape") { setOpen(null); setShowList(false); return; }
-      if (open || showList) return;
-      if (e.key === "ArrowLeft") turn("prev");
-      if (e.key === "ArrowRight") turn("next");
+      if (e.key === "Escape") { setOpen(null); setShowList(false); }
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, []);
 
   const title = storefront?.title || "Our stock";
   const updated = storefront?.at
     ? new Date(storefront.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
     : null;
   const totalText = list.totalPence > 0 ? `${list.totalFrom ? "from " : ""}${counterPrice(list.totalPence)}` : null;
+  const shown = searching ? results?.cards || [] : featured;
+
+  function pocket(c) {
+    return (
+      <button
+        className={c.source === ONLINE ? "bn-pocket bn-card bn-card-online" : "bn-pocket bn-card"}
+        key={c.key}
+        onClick={() => setOpen(c)}
+        title={`${c.name} — ${c.priceText}`}
+      >
+        {c.image ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img className="bn-art" src={c.image} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" />
+        ) : (
+          /* An empty sleeve rather than catalogue art: a mint scan of a
+             played card is a promise about the copy we'd hand over. */
+          <span className="bn-art bn-noart" aria-hidden="true">no photo</span>
+        )}
+        {hasWish(wish, c) ? <span className="sf-heart" aria-label="On your list">♥</span> : null}
+        {/* The flag marks the section that is NOT the visitor's: "ask" at
+            the table, "at a show" in the shop. */}
+        {shop && c.source === BOX ? (
+          <span className="bn-copies bn-flag">{c.count > 1 ? `at a show ×${c.count}` : "at a show"}</span>
+        ) : !shop && c.source === ONLINE ? (
+          <span className="bn-copies bn-flag">{c.count > 1 ? `ask ×${c.count}` : "ask"}</span>
+        ) : c.count > 1 ? (
+          <span className="bn-copies">×{c.count}</span>
+        ) : null}
+        <span className="bn-label">
+          <span className="bn-name">{c.name}</span>
+          <span className={c.pricePence == null ? "bn-price bn-price-ask" : "bn-price"}>
+            {c.priceFrom ? "from " : ""}{c.priceText}
+          </span>
+        </span>
+      </button>
+    );
+  }
+
+  // One grid per run of a section, under that section's heading, so a card
+  // that may be at home never sits unlabelled beside one on the table.
+  function sections(cards) {
+    const runs = [];
+    for (const c of cards) {
+      if (!runs.length || runs[runs.length - 1].source !== c.source) runs.push({ source: c.source, cards: [] });
+      runs[runs.length - 1].cards.push(c);
+    }
+    return runs.map((r, i) => (
+      <section className="sf-results" key={`${r.source}-${i}`}>
+        <div className={r.source === ONLINE ? "bn-section bn-section-online" : "bn-section"}>
+          <span className="eyebrow">{labels[r.source]?.title}</span>
+          <span className="hint-small">{labels[r.source]?.note}</span>
+        </div>
+        <div className="sf-grid">{r.cards.map(pocket)}</div>
+      </section>
+    ));
+  }
 
   return (
     <main className={list.count > 0 ? "sf-shell sf-shell-listed" : "sf-shell"}>
@@ -150,12 +228,12 @@ export default function Storefront({ storefront, stock }) {
         <h1 className="sf-title">{title}</h1>
         <p className="hint sf-lede">
           {shop
-            ? "Everything we have in stock. Search for a card, tap ♡ on anything you like, and show us your list — at a show, or send us a screenshot."
-            : "Flip through what we've brought. Tap ♡ on anything you like, then show us your list at the table."}
+            ? "Search for a card, tap ♡ on anything you like, and show us your list — at a show, or send us a screenshot."
+            : "Search for a card, tap ♡ on anything you like, then show us your list at the table."}
         </p>
       </header>
 
-      {cards.length === 0 ? (
+      {total === 0 ? (
         <p className="dd-empty bn-blank">{shop ? "Nothing to show just yet — check back soon." : "Nothing to show just yet — ask at the table."}</p>
       ) : (
         <>
@@ -175,10 +253,18 @@ export default function Storefront({ storefront, stock }) {
           {/* Built from the cards themselves, so an option that finds nothing
               is never offered, and a filter with one choice is not a filter. */}
           <div className="sf-filters">
-            {facets.sets.length > 1 ? (
+            {facets.games.length > 1 ? (
+              <select className="sd-select" value={game} onChange={(e) => { setGame(e.target.value); setSet(""); }} aria-label="Game">
+                <option value="">All games</option>
+                {facets.games.map((g) => (
+                  <option key={g.slug} value={g.slug}>{g.slug === UNKNOWN_GAME ? "Other cards" : g.name} ({g.count})</option>
+                ))}
+              </select>
+            ) : null}
+            {gameSets.length > 1 ? (
               <select className="sd-select" value={set} onChange={(e) => setSet(e.target.value)} aria-label="Set">
                 <option value="">All sets</option>
-                {facets.sets.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.count})</option>)}
+                {gameSets.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.count})</option>)}
               </select>
             ) : null}
             <select className="sd-select" value={price} onChange={(e) => setPrice(e.target.value)} aria-label="Price">
@@ -190,98 +276,42 @@ export default function Storefront({ storefront, stock }) {
                 {facets.conditions.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             ) : null}
-            {both ? (
-              <select className="sd-select" value={scope} onChange={(e) => setScope(e.target.value)} aria-label="Which stock">
-                {scopes.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+            {searching ? (
+              <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Order">
+                {STOREFRONT_SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
             ) : null}
-            <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Order">
-              {STOREFRONT_SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-            {view.filtering ? (
-              <button className="sd-clear-all" onClick={clearFilters}>Clear filters</button>
+            {searching ? (
+              <button className="sd-clear-all" onClick={clearFilters}>Clear</button>
             ) : null}
           </div>
 
-          <div className="bn-wrap">
-            {view.pageCount > 0 ? (
-              <div className={kind === ONLINE ? "bn-section bn-section-online" : "bn-section"}>
-                <span className="eyebrow">{labels[kind]?.title}</span>
-                <span className="hint-small">{labels[kind]?.note}</span>
-              </div>
-            ) : null}
-            <div
-              className="bn-book"
-              onTouchStart={touchStart}
-              onTouchEnd={touchEnd}
-              role="group"
-              aria-label={view.pageCount === 0 ? "The binder, empty" : `Page ${at + 1} of ${view.pageCount}`}
-            >
-              {view.pageCount === 0 ? (
-                <p className="dd-empty bn-blank">{shop ? "Nothing matches that — ask us, we may still have one." : "Nothing matches that — ask at the table, we may still have one."}</p>
-              ) : (
-                <>
-                  <span className="bn-rings" aria-hidden="true" />
-                  <div className="bn-sheet">
-                    <div className="bn-page">
-                      {(view.pages[at] || BLANK_PAGE).map((c, i) => (c ? (
-                        <button
-                          className={c.source === ONLINE ? "bn-pocket bn-card bn-card-online" : "bn-pocket bn-card"}
-                          key={c.key}
-                          onClick={() => setOpen(c)}
-                          title={`${c.name} — ${c.priceText}`}
-                        >
-                          {c.image ? (
-                            /* eslint-disable-next-line @next/next/no-img-element */
-                            <img className="bn-art" src={c.image} alt="" loading="lazy" referrerPolicy="no-referrer" />
-                          ) : (
-                            /* An empty sleeve rather than catalogue art: a
-                               mint scan of a played card is a promise about
-                               the copy we'd hand over. */
-                            <span className="bn-art bn-noart" aria-hidden="true">no photo</span>
-                          )}
-                          {hasWish(wish, c) ? <span className="sf-heart" aria-label="On your list">♥</span> : null}
-                          {/* The flag marks the section that is NOT the
-                              visitor's: "ask" at the table, "at a show" in
-                              the shop. */}
-                          {shop && c.source === BOX ? (
-                            <span className="bn-copies bn-flag">{c.count > 1 ? `at a show ×${c.count}` : "at a show"}</span>
-                          ) : !shop && c.source === ONLINE ? (
-                            <span className="bn-copies bn-flag">{c.count > 1 ? `ask ×${c.count}` : "ask"}</span>
-                          ) : c.count > 1 ? (
-                            <span className="bn-copies">×{c.count}</span>
-                          ) : null}
-                          <span className="bn-label">
-                            <span className="bn-name">{c.name}</span>
-                            <span className={c.pricePence == null ? "bn-price bn-price-ask" : "bn-price"}>
-                              {c.priceFrom ? "from " : ""}{c.priceText}
-                            </span>
-                          </span>
-                        </button>
-                      ) : (
-                        <span className="bn-pocket bn-pocket-empty" key={`pocket-${i}`} aria-hidden="true" />
-                      )))}
-                    </div>
-                    <span className="bn-sheetno">{at + 1}</span>
-                  </div>
-                </>
-              )}
+          {searching ? (
+            <p className="hint hint-small sf-count" aria-live="polite">
+              {failed
+                ? "Couldn't search just now — venue wifi, probably. Try again in a moment."
+                : results == null || (loading && !results)
+                  ? "Searching…"
+                  : results.shown === 0
+                    ? (shop ? "Nothing matches that — ask us, we may still have one." : "Nothing matches that — ask at the table, we may still have one.")
+                    : `${results.shown} card${results.shown === 1 ? "" : "s"}${shop
+                        ? ` · ${results.online} in stock${results.box ? ` · ${results.box} out at a show` : ""}`
+                        : ` · ${results.box} at the table${results.online ? ` · ${results.online} more in stock` : ""}`}`}
+            </p>
+          ) : (
+            <div className="sf-featured-head">
+              <span className="eyebrow">Our top cards</span>
+              <button className="sd-clear-all" onClick={() => setBrowse(true)}>See all {total} ›</button>
             </div>
-            <div className="bn-nav">
-              <button className="btn btn-ghost bn-turn" onClick={() => turn("prev")} disabled={at === 0} aria-label="Previous page">◀</button>
-              <span className="bn-pageno">
-                {view.pageCount === 0 ? "No pages" : `Page ${at + 1} of ${view.pageCount}`}
-                <span className="hint-small">
-                  {shop
-                    ? `${view.online} in stock${view.box > 0 ? ` · ${view.box} out at a show` : ""}`
-                    : `${view.box} at the table${view.online > 0 ? ` · ${view.online} more in stock` : ""}`}
-                  {view.filtering ? ` · of ${view.total}` : ""}
-                </span>
-              </span>
-              <button className="btn btn-ghost bn-turn" onClick={() => turn("next")} disabled={at >= view.pageCount - 1} aria-label="Next page">▶</button>
-            </div>
-            <p className="hint hint-small bn-hint">Swipe the page, or use the arrows.</p>
-          </div>
+          )}
+
+          {shown.length > 0 ? sections(shown) : null}
+
+          {searching && results?.next != null ? (
+            <button className="btn btn-ghost sf-more" onClick={() => runSearch(results.next)} disabled={loading}>
+              {loading ? "Loading…" : `Show more (${results.shown - results.cards.length} left)`}
+            </button>
+          ) : null}
         </>
       )}
 
@@ -295,7 +325,7 @@ export default function Storefront({ storefront, stock }) {
       </footer>
 
       {/* The list bar. Only while there is a list, and pinned to the bottom so
-          it is one thumb away from any page of the binder. */}
+          it is one thumb away wherever they have scrolled to. */}
       {list.count > 0 && !showList && !open ? (
         <button className="sf-listbar" onClick={() => setShowList(true)}>
           <span>♥ My list · {list.count} card{list.count === 1 ? "" : "s"}{totalText ? ` · ${totalText}` : ""}</span>
@@ -360,7 +390,7 @@ export default function Storefront({ storefront, stock }) {
               <h2 className="sf-list-title">My list</h2>
               <p className="sf-list-sub">{shop ? "Show us at a show, or send us a screenshot" : "Show this to us at the table"}</p>
             </div>
-            <button className="bn-close sf-list-close" onClick={() => setShowList(false)} aria-label="Back to the binder">×</button>
+            <button className="bn-close sf-list-close" onClick={() => setShowList(false)} aria-label="Back to the stock">×</button>
           </div>
           {list.count === 0 ? (
             <p className="sf-list-empty">Nothing on your list yet — tap ♡ on a card to add it.</p>
@@ -379,7 +409,8 @@ export default function Storefront({ storefront, stock }) {
                     <span className="sf-list-meta">
                       {[r.set, r.condition, shop ? (r.source === BOX ? "out at a show" : null) : r.source === ONLINE ? "ask — may be at home" : null].filter(Boolean).join(" · ")}
                     </span>
-                    {r.gone ? <span className="sf-list-meta sf-list-warn">No longer in the binder — ask us</span> : null}
+                    {r.gone ? <span className="sf-list-meta sf-list-warn">No longer in stock — ask us</span> : null}
+                    {r.unchecked ? <span className="sf-list-meta">Price when you saved it</span> : null}
                   </span>
                   <span className="sf-list-price">{r.gone ? "—" : `${r.priceFrom ? "from " : ""}${r.priceText}`}</span>
                   <button className="sf-list-x" onClick={() => updateWish(removeWish(wish, r.id))} aria-label={`Remove ${r.name}`}>×</button>
@@ -394,7 +425,7 @@ export default function Storefront({ storefront, stock }) {
                 <strong>{totalText || "—"}</strong>
               </div>
               {list.ask > 0 ? <p className="sf-list-note">+ {list.ask} to ask about</p> : null}
-              {list.gone > 0 ? <p className="sf-list-note">{list.gone} no longer in the binder</p> : null}
+              {list.gone > 0 ? <p className="sf-list-note">{list.gone} no longer in stock</p> : null}
               {handoff ? (
                 <div className="sf-handoff">
                   <svg viewBox={`0 0 ${handoff.size} ${handoff.size}`} shapeRendering="crispEdges" role="img" aria-label="QR code for the stall to scan">

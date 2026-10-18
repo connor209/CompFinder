@@ -1,5 +1,5 @@
 /**
- * The storefront: the binder behind the QR on the table, on a stranger's phone.
+ * The storefront: our stock behind the QR on the table, on a stranger's phone.
  *
  *   node scripts/check-storefront.mjs      (or: npm run check)
  *
@@ -14,18 +14,22 @@
  * - **The projection is an allow-list**: exactly the keys declared, nothing
  *   spread from a row.
  * - **A dead link serves nothing**: switched off, run out, malformed, unknown.
- * - It is the same binder: nine to a page, sections never share one, a
- *   stranger's search reads the name and not the SKU.
+ * - The page opens on a slice (the dearest cards and the filters), never the
+ *   whole inventory — that was the slow QR. A search comes a page at a time,
+ *   the sections never interleave, a set is only ever asked for inside its
+ *   game, and a stranger's search reads the name and not the SKU.
  * - Greps: noindex and no-referrer on the page, no Supabase client in the
  *   component a visitor runs, the table named in one file, and the route left
  *   out of the middleware's login wall.
  */
 import { readFileSync } from "node:fs";
 import {
-  storefrontStock, storefrontView, storefrontCard, cardMatches,
+  storefrontStock, storefrontSearch, storefrontLanding, storefrontCard, cardMatches,
   STOREFRONT_FIELDS, STOREFRONT_COPY_FIELDS, BOX, ONLINE, ASK_TEXT,
-  storefrontFacets, priceMatches
+  storefrontFacets, priceMatches, searchCriteria, searchQueryString, SEARCH_KEYS,
+  STOREFRONT_PAGE, FEATURED_PER_SECTION
 } from "../apps/app/lib/storefront.js";
+import { buildSetGameIndex } from "../apps/app/lib/games.js";
 import {
   wishKey, wishItem, toggleWish, reconcileWishlist, cleanWishlist, removeWish,
   loadWishlist, saveWishlist, wishStorageKey, WISH_FIELDS, WISHLIST_MAX,
@@ -34,11 +38,10 @@ import {
 import { binderView } from "../apps/app/lib/binder.js";
 import { buildSetIndex } from "@compfinder/core/setmatch.js";
 import {
-  loadPublicStorefront, newToken, isWellFormedToken, storefrontStatus, expiresAtFor,
+  loadPublicStorefront, loadPublicStorefrontCached, newToken, isWellFormedToken, storefrontStatus, expiresAtFor,
   storefrontUrl, CHECKOUT_COLUMNS, LISTING_COLUMNS, newStorefrontRow, isShopLink, SHOP, SHOW
 } from "../apps/app/lib/storefront-store.js";
 import { qrMatrix, qrPath } from "../apps/app/lib/qr.js";
-import { BINDER_PAGE } from "../apps/app/lib/binder.js";
 
 let failures = 0;
 let checks = 0;
@@ -115,24 +118,47 @@ const listings = [
   ok(!JSON.stringify(card).includes("SECRET") && !JSON.stringify(card).includes("998877665544"), "storefrontCard() passes through fields nobody allowed");
 }
 
-// --- The browser's view over projected cards -----------------------------
+// --- One search, and the page it opens on --------------------------------
 {
   const many = [];
-  for (let i = 0; i < 11; i++) many.push({ key: `box-${i}`, source: BOX, name: `Card ${String.fromCharCode(65 + i)} ${i}/100`, pricePence: (i + 1) * 100, priceText: "", copies: [] });
-  for (let i = 0; i < 2; i++) many.push({ key: `online-${i}`, source: ONLINE, name: `Listed ${i}`, pricePence: null, priceText: ASK_TEXT, copies: [] });
-  const v = storefrontView(many, {});
-  ok(v.pages.every((p) => p.length === BINDER_PAGE), "a storefront page is not nine pockets");
-  ok(v.pageCount === 3, `11 box + 2 online should be 2 box pages and 1 online page, got ${v.pageCount}`);
-  ok(JSON.stringify(v.pageKinds) === JSON.stringify([BOX, BOX, ONLINE]), `sections shared a page: ${v.pageKinds}`);
-  ok(v.pages.every((p, i) => p.every((c) => c == null || c.source === v.pageKinds[i])), "a page carries a card from the other section");
-  const cheap = storefrontView(many, { sort: "value-asc" });
-  ok(cheap.pages[0][0].pricePence === 100, "cheapest first does not start at the cheapest");
-  const dear = storefrontView(many, { sort: "value-desc", scope: "all" });
-  ok(dear.pages[dear.pageCount - 1].filter(Boolean).every((c) => c.pricePence == null), "an unpriced card did not sort last");
-  ok(storefrontView(many, { query: "card c 2" }).shown === 1, "search by name and number found the wrong count");
-  ok(storefrontView(many, { scope: BOX }).online === 0, "scope 'box' still showed listed cards");
-  ok(storefrontView(many, { price: "ask" }).shown === 2, "the ask filter did not find the unpriced cards");
+  for (let i = 0; i < 40; i++) many.push({ key: `box-${i}`, source: BOX, name: `Card ${i} ${i}/100`, game: "pokemon", pricePence: (i + 1) * 100, priceText: "", copies: [] });
+  for (let i = 0; i < 3; i++) many.push({ key: `online-${i}`, source: ONLINE, name: `Listed ${i}`, game: "pokemon", pricePence: null, priceText: ASK_TEXT, copies: [] });
+  const first = storefrontSearch(many, {});
+  ok(first.cards.length === STOREFRONT_PAGE && first.next === STOREFRONT_PAGE && first.shown === 43, `a search does not come a page at a time: ${first.cards.length}, next ${first.next}`);
+  const rest = storefrontSearch(many, { offset: first.next });
+  ok(rest.cards.length === 13 && rest.next === null, "the second page is not the rest");
+  const all = [...first.cards, ...rest.cards];
+  ok(new Set(all.map((c) => c.key)).size === 43, "paging a search skipped or repeated a card");
+  // The sections are never merged: the whole of one, then the other.
+  const firstOnline = all.findIndex((c) => c.source === ONLINE);
+  ok(firstOnline === 40 && all.slice(firstOnline).every((c) => c.source === ONLINE), "a search interleaved the box with the stock at home");
+  const shopAll = storefrontSearch(many, {}, { onlineFirst: true, limit: 100 }).cards;
+  ok(shopAll[0].source === ONLINE && shopAll.slice(3).every((c) => c.source === BOX), "a shop search does not open on the stock at home");
+  ok(first.cards[0].pricePence === 4000, "dearest first is not the default order");
+  const dear = storefrontSearch(many, { sort: "value-desc" }, { limit: 100 }).cards.filter((c) => c.source === ONLINE);
+  ok(dear.every((c) => c.pricePence == null), "an unpriced card did not sort last");
+  ok(storefrontSearch(many, { sort: "value-asc" }).cards[0].pricePence === 100, "cheapest first does not start at the cheapest");
+  ok(storefrontSearch(many, { query: "card 39 39/100" }).shown === 1, "search by name and number found the wrong count");
+  ok(storefrontSearch(many, { price: "ask" }).shown === 3, "the ask filter did not find the unpriced cards");
   ok(!cardMatches({ name: "Gengar VMAX 020/198" }, "SKU-SECRET-A50"), "a stranger's search matched on something that is not the name");
+
+  // The landing is a slice, not the inventory: that was the slow first load.
+  const land = storefrontLanding({ cards: many, box: 40, online: 3 });
+  ok(land.featured.length === FEATURED_PER_SECTION, `the front page is not the dearest few: ${land.featured.length}`);
+  ok(land.featured[0].pricePence === 4000 && land.featured.every((c) => c.pricePence != null), "the front page does not open on the dearest priced cards");
+  ok(land.box === 40 && land.online === 3, "the front page lost the stock counts");
+  ok(JSON.stringify(Object.keys(land)) === JSON.stringify(["featured", "facets", "box", "online"]), `the landing carries more than it should: ${Object.keys(land)}`);
+
+  // Only the search's own keys go up, and only they are read back.
+  const qs = searchQueryString({ query: " gengar ", game: "pokemon", set: "Chilling Reign", price: "u5", condition: "", sort: "value-desc", wish: ["box:gengar"], list: "x" }, 30);
+  const keys = [...new URLSearchParams(qs).keys()];
+  ok(keys.every((k) => SEARCH_KEYS.includes(k) || k === "offset"), `a search sends keys nobody allowed: ${keys}`);
+  ok(!/wish|gengar.*box/.test(qs.replace("q=gengar", "")), `the wish list rode along with a search: ${qs}`);
+  ok(!new URLSearchParams(searchQueryString({ set: "Chilling Reign" })).has("set"), "a set was sent without its game");
+  const back = searchCriteria(new URLSearchParams(qs));
+  ok(back.query === "gengar" && back.game === "pokemon" && back.set === "Chilling Reign" && back.price === "u5" && back.offset === 30, `the search did not survive the URL: ${JSON.stringify(back)}`);
+  const junk = searchCriteria(new URLSearchParams("price=free&sort=evil&offset=-4"));
+  ok(junk.price === "any" && junk.sort === "value-desc" && junk.offset === 0, `junk criteria were acted on: ${JSON.stringify(junk)}`);
 }
 
 // --- Tokens and expiry ---------------------------------------------------
@@ -227,6 +253,24 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   ok(u?.set === "Evolving Skies", `the loader did not read the set out of the title: ${u?.set}`);
 }
 {
+  // A search is not a visit, and it reads the inventory at most once a minute.
+  const admin = fakeAdmin({ link: LINK });
+  const at = new Date("2026-09-24T12:00:00Z");
+  const inventory = () => admin.calls.filter((c) => c.table === "stock_checkouts" || c.table === "ebay_listings").length;
+  const one = await loadPublicStorefrontCached(admin, TOKEN, { now: at });
+  const reads = inventory();
+  const two = await loadPublicStorefrontCached(admin, TOKEN, { now: new Date(at.getTime() + 30000) });
+  ok(one.ok && two.ok && inventory() === reads, "a second search inside the minute read the inventory again");
+  ok(!admin.calls.some((c) => c.rpc === "storefront_hit"), "a search counted as a view");
+  await loadPublicStorefrontCached(admin, TOKEN, { now: new Date(at.getTime() + 61000) });
+  ok(inventory() > reads, "a search a minute later served the old stock");
+  const offAdmin = fakeAdmin({ link: { ...LINK, revoked_at: "2026-09-24T10:00:00Z" } });
+  const off = await loadPublicStorefrontCached(offAdmin, TOKEN, { now: new Date(at.getTime() + 62000) });
+  ok(!off.ok, "a link switched off within the minute still answered searches");
+  const lr = admin.calls.find((c) => c.table === "ebay_listings");
+  ok(/extra->>category/.test(lr?.select || "") && !/(^|,)extra(,|$)/.test(lr?.select || ""), `the listings read takes the whole extra blob, or no category: ${lr?.select}`);
+}
+{
   const at = new Date("2026-09-24T12:00:00Z");
   const off = await loadPublicStorefront(fakeAdmin({ link: { ...LINK, revoked_at: "2026-09-24T10:00:00Z" } }), TOKEN, { now: at });
   ok(!off.ok && off.reason === "ended" && !off.stock, "a switched-off link served stock");
@@ -273,14 +317,11 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   ok(sh.event === "Glasgow" && sh.include_online === false && sh.expires_at === "2026-09-27T12:00:00.000Z", "a show link lost its own settings");
   ok(isShopLink({ kind: SHOP }) && !isShopLink({}) && !isShopLink({ kind: SHOW }), "isShopLink() misreads a row");
 
-  // The stock at home opens a shop binder; sections still never share a page.
   const mixed = [];
   for (let i = 0; i < 10; i++) mixed.push({ key: `box-${i}`, source: BOX, name: `Box ${i}`, pricePence: 100, priceText: "", copies: [] });
   for (let i = 0; i < 3; i++) mixed.push({ key: `online-${i}`, source: ONLINE, name: `Listed ${i}`, pricePence: 100, priceText: "", copies: [] });
-  const v = storefrontView(mixed, { onlineFirst: true });
-  ok(JSON.stringify(v.pageKinds) === JSON.stringify([ONLINE, BOX, BOX]), `a shop binder does not open on the stock at home: ${v.pageKinds}`);
-  ok(v.pages.every((p, i) => p.every((c) => c == null || c.source === v.pageKinds[i])), "a shop page carries a card from the other section");
-  ok(storefrontView(mixed, { onlineFirst: true, query: "listed 2" }).shown === 1, "a shop search did not reach the stock at home");
+  ok(storefrontLanding({ cards: mixed }, { onlineFirst: true }).featured[0].source === ONLINE, "a shop's front page does not open on the stock at home");
+  ok(storefrontSearch(mixed, { query: "listed 2" }, { onlineFirst: true }).shown === 1, "a shop search did not reach the stock at home");
 }
 
 ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|event/.test(CHECKOUT_COLUMNS), `the checkout read asks for columns the projection never uses: ${CHECKOUT_COLUMNS}`);
@@ -303,15 +344,40 @@ ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|ev
   ok(by(/umbreon/i)?.set === "Evolving Skies", "a checkout with no set in its title did not fall back to its listing's");
   ok(by(/mystery/i)?.set === null, "a card nothing names was given a set");
   const f = storefrontFacets(st.cards);
-  ok(JSON.stringify(f.sets.map((x) => x.name)) === JSON.stringify(["Chilling Reign", "Evolving Skies"]), `set facets wrong: ${JSON.stringify(f.sets)}`);
-  ok(storefrontView(st.cards, { set: "Chilling Reign" }).shown === 1, "the set filter did not narrow to one set");
-  ok(storefrontView(st.cards, { query: "evolving" }).shown === 1, "search does not look at the set name");
-  ok(storefrontView(st.cards, { price: "u5" }).shown === 0 && storefrontView(st.cards, { price: "5-20" }).shown === 1, "£5 sits in the wrong band");
-  ok(storefrontView(st.cards, { price: "50-100" }).shown === 1, "£90 is not in £50–£100");
+  ok(JSON.stringify((f.sets.unknown || []).map((x) => x.name)) === JSON.stringify(["Chilling Reign", "Evolving Skies"]), `set facets wrong: ${JSON.stringify(f.sets)}`);
+  const view = (c) => storefrontSearch(st.cards, c, { limit: 100 });
+  ok(view({ game: "unknown", set: "Chilling Reign" }).shown === 1, "the set filter did not narrow to one set");
+  ok(view({ set: "Chilling Reign" }).shown === 3, "a set with no game narrowed the search — the dropdown never sends one");
+  ok(view({ query: "evolving" }).shown === 1, "search does not look at the set name");
+  ok(view({ price: "u5" }).shown === 0 && view({ price: "5-20" }).shown === 1, "£5 sits in the wrong band");
+  ok(view({ price: "50-100" }).shown === 1, "£90 is not in £50–£100");
   ok(!priceMatches({ pricePence: null }, "u5"), "a card with no price counted as under £5");
-  ok(storefrontView(st.cards, { price: "ask" }).shown === 1, "the ask filter lost the unpriced card");
+  ok(view({ price: "ask" }).shown === 1, "the ask filter lost the unpriced card");
   const nm = [{ key: "box-0", source: BOX, name: "A", condition: "Near Mint", pricePence: 100, copies: [{ condition: "Near Mint" }, { condition: "Lightly Played" }] }];
-  ok(storefrontView(nm, { condition: "Lightly Played" }).shown === 1, "a pocket holding an LP copy is hidden from the LP filter");
+  ok(storefrontSearch(nm, { condition: "Lightly Played" }).shown === 1, "a pocket holding an LP copy is hidden from the LP filter");
+  // The game: eBay's category, then the title, then a set only one game uses —
+  // and a box card borrows its listing's category. Sets are offered per game.
+  {
+    const gi = buildSetGameIndex([{ game: "pokemon", set_name: "Chilling Reign" }, { game: "magic", set_name: "Dominaria United" }]);
+    const gRows = [
+      { id: "a", sku: "G1", title: "Gengar VMAX 020/198 Chilling Reign", sticker_pence: 500 },
+      { id: "b", sku: "G2", title: "Sheoldred 107/281", sticker_pence: 9000 }
+    ];
+    const gLst = [
+      { ebay_item_id: "1", sku: "G2", title: "Sheoldred 107/281", category: "Magic: The Gathering Individual Cards", price_value: 99, quantity: 1 },
+      { ebay_item_id: "2", sku: "G3", title: "Dark Magician LOB-EN005", price_value: 5, quantity: 1 }
+    ];
+    const gs = storefrontStock(gRows, gLst, { includeOnline: true, gameIndex: gi, setOf });
+    const by = (re) => gs.cards.find((c) => re.test(c.name));
+    ok(by(/gengar/i)?.game === "pokemon", `a set only Pokémon uses did not make the card Pokémon: ${by(/gengar/i)?.game}`);
+    ok(by(/sheoldred/i)?.game === "magic", `a box card did not borrow its listing's eBay category: ${by(/sheoldred/i)?.game}`);
+    ok(by(/dark magician/i)?.game === "yugioh", `a Yu-Gi-Oh code did not read as Yu-Gi-Oh: ${by(/dark magician/i)?.game}`);
+    const gf = storefrontFacets(gs.cards);
+    ok(gf.games.map((g) => g.slug).join(",") === "pokemon,magic,yugioh", `game facets wrong: ${JSON.stringify(gf.games)}`);
+    ok(JSON.stringify(Object.keys(gf.sets)) === JSON.stringify(["pokemon"]) && gf.sets.pokemon[0].name === "Chilling Reign", `a set was offered outside its game: ${JSON.stringify(gf.sets)}`);
+    ok(storefrontSearch(gs.cards, { game: "magic" }).shown === 1, "the game filter did not narrow to one game");
+    ok(storefrontSearch(gs.cards, { game: "magic", set: "Chilling Reign" }).shown === 0, "a set from another game matched inside this one");
+  }
   const none = storefrontStock(rows, lst, { includeOnline: false });
   ok(none.cards.every((c) => c.set === null), "with no catalogue, cards should carry no set rather than guess");
 }
@@ -406,7 +472,15 @@ ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|ev
   const comp = src("apps/app/app/show/[token]/Storefront.js");
   ok(!/supabase|createClient|ShowDesk|DealBar|deal\.js|stackpos|placeOf|copyLocations/i.test(comp), "the visitor's component reaches for a database or desk code");
   ok(!/\bsku\b/i.test(comp), "the visitor's component names a SKU");
-  ok(!/fetch\(|XMLHttpRequest|sendBeacon/.test(comp), "the visitor's component sends something somewhere — the list is meant to stay on their phone");
+  // One request, the search, and it is built by searchQueryString() — which
+  // carries SEARCH_KEYS and nothing else. The list stays on their phone.
+  const fetches = comp.match(/fetch\(/g) || [];
+  ok(fetches.length === 1 && /fetch\(`\$\{[^`]*\}\/search\?\$\{searchQueryString\(criteria, offset\)\}`/.test(comp), "the visitor's component sends something other than the search");
+  ok(!/XMLHttpRequest|sendBeacon|method:\s*"POST"/.test(comp), "the visitor's component sends something somewhere — the list is meant to stay on their phone");
+  ok(!/\bstock=\{|stock\.cards/.test(src("apps/app/app/show/[token]/page.js")), "the page hands the whole stock to the browser again — that is what made the QR slow");
+  const route = src("apps/app/app/show/[token]/search/route.js");
+  ok(/loadPublicStorefrontCached\(/.test(route) && !/\.from\(/.test(route), "the search reads a table itself instead of going through the loader");
+  ok(/searchCriteria\(/.test(route) && /storefrontSearch\(/.test(route), "the search acts on something other than searchCriteria()");
   const wl = src("apps/app/lib/wishlist.js");
   ok(!/fetch\(|supabase|sendBeacon/i.test(wl.replace(/\/\*[\s\S]*?\*\//g, "")), "wishlist.js reaches for a network or a database");
 
