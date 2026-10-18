@@ -20,6 +20,7 @@ import {
   wishCodes, wishHandoffUrl
 } from "@/lib/wishlist.js";
 import { qrPath } from "@/lib/qr.js";
+import SetPicker from "./SetPicker";
 
 /** How long typing pauses before the search goes. Short: it is one cheap request. */
 const SEARCH_DELAY_MS = 250;
@@ -58,6 +59,7 @@ export default function Storefront({ storefront, landing }) {
   const [q, setQ] = useState("");
   const [game, setGame] = useState("");
   const [set, setSet] = useState("");
+  const [era, setEra] = useState("");
   const [price, setPrice] = useState("any");
   const [condition, setCondition] = useState("");
   const [sort, setSort] = useState(DEFAULT_STOREFRONT_SORT);
@@ -78,7 +80,7 @@ export default function Storefront({ storefront, landing }) {
   const soleGame = facets.games.length === 1 ? facets.games[0].slug : "";
   const setGameKey = game || soleGame;
   const gameSets = setGameKey ? facets.sets[setGameKey] || [] : [];
-  const criteria = { query: q, game: game || (set ? soleGame : ""), set, price, condition, sort };
+  const criteria = { query: q, game: game || (set || era ? soleGame : ""), era, set, price, condition, sort };
   const searching = browse || isSearching(criteria);
 
   // The list is read after mount: localStorage does not exist on the server,
@@ -149,7 +151,7 @@ export default function Storefront({ storefront, landing }) {
   }, [origin, list.rows]);
 
   function clearFilters() {
-    setQ(""); setGame(""); setSet(""); setPrice("any"); setCondition(""); setBrowse(false);
+    setQ(""); setGame(""); setSet(""); setEra(""); setPrice("any"); setCondition(""); setBrowse(false);
   }
 
   useEffect(() => {
@@ -254,7 +256,7 @@ export default function Storefront({ storefront, landing }) {
               is never offered, and a filter with one choice is not a filter. */}
           <div className="sf-filters">
             {facets.games.length > 1 ? (
-              <select className="sd-select" value={game} onChange={(e) => { setGame(e.target.value); setSet(""); }} aria-label="Game">
+              <select className="sd-select" value={game} onChange={(e) => { setGame(e.target.value); setSet(""); setEra(""); }} aria-label="Game">
                 <option value="">All games</option>
                 {facets.games.map((g) => (
                   <option key={g.slug} value={g.slug}>{g.slug === UNKNOWN_GAME ? "Other cards" : g.name} ({g.count})</option>
@@ -262,10 +264,13 @@ export default function Storefront({ storefront, landing }) {
               </select>
             ) : null}
             {gameSets.length > 1 ? (
-              <select className="sd-select" value={set} onChange={(e) => setSet(e.target.value)} aria-label="Set">
-                <option value="">All sets</option>
-                {gameSets.map((s) => <option key={s.name} value={s.name}>{s.name} ({s.count})</option>)}
-              </select>
+              <SetPicker
+                sets={gameSets}
+                game={setGameKey}
+                era={era}
+                set={set}
+                onPick={(p) => { setSet(p.set); setEra(p.era); }}
+              />
             ) : null}
             <select className="sd-select" value={price} onChange={(e) => setPrice(e.target.value)} aria-label="Price">
               {STOREFRONT_PRICE_FILTERS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}

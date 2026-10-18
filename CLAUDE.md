@@ -1937,6 +1937,16 @@ page for handing the whole stock over again.
   only once a game is chosen (or when only one game is in stock) and offers
   that game's sets alone; a set is never sent without its game. There is no
   "Everything / At the table" dropdown — both sections are always shown, apart.
+- **Pokémon sets are grouped by era, and the set picker can be typed into.**
+  `lib/pokemon-eras.js` is a hand-written table — the catalogue has no era or
+  release date — of Cardmarket's set names, oldest era first and release
+  order within one; a name is read exactly, then by the longest listed name it
+  starts with ("Dragon Majesty" is not the EX era's "Dragon"), then by an era
+  prefix ("SM Black Star Promos"), and anything unplaced is "Other sets", never
+  a guess. An era heading is a filter of its own (`era` in `SEARCH_KEYS`, sent
+  only with Pokémon). Typing "base" finds the era base sets too, since the
+  catalogue calls the Sun & Moon base set just "Sun & Moon". **A new set needs
+  a line in that table** or it sits under Other until it gets one.
 - **The component's one request is the search**, built by
   `searchQueryString()`, which carries `SEARCH_KEYS` and nothing else, and the
   route acts only on `searchCriteria()`. The check fails on any other `fetch`.
