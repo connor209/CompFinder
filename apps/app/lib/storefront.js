@@ -41,7 +41,7 @@ import { normalise } from "./showfilter.js";
 import { counterPrice, imageAt } from "./showcounter.js";
 import { binderView, binderKey, BOX, ONLINE, SECTION_LABELS, ASK_TEXT } from "./binder.js";
 import { gameOf, gameFacets, UNKNOWN_GAME } from "./games.js";
-import { eraPlace, eraRank, eraLabel, isEra, setSearchWords, norm as setNorm } from "./pokemon-eras.js";
+import { eraPlace, eraRank, eraLabel, isEra, setSearchWords, norm as setNorm, OTHER_ERA } from "./pokemon-eras.js";
 
 /** The one game whose sets are grouped into eras. */
 export const ERA_GAME = "pokemon";
@@ -193,8 +193,8 @@ export function imagesBySku(listings) {
  * set matcher. Without it a card is still read by its eBay category and its
  * title; what it loses is the set-name fallback.
  */
-export function storefrontStock(checkouts, listings, { includeOnline = true, setOf = null, gameIndex = null } = {}) {
-  const tags = tagsByKey(checkouts, includeOnline ? listings : [], listings, setOf, gameIndex);
+export function storefrontStock(checkouts, listings, { includeOnline = true, setOf = null, gameIndex = null, isPokemonSet = null } = {}) {
+  const tags = tagsByKey(checkouts, includeOnline ? listings : [], listings, setOf, gameIndex, isPokemonSet);
   const view = binderView(
     checkouts || [],
     { sort: "name", scope: includeOnline ? "all" : BOX },
@@ -229,7 +229,7 @@ export function storefrontStock(checkouts, listings, { includeOnline = true, set
  * first copy that names a set answers for the pocket; a card nothing names
  * gets no set, and "All sets" still shows it.
  */
-function tagsByKey(checkouts, onlineListings, allListings, setOf, gameIndex) {
+function tagsByKey(checkouts, onlineListings, allListings, setOf, gameIndex, isPokemonSet) {
   const out = new Map();
   const listingBySku = new Map();
   for (const l of allListings || []) {
@@ -247,6 +247,16 @@ function tagsByKey(checkouts, onlineListings, allListings, setOf, gameIndex) {
     if (!cur.set && typeof setOf === "function") {
       const hit = setOf(title) || (listing?.title && listing.title !== title ? setOf(listing.title) : null);
       if (hit?.name) cur.set = hit.name;
+    }
+    // A Wizards-era title rarely says "Pokémon", and its set says nothing to
+    // gameOf(): "Jungle" is one word and "Base Set" is a name other games
+    // use too. So those cards read as unidentified and their sets never
+    // reached the Pokémon picker. A set the catalogue holds for Pokémon AND
+    // that the era table places is enough — asked only of a card nothing else
+    // identified, so a title that names its game is never overruled.
+    if (cur.game === UNKNOWN_GAME && cur.set && typeof isPokemonSet === "function" &&
+        isPokemonSet(cur.set) && eraPlace(cur.set).era !== OTHER_ERA) {
+      cur.game = ERA_GAME;
     }
     out.set(id, cur);
   };

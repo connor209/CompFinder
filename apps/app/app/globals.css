@@ -2309,6 +2309,34 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .sf-setpick-cur, .sf-setpick-cur .sf-setpick-n { color:var(--accent); font-weight:700; }
 .sf-setpick-row:hover, .sf-setpick-era:hover { color:var(--accent); }
 .sf-setpick-none { text-align:center; margin:24px 0; }
+/* Something moving. An indeterminate bar — nothing here knows how far along a
+   search or the first read is — in the holo foil the app already uses. */
+.sf-progress { display:block; position:relative; height:3px; border-radius:999px; overflow:hidden;
+  background:var(--line); margin:-4px 0 2px; }
+.sf-progress > span { position:absolute; top:0; bottom:0; width:40%; border-radius:999px;
+  background:linear-gradient(90deg, #7CE7F0, #9FA6FF, #F0A6D8, #FCD79A);
+  animation:sf-slide 1.1s ease-in-out infinite; }
+@keyframes sf-slide { 0% { left:-40%; } 100% { left:100%; } }
+.sf-busy { opacity:.45; transition:opacity .15s ease; pointer-events:none; }
+.sf-results + .sf-results { margin-top:12px; }
+/* The first load: a card in foil, turning, while the server reads the stock. */
+.sf-loading { min-height:70vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; }
+.sf-loading-card { width:64px; height:90px; border-radius:7px;
+  background:linear-gradient(135deg, #7CE7F0 0%, #9FA6FF 34%, #F0A6D8 64%, #FCD79A 100%);
+  box-shadow:0 10px 24px rgba(0,0,0,.18), inset 0 0 0 3px rgba(255,255,255,.55);
+  animation:sf-turn 1.6s ease-in-out infinite; }
+@keyframes sf-turn {
+  0% { transform:perspective(400px) rotateY(0deg); }
+  50% { transform:perspective(400px) rotateY(180deg); filter:brightness(1.12); }
+  100% { transform:perspective(400px) rotateY(360deg); }
+}
+.sf-loading-text { margin:0; font-size:15px; color:var(--ink-soft); }
+.sf-progress-wide { width:min(220px, 60vw); margin:0; }
+@media (prefers-reduced-motion: reduce) {
+  .sf-loading-card { animation:sf-pulse 1.6s ease-in-out infinite; }
+  @keyframes sf-pulse { 50% { opacity:.55; } }
+  .sf-progress > span { animation-duration:2.4s; }
+}
 .sf-shell-listed { padding-bottom:96px; }
 .sf-heart { position:absolute; top:5px; left:5px; z-index:1; width:22px; height:22px; border-radius:50%;
   display:flex; align-items:center; justify-content:center; font-size:12px; line-height:1;

@@ -132,6 +132,16 @@ export function appSetIndex(rows) {
     return { ...r, set_name: name };
   });
   const index = buildSetIndex(formed);
+  // Which games hold each set, by the catalogue's own spelling — so a caller
+  // can ask "is this a Pokémon set?" of a name the matcher returned.
+  const gamesByName = new Map();
+  for (const r of rows || []) {
+    const name = String(r?.set_name || "").trim();
+    if (!name) continue;
+    if (!gamesByName.has(name)) gamesByName.set(name, new Set());
+    if (r?.game) gamesByName.get(name).add(String(r.game));
+  }
+  index.gamesByName = gamesByName;
   for (const e of index.names) e.name = original.get(e.name) || e.name;
   for (const v of index.codes.values()) v.name = original.get(v.name) || v.name;
   const byFirst = new Map();
@@ -169,11 +179,24 @@ export function matchSetFromTitle(title, index) {
   if (!index || !title) return null;
   const hay = canonicalSetTitle(title);
   const hit = matchCanonical(hay, index);
-  if (!hit || normalizeForMatch(hit.name).trim() !== BASE_SET) return hit;
   const total = String(title).match(/\b\d{1,3}\s*\/\s*(\d{2,3})\b/);
+  // The 1999 set as sellers often title it: "Base" with no "Set", or
+  // "Shadowless" (a printing only Base Set has), on a number out of 102.
+  // Triumphant is also out of 102, which is why the word is required.
+  if (!hit) {
+    return total && Number(total[1]) === BASE_SET_TOTAL && / (?:base|shadowless) /.test(hay)
+      ? matchCanonical(` ${BASE_SET} `, index)
+      : null;
+  }
+  if (normalizeForMatch(hit.name).trim() !== BASE_SET) return hit;
   if (!total || Number(total[1]) === BASE_SET_TOTAL) return hit;
   const era = ERA_BY_TOTAL.get(Number(total[1]));
   return era ? matchCanonical(era, index) : null;
+}
+
+/** Does the catalogue hold a set by this exact name for this game? */
+export function setInGame(index, name, game) {
+  return Boolean(index?.gamesByName?.get(String(name || ""))?.has(game));
 }
 
 /** A function title -> { name, code } | null over the index, or one that always answers null. */
