@@ -10,6 +10,8 @@ import ColumnPicker, { useColumns } from "./ColumnPicker";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { awayIndex, listingStock } from "@/lib/stockcheck.js";
 import { withPool, isStreamCheckout } from "@/lib/streamstock.js";
+import { pagedSelect } from "@/lib/pagedSelect";
+import { locationsBySku } from "@/lib/stackpos.js";
 import DealBar, { DealButton, useDeal } from "./DealBar";
 import { StreamBar, StreamButton, useRelay } from "./StreamBar";
 import { listingLine } from "@/lib/deal.js";
@@ -220,6 +222,29 @@ function skusOf(g) {
   return s.length ? s.join(", ") : "—";
 }
 
+/**
+ * Where a listing's card is on the shelf right now — "B · 12 of 40".
+ *
+ * The SKU is a name, not an address: it was written when the card was filed,
+ * and it keeps saying "A50" after the card has been reallocated to Stack B or
+ * moved up past ten pulled cards. Hunting by SKU at a show sent us to the
+ * wrong stack. locationsBySku() is the one rule (stackpos.js), so this is the
+ * same number the Show Desk and Stacks give. A card that is away or has no
+ * stack card gets nothing — there is no honest place to send you.
+ */
+function locationOf(sku, locations) {
+  if (!sku || !locations) return null;
+  return locations.get(String(sku).toLowerCase()) || null;
+}
+function locationsOf(g, locations) {
+  const out = [];
+  for (const it of g._items) {
+    const loc = locationOf(it.sku, locations);
+    if (loc && !out.includes(loc)) out.push(loc);
+  }
+  return out;
+}
+
 // Table columns for the "pick columns" view. Each cell gets (g, ctx) where
 // ctx.priced is the repricing map. `always` columns can't be hidden.
 const ALL_COLUMNS = [
@@ -236,6 +261,14 @@ const ALL_COLUMNS = [
     )
   },
   { key: "sku", label: "SKU", cell: (g) => <span className="mono">{skusOf(g)}</span> },
+  {
+    key: "location",
+    label: "Stack",
+    cell: (g, ctx) => {
+      const locs = locationsOf(g, ctx.locations);
+      return locs.length ? <span className="mono">{locs.join(", ")}</span> : <span className="muted">—</span>;
+    }
+  },
   { key: "price", label: "Ask", cell: (g) => <span className="mono">{priceStr(g.price_value, g.price_currency)}</span> },
   { key: "qty", label: "Qty", cell: (g) => g._qty },
   { key: "listings", label: "Listings", cell: (g) => g._count },
@@ -343,7 +376,7 @@ const ALL_COLUMNS = [
     }
   }
 ];
-const DEFAULT_COLS = ["image", "title", "sku", "price", "cost", "market", "margin", "actions"];
+const DEFAULT_COLS = ["image", "title", "sku", "location", "price", "cost", "market", "margin", "actions"];
 
 /**
  * How many cards are rendered at once.
@@ -391,6 +424,8 @@ export default function Inventory({ onDeepDive }) {
   // zero. `null` means we could not ask — see loadAway(); that is not the same
   // as "none are away", and nothing is hidden on the strength of it.
   const [away, setAway] = useState(null);
+  // lowercased SKU -> "B · 12 of 40"; null until loaded, or if the read failed.
+  const [locations, setLocations] = useState(null);
   const [showGone, setShowGone] = useState(false);
   const [expanded, setExpanded] = useState(() => new Set());
   // key -> { loading, recPence, used, rec, error }. `rec` is the whole
@@ -474,6 +509,25 @@ export default function Inventory({ onDeepDive }) {
     }
   }
 
+  /**
+   * Where every card in a stack is right now, keyed by SKU. Unpulled cards
+   * only — a pulled card has no position. A failed read leaves it null and the
+   * screen simply shows no location, which is a gap rather than a wrong stack.
+   */
+  async function loadLocations() {
+    try {
+      const sb = createClient();
+      const [{ data: st, error }, cards] = await Promise.all([
+        sb.from("card_stacks").select("id,name"),
+        pagedSelect(() => sb.from("stack_cards").select("id,stack_id,sku,position,pulled_at,checked_out_at").is("pulled_at", null))
+      ]);
+      if (error) { setLocations(null); return; }
+      setLocations(locationsBySku(cards, new Map((st || []).map((s) => [s.id, s.name]))));
+    } catch {
+      setLocations(null);
+    }
+  }
+
   async function loadCosts() {
     const supabase = createClient();
     const { data } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
@@ -509,6 +563,7 @@ export default function Inventory({ onDeepDive }) {
         loadListings();
         loadCosts();
         loadAway();
+        loadLocations();
         getSetIndex(createClient()).then((r) => setSetIndex(r?.index ? r : null), () => {});
       }
     })();
@@ -526,6 +581,7 @@ export default function Inventory({ onDeepDive }) {
         await loadListings();
         await loadCosts();
         await loadAway();
+        await loadLocations();
       } else {
         setNote(res.error || "Sync failed.");
       }
@@ -1268,7 +1324,7 @@ export default function Inventory({ onDeepDive }) {
                   </td>
                   {visibleCols(ALL_COLUMNS).map((c) => (
                     <td key={c.key} className={`itbl-${c.key}`}>
-                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, onShow: showOut, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay })}
+                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, onShow: showOut, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay, locations })}
                     </td>
                   ))}
                 </tr>
@@ -1301,7 +1357,14 @@ export default function Inventory({ onDeepDive }) {
                       <span className="inv-qty">Qty {g.quantity}</span>
                     ) : null}
                   </div>
-                  {g._count === 1 && g.sku ? <div className="inv-sku">SKU {g.sku}</div> : null}
+                  {g._count === 1 && g.sku ? (
+                    <div className="inv-sku">
+                      SKU {g.sku}
+                      {locationOf(g.sku, locations) ? <span className="inv-loc" title="Where the card is now — the SKU may name the stack it was first filed in"> · 📍 {locationOf(g.sku, locations)}</span> : null}
+                    </div>
+                  ) : g._count > 1 && locationsOf(g, locations).length ? (
+                    <div className="inv-sku"><span className="inv-loc">📍 {locationsOf(g, locations).join(", ")}</span></div>
+                  ) : null}
                   <AwayChip away={g._away} />
 
                   {/* Repricing intelligence */}
@@ -1364,7 +1427,7 @@ export default function Inventory({ onDeepDive }) {
                     <div className="inv-sublist">
                       {g._items.map((it, i) => (
                         <a key={it.ebay_item_id} href={it.url || "#"} target="_blank" rel="noopener noreferrer">
-                          {it.sku ? `SKU ${it.sku}` : `Listing ${i + 1}`}{it.quantity != null ? ` · qty ${it.quantity}` : ""} →
+                          {it.sku ? `SKU ${it.sku}` : `Listing ${i + 1}`}{locationOf(it.sku, locations) ? ` · 📍 ${locationOf(it.sku, locations)}` : ""}{it.quantity != null ? ` · qty ${it.quantity}` : ""} →
                         </a>
                       ))}
                     </div>

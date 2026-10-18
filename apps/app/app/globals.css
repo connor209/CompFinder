@@ -1507,6 +1507,7 @@ html, body { overflow-x: clip; max-width: 100%; }
 .inv-sublist a { font-size:12px; color:var(--accent-2); text-decoration:none; font-family:var(--font-mono); }
 .inv-sublist a:hover { text-decoration:underline; }
 .inv-sku { font-size:11px; font-family:var(--font-mono); color:var(--ink-faint); letter-spacing:.02em; }
+.inv-loc { color:var(--ink); font-weight:600; }
 
 /* Repricing intelligence */
 .inv-reprice { display:flex; flex-direction:column; gap:2px; font-size:12px; padding:8px 10px; border-radius:10px; background:var(--surface-sink); }
