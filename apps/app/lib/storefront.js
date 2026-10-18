@@ -38,7 +38,7 @@
  * can load it under bare node.
  */
 import { normalise } from "./showfilter.js";
-import { counterPrice } from "./showcounter.js";
+import { counterPrice, imageAt } from "./showcounter.js";
 import { binderView, binderKey, BOX, ONLINE, SECTION_LABELS, ASK_TEXT } from "./binder.js";
 import { gameOf, gameFacets, UNKNOWN_GAME } from "./games.js";
 
@@ -108,6 +108,14 @@ export const SHOP_SECTION_LABELS = {
   [BOX]: { title: "Out at a show", note: "On our table at a show right now — back in stock after." },
   [ONLINE]: { title: "In stock", note: "Ask us about any card and we'll check it for you." }
 };
+/**
+ * The picture size a storefront pocket asks eBay for. A pocket is ~110px wide
+ * on a phone, so 300 covers a 3x screen; the desk binder's 500 is nearly three
+ * times the bytes, eighteen times over on the first screen, on venue wifi.
+ * The 1600 one still opens on a tap.
+ */
+export const STOREFRONT_POCKET_PX = 300;
+
 /** A price that is really a price, or null. */
 function pence(n) {
   const v = n == null ? NaN : Number(n);
@@ -145,7 +153,7 @@ export function storefrontCard(pocket, index, set = null, game = null) {
     pricePence: p,
     priceText: counterPrice(p),
     priceFrom: Boolean(pocket?.priceFrom),
-    image: pocket?.image || null,
+    image: imageAt(pocket?.image, STOREFRONT_POCKET_PX) || null,
     imageLarge: pocket?.imageLarge || null,
     count: copies.length || 1,
     copies

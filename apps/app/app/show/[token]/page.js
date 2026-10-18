@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { loadPublicStorefront, rememberStorefront } from "@/lib/storefront-store.js";
 import { storefrontLanding } from "@/lib/storefront.js";
 import Storefront from "./Storefront";
+import { storefrontSets } from "./sets";
 
 /**
  * The storefront: the show stock, behind the QR on the table.
@@ -54,7 +55,10 @@ export default async function StorefrontPage({ params }) {
   const { token } = await params;
   let result;
   try {
-    result = await loadPublicStorefront(createAdminClient(), token);
+    result = await loadPublicStorefront(createAdminClient(), token, { loadSets: storefrontSets });
+    // One line per scan in the function log: the database's share and ours,
+    // so "it's slow" can be answered with a number rather than a guess.
+    if (result?.timing) console.info(`[storefront] page reads=${result.timing.readMs}ms project=${result.timing.projectMs}ms cards=${result.timing.cards}`);
     // Fresh on every page load, and handed to the search route so the first
     // few searches after it cost no second read of the inventory.
     rememberStorefront(token, result);

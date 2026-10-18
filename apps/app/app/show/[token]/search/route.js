@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadPublicStorefrontCached } from "@/lib/storefront-store.js";
 import { storefrontSearch, searchCriteria } from "@/lib/storefront.js";
+import { storefrontSets } from "../sets";
 
 /**
  * The storefront's search box: one page of matching cards for a link.
@@ -28,7 +29,12 @@ export async function GET(request, { params }) {
   const { token } = await params;
   let result;
   try {
-    result = await loadPublicStorefrontCached(createAdminClient(), token);
+    result = await loadPublicStorefrontCached(createAdminClient(), token, { loadSets: storefrontSets });
+    if (result?.timing && !result.timing.logged) {
+      // Logged once per load: a cache hit hands back the same object.
+      result.timing.logged = true;
+      console.info(`[storefront] search reads=${result.timing.readMs}ms project=${result.timing.projectMs}ms cards=${result.timing.cards}`);
+    }
   } catch {
     result = { ok: false, reason: "error" };
   }

@@ -238,17 +238,36 @@ const LINK_COLUMNS = "id,user_id,title,event,include_online,expires_at,revoked_a
 /** 032's column, read where it exists: without it every link is a show link. */
 const LINK_KIND_COLUMN = "kind";
 
-/** A paged read that reports its error, where pagedSelect() swallows it. */
+/**
+ * A paged read that reports its error, where pagedSelect() swallows it.
+ *
+ * `makeQuery(withCount)` builds the query; the first page asks for the row
+ * count as well, and when there is more than one page the rest are read at
+ * ONCE rather than one after another — a few thousand listings were several
+ * round trips in a row, on the request a visitor is waiting on. A client that
+ * reports no count is read page by page as before.
+ */
 async function readAll(makeQuery, pageSize = 1000) {
-  let from = 0;
-  let rows = [];
-  for (;;) {
-    const { data, error } = await makeQuery().range(from, from + pageSize - 1);
+  const first = await makeQuery(true).range(0, pageSize - 1);
+  if (first.error) return { rows: [], error: first.error };
+  let rows = first.data || [];
+  if (rows.length < pageSize) return { rows, error: null };
+  if (Number.isFinite(first.count)) {
+    const ranges = [];
+    for (let from = pageSize; from < first.count; from += pageSize) ranges.push(from);
+    const pages = await Promise.all(ranges.map((from) => makeQuery(false).range(from, from + pageSize - 1)));
+    for (const p of pages) {
+      if (p.error) return { rows, error: p.error };
+      rows = rows.concat(p.data || []);
+    }
+    return { rows, error: null };
+  }
+  for (let from = pageSize; ; from += pageSize) {
+    const { data, error } = await makeQuery(false).range(from, from + pageSize - 1);
     if (error) return { rows, error };
     if (!data || data.length === 0) break;
     rows = rows.concat(data);
     if (data.length < pageSize) break;
-    from += pageSize;
   }
   return { rows, error: null };
 }
@@ -262,7 +281,8 @@ async function readAll(makeQuery, pageSize = 1000) {
  * switched off or run out: somebody scanning last month's sign should be told
  * the show is over rather than that the link is broken.
  */
-export async function loadPublicStorefront(admin, token, { now = new Date(), countView = true } = {}) {
+export async function loadPublicStorefront(admin, token, { now = new Date(), countView = true, loadSets = getSetIndex } = {}) {
+  const started = Date.now();
   if (!isWellFormedToken(token)) return { ok: false, reason: "not-found" };
 
   const readLink = (cols) => admin
@@ -283,10 +303,11 @@ export async function loadPublicStorefront(admin, token, { now = new Date(), cou
   // A shop link is the whole stock, read that way whatever the row says.
   const event = shop ? "" : String(link.event || "").trim();
   const includeOnline = shop || Boolean(link.include_online);
-  const listingQuery = (cols) => () => admin
-    .from("ebay_listings").select(cols).eq("user_id", owner).order("ebay_item_id", { ascending: true });
-  const checkoutQuery = (cols) => () => {
-    let q = admin.from("stock_checkouts").select(cols).eq("user_id", owner).is("resolved_at", null);
+  const counted = (withCount) => (withCount ? { count: "exact" } : undefined);
+  const listingQuery = (cols) => (withCount) => admin
+    .from("ebay_listings").select(cols, counted(withCount)).eq("user_id", owner).order("ebay_item_id", { ascending: true });
+  const checkoutQuery = (cols) => (withCount) => {
+    let q = admin.from("stock_checkouts").select(cols, counted(withCount)).eq("user_id", owner).is("resolved_at", null);
     if (event) q = q.eq("event", event);
     // A paged read needs a TOTAL order: ties on checked_out_at (a batch checked
     // out in one go) let pages overlap or skip, and a skipped row is a card
@@ -308,7 +329,7 @@ export async function loadPublicStorefront(admin, token, { now = new Date(), cou
       .then((r) => (r.error ? readAll(listingQuery(LISTING_COLUMNS)) : r)),
     // The public catalogue's set list, for the set filter. A failure here
     // costs the filter, never the page.
-    getSetIndex(admin).catch(() => ({ index: null })),
+    Promise.resolve().then(() => loadSets(admin)).catch(() => ({ index: null })),
     // A count we fail to write is a count we lose, not a page we refuse. A
     // search is not a visit: only the page load counts.
     countView
@@ -316,6 +337,12 @@ export async function loadPublicStorefront(admin, token, { now = new Date(), cou
       : null
   ]);
   if (box.error) return { ok: false, reason: "error" };
+  const read = Date.now();
+  const stock = storefrontStock(showOnly(box.rows), live.error ? [] : live.rows, {
+    includeOnline,
+    setOf: setMatcher(sets?.index),
+    gameIndex: sets?.gameIndex || null
+  });
 
   return {
     ok: true,
@@ -327,11 +354,10 @@ export async function loadPublicStorefront(admin, token, { now = new Date(), cou
       shop,
       at: now.toISOString()
     },
-    stock: storefrontStock(showOnly(box.rows), live.error ? [] : live.rows, {
-      includeOnline,
-      setOf: setMatcher(sets?.index),
-      gameIndex: sets?.gameIndex || null
-    })
+    stock,
+    // Server-side only — for the log line, so a slow scan can be told apart
+    // into the database's share and ours. Never handed to the page.
+    timing: { readMs: read - started, projectMs: Date.now() - read, cards: stock.cards.length }
   };
 }
 
@@ -358,7 +384,7 @@ export function rememberStorefront(token, result, at = Date.now()) {
   while (storefrontCache.size > STOREFRONT_CACHE_MAX) storefrontCache.delete(storefrontCache.keys().next().value);
 }
 
-export async function loadPublicStorefrontCached(admin, token, { now = new Date(), ttlMs = STOREFRONT_CACHE_MS } = {}) {
+export async function loadPublicStorefrontCached(admin, token, { now = new Date(), ttlMs = STOREFRONT_CACHE_MS, loadSets } = {}) {
   const hit = storefrontCache.get(token);
   if (hit && now.getTime() - hit.at < ttlMs && isWellFormedToken(token)) {
     const { data: link, error } = await admin
@@ -370,7 +396,7 @@ export async function loadPublicStorefrontCached(admin, token, { now = new Date(
     storefrontCache.delete(token);
     if (!error) return { ok: false, reason: link ? "ended" : "not-found", shop: hit.result.storefront?.shop };
   }
-  const result = await loadPublicStorefront(admin, token, { now, countView: false });
+  const result = await loadPublicStorefront(admin, token, { now, countView: false, ...(loadSets ? { loadSets } : {}) });
   rememberStorefront(token, result, now.getTime());
   return result;
 }

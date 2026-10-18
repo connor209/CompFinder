@@ -93,13 +93,39 @@ export function buildSetGameIndex(rows) {
     .sort((a, b) => b.norm.length - a.norm.length);
 }
 
+/**
+ * Entries by their first word, built once per index. Walking every set name
+ * for every title is what made the storefront's first load spend seconds of
+ * CPU; a name can only be in a title if its first word is, so each title
+ * checks the few names starting with one of its words and takes the earliest
+ * in the longest-first order — the one the full walk would have found.
+ */
+const BY_FIRST = new WeakMap();
+function byFirstWord(setIndex) {
+  let m = BY_FIRST.get(setIndex);
+  if (!m) {
+    m = new Map();
+    setIndex.forEach((e, i) => {
+      const first = e.norm.split(" ")[0];
+      if (!m.has(first)) m.set(first, []);
+      m.get(first).push(i);
+    });
+    BY_FIRST.set(setIndex, m);
+  }
+  return m;
+}
+
 function gameFromSet(title, setIndex) {
   if (!setIndex || setIndex.length === 0 || !title) return null;
   const hay = normalizeForMatch(title);
-  for (const e of setIndex) {
-    if (hay.includes(` ${e.norm} `)) return e.game;
+  const m = byFirstWord(setIndex);
+  let best = -1;
+  for (const tok of new Set(hay.trim().split(" "))) {
+    for (const i of m.get(tok) || []) {
+      if ((best === -1 || i < best) && hay.includes(` ${setIndex[i].norm} `)) best = i;
+    }
   }
-  return null;
+  return best === -1 ? null : setIndex[best].game;
 }
 
 /**
