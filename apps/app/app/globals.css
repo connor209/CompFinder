@@ -2277,6 +2277,16 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .sf-filters .sd-select { flex:1 1 140px; min-width:0; }
 .sf-filters .sd-clear-all { flex:none; font-size:13px; }
 .sf-note { text-align:center; margin:0; }
+/* The storefront's cards: the binder's pockets without the binder. Three
+   across on a phone, as before, because the pocket and label sizes under the
+   720px rule were measured for that width; more on anything wider. */
+.sf-results { display:flex; flex-direction:column; gap:8px; }
+.sf-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
+@media (max-width: 720px) { .sf-grid { gap:6px; } }
+.sf-featured-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+.sf-featured-head .sd-clear-all { flex:none; font-size:13px; }
+.sf-count { margin:0; }
+.sf-more { align-self:center; margin-top:4px; }
 .sf-shell-listed { padding-bottom:96px; }
 .sf-heart { position:absolute; top:5px; left:5px; z-index:1; width:22px; height:22px; border-radius:50%;
   display:flex; align-items:center; justify-content:center; font-size:12px; line-height:1;

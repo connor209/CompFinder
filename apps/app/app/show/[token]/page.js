@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadPublicStorefront } from "@/lib/storefront-store.js";
+import { loadPublicStorefront, rememberStorefront } from "@/lib/storefront-store.js";
+import { storefrontLanding } from "@/lib/storefront.js";
 import Storefront from "./Storefront";
 
 /**
@@ -54,6 +55,9 @@ export default async function StorefrontPage({ params }) {
   let result;
   try {
     result = await loadPublicStorefront(createAdminClient(), token);
+    // Fresh on every page load, and handed to the search route so the first
+    // few searches after it cost no second read of the inventory.
+    rememberStorefront(token, result);
   } catch {
     // No service-role key on this deployment, or Supabase unreachable. A
     // visitor is owed a sentence rather than Next's 500 page.
@@ -72,5 +76,9 @@ export default async function StorefrontPage({ params }) {
     );
   }
 
-  return <Storefront storefront={result.storefront} stock={result.stock} />;
+  // The landing slice only: the dearest cards and the filter options. The
+  // whole inventory used to go to the browser here, inline in the HTML, and
+  // that was what made the QR slow to open. The rest comes a page at a time
+  // from ./search.
+  return <Storefront storefront={result.storefront} landing={storefrontLanding(result.stock, { onlineFirst: result.storefront.shop })} />;
 }

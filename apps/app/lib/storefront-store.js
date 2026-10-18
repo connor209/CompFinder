@@ -227,6 +227,13 @@ export const CHECKOUT_COLUMNS_PRE_024 = "id,title,sku";
  */
 export const POOL_COLUMN = "pool";
 export const LISTING_COLUMNS = "ebay_item_id,sku,title,price_value,quantity,image_url";
+/**
+ * eBay's category, for the game filter — one key out of migration 004's
+ * `extra` blob rather than the blob, which carries everything the column
+ * picker shows. Read where it can be; a read that fails with it is asked
+ * again without, and the game falls back to the title.
+ */
+export const LISTING_CATEGORY_COLUMN = "category:extra->>category";
 const LINK_COLUMNS = "id,user_id,title,event,include_online,expires_at,revoked_at";
 /** 032's column, read where it exists: without it every link is a show link. */
 const LINK_KIND_COLUMN = "kind";
@@ -255,7 +262,7 @@ async function readAll(makeQuery, pageSize = 1000) {
  * switched off or run out: somebody scanning last month's sign should be told
  * the show is over rather than that the link is broken.
  */
-export async function loadPublicStorefront(admin, token, { now = new Date() } = {}) {
+export async function loadPublicStorefront(admin, token, { now = new Date(), countView = true } = {}) {
   if (!isWellFormedToken(token)) return { ok: false, reason: "not-found" };
 
   const readLink = (cols) => admin
@@ -276,6 +283,8 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
   // A shop link is the whole stock, read that way whatever the row says.
   const event = shop ? "" : String(link.event || "").trim();
   const includeOnline = shop || Boolean(link.include_online);
+  const listingQuery = (cols) => () => admin
+    .from("ebay_listings").select(cols).eq("user_id", owner).order("ebay_item_id", { ascending: true });
   const checkoutQuery = (cols) => () => {
     let q = admin.from("stock_checkouts").select(cols).eq("user_id", owner).is("resolved_at", null);
     if (event) q = q.eq("event", event);
@@ -295,14 +304,16 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
     // is on the listing it came from.
     // Ordered for the same reason: unordered, every row of a sync shares one
     // synced_at and nothing makes page two start where page one ended.
-    readAll(() => admin.from("ebay_listings").select(LISTING_COLUMNS).eq("user_id", owner).order("ebay_item_id", { ascending: true })),
+    readAll(listingQuery(`${LISTING_COLUMNS},${LISTING_CATEGORY_COLUMN}`))
+      .then((r) => (r.error ? readAll(listingQuery(LISTING_COLUMNS)) : r)),
     // The public catalogue's set list, for the set filter. A failure here
     // costs the filter, never the page.
     getSetIndex(admin).catch(() => ({ index: null })),
-    // A count we fail to write is a count we lose, not a page we refuse.
-    Promise.resolve()
-      .then(() => admin.rpc("storefront_hit", { p_id: link.id }))
-      .catch(() => null)
+    // A count we fail to write is a count we lose, not a page we refuse. A
+    // search is not a visit: only the page load counts.
+    countView
+      ? Promise.resolve().then(() => admin.rpc("storefront_hit", { p_id: link.id })).catch(() => null)
+      : null
   ]);
   if (box.error) return { ok: false, reason: "error" };
 
@@ -318,7 +329,48 @@ export async function loadPublicStorefront(admin, token, { now = new Date() } = 
     },
     stock: storefrontStock(showOnly(box.rows), live.error ? [] : live.rows, {
       includeOnline,
-      setOf: setMatcher(sets?.index)
+      setOf: setMatcher(sets?.index),
+      gameIndex: sets?.gameIndex || null
     })
   };
+}
+
+/**
+ * The same answer, kept for a minute per token on a warm instance — for the
+ * SEARCH route, which would otherwise read the whole inventory on every
+ * keystroke. The page itself always reads fresh (and refills this), so pull
+ * to refresh still shows a sticker typed at the desk a moment ago; a search
+ * is at most a minute behind the page it was typed on.
+ *
+ * Only a live answer is kept, and a kept one is only served after the LINK
+ * row is asked about again — one row, three columns, nothing like the
+ * inventory — so switching a link off takes effect on the next search, not a
+ * minute later.
+ */
+export const STOREFRONT_CACHE_MS = 60 * 1000;
+const STOREFRONT_CACHE_MAX = 32;
+const storefrontCache = new Map();
+
+export function rememberStorefront(token, result, at = Date.now()) {
+  if (!result?.ok) { storefrontCache.delete(token); return; }
+  storefrontCache.delete(token);
+  storefrontCache.set(token, { at, result });
+  while (storefrontCache.size > STOREFRONT_CACHE_MAX) storefrontCache.delete(storefrontCache.keys().next().value);
+}
+
+export async function loadPublicStorefrontCached(admin, token, { now = new Date(), ttlMs = STOREFRONT_CACHE_MS } = {}) {
+  const hit = storefrontCache.get(token);
+  if (hit && now.getTime() - hit.at < ttlMs && isWellFormedToken(token)) {
+    const { data: link, error } = await admin
+      .from("show_storefronts")
+      .select("id,expires_at,revoked_at")
+      .eq("token", token)
+      .maybeSingle();
+    if (!error && link && isLive(link, now)) return hit.result;
+    storefrontCache.delete(token);
+    if (!error) return { ok: false, reason: link ? "ended" : "not-found", shop: hit.result.storefront?.shop };
+  }
+  const result = await loadPublicStorefront(admin, token, { now, countView: false });
+  rememberStorefront(token, result, now.getTime());
+  return result;
 }
