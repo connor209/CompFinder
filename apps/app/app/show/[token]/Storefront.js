@@ -133,6 +133,8 @@ export default function Storefront({ storefront, landing }) {
   const criteriaKey = searchQueryString(criteria);
   useEffect(() => {
     if (!searching) { searchSeq.current++; setResults(null); setLoading(false); setFailed(false); return undefined; }
+    // The bar shows from the keystroke, not from when the request leaves.
+    setLoading(true);
     const t = setTimeout(() => runSearch(0), SEARCH_DELAY_MS);
     return () => clearTimeout(t);
     // runSearch reads the criteria this key was built from.
@@ -167,7 +169,9 @@ export default function Storefront({ storefront, landing }) {
     ? new Date(storefront.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })
     : null;
   const totalText = list.totalPence > 0 ? `${list.totalFrom ? "from " : ""}${counterPrice(list.totalPence)}` : null;
-  const shown = searching ? results?.cards || [] : featured;
+  // Until the first answer lands, the front page stays up (dimmed by the
+  // busy state) rather than the screen going blank under the bar.
+  const shown = searching ? results?.cards ?? (loading ? featured : []) : featured;
 
   function pocket(c) {
     return (
@@ -291,6 +295,9 @@ export default function Storefront({ storefront, landing }) {
             ) : null}
           </div>
 
+          {/* Something moving while a search is out: the count line alone was
+              "Searching…" in small grey type, easy to miss on a phone. */}
+          {loading ? <span className="sf-progress" role="progressbar" aria-label="Searching"><span /></span> : null}
           {searching ? (
             <p className="hint hint-small sf-count" aria-live="polite">
               {failed
@@ -310,7 +317,9 @@ export default function Storefront({ storefront, landing }) {
             </div>
           )}
 
-          {shown.length > 0 ? sections(shown) : null}
+          {/* The old results stay while the new ones come, dimmed, so the page
+              does not jump to empty between keystrokes. */}
+          {shown.length > 0 ? <div className={loading ? "sf-busy" : undefined} aria-busy={loading || undefined}>{sections(shown)}</div> : null}
 
           {searching && results?.next != null ? (
             <button className="btn btn-ghost sf-more" onClick={() => runSearch(results.next)} disabled={loading}>

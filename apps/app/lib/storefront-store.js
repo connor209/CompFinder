@@ -30,7 +30,7 @@
  * scripts/check-storefront.mjs can load it under bare node.
  */
 import { storefrontStock } from "./storefront.js";
-import { getSetIndex, setMatcher } from "./set-index.js";
+import { getSetIndex, setMatcher, setInGame } from "./set-index.js";
 import { showOnly } from "./streamstock.js";
 
 /** Where a storefront lives. Short, because it is a QR: fewer modules to scan. */
@@ -341,7 +341,8 @@ export async function loadPublicStorefront(admin, token, { now = new Date(), cou
   const stock = storefrontStock(showOnly(box.rows), live.error ? [] : live.rows, {
     includeOnline,
     setOf: setMatcher(sets?.index),
-    gameIndex: sets?.gameIndex || null
+    gameIndex: sets?.gameIndex || null,
+    isPokemonSet: (name) => setInGame(sets?.index, name, "pokemon")
   });
 
   return {

@@ -30,6 +30,7 @@ import {
   STOREFRONT_PAGE, FEATURED_PER_SECTION, setPickerGroups
 } from "../apps/app/lib/storefront.js";
 import { eraOf, OTHER_ERA, POKEMON_ERAS } from "../apps/app/lib/pokemon-eras.js";
+import { appSetIndex, setMatcher, setInGame } from "../apps/app/lib/set-index.js";
 import { buildSetGameIndex } from "../apps/app/lib/games.js";
 import {
   wishKey, wishItem, toggleWish, reconcileWishlist, cleanWishlist, removeWish,
@@ -208,6 +209,35 @@ const listings = [
   ok(groups("jun").flatMap((g) => g.sets.map((x) => x.name)).join() === "Jungle", "typing the start of a set name did not find it");
   ok(groups("zzz").length === 0, "a search that matches nothing still showed a group");
   ok(setPickerGroups(f.sets.magic, "", "magic").length === 1 && setPickerGroups(f.sets.magic, "", "magic")[0].label === "", "a game with no eras grew an era heading");
+}
+
+// --- Wizards-era cards reach the Pokémon picker --------------------------------
+// Their titles rarely say "Pokémon", "Jungle" is one word and "Base Set" is a
+// name other games use, so gameOf() calls them unidentified. A set the
+// catalogue holds for Pokémon, and that the era table places, settles it —
+// for an otherwise unidentified card only.
+{
+  const rows = [["pokemon", "Base Set"], ["pokemon", "Jungle"], ["pokemon", "Triumphant"], ["digimon", "Base Set"], ["magic", "Dominaria United"], ["magic", "Emerald Isle"]]
+    .map(([game, set_name]) => ({ game, set_name, set_code: "" }));
+  const idx = appSetIndex(rows);
+  const gi = buildSetGameIndex(rows);
+  const L = (i, title, category = "CCG Individual Cards") => ({ ebay_item_id: String(i), sku: `W${i}`, title, price_value: 10, quantity: 1, category });
+  const st = storefrontStock([], [
+    L(1, "Charizard 4/102 Base Set Holo Rare"), L(2, "Venusaur 15/102 Base Holo WOTC"), L(3, "Blastoise 2/102 Shadowless Holo"),
+    L(4, "Scyther 10/64 Jungle Holo"), L(5, "Celebi 100/102 Triumphant"), L(6, "Agumon BT1-010 Base Set Digimon"),
+    L(7, "Sheoldred 107/281 Dominaria United"), L(8, "Mystery 100/102 Holo")
+  ], { setOf: setMatcher(idx), gameIndex: gi, isPokemonSet: (n) => setInGame(idx, n, "pokemon") });
+  const by = (re) => st.cards.find((c) => re.test(c.name));
+  for (const [re, set] of [[/charizard/i, "Base Set"], [/venusaur/i, "Base Set"], [/blastoise/i, "Base Set"], [/scyther/i, "Jungle"], [/celebi/i, "Triumphant"]]) {
+    ok(by(re)?.game === "pokemon" && by(re)?.set === set, `${re} came out as ${by(re)?.game} / ${by(re)?.set}`);
+  }
+  ok(by(/agumon/i)?.game === "digimon", "a card that names its game was overruled by a shared set name");
+  ok(by(/sheoldred/i)?.game === "magic", "a Magic card was moved to Pokémon");
+  ok(by(/mystery/i)?.set === null, "a number out of 102 with no 'base' or 'shadowless' was read as Base Set — Triumphant is /102 too");
+  ok(storefrontFacets(st.cards).sets.pokemon?.some((x) => x.name === "Base Set"), "Base Set is not offered in the Pokémon picker");
+
+  const loading = src("apps/app/app/show/[token]/loading.js");
+  ok(!/import|fetch\(|props|params/.test(loading), "the loading screen reaches for data — it renders before anything is known about the link");
 }
 
 // --- Tokens and expiry ---------------------------------------------------
