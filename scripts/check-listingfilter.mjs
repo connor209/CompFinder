@@ -13,7 +13,9 @@
  */
 import { readFileSync } from "node:fs";
 import { buildSetIndex } from "@compfinder/core/setmatch.js";
-import { setMatcher } from "../apps/app/lib/set-index.js";
+import { buildSetIndex as coreIndex, matchSetFromTitle as coreMatch } from "@compfinder/core/setmatch.js";
+import { setMatcher, appSetIndex, matchSetFromTitle } from "../apps/app/lib/set-index.js";
+import { buildSetGameIndex, gameOf } from "../apps/app/lib/games.js";
 import {
   tagListing,
   matchesListingFilters,
@@ -74,6 +76,61 @@ ok(f.sets[f.sets.length - 1].key === NO_SET, "'No set found' is listed last");
 ok(f.sets.find((s) => s.key === "Evolving Skies")?.count === 2, "set counts are counted");
 ok(f.conditions[f.conditions.length - 1].key === NO_CONDITION, "'Not stated' is listed last");
 ok(f.games.some((g) => g.key === "pokemon"), "the game options come from the listings");
+
+// --- "Base Set" is four sets ------------------------------------------------
+// The catalogue names the modern base sets after their era alone; sellers
+// write "<era> Base Set", which longest-first used to read as the 1999 one.
+{
+  const idx = appSetIndex([
+    ["Base Set", "BS"], ["Base Set 2", "B2"], ["Sun & Moon", "SUM"], ["Sword & Shield", "SSH"],
+    ["Scarlet & Violet", "SVI"], ["XY", "XY"], ["Black & White", "BLW"], ["Evolving Skies", "EVS"]
+  ].map(([set_name, set_code]) => ({ game: "pokemon", set_name, set_code })));
+  const read = (t) => matchSetFromTitle(t, idx)?.name ?? null;
+  const cases = [
+    ["Charizard 4/102 Pokemon Base Set Holo", "Base Set"],
+    ["Pikachu 58/102 Base Set Shadowless", "Base Set"],
+    ["Pikachu 87/130 Base Set 2", "Base Set 2"],
+    ["Pikachu 25/149 Sun and Moon Base Set", "Sun & Moon"],
+    ["Pikachu 25/149 Sun & Moon Base Set", "Sun & Moon"],
+    ["Rowlet 9/149 SM Base Set Reverse Holo", "Sun & Moon"],
+    ["Grookey 11/202 Sword and Shield Base Set", "Sword & Shield"],
+    ["Zacian V 138/202 Sword & Shield", "Sword & Shield"],
+    ["Miraidon ex 81/198 SV Base Set", "Scarlet & Violet"],
+    ["Pikachu 62/198 Scarlet and Violet Base Set", "Scarlet & Violet"],
+    ["Squirtle 7/146 XY Base Set", "XY"],
+    ["Snivy 1/114 Black and White Base Set", "Black & White"],
+    // The era left off: the number says which base set it is.
+    ["Pikachu 62/198 Base Set", "Scarlet & Violet"],
+    ["Rowlet 9/149 Pokemon Base Set", "Sun & Moon"],
+    // A number out of something we cannot place is no set, never the wrong one.
+    ["Mystery 5/77 Base Set", null],
+    ["Umbreon VMAX 215/203 Evolving Skies", "Evolving Skies"]
+  ];
+  for (const [t, want] of cases) ok(read(t) === want, `"${t}" read as ${JSON.stringify(read(t))}, want ${JSON.stringify(want)}`);
+  ok(idx.names.every((e) => !/ and /.test(e.name) || !/&/.test(e.name)), "a set name lost the catalogue's own spelling");
+
+  // The word index must pick exactly what core's full walk picks, on titles
+  // where the and/era readings do not apply — it is a speed-up, not a rule.
+  const words = "dark light star crown shining fates lost origin silver tempest paldea evolved obsidian flames neo genesis".split(" ");
+  const rows = [];
+  for (let i = 0; i < 400; i++) rows.push({ game: ["pokemon", "magic"][i % 2], set_name: `${words[i % 16]} ${words[(i * 5) % 16]}${i % 3 ? "" : " " + words[(i * 11) % 16]}`, set_code: `Q${i}` });
+  const fast = appSetIndex(rows), slow = coreIndex(rows);
+  let same = 0, n = 0;
+  for (let i = 0; i < 2000; i++) {
+    const t = `Card ${i} ${words[i % 16]} ${words[(i * 3) % 16]} ${words[(i * 7) % 16]} ${words[(i * 5) % 16]} Q${i % 500}`;
+    n++;
+    if (JSON.stringify(matchSetFromTitle(t, fast)) === JSON.stringify(coreMatch(t, slow))) same++;
+  }
+  ok(same === n, `the word index disagreed with core's matcher on ${n - same} of ${n} titles`);
+  const gi = buildSetGameIndex(rows);
+  const walk = (t) => { const hay = ` ${t.toLowerCase()} `; const e = gi.find((x) => hay.includes(` ${x.norm} `)); return e ? e.game : "unknown"; };
+  let gsame = 0;
+  for (let i = 0; i < 2000; i++) {
+    const t = `x ${words[i % 16]} ${words[(i * 3) % 16]} ${words[(i * 7) % 16]} ${words[(i * 5) % 16]}`;
+    if (gameOf({ title: t }, gi) === walk(t)) gsame++;
+  }
+  ok(gsame === 2000, `the game reader's word index disagreed with the full walk on ${2000 - gsame} titles`);
+}
 
 // The screen goes through the module, not a copy of its readings.
 const inv = readFileSync(new URL("../apps/app/app/panel/Inventory.js", import.meta.url), "utf8");

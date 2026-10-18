@@ -98,7 +98,7 @@ const listings = [
     ok(/^(box|online)-\d+$/.test(c.key), `a card key is not source-and-position: ${c.key}`);
   }
   const gengar = stock.cards.find((c) => /gengar/i.test(c.name));
-  ok(gengar && gengar.image && /s-l500/.test(gengar.image), "the box card did not pick up the photo off its own listing, at pocket size");
+  ok(gengar && gengar.image && /s-l300/.test(gengar.image), "the box card did not pick up the photo off its own listing, at the storefront's pocket size");
   ok(gengar && gengar.priceText === "£40", `the sticker, not the eBay price, is a box card's price: got ${gengar?.priceText}`);
   const umbreon = stock.cards.find((c) => /umbreon/i.test(c.name));
   ok(umbreon && umbreon.priceText === ASK_TEXT && umbreon.pricePence == null, "a held (unstickered) price must ask, not show a number");
@@ -322,6 +322,35 @@ const LINK = { id: "link-1", user_id: OWNER, token: TOKEN, title: "Glasgow table
   for (let i = 0; i < 3; i++) mixed.push({ key: `online-${i}`, source: ONLINE, name: `Listed ${i}`, pricePence: 100, priceText: "", copies: [] });
   ok(storefrontLanding({ cards: mixed }, { onlineFirst: true }).featured[0].source === ONLINE, "a shop's front page does not open on the stock at home");
   ok(storefrontSearch(mixed, { query: "listed 2" }, { onlineFirst: true }).shown === 1, "a shop search did not reach the stock at home");
+}
+
+// --- Paged reads: the rest of the pages at once, and none of them missed -----
+{
+  const many = Array.from({ length: 2500 }, (_, i) => ({ ebay_item_id: String(100000 + i), user_id: OWNER, sku: `P${i}`, title: `Card ${i} ${i}/2500`, price_value: 1 + (i % 50), quantity: 1 }));
+  let inFlight = 0, peak = 0;
+  const admin = {
+    from(table) {
+      const q = { filters: [], opts: null };
+      const b = {
+        select(cols, opts) { q.opts = opts; return b; },
+        eq(c, v) { q.filters.push([c, v]); return b; }, is() { return b; }, order() { return b; },
+        async maybeSingle() { return { data: table === "show_storefronts" ? LINK : null, error: null }; },
+        async range(from, to) {
+          inFlight++; peak = Math.max(peak, inFlight);
+          await new Promise((r) => setTimeout(r, 5));
+          inFlight--;
+          const rows = table === "ebay_listings" ? many : [];
+          return { data: rows.slice(from, to + 1), error: null, count: q.opts?.count === "exact" ? rows.length : null };
+        }
+      };
+      return b;
+    },
+    rpc() { return Promise.resolve({ data: null, error: null }); }
+  };
+  const r = await loadPublicStorefront(admin, TOKEN, { now: new Date("2026-09-24T12:00:00Z"), loadSets: async () => ({ index: null }) });
+  ok(r.ok && r.stock.online === 2500, `a paged read lost or doubled rows: ${r.stock?.online} of 2500`);
+  ok(peak >= 2, "the pages after the first were read one after another, not at once");
+  ok(r.timing && Number.isFinite(r.timing.readMs) && !("timing" in storefrontLanding(r.stock)), "the loader's timing is missing, or reached the page");
 }
 
 ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|event/.test(CHECKOUT_COLUMNS), `the checkout read asks for columns the projection never uses: ${CHECKOUT_COLUMNS}`);
