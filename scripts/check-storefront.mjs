@@ -27,8 +27,9 @@ import {
   storefrontStock, storefrontSearch, storefrontLanding, storefrontCard, cardMatches,
   STOREFRONT_FIELDS, STOREFRONT_COPY_FIELDS, BOX, ONLINE, ASK_TEXT,
   storefrontFacets, priceMatches, searchCriteria, searchQueryString, SEARCH_KEYS,
-  STOREFRONT_PAGE, FEATURED_PER_SECTION
+  STOREFRONT_PAGE, FEATURED_PER_SECTION, setPickerGroups
 } from "../apps/app/lib/storefront.js";
+import { eraOf, OTHER_ERA, POKEMON_ERAS } from "../apps/app/lib/pokemon-eras.js";
 import { buildSetGameIndex } from "../apps/app/lib/games.js";
 import {
   wishKey, wishItem, toggleWish, reconcileWishlist, cleanWishlist, removeWish,
@@ -159,6 +160,54 @@ const listings = [
   ok(back.query === "gengar" && back.game === "pokemon" && back.set === "Chilling Reign" && back.price === "u5" && back.offset === 30, `the search did not survive the URL: ${JSON.stringify(back)}`);
   const junk = searchCriteria(new URLSearchParams("price=free&sort=evil&offset=-4"));
   ok(junk.price === "any" && junk.sort === "value-desc" && junk.offset === 0, `junk criteria were acted on: ${JSON.stringify(junk)}`);
+}
+
+// --- Pokémon sets by era, and a picker you can type into ----------------------
+{
+  const eras = [
+    ["Base Set", "wotc"], ["Base Set 2", "wotc"], ["Jungle", "wotc"], ["Neo Destiny", "wotc"],
+    ["EX Unseen Forces", "ex"], ["Unseen Forces", "ex"], ["EX Dragon", "ex"], ["Team Rocket", "wotc"], ["Team Rocket Returns", "ex"],
+    // Longest listed name wins: these all start with a shorter one.
+    ["Dragon Majesty", "sm"], ["Dragon Vault", "bw"], ["Crown Zenith Galarian Gallery", "swsh"], ["Shining Fates Shiny Vault", "swsh"],
+    ["Generations Radiant Collection", "xy"], ["Celebrations: Classic Collection", "swsh"],
+    // An era's own prefix.
+    ["SM Black Star Promos", "sm"], ["XY Trainer Kit: Latias", "xy"], ["Sun & Moon Promos", "sm"], ["Scarlet & Violet Energies", "sv"],
+    ["Pokémon GO", "swsh"], ["Pokemon GO", "swsh"], ["151", "sv"], ["Silver Tempest", "swsh"], ["Prismatic Evolutions", "sv"],
+    ["POP Series 7", "dp"], ["Arceus", "platinum"],
+    // Nothing places it: Other, never a guess.
+    ["McDonald's Collection 2021", OTHER_ERA], ["Svelte Fakes", OTHER_ERA]
+  ];
+  for (const [name, want] of eras) ok(eraOf(name) === want, `${name} read as era ${eraOf(name)}, want ${want}`);
+  const listed = POKEMON_ERAS.flatMap((e) => e.sets.map((n) => [n, e.key]));
+  ok(listed.every(([n, k]) => eraOf(n) === k), "a set listed under one era reads as another");
+
+  const cards = [
+    { key: "online-0", source: ONLINE, name: "Charizard 4/102", game: "pokemon", set: "Base Set", pricePence: 30000, copies: [] },
+    { key: "online-1", source: ONLINE, name: "Scyther 10/64", game: "pokemon", set: "Jungle", pricePence: 900, copies: [] },
+    { key: "online-2", source: ONLINE, name: "Pikachu 25/149", game: "pokemon", set: "Sun & Moon", pricePence: 200, copies: [] },
+    { key: "online-3", source: ONLINE, name: "Umbreon VMAX 215/203", game: "pokemon", set: "Evolving Skies", pricePence: 80000, copies: [] },
+    { key: "online-4", source: ONLINE, name: "Sheoldred 107/281", game: "magic", set: "Dominaria United", pricePence: 6000, copies: [] }
+  ];
+  const f = storefrontFacets(cards);
+  ok(JSON.stringify(f.sets.pokemon.map((x) => x.name)) === JSON.stringify(["Base Set", "Jungle", "Sun & Moon", "Evolving Skies"]),
+    `Pokémon sets are not in era-then-release order: ${f.sets.pokemon.map((x) => x.name)}`);
+  ok(f.sets.pokemon.every((x) => x.era) && !("era" in f.sets.magic[0]), "only Pokémon sets carry an era");
+  ok(storefrontSearch(cards, { game: "pokemon", era: "wotc" }).shown === 2, "the era filter did not narrow to Wizards of the Coast");
+  ok(storefrontSearch(cards, { game: "pokemon", era: "wotc", set: "Jungle" }).shown === 1, "a set inside an era is not the narrower ask");
+  ok(storefrontSearch(cards, { game: "magic", era: "wotc" }).shown === 1, "an era narrowed a game that has none");
+  ok(new URLSearchParams(searchQueryString({ game: "pokemon", era: "wotc" })).get("era") === "wotc", "the era did not go up with the search");
+  ok(!new URLSearchParams(searchQueryString({ era: "wotc" })).has("era") && !new URLSearchParams(searchQueryString({ game: "magic", era: "wotc" })).has("era"), "an era was sent without Pokémon");
+  ok(searchCriteria(new URLSearchParams("era=evil")).era === "" && searchCriteria(new URLSearchParams("era=sm")).era === "sm", "the server acted on an era that does not exist");
+
+  const groups = (q) => setPickerGroups(f.sets.pokemon, q, "pokemon");
+  ok(JSON.stringify(groups("").map((g) => g.label)) === JSON.stringify(["Wizards of the Coast", "Sun & Moon", "Sword & Shield"]), `the picker's eras: ${groups("").map((g) => g.label)}`);
+  ok(groups("").find((g) => g.era === "wotc").count === 2, "an era heading does not count its cards");
+  const base = groups("base").flatMap((g) => g.sets.map((x) => x.name));
+  ok(JSON.stringify(base) === JSON.stringify(["Base Set", "Sun & Moon"]), `typing "base" did not find every base set: ${base}`);
+  ok(groups("wizards").flatMap((g) => g.sets).length === 2, "typing an era's name did not list its sets");
+  ok(groups("jun").flatMap((g) => g.sets.map((x) => x.name)).join() === "Jungle", "typing the start of a set name did not find it");
+  ok(groups("zzz").length === 0, "a search that matches nothing still showed a group");
+  ok(setPickerGroups(f.sets.magic, "", "magic").length === 1 && setPickerGroups(f.sets.magic, "", "magic")[0].label === "", "a game with no eras grew an era heading");
 }
 
 // --- Tokens and expiry ---------------------------------------------------
@@ -505,6 +554,7 @@ ok(!CHECKOUT_COLUMNS.includes("*") && !/note|hide_error|sold_price|stack_name|ev
   // carries SEARCH_KEYS and nothing else. The list stays on their phone.
   const fetches = comp.match(/fetch\(/g) || [];
   ok(fetches.length === 1 && /fetch\(`\$\{[^`]*\}\/search\?\$\{searchQueryString\(criteria, offset\)\}`/.test(comp), "the visitor's component sends something other than the search");
+  ok(!/fetch\(|XMLHttpRequest|sendBeacon/.test(src("apps/app/app/show/[token]/SetPicker.js")), "the set picker sends something somewhere");
   ok(!/XMLHttpRequest|sendBeacon|method:\s*"POST"/.test(comp), "the visitor's component sends something somewhere — the list is meant to stay on their phone");
   ok(!/\bstock=\{|stock\.cards/.test(src("apps/app/app/show/[token]/page.js")), "the page hands the whole stock to the browser again — that is what made the QR slow");
   const route = src("apps/app/app/show/[token]/search/route.js");

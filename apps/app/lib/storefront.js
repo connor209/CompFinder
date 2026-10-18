@@ -41,6 +41,10 @@ import { normalise } from "./showfilter.js";
 import { counterPrice, imageAt } from "./showcounter.js";
 import { binderView, binderKey, BOX, ONLINE, SECTION_LABELS, ASK_TEXT } from "./binder.js";
 import { gameOf, gameFacets, UNKNOWN_GAME } from "./games.js";
+import { eraPlace, eraRank, eraLabel, isEra, setSearchWords, norm as setNorm } from "./pokemon-eras.js";
+
+/** The one game whose sets are grouped into eras. */
+export const ERA_GAME = "pokemon";
 
 export { BOX, ONLINE, SECTION_LABELS, ASK_TEXT };
 
@@ -278,7 +282,15 @@ export function storefrontFacets(cards) {
   }
   const list = (m) => [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name));
   const sets = {};
-  for (const [g, m] of setsByGame) sets[g] = list(m);
+  for (const [g, m] of setsByGame) {
+    if (g !== ERA_GAME) { sets[g] = list(m); continue; }
+    // Pokémon sets carry their era and come in the era's own order — oldest
+    // era first, release order inside one — which is the picker's order.
+    sets[g] = list(m)
+      .map((x) => ({ ...x, ...eraPlace(x.name) }))
+      .sort((a, b) => eraRank(a.era) - eraRank(b.era) || a.order - b.order || a.name.localeCompare(b.name))
+      .map(({ name, count, era }) => ({ name, count, era }));
+  }
   return {
     games: gameFacets((cards || []).filter(Boolean), (c) => c.game),
     sets,
@@ -335,7 +347,7 @@ export const FEATURED_PER_SECTION = 9;
  * so nothing but these — no wish list, nothing about the visitor — can ride
  * along to the server, and nothing but these is acted on there.
  */
-export const SEARCH_KEYS = ["q", "game", "set", "price", "condition", "sort"];
+export const SEARCH_KEYS = ["q", "game", "era", "set", "price", "condition", "sort"];
 
 export function searchCriteria(params) {
   const get = (k) => {
@@ -348,6 +360,7 @@ export function searchCriteria(params) {
   return {
     query: get("q"),
     game: get("game"),
+    era: isEra(get("era")) ? get("era") : "",
     set: get("set"),
     condition: get("condition"),
     price: STOREFRONT_PRICE_FILTERS.some((f) => f.key === price) ? price : "any",
@@ -356,13 +369,15 @@ export function searchCriteria(params) {
   };
 }
 
-export function searchQueryString({ query = "", game = "", set = "", price = "any", condition = "", sort = DEFAULT_STOREFRONT_SORT } = {}, offset = 0) {
+export function searchQueryString({ query = "", game = "", era = "", set = "", price = "any", condition = "", sort = DEFAULT_STOREFRONT_SORT } = {}, offset = 0) {
   const p = new URLSearchParams();
   const put = (k, v) => { if (v) p.set(k, String(v)); };
   put("q", String(query || "").trim());
   put("game", game);
-  // A set means nothing without its game: the dropdown only offers one inside a game.
+  // A set means nothing without its game: the picker only offers one inside a
+  // game. An era is a Pokémon thing, and a set inside it is the narrower ask.
   if (game) put("set", set);
+  if (game === ERA_GAME && !set) put("era", era);
   if (price && price !== "any") put("price", price);
   put("condition", condition);
   if (sort && sort !== DEFAULT_STOREFRONT_SORT) put("sort", sort);
@@ -371,8 +386,8 @@ export function searchQueryString({ query = "", game = "", set = "", price = "an
 }
 
 /** Is a visitor asking for anything, or looking at the front page? */
-export function isSearching({ query = "", game = "", set = "", price = "any", condition = "" } = {}) {
-  return Boolean(normalise(query) || game || set || (price && price !== "any") || condition);
+export function isSearching({ query = "", game = "", era = "", set = "", price = "any", condition = "" } = {}) {
+  return Boolean(normalise(query) || game || era || set || (price && price !== "any") || condition);
 }
 
 /**
@@ -385,13 +400,14 @@ export function isSearching({ query = "", game = "", set = "", price = "any", co
  * over, and a list that interleaves the two is a list where nobody can tell
  * which is which.
  */
-export function storefrontSearch(cards, { query = "", game = "", set = "", price = "any", condition = "", sort = DEFAULT_STOREFRONT_SORT, offset = 0 } = {}, { limit = STOREFRONT_PAGE, onlineFirst = false } = {}) {
+export function storefrontSearch(cards, { query = "", game = "", era = "", set = "", price = "any", condition = "", sort = DEFAULT_STOREFRONT_SORT, offset = 0 } = {}, { limit = STOREFRONT_PAGE, onlineFirst = false } = {}) {
   const cmp = COMPARATORS[sort] || COMPARATORS[DEFAULT_STOREFRONT_SORT];
   const keep = (c) =>
     cardMatches(c, query) &&
     priceMatches(c, price) &&
     (!game || (c.game || UNKNOWN_GAME) === game) &&
     (!game || !set || c.set === set) &&
+    (game !== ERA_GAME || !era || set || (c.set ? eraPlace(c.set).era : null) === era) &&
     conditionMatches(c, condition);
   const section = (source) => (cards || [])
     .filter((c) => c && c.source === source && keep(c))
@@ -432,4 +448,35 @@ export function storefrontLanding(stock, { onlineFirst = false, perSection = FEA
     box: stock?.box || 0,
     online: stock?.online || 0
   };
+}
+
+/**
+ * The set picker's list for one game, narrowed by what the visitor typed.
+ *
+ * Pokémon comes back as eras, each a heading the visitor can pick whole, with
+ * its sets under it; any other game is one group with no heading. Typing
+ * matches the set's name, the words "base set" on an era's base set (the
+ * catalogue calls the Sun & Moon base set just "Sun & Moon"), and the era's
+ * own name — so "base" lists every base set, and "wizards" the whole era.
+ * A group with nothing left in it is not shown.
+ */
+export function setPickerGroups(sets, query = "", game = "") {
+  const q = setNorm(query);
+  const words = q ? q.split(" ") : [];
+  const hit = (s) => {
+    if (!words.length) return true;
+    const hay = ` ${setNorm(s.name)} ${setSearchWords(s.name)} ${s.era ? setNorm(eraLabel(s.era)) : ""} `;
+    return words.every((w) => hay.includes(` ${w}`));
+  };
+  const list = (sets || []).filter(hit);
+  if (game !== ERA_GAME) return list.length ? [{ era: "", label: "", count: list.reduce((n, s) => n + s.count, 0), sets: list }] : [];
+  const groups = [];
+  for (const s of list) {
+    let g = groups[groups.length - 1];
+    if (!g || g.era !== s.era) { g = { era: s.era, label: eraLabel(s.era), count: 0, sets: [] }; groups.push(g); }
+    g.sets.push(s);
+  }
+  // An era's count is every card in it, not only the sets the search left.
+  for (const g of groups) g.count = (sets || []).filter((s) => s.era === g.era).reduce((n, s) => n + s.count, 0);
+  return groups;
 }
