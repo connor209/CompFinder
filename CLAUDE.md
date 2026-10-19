@@ -2515,6 +2515,13 @@ digital binder the desk turns round to a customer.
   before it is built; the stack picker takes a card name (`titleMatches()` in
   `showfilter.js`: every word typed starts a word of the title, so "char"
   finds Charizard and "ex" does not find Alex) as well as a SKU batch.
+- **A binder card is never recommended on its own.** ★ Recommend show stock
+  leaves out every card in a Show Binder, and says how many: the binder goes
+  out whole, and a binder card checked out by itself would split it.
+- **👁 View cards** lists a binder's contents (`binderContents()`), by name,
+  each marked on sale, at a show, not listed or sold on eBay — away is asked
+  first, since a checked-out card's hidden listing reads as sold out. Read
+  off state the desk already holds, so it costs no request.
 - **Checking out is the stack picker opened on the binder, all ticked** — the
   toploader button's mechanism — so a card eBay says sold is left out rather
   than checked out blind, and each card goes through `checkoutStackCard()`.

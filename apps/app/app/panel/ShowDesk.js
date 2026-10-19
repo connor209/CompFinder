@@ -15,7 +15,7 @@ import {
 } from "@/lib/checkout";
 import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
 import {
-  showView, selectionFor, facetsOf, listingState, matchesQuery, skuBatch,
+  showView, selectionFor, facetsOf, listingState, matchesQuery, skuBatch, titleMatches, skuInBatch,
   openCheckoutIndex, isCardAway,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
@@ -44,7 +44,7 @@ import {
 } from "@/lib/toploader.js";
 import {
   isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder,
-  binderCounts, openFromBinder, binderCheckIn
+  binderCounts, binderContents, openFromBinder, binderCheckIn
 } from "@/lib/showbinder.js";
 
 /** `return_mode` on a checkout filed into a Show Binder (016 leaves it free text). */
@@ -252,6 +252,7 @@ export default function ShowDesk() {
     try { localStorage.setItem(REC_NO_GRADED_KEY, on ? "on" : "off"); } catch { /* best-effort */ }
   }
   const [recSkipped, setRecSkipped] = useState(0); // in a stack, but sold out on eBay
+  const [recInBinder, setRecInBinder] = useState(0); // in a Show Binder, so not offered
   // Once for the desk, then handed down — see the note on useDeal().
   const [deal, updateDeal] = useDeal();
   const [usedByStack, setUsedByStack] = useState(new Map());
@@ -440,6 +441,9 @@ export default function ShowDesk() {
   const [binderCheck, setBinderCheck] = useState(null);
   const [binderMissing, setBinderMissing] = useState(new Set());
   const [binderPrices, setBinderPrices] = useState({});
+  // The binder being looked through, and a name search within it.
+  const [binderLook, setBinderLook] = useState(null);
+  const [binderLookQ, setBinderLookQ] = useState("");
 
   // ---- Checkout ------------------------------------------------------------
 
@@ -508,6 +512,7 @@ export default function ShowDesk() {
     setRecPool(null);
     setRecOff(new Set());
     setRecSkipped(0);
+    setRecInBinder(0);
     setMsg("");
     const sb = supabase();
     const [cards, listings, sets] = await Promise.all([
@@ -546,8 +551,14 @@ export default function ShowDesk() {
     setRecSkipped(
       cards.filter((c) => !isCardAway(c, awayIndex) && c.sku && gone.has(String(c.sku).toLowerCase())).length
     );
+    // A card in a Show Binder goes to a show WITH the binder, never on its
+    // own: recommending it would split the binder, and a binder card checked
+    // out separately comes back to a check-in that does not expect it. Counted
+    // rather than dropped quietly.
+    const inBinder = (c) => isShowBinder(stackName.get(c.stack_id));
+    setRecInBinder(cards.filter((c) => !isCardAway(c, awayIndex) && inBinder(c)).length);
     const ranked = cards
-      .filter((c) => !isCardAway(c, awayIndex) && c.sku && priceBySku.has(String(c.sku).toLowerCase()))
+      .filter((c) => !isCardAway(c, awayIndex) && !inBinder(c) && c.sku && priceBySku.has(String(c.sku).toLowerCase()))
       .map((c) => ({
         card: c,
         pricePence: priceBySku.get(String(c.sku).toLowerCase()),
@@ -555,7 +566,6 @@ export default function ShowDesk() {
         depth: depths.get(c.stack_id) ?? null,
         graded: isSlabTitle(c.title),
         toploaded: isToploaderStack(stackName.get(c.stack_id)),
-        inBinder: isShowBinder(stackName.get(c.stack_id)),
         game: gameOf({ category: categoryBySku.get(String(c.sku).toLowerCase()), title: c.title }, sets.gameIndex)
       }))
       // Toploaded cards first: already priced, stickered and sleeved.
@@ -883,6 +893,29 @@ export default function ShowDesk() {
     setBinderMissing(new Set());
     setBinderPrices({});
   }
+
+  // What is in the binder being looked through. Read off the desk's own state
+  // — the stack cards, the listings and the open checkouts it already holds —
+  // so looking costs no request.
+  const binderInside = useMemo(() => {
+    if (!binderLook) return null;
+    const offSale = listings.length > 0 ? offSaleIndex(listings, sales || []) : null;
+    const price = new Map();
+    for (const l of listings) {
+      if (!l?.sku || l.price_value == null) continue;
+      const k = String(l.sku).toLowerCase();
+      if (!price.has(k) || isListingAvailable(l)) price.set(k, Math.round(Number(l.price_value) * 100));
+    }
+    return binderContents(stackCards, binderLook, {
+      isAway: (c) => isCardAway(c, awayIndex),
+      offSale: (sku) => offSaleReason(sku, offSale),
+      priceOf: (sku) => (sku ? price.get(String(sku).toLowerCase()) ?? null : null)
+    });
+  }, [binderLook, stackCards, listings, sales, awayIndex]);
+  const binderInsideShown = useMemo(
+    () => (binderInside ? binderInside.rows.filter((r) => !binderLookQ.trim() || titleMatches(r.card.title, binderLookQ) || skuInBatch(r.card.sku, binderLookQ)) : []),
+    [binderInside, binderLookQ]
+  );
 
   // What the binder being checked in still has out, in the order you flick.
   const binderOut = useMemo(
@@ -1761,6 +1794,14 @@ export default function ShowDesk() {
                       >
                         ⤴ Check out
                       </button>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); }}
+                        aria-pressed={binderLook === b.id}
+                        title="List every card in this binder"
+                      >
+                        {binderLook === b.id ? "Hide cards" : "👁 View cards"}
+                      </button>
                       <button className="btn btn-ghost" onClick={() => renameBinder(b)} disabled={busy} title="Rename this binder">
                         ✎ Rename
                       </button>
@@ -1778,6 +1819,68 @@ export default function ShowDesk() {
               })}
             </div>
           )}
+          {binderInside ? (() => {
+            const binder = binders.find((b) => b.id === binderLook);
+            const c = binderInside.counts;
+            const STATUS = {
+              home: { text: "on sale", title: "In the binder and listed on eBay" },
+              away: { text: "at a show", title: "Checked out with the binder — off sale on eBay" },
+              sold: { text: "sold on eBay", title: "In your eBay sales with no live listing — pull it on the Pull Sheet", bad: true },
+              outofstock: { text: "sold out on eBay", title: "Listed at quantity 0, which is what a sold card looks like — pull it on the Pull Sheet", bad: true },
+              notlisted: { text: "not listed", title: "No eBay listing for this SKU, so it isn't on sale anywhere" }
+            };
+            return (
+              <div className="sd-plan">
+                <div className="sd-plan-head">
+                  <b>In {binder?.name || "the binder"} · {binderInside.rows.length} card{binderInside.rows.length === 1 ? "" : "s"}{binderInside.valuePence ? ` · ${pounds(binderInside.valuePence)}` : ""}</b>
+                  <button className="btn btn-ghost" onClick={() => setBinderLook(null)}>Close</button>
+                </div>
+                <p className="hint hint-small" style={{ marginTop: 0 }}>
+                  {c.home} on sale{c.away ? ` · ${c.away} at a show` : ""}
+                  {c.notlisted ? ` · ${c.notlisted} not listed` : ""}
+                  {c.sold + c.outofstock > 0 ? (
+                    <span style={{ color: "var(--bad-ink)" }}>
+                      {" "}· {c.sold + c.outofstock} sold on eBay but still in the binder — pull {c.sold + c.outofstock === 1 ? "it" : "them"} on the Pull Sheet
+                    </span>
+                  ) : null}
+                  . The value is our eBay asking prices for what is still ours to sell.
+                </p>
+                {binderInside.rows.length === 0 ? (
+                  <p className="dd-empty">Nothing in this binder yet. Fill it with 📒 Into binder.</p>
+                ) : (
+                  <>
+                    {binderInside.rows.length > 8 ? (
+                      <input
+                        className="stack-title-inp sd-batch-inp"
+                        value={binderLookQ}
+                        onChange={(e) => setBinderLookQ(e.target.value)}
+                        placeholder="Find a card in the binder — name or SKU"
+                        aria-label="Find a card in the binder"
+                        style={{ marginBottom: 8 }}
+                      />
+                    ) : null}
+                    <div className="stack-list sd-batch-list">
+                      {binderInsideShown.map(({ card, status, pricePence }) => (
+                        <div className="ps-row sd-rec-row" key={card.id}>
+                          <span className="stack-sku">{card.sku || "—"}</span>
+                          <span className="stack-title">{card.title || <em>—</em>}</span>
+                          <span
+                            className="badge2"
+                            title={STATUS[status].title}
+                            style={STATUS[status].bad ? { color: "var(--bad-ink)" } : undefined}
+                          >
+                            {STATUS[status].text}
+                          </span>
+                          <span className="sd-price">{pricePence != null ? pounds(pricePence) : "—"}</span>
+                        </div>
+                      ))}
+                      {binderInsideShown.length === 0 ? <p className="hint hint-small">Nothing in the binder matches that.</p> : null}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })() : null}
           {binderCheck ? (() => {
             const binder = binders.find((b) => b.id === binderCheck);
             const { back, sold } = binderCheckIn(binderOut, binderMissing);
@@ -1879,6 +1982,12 @@ export default function ShowDesk() {
                   <span className="hint hint-small">({recGradedOut} slab{recGradedOut === 1 ? "" : "s"} left out)</span>
                 ) : null}
               </label>
+              {recInBinder > 0 ? (
+                <p className="hint hint-small">
+                  {recInBinder} card{recInBinder === 1 ? "" : "s"} in Show Binders left out — a binder goes to a show as a
+                  whole, from Show Binders.
+                </p>
+              ) : null}
               {recDistinct?.dropped > 0 ? (
                 <p className="hint hint-small">
                   {recDistinct.dropped} duplicate{recDistinct.dropped === 1 ? "" : "s"} left out — one copy of each card
@@ -1905,7 +2014,7 @@ export default function ShowDesk() {
                 </label>
               </div>
               <div className="stack-list">
-                {recs.map(({ card, pricePence, rank, depth, toploaded, inBinder }) => (
+                {recs.map(({ card, pricePence, rank, depth, toploaded }) => (
                   <label className="ps-row sd-rec-row" key={card.id}>
                     <input
                       type="checkbox"
@@ -1917,8 +2026,6 @@ export default function ShowDesk() {
                     </span>
                     {toploaded ? (
                       <span className="stack-pos" title="In the toploader box — already priced and sleeved">🗂</span>
-                    ) : inBinder ? (
-                      <span className="stack-pos" title="Already in a Show Binder">📒</span>
                     ) : (
                       <span className="stack-pos" title="Live position — count this many from the top of the stack">
                         {rank ?? "?"}

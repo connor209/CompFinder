@@ -24,7 +24,7 @@
 import { readFileSync } from "node:fs";
 import {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
-  binderSuffix, renamedBinder, binderCounts, openFromBinder, binderCheckIn
+  binderSuffix, renamedBinder, binderCounts, binderContents, openFromBinder, binderCheckIn
 } from "../apps/app/lib/showbinder.js";
 import { isUnorderedStack, fileableStacks, isToploaderStack } from "../apps/app/lib/toploader.js";
 import { positionLabel, locationsBySku } from "../apps/app/lib/stackpos.js";
@@ -104,6 +104,33 @@ eq("home and away, pulled counted as neither", counts.get("b2"), { home: 1, away
 eq("an empty binder", counts.get("b10"), { home: 0, away: 0 });
 eq("a stack is not counted", counts.has("a"), false);
 
+// --- 3b. what is in a binder ------------------------------------------------
+{
+  const inside = [
+    { id: "1", stack_id: "b2", sku: "B1", title: "Umbreon VMAX 215/203" },
+    { id: "2", stack_id: "b2", sku: "B2", title: "Charizard ex 199/165", checked_out_at: "2026-10-18" },
+    { id: "3", stack_id: "b2", sku: "B3", title: "Gengar 94/102" },
+    { id: "4", stack_id: "b2", sku: "B4", title: "Pikachu", pulled_at: "2026-10-18" },
+    { id: "5", stack_id: "a", sku: "A1", title: "Mew" },
+    { id: "6", stack_id: "b2", sku: "B6", title: "Alakazam 1/102" }
+  ];
+  const reasons = { b2: "outofstock", b3: "sold", b6: "notlisted" };
+  const prices = { b1: 82500, b2: 30000, b3: 4000, b6: 1500 };
+  const got = binderContents(inside, "b2", {
+    offSale: (sku) => reasons[String(sku).toLowerCase()] || null,
+    priceOf: (sku) => prices[String(sku).toLowerCase()] ?? null
+  });
+  eq("every card in the binder, by name, pulled and other stacks out",
+    got.rows.map((r) => r.card.id), ["6", "2", "3", "1"]);
+  eq("an away card is at a show, not sold out — its listing is hidden on purpose",
+    got.rows.find((r) => r.card.id === "2").status, "away");
+  eq("statuses", Object.fromEntries(got.rows.map((r) => [r.card.sku, r.status])),
+    { B6: "notlisted", B2: "away", B3: "sold", B1: "home" });
+  eq("counts", got.counts, { home: 1, away: 1, sold: 1, outofstock: 0, notlisted: 1 });
+  eq("value is what is still ours to sell, never a sold card", got.valuePence, 82500 + 30000);
+  eq("an empty binder", binderContents(inside, "b10").rows.length, 0);
+}
+
 // --- 4. checking in ----------------------------------------------------------
 const checkouts = [
   { id: "c1", stack_id: "b2", resolved_at: null },
@@ -129,6 +156,9 @@ if (!/sellLine\(sb, checkoutLine\(co\)/.test(desk)) {
 }
 if (!/binderCheckIn\(binderOut, binderMissing\)/.test(desk)) {
   fail("the binder check-in must split through binderCheckIn(), or a card can be left open");
+}
+if (!/!isCardAway\(c, awayIndex\) && !inBinder\(c\)/.test(desk)) {
+  fail("★ Recommend show stock must leave out cards in a Show Binder — the binder goes to a show whole");
 }
 if (/["']Show Binder["']/.test(desk.replace(/\/\/.*$/gm, ""))) {
   fail("ShowDesk.js spells the binder prefix by hand — use SHOW_BINDER_PREFIX / nextBinderName()");
