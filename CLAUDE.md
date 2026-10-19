@@ -2527,6 +2527,14 @@ digital binder the desk turns round to a customer.
   each marked on sale, at a show, not listed or sold on eBay — away is asked
   first, since a checked-out card's hidden listing reads as sold out. Read
   off state the desk already holds, so it costs no request.
+- **Sorting the list never moves a card; ↻ Re-pocket A–Z does.** The view's
+  sort (`sortBinderRows`: pocket, name, price — unpriced last both ways) is
+  for finding a card. Re-pocketing (`repocketPlan`) renumbers every pocket by
+  card name (`nameKey`: the label's reading of the title, game prefixes off),
+  gaps closed, on a confirmed click only, and is REFUSED while any card is at
+  a show — its pocket is waiting for it. It leaves a move list on screen and
+  the moved cards ticked, so 🏷 Labels reprints just those. Cards filed in
+  afterwards still take the first gap, so A–Z holds until the next re-pocket.
 - **↩ Out takes one card out**, onto the back of a chosen stack: no checkout,
   listing untouched, pocket left empty. Not offered for a card away at a show.
 - **Labels for the ticked cards**, or every card on screen when none are

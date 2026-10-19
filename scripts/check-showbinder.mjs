@@ -27,7 +27,8 @@ import { readFileSync } from "node:fs";
 import {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
   binderSuffix, renamedBinder, binderCounts, binderContents,
-  POCKETS_PER_PAGE, pocketOf, freePockets, comparePockets, openFromBinder, binderCheckIn
+  POCKETS_PER_PAGE, pocketOf, freePockets, comparePockets,
+  nameKey, compareByCardName, sortBinderRows, repocketPlan, openFromBinder, binderCheckIn
 } from "../apps/app/lib/showbinder.js";
 import { isUnorderedStack, fileableStacks, isToploaderStack } from "../apps/app/lib/toploader.js";
 import { positionLabel, locationsBySku } from "../apps/app/lib/stackpos.js";
@@ -119,6 +120,42 @@ eq("⌖ locate names the binder and the pocket", located.get("b1"), "📒 Show B
 const plan = planReallocation(3, fileableStacks(stacks).map((s) => ({ ...s, used: 0 })), 100);
 eq("a filing plan only ever picks a real stack", plan.groups.map((g) => g.stackId), ["a"]);
 
+// --- 2b. A–Z by card name, and re-pocketing --------------------------------
+eq("the game word is not the name", nameKey("Pokemon TCG Charizard ex 199/165 151 NM"), "charizard ex 199/165");
+eq("nor another game's prefix", nameKey("MTG Lightning Bolt Alpha"), "lightning bolt alpha");
+eq("accents fold", nameKey("Flabébé 1/2"), "flabebe 1/2");
+{
+  const deck = [
+    { id: "u", title: "Umbreon VMAX 215/203", sku: "B1", position: 1 },
+    { id: "c2", title: "Pokemon Charizard ex 199/165", sku: "B9", position: 2 },
+    { id: "a", title: "Abra 43/102", sku: "B3", position: 4 },
+    { id: "c1", title: "Charizard 4/102 Base Set", sku: "B2", position: 7 },
+    { id: "z", title: "", sku: "B5", position: 8 }
+  ];
+  eq("A–Z by NAME, the Pokémon prefix ignored, no title last",
+    [...deck].sort(compareByCardName).map((c) => c.id), ["a", "c1", "c2", "u", "z"]);
+  const rows = deck.map((card, i) => ({ card, pricePence: [500, null, 120, 9000, null][i] }));
+  eq("list sorted by name", sortBinderRows(rows, "name").map((r) => r.card.id), ["a", "c1", "c2", "u", "z"]);
+  eq("price high first, unpriced last", sortBinderRows(rows, "price-desc").map((r) => r.card.id), ["c1", "u", "a", "c2", "z"]);
+  eq("price low first, unpriced STILL last", sortBinderRows(rows, "price-asc").map((r) => r.card.id), ["a", "u", "c1", "c2", "z"]);
+  eq("pocket order is the default", sortBinderRows(rows).map((r) => r.card.id), ["u", "c2", "a", "c1", "z"]);
+  eq("sorting the list never moves a pocket", deck.map((c) => c.position), [1, 2, 4, 7, 8]);
+
+  const bound = deck.map((c) => ({ ...c, stack_id: "b" })).concat([{ id: "x", stack_id: "a", title: "Aaa", position: 1 }]);
+  const plan = repocketPlan(bound, "b");
+  eq("re-pocket runs A–Z from pocket 1, gaps closed, other stacks untouched",
+    plan.order.map((m) => `${m.card.id}:${m.to.label}`), ["a:p1-1", "c1:p1-2", "c2:p1-3", "u:p1-4", "z:p1-5"]);
+  eq("every card here changes pocket", plan.moves.map((m) => m.card.id), ["a", "c1", "c2", "u", "z"]);
+  const sorted = plan.order.map((m) => ({ ...m.card, position: m.position }));
+  eq("a binder already A–Z with no gaps has nothing to move", repocketPlan(sorted, "b").moves.length, 0);
+  const oneOff = sorted.map((c) => (c.id === "z" ? { ...c, position: 9 } : c));
+  eq("only the cards whose pocket changes are moves", repocketPlan(oneOff, "b").moves.map((m) => m.card.id), ["z"]);
+  eq("a move says where it was", plan.moves[0].from.label, "p1-4");
+  const out = repocketPlan(bound.map((c) => (c.id === "u" ? { ...c, checked_out_at: "2026-10-19" } : c)), "b");
+  eq("refused while a card is out at a show", [out.ok, out.away.map((c) => c.id)], [false, ["u"]]);
+  eq("a sold card is not re-pocketed", repocketPlan(bound.map((c) => (c.id === "a" ? { ...c, pulled_at: "x" } : c)), "b").order.length, 4);
+}
+
 // --- 3. how full each binder is ---------------------------------------------
 const cards = [
   { id: "1", stack_id: "b2" },
@@ -181,6 +218,9 @@ eq("all present: all back", binderCheckIn(out, []).back.length, 3);
 const desk = read("apps/app/app/panel/ShowDesk.js");
 if (!/sellLine\(sb, checkoutLine\(co\)/.test(desk)) {
   fail("a missing binder card must be sold through sellLine(), the one definition of a sale");
+}
+if (!/repocketPlan\(stackCards, binder\.id, \(c\) => isCardAway\(c, awayIndex\)\)/.test(desk)) {
+  fail("re-pocketing must go through repocketPlan() with the desk's own away reading, or a card at a show loses its pocket");
 }
 if ((desk.match(/freePockets\(stackCards,/g) || []).length < 2) {
   fail("filing into a binder (📒 Into, and a check-in To a binder) must take the first free pockets via freePockets()");

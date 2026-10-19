@@ -26,6 +26,8 @@
  * under bare node.
  */
 
+import { labelName } from "./showstock.js";
+
 /** The one spelling of the prefix. Never written out anywhere else. */
 export const POCKETS_PER_PAGE = 9;
 
@@ -137,6 +139,90 @@ export function renamedBinder(typed, existingNames = [], currentName = "") {
 }
 
 /**
+ * What a card is called, for sorting A–Z by name: the label's reading of the
+ * title (labelName — brackets, "Pokémon TCG" and everything after the number
+ * gone), with the other games' prefixes off the front too, so "MTG Lightning
+ * Bolt" files under L and "Pokemon Charizard ex" under C. Flattened so
+ * "Flabébé" sorts with "Flabebe".
+ */
+const GAME_PREFIX = /^(?:mtg|magic(?:\s*:?\s*the\s+gathering)?|yu[\s-]?gi[\s-]?oh!?|ygo|one\s*piece|lorcana|digimon|dragon\s*ball(?:\s*super)?|card|single)\b[\s:-]*/i;
+export function nameKey(title) {
+  let s = labelName(title, 999);
+  for (let i = 0; i < 3 && GAME_PREFIX.test(s); i++) s = s.replace(GAME_PREFIX, "");
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+/**
+ * A–Z by card name, then the rest of the title (set, number), then SKU — so
+ * every Charizard sits together and two copies always land in the same order.
+ * A card with no title sorts last.
+ */
+export function compareByCardName(a, b) {
+  const x = nameKey(a?.title);
+  const y = nameKey(b?.title);
+  if (!x || !y) return (x ? 0 : 1) - (y ? 0 : 1);
+  const opt = { numeric: true, sensitivity: "base" };
+  return x.localeCompare(y, undefined, opt)
+    || norm(a?.title).localeCompare(norm(b?.title), undefined, opt)
+    || String(a?.sku || "").localeCompare(String(b?.sku || ""), undefined, opt);
+}
+
+/** The binder view's sort choices. Pocket order is the binder as it sits. */
+export const BINDER_VIEW_SORTS = [
+  { key: "pocket", label: "Pocket order" },
+  { key: "name", label: "Name A–Z" },
+  { key: "price-desc", label: "Price, high first" },
+  { key: "price-asc", label: "Price, low first" }
+];
+
+/**
+ * binderContents() rows in the chosen order. A card with no price sorts last
+ * in BOTH price directions — as £0 it would head the cheap-first list with
+ * cards that have no price at all. Ties fall back to pocket order.
+ */
+export function sortBinderRows(rows, sort = "pocket") {
+  const list = [...(rows || [])];
+  const byPocket = (a, b) => comparePockets(a.card, b.card);
+  const price = (dir) => (a, b) => {
+    const x = a.pricePence;
+    const y = b.pricePence;
+    if (x == null || y == null) return (x == null ? 1 : 0) - (y == null ? 1 : 0) || byPocket(a, b);
+    return (x - y) * dir || byPocket(a, b);
+  };
+  if (sort === "name") return list.sort((a, b) => compareByCardName(a.card, b.card) || byPocket(a, b));
+  if (sort === "price-desc") return list.sort(price(-1));
+  if (sort === "price-asc") return list.sort(price(1));
+  return list.sort(byPocket);
+}
+
+/**
+ * Re-pocket a binder A–Z by card name: pocket 1 is the first name
+ * alphabetically, and the gaps close up. This is the one thing that moves
+ * cards between pockets, and it is only ever done on a click, because every
+ * move it plans is a card somebody has to pick up and put somewhere else.
+ *
+ * Refused while any card is away at a show: its pocket is waiting for it, and
+ * re-pocketing around a card that is not there would give its slot away and
+ * send it home to a pocket that has moved. Check the binder in first.
+ *
+ * Returns { ok: true, moves: [{ card, from, to }], order } where `order` is
+ * every card in its NEW pocket order (the sheet you rearrange from) and
+ * `moves` only the cards whose pocket changes; or { ok: false, away }.
+ */
+export function repocketPlan(cards, binderId, isAway = (c) => !!c.checked_out_at) {
+  const inside = (cards || []).filter((c) => c && c.stack_id === binderId && !c.pulled_at);
+  const away = inside.filter((c) => isAway(c));
+  if (away.length) return { ok: false, away };
+  const order = [...inside].sort(compareByCardName).map((card, i) => ({
+    card,
+    from: pocketOf(card.position),
+    to: pocketOf(i + 1),
+    position: i + 1
+  }));
+  return { ok: true, order, moves: order.filter((m) => Math.round(Number(m.card.position)) !== m.position) };
+}
+
+/**
  * How full each binder is, and how much of it is away. `cards` is stack_cards
  * rows; `isAway(card)` is the desk's own reading (isCardAway in showfilter.js)
  * so a lost flag cannot make an away card look like it is at home.
@@ -227,5 +313,6 @@ export function binderCheckIn(open, missing) {
 export default {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
   binderSuffix, renamedBinder, binderCounts, binderContents,
-  POCKETS_PER_PAGE, pocketOf, freePockets, comparePockets, openFromBinder, binderCheckIn
+  POCKETS_PER_PAGE, pocketOf, freePockets, comparePockets, openFromBinder, binderCheckIn,
+  nameKey, compareByCardName, BINDER_VIEW_SORTS, sortBinderRows, repocketPlan
 };
