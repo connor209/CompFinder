@@ -115,6 +115,29 @@ export function currentPileNo(items, doneKeys) {
 }
 
 /**
+ * Every pile at a glance — who it is for and whether it is packed — so the
+ * whole deal can be checked against the envelopes on the table. A pile is
+ * done when every one of its lines is in a completed pile; the current one is
+ * currentPileNo(). `cards` counts quantity, the same as the hand does.
+ */
+export function pileOverview(items, piles, doneKeys) {
+  const done = doneKeys || new Set();
+  const current = currentPileNo(items, done);
+  const byNo = new Map();
+  for (const it of items || []) {
+    const s = byNo.get(it.pileNo) || { cards: 0, open: 0 };
+    s.cards += Math.max(1, Number(it.qty) || 1);
+    if (!done.has(it.key)) s.open += 1;
+    byNo.set(it.pileNo, s);
+  }
+  return (piles || []).map((p) => {
+    const s = byNo.get(p.pileNo) || { cards: 0, open: 0 };
+    const state = s.open === 0 ? "done" : p.pileNo === current ? "current" : "todo";
+    return { pileNo: p.pileNo, name: p.deliveryName || p.buyer || "Buyer", buyer: p.buyer, orders: p.orderIds.length, cards: s.cards, state };
+  });
+}
+
+/**
  * One pile's cards top of the hand first — card 1 at the head of the list.
  */
 export function pilePullOrder(items, pileNo, pos) {

@@ -12,7 +12,7 @@
  * guessed into anybody else's pile.
  */
 import { readFileSync } from "node:fs";
-import { buildPiles, currentPileNo, handPositions, pileKeyOf, pileLivePositions, pilePullOrder, shipKeyOf } from "../apps/app/lib/piles.js";
+import { buildPiles, currentPileNo, handPositions, pileKeyOf, pileLivePositions, pileOverview, pilePullOrder, shipKeyOf } from "../apps/app/lib/piles.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -121,6 +121,19 @@ eq("a postcode alone still compares", shipKeyOf({ postalCode: "G1 1AA" }), "G11A
   eq("a completed pile that gains a card is not skipped", currentPileNo(more, new Set(["a", "c", "b", "e"])), 1);
 
   eq("every pile done is null, not pile 1", currentPileNo(items, new Set(["a", "b", "c", "d", "e"])), null);
+}
+
+// --- every pile at a glance -------------------------------------------------
+{
+  const { items, piles } = buildPiles([
+    line("a1", "o1", "ann"), line("b1", "o2", "bob", HOME, { qty: 2 }), line("a2", "o3", "ann"), line("c1", "o4", ""),
+  ]);
+  const ov = pileOverview(items, piles, new Set(["a1", "a2"]));
+  eq("overview: a completed pile is done, the next is now, the rest to do", ov.map((p) => p.state), ["done", "current", "todo"]);
+  eq("overview: names the delivery name over the username", ov.map((p) => p.name), ["ann name", "bob name", "Buyer"]);
+  eq("overview: a quantity-2 line is two cards", ov.map((p) => p.cards), [2, 2, 1]);
+  eq("overview: a buyer's separate checkouts are one pile with both orders", ov[0].orders, 2);
+  eq("overview: nothing done, pile 1 is now", pileOverview(items, piles, new Set()).map((p) => p.state), ["current", "todo", "todo"]);
 }
 
 // --- greps: one definition --------------------------------------------------

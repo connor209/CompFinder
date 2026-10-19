@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
-import { buildPiles, currentPileNo, handPositions, pileLivePositions, pilePullOrder } from "@/lib/piles";
+import { buildPiles, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, compareByTitle } from "@/lib/toploader.js";
 
@@ -98,6 +98,7 @@ export default function PullSheet() {
   // Default: last-pulled card on top of the hand (LIFO), so we deal in reverse
   // pull order. Toggle for anyone who holds the stack the other way up.
   const [packReverse, setPackReverse] = useState(true);
+  const [showAllPiles, setShowAllPiles] = useState(false); // the every-pile list on Pack
   // Completed piles, one array of line keys per Pile complete, oldest first.
   // Kept on this device so a reload mid-deal doesn't renumber the hand as if
   // the finished piles were still in it — that would send you to the wrong
@@ -388,6 +389,7 @@ export default function PullSheet() {
     [packView.items, pileNo, hand]
   );
   const pileLive = useMemo(() => pileLivePositions(pileCards, hand.pos, placed), [pileCards, hand, placed]);
+  const overview = useMemo(() => pileOverview(packView.items, packView.piles, doneKeys), [packView, doneKeys]);
   const pilesLeft = useMemo(() => new Set(packView.items.filter((i) => !doneKeys.has(i.key)).map((i) => i.pileNo)).size, [packView.items, doneKeys]);
 
   function completePile() {
@@ -524,6 +526,11 @@ export default function PullSheet() {
               title={doneLog.length ? "Locked once a pile is complete — flipping now would renumber the hand under you" : "Which end of your pulled stack you start from"}
             >
               ⇅ {packReverse ? "Last pulled on top" : "First pulled on top"}
+            </button>
+          ) : null}
+          {mode === "pack" && packView.piles.length ? (
+            <button className="btn btn-ghost" aria-pressed={showAllPiles} onClick={() => setShowAllPiles((v) => !v)}>
+              ☰ {showAllPiles ? "Hide piles" : `All piles (${packView.piles.length})`}
             </button>
           ) : null}
           <button className="btn btn-ghost" onClick={() => window.print()}>🖨 Print</button>
@@ -664,6 +671,32 @@ export default function PullSheet() {
       ) : (
       /* ---- PACK MODE: one pile at a time ---- */
       <>
+      {showAllPiles && overview.length ? (
+        <div className="panel ps-allpiles">
+          <div className="panel-head">
+            <h3>All piles</h3>
+            <span className="badge2">
+              {overview.filter((p) => p.state === "done").length} done · {overview.filter((p) => p.state !== "done").length} to go
+            </span>
+          </div>
+          <ol className="ps-allpiles-list">
+            {overview.map((p) => (
+              <li key={p.pileNo} className={`ps-allpile ${p.state}`}>
+                <span className="ps-allpile-no">{p.pileNo}</span>
+                <span className="ps-allpile-who">
+                  <span className="ps-allpile-name">{p.name}</span>
+                  <span className="pack-pile-user">
+                    {p.buyer && p.name !== p.buyer ? `@${p.buyer}` : ""}
+                    {p.orders > 1 ? `${p.buyer && p.name !== p.buyer ? " · " : ""}${p.orders} orders` : ""}
+                  </span>
+                </span>
+                <span className="ps-allpile-cards">{p.cards} card{p.cards === 1 ? "" : "s"}</span>
+                <span className="ps-allpile-state">{p.state === "done" ? "✓ Done" : p.state === "current" ? "▶ Now" : "To do"}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
       {packView.items.length === 0 ? (
         <div className="panel"><p className="dd-empty">Nothing to pack — no open orders. 🎉</p></div>
       ) : pile == null ? (
