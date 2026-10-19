@@ -45,7 +45,7 @@ import {
 import {
   isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder,
   binderCounts, binderContents, openFromBinder, binderCheckIn,
-  freePockets, pocketOf, comparePockets
+  freePockets, pocketOf, comparePockets, sortBinderRows, repocketPlan, BINDER_VIEW_SORTS
 } from "@/lib/showbinder.js";
 
 /** `return_mode` on a checkout filed into a Show Binder (016 leaves it free text). */
@@ -449,6 +449,10 @@ export default function ShowDesk() {
   // card goes to.
   const [binderTick, setBinderTick] = useState(new Set());
   const [binderRemoveTo, setBinderRemoveTo] = useState("");
+  // How the binder view is ordered (the pockets themselves don't move), and
+  // the move list a re-pocket leaves behind to rearrange the binder from.
+  const [showBinderSort, setShowBinderSort] = useState("pocket");
+  const [binderMoves, setBinderMoves] = useState(null);
 
   // ---- Checkout ------------------------------------------------------------
 
@@ -922,8 +926,10 @@ export default function ShowDesk() {
     });
   }, [binderLook, stackCards, listings, sales, awayIndex]);
   const binderInsideShown = useMemo(
-    () => (binderInside ? binderInside.rows.filter((r) => !binderLookQ.trim() || titleMatches(r.card.title, binderLookQ) || skuInBatch(r.card.sku, binderLookQ)) : []),
-    [binderInside, binderLookQ]
+    () => (binderInside
+      ? sortBinderRows(binderInside.rows.filter((r) => !binderLookQ.trim() || titleMatches(r.card.title, binderLookQ) || skuInBatch(r.card.sku, binderLookQ)), showBinderSort)
+      : []),
+    [binderInside, binderLookQ, showBinderSort]
   );
   // What 🏷 Labels prints: the ticked cards on screen, or — none ticked —
   // every card on screen. A tick the search has hidden is not printed, the
@@ -942,6 +948,48 @@ export default function ShowDesk() {
       .map((co) => ({ ...co, position: posById.get(co.stack_card_id) ?? null }))
       .sort(comparePockets);
   }, [open, binderCheck, stackCards]);
+
+  /**
+   * Re-pocket a binder A–Z by card name — repocketPlan() in showbinder.js.
+   * Confirmed, because every move is a card somebody has to shift by hand,
+   * and refused while any card is away: its pocket is waiting for it.
+   * Afterwards the move list stays on screen to rearrange from, and the moved
+   * cards are left TICKED, so 🏷 Labels prints just the labels whose pocket
+   * changed.
+   */
+  async function repocketBinder(binder) {
+    const plan = repocketPlan(stackCards, binder.id, (c) => isCardAway(c, awayIndex));
+    if (!plan.ok) {
+      setMsg(`${binder.name} has ${plan.away.length} card${plan.away.length === 1 ? "" : "s"} out at a show — check the binder in before re-pocketing, or ${plan.away.length === 1 ? "its pocket" : "their pockets"} would be given away.`);
+      return;
+    }
+    if (plan.moves.length === 0) { setMsg(`${binder.name} is already in A–Z order with no gaps.`); return; }
+    if (!confirm(
+      `Re-pocket ${binder.name} A–Z by card name? ${plan.moves.length} of ${plan.order.length} cards change pocket, ` +
+      `and you'll need to move them in the binder to match. A move list stays on screen.`
+    )) return;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const errors = [];
+    for (let i = 0; i < plan.moves.length; i++) {
+      setProgress(`Re-pocketing ${i + 1} of ${plan.moves.length}…`);
+      const m = plan.moves[i];
+      const { error } = await sb.from("stack_cards").update({ position: m.position }).eq("id", m.card.id).is("checked_out_at", null);
+      if (error) errors.push(`${m.card.sku || "?"}: ${error.message}`);
+    }
+    setProgress("");
+    setBusy(false);
+    setBinderMoves({ binderId: binder.id, name: binder.name, order: plan.order });
+    setBinderTick(new Set(plan.moves.map((m) => m.card.id)));
+    setShowBinderSort("pocket");
+    setMsg(
+      `${binder.name} re-pocketed A–Z: ${plan.moves.length - errors.length} card${plan.moves.length === 1 ? "" : "s"} changed pocket. ` +
+      `The moved cards are ticked, so 🏷 Labels prints just their new labels.` +
+      (errors.length ? ` ⚠ ${errors.length} couldn't be saved and kept their old pocket: ${errors.join(" · ")} — re-pocket again.` : "")
+    );
+    await load();
+  }
 
   /**
    * Take one card out of a binder, onto the back of a stack. It was never
@@ -1885,7 +1933,7 @@ export default function ShowDesk() {
                       </button>
                       <button
                         className="btn btn-ghost"
-                        onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); setBinderTick(new Set()); }}
+                        onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); setBinderTick(new Set()); setBinderMoves(null); }}
                         aria-pressed={binderLook === b.id}
                         title="List every card in this binder"
                       >
@@ -1931,9 +1979,48 @@ export default function ShowDesk() {
                     >
                       🏷 Labels{binderTick.size ? " for ticked" : ""} ({binderLabelSet.filter((r) => r.status !== "sold" && r.status !== "outofstock").length})
                     </button>
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => repocketBinder(binder)}
+                      disabled={busy || !binder || binderInside.rows.length === 0}
+                      title="Renumber every pocket so the binder runs A–Z by card name, closing the gaps. You get a move list to rearrange the cards from."
+                    >
+                      ↻ Re-pocket A–Z
+                    </button>
                     <button className="btn btn-ghost" onClick={() => setBinderLook(null)}>Close</button>
                   </div>
                 </div>
+                {binderMoves && binderMoves.binderId === binderLook ? (
+                  <div className="sd-plan" style={{ marginTop: 0 }}>
+                    <div className="sd-plan-head">
+                      <b>Move list — {binderMoves.name}, A–Z</b>
+                      <button className="btn btn-ghost" onClick={() => setBinderMoves(null)}>Done</button>
+                    </div>
+                    <p className="hint hint-small" style={{ marginTop: 0 }}>
+                      Easiest done as: take the cards out, then put them back in this order, pocket by pocket. Rows marked
+                      ↻ changed pocket; the rest are already where they belong.
+                    </p>
+                    <div className="stack-list sd-batch-list">
+                      {binderMoves.order.map((m, i) => {
+                        const moved = Math.round(Number(m.card.position)) !== m.position;
+                        const newPage = i === 0 || binderMoves.order[i - 1].to?.page !== m.to?.page;
+                        return (
+                          <Fragment key={m.card.id}>
+                            {newPage ? <p className="eyebrow" style={{ margin: "10px 0 2px" }}>Page {m.to?.page}</p> : null}
+                            <div className="ps-row sd-rec-row">
+                              <span className="stack-pos" title="New pocket">{m.to?.label}</span>
+                              <span className="stack-sku">{m.card.sku || "—"}</span>
+                              <span className="stack-title">{m.card.title || <em>—</em>}</span>
+                              <span className="badge2" title={moved ? "Moves from this pocket" : "Already in place"}>
+                                {moved ? `↻ was ${m.from?.label || "no pocket"}` : "stays"}
+                              </span>
+                            </div>
+                          </Fragment>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
                 <p className="hint hint-small" style={{ marginTop: 0 }}>
                   {c.home} on sale{c.away ? ` · ${c.away} at a show` : ""}
                   {c.notlisted ? ` · ${c.notlisted} not listed` : ""}
@@ -1977,6 +2064,15 @@ export default function ShowDesk() {
                       </label>
                       <select
                         className="sd-select"
+                        value={showBinderSort}
+                        onChange={(e) => setShowBinderSort(e.target.value)}
+                        aria-label="Sort the binder list"
+                        title="Only the list is re-ordered — the cards stay in their pockets. ↻ Re-pocket A–Z moves them."
+                      >
+                        {BINDER_VIEW_SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                      </select>
+                      <select
+                        className="sd-select"
                         value={binderRemoveTo}
                         onChange={(e) => setBinderRemoveTo(e.target.value)}
                         aria-label="Stack a removed card goes to"
@@ -1991,7 +2087,7 @@ export default function ShowDesk() {
                         // A heading where the page changes, so the list reads
                         // the way the binder is turned.
                         const prevPage = i > 0 ? binderInsideShown[i - 1].pocket?.page ?? null : undefined;
-                        const pageHead = (pocket?.page ?? null) !== prevPage
+                        const pageHead = showBinderSort === "pocket" && (pocket?.page ?? null) !== prevPage
                           ? <p className="eyebrow" style={{ margin: "10px 0 2px" }}>{pocket ? `Page ${pocket.page}` : "No pocket yet"}</p>
                           : null;
                         // A photo of THIS copy, off its listing — the same map
