@@ -22,7 +22,7 @@
  * Framework-free and app-import-free, so check-stackpos.mjs can load it under
  * bare node.
  */
-import { isToploaderStack } from "./toploader.js";
+import { isToploaderStack, isUnorderedStack } from "./toploader.js";
 
 /**
  * The stack and position an eBay SKU was written as, for Auto-import: `A50` is
@@ -90,9 +90,10 @@ export function stackDepths(cards) {
  */
 export function positionLabel(stackName, rank, depth = null) {
   const stack = String(stackName || "").trim() || "—";
-  // The toploader box has no order — you flick through it by name — so a
-  // number there would send you counting through a box that is not in one.
-  if (isToploaderStack(stack)) return `🗂 ${stack}`;
+  // The toploader box and the Show Binders have no order — you flick through
+  // them by name — so a number would send you counting through one that is
+  // not in any.
+  if (isUnorderedStack(stack)) return `${isToploaderStack(stack) ? "🗂" : "📒"} ${stack}`;
   if (rank == null) return stack;
   return depth ? `${stack} · ${rank} of ${depth}` : `${stack} · ${rank}`;
 }
