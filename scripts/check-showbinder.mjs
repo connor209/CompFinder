@@ -24,7 +24,7 @@
 import { readFileSync } from "node:fs";
 import {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
-  binderCounts, openFromBinder, binderCheckIn
+  binderSuffix, renamedBinder, binderCounts, openFromBinder, binderCheckIn
 } from "../apps/app/lib/showbinder.js";
 import { isUnorderedStack, fileableStacks, isToploaderStack } from "../apps/app/lib/toploader.js";
 import { positionLabel, locationsBySku } from "../apps/app/lib/stackpos.js";
@@ -61,6 +61,18 @@ eq("binders found, in number order", showBindersOf(stacks).map((s) => s.id), ["b
 eq("first binder", nextBinderName(["A", "Toploaders"]), "Show Binder 1");
 eq("one past the highest", nextBinderName(stacks.map((s) => s.name)), "Show Binder 11");
 eq("an unnumbered binder counts as 1", nextBinderName(["Show Binder"]), "Show Binder 2");
+
+// --- 1b. renaming: the prefix stays, so a binder stays a binder --------------
+eq("the editable part", binderSuffix("Show Binder 2"), "2");
+eq("a separator is not part of it", binderSuffix("Show Binder — Pokémon"), "Pokémon");
+eq("a rename keeps the prefix", renamedBinder("Pokémon", ["A"], "Show Binder 1"), "Show Binder Pokémon");
+eq("typing the prefix too is not doubled", renamedBinder("show binder Yu-Gi-Oh", [], "Show Binder 1"), "Show Binder Yu-Gi-Oh");
+eq("a renamed binder is still a binder", isShowBinder(renamedBinder("Graded", [], "Show Binder 1")), true);
+eq("blank is refused", renamedBinder("   ", [], "Show Binder 1"), null);
+eq("the prefix alone is refused", renamedBinder("Show Binder", [], "Show Binder 1"), null);
+eq("another stack's name is refused, case-blind", renamedBinder("pokemon", ["Show Binder Pokemon"], "Show Binder 1"), null);
+eq("its own name, re-cased, is fine", renamedBinder("one", [], "Show Binder One"), "Show Binder one");
+eq("too long is refused", renamedBinder("x".repeat(41), [], "Show Binder 1"), null);
 
 // --- 2. no positions, never filed into by a plan ------------------------------
 eq("a binder is unordered", isUnorderedStack("Show Binder 1"), true);

@@ -2506,6 +2506,15 @@ digital binder the desk turns round to a customer.
   no checkout, the listing stays live. A card already away or already in a
   binder is skipped and counted. Cards coming back from a show can be filed
   into one from the away list (`return_mode = 'binder'`).
+- **A rename keeps the prefix.** ✎ Rename edits only what comes after "Show
+  Binder" (`renamedBinder()`), because dropping it would turn the binder back
+  into a numbered stack, and refuses a name another stack already has. Open
+  checkouts out of it are renamed with it; renaming on Stacks is not guarded.
+- **Filling one picks by game or by name.** The game dropdown beside ★
+  Recommend show stock is the same choice as the chips on the list, made
+  before it is built; the stack picker takes a card name (`titleMatches()` in
+  `showfilter.js`: every word typed starts a word of the title, so "char"
+  finds Charizard and "ex" does not find Alex) as well as a SKU batch.
 - **Checking out is the stack picker opened on the binder, all ticked** — the
   toploader button's mechanism — so a card eBay says sold is left out rather
   than checked out blind, and each card goes through `checkoutStackCard()`.

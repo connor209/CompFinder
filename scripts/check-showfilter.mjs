@@ -286,6 +286,26 @@ eq("a card with no SKU is in no batch", skuInBatch("", "BP"), false);
     skuBatch(stacked, "BP", { stackId: "s1", rankOf: (c) => rank.get(c.id) }).map((c) => c.id), [2, 1]);
   eq("neither criterion lists nothing, not the whole shelf",
     skuBatch(stacked, " ", { stackId: "" }).length, 0);
+  const named = [
+    { id: 1, sku: "C9", title: "Charizard ex 199/165 Pokémon 151", stack_id: "s1" },
+    { id: 2, sku: "C2", title: "Charmander 4/102 Base Set", stack_id: "s2" },
+    { id: 3, sku: "U1", title: "Umbreon VMAX 215/203", stack_id: "s1" },
+    { id: 4, sku: "C1", title: "Charizard V", stack_id: "s1", checked_out_at: "2026-10-01" },
+    { id: 5, sku: "A1", title: "Alex the Trainer", stack_id: "s1" }
+  ];
+  const nrank = new Map([[3, 1], [1, 2], [5, 3]]);
+  eq("a name alone searches every stack, SKU order, away cards out",
+    skuBatch(named, "", { name: "char" }).map((c) => c.id), [2, 1]);
+  eq("a name is words, in any order, each starting a word",
+    skuBatch(named, "", { name: "215 umbreon" }).map((c) => c.id), [3]);
+  eq("'ex' does not find 'Alex'",
+    skuBatch(named, "", { name: "ex" }).map((c) => c.id), [1]);
+  eq("accents fold: 'pokemon' finds 'Pokémon'",
+    skuBatch(named, "", { name: "pokemon" }).map((c) => c.id), [1]);
+  eq("a stack and a name narrow each other, in shelf order",
+    skuBatch(named, "", { stackId: "s1", name: "charizard", rankOf: (c) => nrank.get(c.id) }).map((c) => c.id), [1]);
+  eq("a blank name names nothing",
+    skuBatch(named, "", { name: "  " }).length, 0);
 }
 // BC1, 2026-10-10: an OPEN checkout but no flag on its stack card — returning
 // one of two checkouts for the same card clears the flag while the other is

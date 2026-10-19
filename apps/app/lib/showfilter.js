@@ -208,23 +208,40 @@ export function isCardAway(card, away = null) {
 }
 
 /**
- * The cards still on the shelf that a SKU batch and/or a stack names — not
- * pulled, not already away at a show or in the stream box: the ones you could
- * pick up and check out right now. Either criterion alone works; both narrow.
- *
- * Order follows the question. Asked by STACK alone, the list runs in the order
- * the cards sit in it, so it reads top to bottom as you count through the box
- * (`rankOf` supplies the live rank). Asked by SKU, it runs AB2 before AB11.
+ * Does a card's NAME answer a search? Every word typed must START a word of
+ * the title — "char" finds Charizard, "215 umbreon" and "umbreon 215" find
+ * the same card, and "ex" does not find "Alex". Flattened through normalise(),
+ * so "pokemon" finds "Pokémon". An empty search names nothing.
  */
-export function skuBatch(cards, prefix, { stackId = "", rankOf = null, away = null } = {}) {
+export function titleMatches(title, name) {
+  const want = normalise(name).split(" ").filter(Boolean);
+  if (want.length === 0) return false;
+  const words = normalise(title).split(" ").filter(Boolean);
+  return want.every((w) => words.some((t) => t.startsWith(w)));
+}
+
+/**
+ * The cards still on the shelf that a SKU batch, a stack and/or a card name
+ * names — not pulled, not already away at a show or in the stream box: the
+ * ones you could pick up and check out right now. Any criterion alone works;
+ * together they narrow.
+ *
+ * Order follows the question. Asked by STACK alone (or a stack and a name),
+ * the list runs in the order the cards sit in it, so it reads top to bottom
+ * as you count through the box (`rankOf` supplies the live rank). Asked by
+ * SKU, or by name across every stack, it runs AB2 before AB11.
+ */
+export function skuBatch(cards, prefix, { stackId = "", name = "", rankOf = null, away = null } = {}) {
   const p = String(prefix || "").trim();
-  if (!p && !stackId) return [];
+  const n = String(name || "").trim();
+  if (!p && !stackId && !n) return [];
   const rows = (cards || []).filter((c) =>
     c && !c.pulled_at && !isCardAway(c, away) &&
     (!stackId || String(c.stack_id) === String(stackId)) &&
-    (!p || skuInBatch(c.sku, p))
+    (!p || skuInBatch(c.sku, p)) &&
+    (!n || titleMatches(c.title, n))
   );
-  if (!p && rankOf) return rows.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
+  if (!p && stackId && rankOf) return rows.sort((a, b) => (rankOf(a) ?? Infinity) - (rankOf(b) ?? Infinity));
   return rows.sort((a, b) => compareSku(a.sku, b.sku));
 }
 

@@ -62,6 +62,34 @@ export function nextBinderName(existingNames) {
 }
 
 /**
+ * The part of a binder's name after the prefix — "Pokémon" out of "Show
+ * Binder Pokémon" — which is what a rename edits. The prefix itself is not
+ * offered for editing: it is what makes the stack a binder, and a rename that
+ * dropped it would quietly turn a binder back into a numbered stack.
+ */
+export function binderSuffix(name) {
+  const n = String(name ?? "").trim().replace(/\s+/g, " ");
+  return isShowBinder(n) ? n.slice(SHOW_BINDER_PREFIX.length).replace(/^[\s\-—:·]+/, "").trim() : n;
+}
+
+/**
+ * The full stack name for a rename: the prefix, then what was typed. Typing
+ * the prefix as well is forgiven rather than doubled. Returns null for a name
+ * that is blank, too long, or already used by ANOTHER stack (case-blind) —
+ * two stacks of one name would make every screen that finds a card by its
+ * stack name point at the wrong one.
+ */
+export function renamedBinder(typed, existingNames = [], currentName = "") {
+  const rest = binderSuffix(typed);
+  if (!rest || rest.length > 40) return null;
+  const name = `${SHOW_BINDER_PREFIX} ${rest}`;
+  const key = norm(name);
+  if (key === norm(currentName)) return name;
+  if ((existingNames || []).some((n) => norm(n) === key)) return null;
+  return name;
+}
+
+/**
  * How full each binder is, and how much of it is away. `cards` is stack_cards
  * rows; `isAway(card)` is the desk's own reading (isCardAway in showfilter.js)
  * so a lost flag cannot make an away card look like it is at home.
@@ -111,5 +139,5 @@ export function binderCheckIn(open, missing) {
 
 export default {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
-  binderCounts, openFromBinder, binderCheckIn
+  binderSuffix, renamedBinder, binderCounts, openFromBinder, binderCheckIn
 };
