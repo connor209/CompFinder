@@ -8,6 +8,7 @@ import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, compareByTitle } from "@/lib/toploader.js";
 import Fold from "./Fold";
+import { syncListings, syncNote } from "@/lib/listing-sync.js";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -96,13 +97,27 @@ export default function Stacks() {
   // position). e.g. A50 -> Stack A, position 50; YGO-A12 -> Stack YGO-A,
   // position 12 (see stackFromSku). Reuses existing stacks and
   // skips SKUs already added.
+  //
+  // It syncs with eBay FIRST. It reads `ebay_listings`, which is only as fresh
+  // as the last sync — so the cards listed since the nightly run, which are
+  // exactly the ones you press this button to bring in, weren't there to
+  // import. A sync that fails asks before importing from the stale copy
+  // rather than quietly doing so.
   async function autoImport() {
     const sb = supabase();
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return;
-    if (!confirm("Auto-create stacks from your eBay listing SKUs?\n\nEach SKU like A50 becomes Stack A, position 50 (YGO-A12 becomes Stack YGO-A, position 12). Existing stacks are reused and SKUs already added are skipped.")) return;
+    if (!confirm("Sync with eBay, then auto-create stacks from your listing SKUs?\n\nEach SKU like A50 becomes Stack A, position 50 (YGO-A12 becomes Stack YGO-A, position 12). Existing stacks are reused and SKUs already added are skipped.")) return;
     setBusy(true);
-    setMsg("");
+    setMsg("Syncing with eBay…");
+    const synced = await syncListings();
+    if (!synced.ok && !confirm(`${syncNote(synced)}\n\nImport from your listings as they were last synced instead?`)) {
+      setBusy(false);
+      setMsg(syncNote(synced));
+      return;
+    }
+    const syncLine = synced.ok ? syncNote(synced) : "Sync failed — imported from the last synced listings.";
+    setMsg(`${syncLine} Importing…`);
     const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title,ebay_item_id").not("sku", "is", null));
     let unparseable = 0;
     const parsed = [];
@@ -136,7 +151,7 @@ export default function Stacks() {
     for (let i = 0; i < rows.length; i += 500) await sb.from("stack_cards").insert(rows.slice(i, i + 500));
 
     setBusy(false);
-    setMsg(`Imported ${rows.length} card(s) into ${byPrefix.size} stack(s). Skipped ${parsed.length - fresh.length} already added${unparseable ? `, ${unparseable} with non-standard SKUs` : ""}.`);
+    setMsg(`${syncLine} Imported ${rows.length} card(s) into ${byPrefix.size} stack(s). Skipped ${parsed.length - fresh.length} already added${unparseable ? `, ${unparseable} with non-standard SKUs` : ""}.`);
     await loadStacks();
     await loadCards(selId);
   }

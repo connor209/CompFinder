@@ -16,6 +16,7 @@ import DealBar, { DealButton, useDeal } from "./DealBar";
 import { StreamBar, StreamButton, useRelay } from "./StreamBar";
 import { listingLine } from "@/lib/deal.js";
 import Fold from "./Fold";
+import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { getSetIndex, setMatcher } from "@/lib/set-index.js";
 import {
   tagListing,
@@ -573,9 +574,9 @@ export default function Inventory({ onDeepDive }) {
     setSyncing(true);
     setNote("");
     try {
-      const res = await fetch("/api/ebay/sync", { method: "POST" }).then((r) => r.json());
+      const res = await syncListings();
       if (res.ok) {
-        setNote(`Synced ${res.count} listing${res.count === 1 ? "" : "s"}.`);
+        setNote(syncNote(res));
         setPriced(new Map());
         await loadStatus();
         await loadListings();
