@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/stackpos.js";
 import { isListingAvailable, soldOutSkus, offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
-import { gameOf, gameFacets, filterByGames, gameName, UNKNOWN_GAME } from "@/lib/games.js";
+import { gameOf, gameFacets, filterByGames, gameName, UNKNOWN_GAME, GAMES } from "@/lib/games.js";
 import { getSetIndex } from "@/lib/set-index.js";
 import {
   checkoutStackCard, nextStackName, planReallocation, maxPosition, restoreCheckout,
@@ -43,7 +43,8 @@ import {
   compareRecs, compareByTitle, TOPLOADER_STACK_NAME, TOPLOADER_RETURN_MODE
 } from "@/lib/toploader.js";
 import {
-  isShowBinder, showBindersOf, nextBinderName, binderCounts, openFromBinder, binderCheckIn
+  isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder,
+  binderCounts, openFromBinder, binderCheckIn
 } from "@/lib/showbinder.js";
 
 /** `return_mode` on a checkout filed into a Show Binder (016 leaves it free text). */
@@ -136,6 +137,10 @@ export default function ShowDesk() {
   // specific cards, and a pre-ticked list of 140 is one tap from checking out
   // the lot.
   const [batchPrefix, setBatchPrefix] = useState("");
+  // A card NAME to pick by, across every stack or within the one chosen.
+  // Deferred, so typing never waits on a filter over the whole shelf.
+  const [batchName, setBatchName] = useState("");
+  const batchNameQ = useDeferredValue(batchName);
   const [batchStack, setBatchStack] = useState("");
   // Cards the shelf still lists but eBay says have SOLD (or are listed at
   // quantity 0). Hidden from the picker unless asked for — see offSaleReason().
@@ -726,7 +731,7 @@ export default function ShowDesk() {
   // easier is exactly the shortcut check-showcounter.mjs exists to refuse.
   const locations = useMemo(() => locationsBySku(stackCards, stackName), [stackCards, stackName]);
   const batchRows = useMemo(() => {
-    if (!batchPrefix.trim() && !batchStack) return [];
+    if (!batchPrefix.trim() && !batchStack && !batchNameQ.trim()) return [];
     // A card an open checkout names is off the shelf even when its flag was
     // lost, so it must not hold a position the cards behind it count past.
     const present = stackCards.map((c) => (!c.checked_out_at && isCardAway(c, awayIndex) ? { ...c, checked_out_at: "open" } : c));
@@ -736,18 +741,18 @@ export default function ShowDesk() {
     // call every card on the shelf "not listed".
     const offSale = listings.length > 0 ? offSaleIndex(listings, sales || []) : null;
     // The toploader box and the binders have no order to walk: by name.
-    const picked = skuBatch(present, batchPrefix, { stackId: batchStack, rankOf: (c) => ranks.get(c.id), away: awayIndex });
-    if (!batchPrefix.trim() && isUnorderedStack(stackName.get(batchStack))) picked.sort(compareByTitle);
+    const picked = skuBatch(present, batchPrefix, { stackId: batchStack, name: batchNameQ, rankOf: (c) => ranks.get(c.id), away: awayIndex });
+    if (!batchPrefix.trim() && batchStack && isUnorderedStack(stackName.get(batchStack))) picked.sort(compareByTitle);
     return picked.map((card) => ({
       card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null,
       offSale: offSaleReason(card.sku, offSale)
     }));
-  }, [stackCards, batchPrefix, batchStack, awayIndex, listings, sales, stackName]);
+  }, [stackCards, batchPrefix, batchStack, batchNameQ, awayIndex, listings, sales, stackName]);
   // Sold and sold-out cards leave the picker unless asked for, and are counted:
   // a card that sold online but was never pulled is still a row on the shelf.
   const batchGone = batchRows.filter((r) => r.offSale === "sold" || r.offSale === "outofstock");
   const batchShown = batchShowGone ? batchRows : batchRows.filter((r) => r.offSale !== "sold" && r.offSale !== "outofstock");
-  const batchOpen = !!(batchPrefix.trim() || batchStack);
+  const batchOpen = !!(batchPrefix.trim() || batchStack || batchName.trim());
   // Only ticks the list can still see: a card checked out since, or outside a
   // narrowed prefix, is never acted on — the selectionFor() rule.
   const batchChosen = batchShown.filter((r) => batchPick.has(r.card.id)).map((r) => r.card);
@@ -768,6 +773,7 @@ export default function ShowDesk() {
     if (!stackId) return;
     tickBoxOnOpen.current = stackId;
     setBatchPrefix("");
+    setBatchName("");
     setBatchStack(stackId);
     setBatchPick(new Set());
   }
@@ -847,6 +853,29 @@ export default function ShowDesk() {
       `${binder.name} is listed under Check stock out, every card ticked — anything eBay says has sold is left out. Check it out from there.` +
       (hideMode === "none" ? " ⚠ Hide on eBay is set to “Don't touch the listing”, so the binder's cards would stay on sale while it is at the show." : "")
     );
+  }
+
+  /**
+   * Rename a binder. Only the part after the prefix is asked for — the
+   * prefix is what makes it a binder. Open checkouts out of it carry the old
+   * name as a snapshot (the away list's stack filter reads it), so they are
+   * renamed with it; resolved ones keep the name they went out under.
+   */
+  async function renameBinder(binder) {
+    const typed = prompt(`Rename ${binder.name} — it stays “Show Binder …”, so type what comes after`, binderSuffix(binder.name));
+    if (typed === null) return;
+    const name = renamedBinder(typed, stacks.filter((s) => s.id !== binder.id).map((s) => s.name), binder.name);
+    if (!name) { setMsg("That name is blank, longer than 40 characters, or already used by another stack."); return; }
+    if (name === binder.name) return;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const { error } = await sb.from("card_stacks").update({ name }).eq("id", binder.id);
+    if (error) { setBusy(false); setMsg(`Couldn't rename ${binder.name}: ${error.message}`); return; }
+    const { error: coErr } = await sb.from("stock_checkouts").update({ stack_name: name }).eq("stack_id", binder.id).is("resolved_at", null);
+    setBusy(false);
+    setMsg(`Renamed ${binder.name} to ${name}.${coErr ? ` ⚠ The cards it has out still show the old name: ${coErr.message}` : ""}`);
+    await load();
   }
 
   function startBinderCheckIn(binderId) {
@@ -1556,6 +1585,13 @@ export default function ShowDesk() {
             placeholder="SKU batch (e.g. BP)"
             aria-label="SKU batch to pick from"
           />
+          <input
+            className="stack-title-inp sd-batch-inp"
+            value={batchName}
+            onChange={(e) => { setBatchName(e.target.value); setBatchPick(new Set()); }}
+            placeholder="Card name (e.g. charizard)"
+            aria-label="Card name to pick from"
+          />
           <select
             className="sd-select"
             value={batchStack}
@@ -1576,9 +1612,9 @@ export default function ShowDesk() {
             </button>
           ) : null}
           {batchOpen ? (
-            <button className="btn btn-ghost" onClick={() => { setBatchPrefix(""); setBatchStack(""); setBatchPick(new Set()); }}>Close</button>
+            <button className="btn btn-ghost" onClick={() => { setBatchPrefix(""); setBatchName(""); setBatchStack(""); setBatchPick(new Set()); }}>Close</button>
           ) : (
-            <span className="hint hint-small">list a stack or SKU batch and tick the cards to take</span>
+            <span className="hint hint-small">list a stack, a SKU batch or a card name and tick the cards to take</span>
           )}
         </div>
         {batchOpen ? (
@@ -1586,6 +1622,7 @@ export default function ShowDesk() {
             <p className="hint hint-small">
               No cards on the shelf
               {batchPrefix.trim() ? <> under <b>{batchPrefix.trim().toUpperCase()}</b></> : null}
+              {batchName.trim() ? <> named <b>{batchName.trim()}</b></> : null}
               {batchStack ? <> in stack <b>{stackName.get(batchStack) || "?"}</b></> : null}
               {" "}— none match, or every one is already pulled or checked out.
             </p>
@@ -1650,7 +1687,7 @@ export default function ShowDesk() {
                 <button className="btn btn-primary" onClick={checkoutBatch} disabled={busy || batchChosen.length === 0}>
                   {busy ? progress || "Checking out…" : `Check out ${batchChosen.length} card(s)`}
                 </button>
-                {isShowBinder(stackName.get(batchStack)) && !batchPrefix.trim() ? null : intoBinderControl(batchChosen.length, fileBatchIntoBinder)}
+                {isShowBinder(stackName.get(batchStack)) && !batchPrefix.trim() && !batchName.trim() ? null : intoBinderControl(batchChosen.length, fileBatchIntoBinder)}
               </div>
             </>
           )
@@ -1659,6 +1696,19 @@ export default function ShowDesk() {
           <button className="btn btn-ghost" onClick={buildRecs} disabled={busy || recsLoading}>
             {recsLoading ? "Ranking your stock…" : "★ Recommend show stock"}
           </button>
+          {/* The same choice as the game chips on the list below, offered
+              before it is built: the top N is taken AFTER the game, so
+              "top 50 Pokémon" is fifty Pokémon cards. */}
+          <select
+            className="sd-select"
+            value={recGames.size === 0 ? "" : recGames.size === 1 ? [...recGames][0] : "__several"}
+            onChange={(e) => { if (e.target.value !== "__several") setRecGames(e.target.value ? new Set([e.target.value]) : new Set()); }}
+            aria-label="Game to recommend"
+          >
+            <option value="">every game</option>
+            {GAMES.map((g) => <option key={g.slug} value={g.slug}>{g.name}</option>)}
+            {recGames.size > 1 ? <option value="__several">{recGames.size} games</option> : null}
+          </select>
           <label className="sd-toggle">
             top
             <input className="sd-count" type="number" min="1" max="200" value={recCount} onChange={(e) => setRecCount(e.target.value)} />
@@ -1710,6 +1760,9 @@ export default function ShowDesk() {
                         title="List everything in the binder, all ticked, under Check stock out — anything eBay says has sold is left out — then check it out"
                       >
                         ⤴ Check out
+                      </button>
+                      <button className="btn btn-ghost" onClick={() => renameBinder(b)} disabled={busy} title="Rename this binder">
+                        ✎ Rename
                       </button>
                       <button
                         className="btn btn-ghost"
