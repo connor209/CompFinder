@@ -19,7 +19,7 @@ import {
   openCheckoutIndex, isCardAway,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
-import { counterView, onlineMatches, inBoxSkus, atHomeListings } from "@/lib/showcounter.js";
+import { counterView, onlineMatches, inBoxSkus, atHomeListings, imageAt, largeImage } from "@/lib/showcounter.js";
 import {
   binderView, clampPage, turnPage, swipeDirection, copyLocations,
   BINDER_SORTS, DEFAULT_BINDER_SORT, BINDER_PRICE_FILTERS,
@@ -37,7 +37,7 @@ import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
 import { showOnly, oneOfEach } from "@/lib/streamstock.js";
 import { isSlabTitle, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
-import { checkoutLabelRows, labelWorkbook, LABEL_NAME_KEY } from "@/lib/labelexport.js";
+import { checkoutLabelRows, binderLabelRows, labelWorkbook, LABEL_NAME_KEY, BINDER_LABEL_COLUMNS } from "@/lib/labelexport.js";
 import {
   isToploaderStack, isUnorderedStack, toploaderStackOf, fileableStacks, ensureToploaderStack,
   compareRecs, compareByTitle, TOPLOADER_STACK_NAME, TOPLOADER_RETURN_MODE
@@ -1332,6 +1332,41 @@ export default function ShowDesk() {
     setMsg(`${rows.length} label${rows.length === 1 ? "" : "s"} exported.${gap}`);
   }
 
+  /**
+   * Labels for the binder cards on screen, each with its eBay SKU — see
+   * binderLabelRows() in labelexport.js. What the in-binder search shows is
+   * what gets a label, the selectionFor() rule: a search for "charizard"
+   * prints Charizards, not the binder.
+   */
+  function downloadBinderLabels(binder) {
+    let nameMax = DEFAULT_NAME_MAX;
+    try {
+      const saved = Number(localStorage.getItem(LABEL_NAME_KEY));
+      if (saved > 0) nameMax = saved;
+    } catch { /* private mode — the default is fine */ }
+    const { rows, unpriced, sold } = binderLabelRows(binderInsideShown, { nameMax });
+    const named = unpriced.slice(0, 3).map((c) => c.sku || c.title || "untitled").join(", ");
+    const more = unpriced.length > 3 ? ` and ${unpriced.length - 3} more` : "";
+    const gap =
+      (unpriced.length ? ` ${unpriced.length} card${unpriced.length === 1 ? " has" : "s have"} no eBay price and ${unpriced.length === 1 ? "was" : "were"} left out: ${named}${more}.` : "") +
+      (sold ? ` ${sold} sold on eBay ${sold === 1 ? "was" : "were"} left out — pull ${sold === 1 ? "it" : "them"} instead.` : "");
+    if (rows.length === 0) {
+      setMsg(`No labels — none of these cards has an eBay price to print.${gap}`);
+      return;
+    }
+    const blob = new Blob([labelWorkbook(rows, BINDER_LABEL_COLUMNS)], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const slug = String(binder?.name || "binder").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    a.download = `labels-${slug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setMsg(`${rows.length} label${rows.length === 1 ? "" : "s"} exported for ${binder?.name || "the binder"}, with the SKU in a third column.${gap}`);
+  }
+
   /** Price only the ticked cards — the pool route, narrowed by id. */
   function priceSelected(ids) {
     if (!ids.length) return;
@@ -1833,7 +1868,17 @@ export default function ShowDesk() {
               <div className="sd-plan">
                 <div className="sd-plan-head">
                   <b>In {binder?.name || "the binder"} · {binderInside.rows.length} card{binderInside.rows.length === 1 ? "" : "s"}{binderInside.valuePence ? ` · ${pounds(binderInside.valuePence)}` : ""}</b>
-                  <button className="btn btn-ghost" onClick={() => setBinderLook(null)}>Close</button>
+                  <div className="ps-actions">
+                    <button
+                      className="btn btn-ghost"
+                      onClick={() => downloadBinderLabels(binder)}
+                      disabled={binderInsideShown.length === 0}
+                      title="Label file (.xlsx) for the cards listed here: price, name and eBay SKU. The price is our eBay ask, to the pound."
+                    >
+                      🏷 Labels ({binderInsideShown.filter((r) => r.status !== "sold" && r.status !== "outofstock").length})
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => setBinderLook(null)}>Close</button>
+                  </div>
                 </div>
                 <p className="hint hint-small" style={{ marginTop: 0 }}>
                   {c.home} on sale{c.away ? ` · ${c.away} at a show` : ""}
@@ -1860,8 +1905,29 @@ export default function ShowDesk() {
                       />
                     ) : null}
                     <div className="stack-list sd-batch-list">
-                      {binderInsideShown.map(({ card, status, pricePence }) => (
+                      {binderInsideShown.map(({ card, status, pricePence }) => {
+                        // A photo of THIS copy, off its listing — the same map
+                        // the counter uses. A card checked out by ending its
+                        // listing has none, and says so rather than borrowing
+                        // catalogue art of a mint copy.
+                        const img = card.sku ? images.get(String(card.sku).toLowerCase()) : null;
+                        return (
                         <div className="ps-row sd-rec-row" key={card.id}>
+                          {img ? (
+                            <button
+                              type="button"
+                              className="deal-thumb"
+                              style={{ padding: 0, cursor: "zoom-in", flex: "none" }}
+                              onClick={() => setPhoto({ url: largeImage(img), name: card.title || card.sku || "Card" })}
+                              title="See the photo"
+                              aria-label={`See the photo of ${card.title || card.sku || "this card"}`}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={imageAt(img, 140)} alt="" loading="lazy" />
+                            </button>
+                          ) : (
+                            <span className="deal-thumb" style={{ flex: "none" }} title="No photo of this copy" aria-hidden="true">📷</span>
+                          )}
                           <span className="stack-sku">{card.sku || "—"}</span>
                           <span className="stack-title">{card.title || <em>—</em>}</span>
                           <span
@@ -1873,7 +1939,8 @@ export default function ShowDesk() {
                           </span>
                           <span className="sd-price">{pricePence != null ? pounds(pricePence) : "—"}</span>
                         </div>
-                      ))}
+                        );
+                      })}
                       {binderInsideShown.length === 0 ? <p className="hint hint-small">Nothing in the binder matches that.</p> : null}
                     </div>
                   </>

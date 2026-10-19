@@ -23,7 +23,7 @@
  */
 import { readFileSync } from "node:fs";
 import { labelName, fit, stickerRows, NAME_LENGTHS, DEFAULT_NAME_MAX } from "../apps/app/lib/showstock.js";
-import { checkoutLabelRows, labelRows, labelPrice, labelWorkbook, labelFile, xmlText, LABEL_COLUMNS } from "../apps/app/lib/labelexport.js";
+import { checkoutLabelRows, binderLabelRows, labelRows, labelPrice, labelWorkbook, labelFile, xmlText, LABEL_COLUMNS, BINDER_LABEL_COLUMNS } from "../apps/app/lib/labelexport.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -232,4 +232,25 @@ if (failures) {
   console.error(`\ncheck-labels: ${failures} failure(s)\n`);
   process.exit(1);
 }
+// --- Show Binder labels: the printer's two columns, THEN the SKU -------------
+{
+  eq("a binder label keeps Price then Name first, SKU after", BINDER_LABEL_COLUMNS, ["Price", "Name", "SKU"]);
+  const { rows: br, unpriced, sold } = binderLabelRows([
+    { card: { sku: "B12", title: "Umbreon VMAX 215/203 Evolving Skies Alt Art NM" }, status: "home", pricePence: 82249 },
+    { card: { sku: "B13", title: "Gengar 94/102" }, status: "away", pricePence: 2249 },
+    { card: { sku: "B14", title: "Pikachu" }, status: "sold", pricePence: 999 },
+    { card: { sku: "B15", title: "Mew" }, status: "outofstock", pricePence: 999 },
+    { card: { sku: "B16", title: "Alakazam" }, status: "notlisted", pricePence: null }
+  ], { nameMax: 30 });
+  eq("every label carries its SKU", br.map((r) => r.SKU), ["B12", "B13"]);
+  eq("the eBay ask to the POUND, never down the cash ladder", br.map((r) => r.Price), ["£822", "£22"]);
+  eq("the name is cut by the same rule", br[0].Name, labelName("Umbreon VMAX 215/203 Evolving Skies Alt Art NM", 30));
+  eq("a card with no price is named, not dropped", unpriced.map((c) => c.sku), ["B16"]);
+  eq("a card sold on eBay gets no label, and is counted", sold, 2);
+  const sheet = Buffer.from(labelWorkbook(br, BINDER_LABEL_COLUMNS)).toString("latin1");
+  const at = ["Price", "Name", "SKU"].map((h) => sheet.indexOf(`>${h}<`));
+  ok("the workbook's header runs Price, Name, SKU", at.every((i) => i > 0) && at[0] < at[1] && at[1] < at[2]);
+  ok("the SKU is in the file", sheet.includes(">B12<"));
+}
+
 console.log("check-labels: OK — Price then Name, whole pounds, names cut to fit, and a workbook that opens.");
