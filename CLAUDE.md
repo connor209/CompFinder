@@ -168,8 +168,9 @@ stream` (the relay, only while streaming).
   recommended show stock leads with it, and that the pull sheet's pick list
   and pack hand walk it in the same order.
 - `scripts/check-showbinder.mjs` — Show Binders: which stacks are binders
-  ("Show Binder 2" is, "Binder" and "Show Binders" are not), that a binder,
-  like the toploader box, shows no position and no filing plan picks it, and
+  ("Show Binder 2" is, "Binder" and "Show Binders" are not), that a binder's
+  code survives a rename and a card's binder SKU (B1-047) never moves, that
+  new cards go at the back, that no filing plan picks a binder, and
   that checking one in leaves nothing open — every card is back on sale or
   sold, and only the binder's own show checkouts are touched.
 - `scripts/check-piles.mjs` — which pile a pull-sheet card is dealt into: a
@@ -2497,24 +2498,29 @@ digital binder the desk turns round to a customer.
 - **A binder is a stack whose name starts "Show Binder"** (`SHOW_BINDER_PREFIX`,
   spelled once), so there can be several, the pull sheet, Stacks and ⌖ locate
   find a card in one with no new code, and it needs **no migration**.
-- **Pockets, with the gaps kept** (decided 2026-10-19, replacing "no
-  positions" the same day). A binder card's `position` is a FIXED address,
-  nine to a page — `pocketOf()` reads 34 as `p4-7` — never a live count. A
-  sold or removed card leaves its pocket empty and nothing renumbers, because
-  the physical binder doesn't; `freePockets()` hands the next card filed in
-  the first gap, and a pocket held by a card away at a show is not a gap. The
-  view, the check-in, the stack picker, Stacks and the pull sheet all run page
-  by page (`comparePockets`), and `positionLabel()` says "📒 Show Binder 2 ·
-  p4-7". `fileableStacks()` still keeps every filing plan out of a binder.
+- **Every card has a BINDER SKU — `B1-047`** (decided 2026-10-19, replacing
+  the p4-7 pockets the same day). The binder's code is its NUMBER, carried in
+  its name ("Show Binder 3 · Pokémon" is B3) because a stack has no column for
+  it; ✎ Rename edits only the label after it, and `codeless()` gives a binder
+  named without one the next free number, once, on the desk. The slot is the
+  card's `position`: FIXED, never a live count. **New cards go at the back**
+  (`nextSlots()` after `maxPosition()`, which counts sold cards too), so a
+  sold or removed card retires its number and an old label never comes to
+  mean another card. Nothing renumbers but ↻ Re-pocket A–Z. `binderSlot()`
+  is the one reading — the view, check-in (headed by page, nine slots each),
+  the stack picker, Stacks, the pull sheet and `positionLabel()` ("📒 Show
+  Binder 2 · B2-001") all go through it. `fileableStacks()` still keeps every
+  filing plan out of a binder.
 - **Filling one moves the card, and touches nothing else.** 📒 Into binder,
   under ★ Recommend show stock or the stack picker, changes the card's stack:
   no checkout, the listing stays live. A card already away or already in a
   binder is skipped and counted. Cards coming back from a show can be filed
   into one from the away list (`return_mode = 'binder'`).
-- **A rename keeps the prefix.** ✎ Rename edits only what comes after "Show
-  Binder" (`renamedBinder()`), because dropping it would turn the binder back
-  into a numbered stack, and refuses a name another stack already has. Open
-  checkouts out of it are renamed with it; renaming on Stacks is not guarded.
+- **A rename keeps the prefix and the number.** `renamedBinder()` writes
+  "Show Binder 3 · <label>"; dropping the prefix would turn the binder back
+  into a numbered stack, and changing the number would break every label it
+  has printed. Refuses a name another stack has; open checkouts are renamed
+  with it. Renaming on Stacks is not guarded.
 - **Filling one picks by game or by name.** The game dropdown beside ★
   Recommend show stock is the same choice as the chips on the list, made
   before it is built; the stack picker takes a card name (`titleMatches()` in
@@ -2533,16 +2539,17 @@ digital binder the desk turns round to a customer.
   card name (`nameKey`: the label's reading of the title, game prefixes off),
   gaps closed, on a confirmed click only, and is REFUSED while any card is at
   a show — its pocket is waiting for it. It leaves a move list on screen and
-  the moved cards ticked, so 🏷 Labels reprints just those. Cards filed in
-  afterwards still take the first gap, so A–Z holds until the next re-pocket.
+  the moved cards ticked, so 🏷 Labels reprints just those. It is the one
+  thing that changes a binder SKU, so it is a setting-up tool, not upkeep —
+  cards filed in afterwards go at the back.
 - **↩ Out takes one card out**, onto the back of a chosen stack: no checkout,
-  listing untouched, pocket left empty. Not offered for a card away at a show.
+  listing untouched, binder SKU retired. Not offered for a card away at a show.
 - **Labels for the ticked cards**, or every card on screen when none are
   ticked — a tick the search hides is not printed, the `selectionFor()` rule.
 - **The view shows a photo of THIS copy** (the listing's gallery shot, the
   counter's `images` map; tap for large) and prints **labels with the eBay
-  SKU and pocket**: `binderLabelRows()` writes `BINDER_LABEL_COLUMNS` — the
-  printer's Price and Name, THEN SKU and Pocket, so a template laid out on the
+  SKU and binder SKU**: `binderLabelRows()` writes `BINDER_LABEL_COLUMNS` — the
+  printer's Price and Name, THEN SKU and Binder SKU, so a template laid out on the
   first two still works and each is one more field bound to its column. The price is
   our eBay ask on the cash ladder (`stickerPence`, asked for 2026-10-19 — a
   binder label is read at a table like any sticker); a card sold on eBay gets

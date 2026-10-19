@@ -8,7 +8,7 @@ import { queuesBySku } from "@/lib/copyqueue";
 import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
-import { pocketOf } from "@/lib/showbinder.js";
+import { binderSlot } from "@/lib/showbinder.js";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -637,8 +637,8 @@ export default function PullSheet() {
       {groups.map(([stackId, gr]) => {
         // The toploader box has no positions: it is listed by name, and the
         // column a stack uses for "count to" says so instead of a number. A
-        // Show Binder has POCKETS (fixed, gaps left) — shown as p4-7, in
-        // page order, never as a live count.
+        // Show Binder card has a binder SKU (B1-047) — a fixed slot, in slot
+        // order, never a live count.
         const box = isUnorderedStack(stackName.get(stackId));
         const tl = isToploaderStack(stackName.get(stackId));
         return (
@@ -648,12 +648,12 @@ export default function PullSheet() {
             <span className="badge2">{gr.filter((r) => !picked.has(r.cardId)).length} to pick</span>
           </div>
           {box ? (
-            <p className="hint hint-small" style={{ marginTop: 0 }}>{tl ? "In the toploader box, by name — no positions to count." : "In the Show Binder, page by page — p4-7 is page 4, pocket 7."}</p>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>{tl ? "In the toploader box, by name — no positions to count." : "In the Show Binder, in binder SKU order — B1-047 is slot 47 of binder B1."}</p>
           ) : null}
           <div className="stack-list">
             {gr.map((r) => {
               const isPicked = picked.has(r.cardId);
-              const rank = !box ? liveRank(r) : tl ? "🗂" : (pocketOf(r.position)?.label || "📒");
+              const rank = !box ? liveRank(r) : tl ? "🗂" : (binderSlot(stackName.get(stackId), r.position)?.sku || "📒");
               return (
                 <label className={`ps-row${isPicked ? " done" : ""}`} key={r.key}>
                   <input type="checkbox" checked={isPicked} onChange={() => togglePick(r.cardId)} />

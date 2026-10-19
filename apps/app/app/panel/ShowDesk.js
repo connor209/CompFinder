@@ -43,9 +43,9 @@ import {
   compareRecs, compareByTitle, TOPLOADER_STACK_NAME, TOPLOADER_RETURN_MODE
 } from "@/lib/toploader.js";
 import {
-  isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder,
+  isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder, binderCode,
   binderCounts, binderContents, openFromBinder, binderCheckIn,
-  freePockets, pocketOf, comparePockets, sortBinderRows, repocketPlan, BINDER_VIEW_SORTS
+  binderSlot, nextSlots, codeless, comparePockets, sortBinderRows, repocketPlan, BINDER_VIEW_SORTS
 } from "@/lib/showbinder.js";
 
 /** `return_mode` on a checkout filed into a Show Binder (016 leaves it free text). */
@@ -435,6 +435,30 @@ export default function ShowDesk() {
   const tickBoxOnOpen = useRef(null);
   // Show Binders, in name order. See lib/showbinder.js.
   const binders = useMemo(() => showBindersOf(stacks), [stacks]);
+  // A binder with no number (named by hand, or renamed before binder codes
+  // existed) gets the next free one, once, and says so: without a code its
+  // cards have no binder SKU. The label it was given is kept.
+  const codedOnce = useRef(false);
+  useEffect(() => {
+    if (codedOnce.current) return;
+    const fix = codeless(stacks);
+    if (fix.length === 0) return;
+    codedOnce.current = true;
+    (async () => {
+      const sb = supabase();
+      const done = [];
+      for (const f of fix) {
+        const { error } = await sb.from("card_stacks").update({ name: f.name }).eq("id", f.id);
+        if (error) continue;
+        await sb.from("stock_checkouts").update({ stack_name: f.name }).eq("stack_id", f.id).is("resolved_at", null);
+        done.push(f.name);
+      }
+      if (done.length) {
+        setMsg(`Gave ${done.length === 1 ? "a binder its code" : `${done.length} binders their codes`}: ${done.join(", ")}. Their cards' binder SKUs start with it.`);
+        await load();
+      }
+    })();
+  }, [stacks]);
   // Which binder "📒 Into" files into, shared by the picker and the recs.
   const [binderTarget, setBinderTarget] = useState("");
   // The binder being checked in, the cards said NOT to be in it, and the
@@ -835,8 +859,9 @@ export default function ShowDesk() {
     setBusy(true);
     setMsg("");
     const sb = supabase();
-    // The first empty pockets, gaps first — a sold card's pocket is reused.
-    const pockets = freePockets(stackCards, binderId, movable.length);
+    // At the back: one past the highest slot the binder has EVER used —
+    // maxPosition() counts sold cards too, so no binder SKU is handed out twice.
+    const pockets = nextSlots(await maxPosition(sb, binderId), movable.length);
     let moved = 0;
     const errors = [];
     const placed = [];
@@ -848,13 +873,13 @@ export default function ShowDesk() {
         .eq("id", movable[i].id)
         .is("checked_out_at", null);
       if (error) errors.push(`${movable[i].sku || "?"}: ${error.message}`);
-      else { moved += 1; placed.push(`${movable[i].sku || "?"} → ${pocketOf(pockets[i])?.label}`); }
+      else { moved += 1; placed.push(`${movable[i].sku || "?"} → ${binderSlot(binder.name, pockets[i])?.sku}`); }
     }
     setProgress("");
     setBusy(false);
     setMsg(
       `Filed ${moved} card${moved === 1 ? "" : "s"} into ${binder.name} — still on sale on eBay until the binder is checked out.` +
-      (placed.length ? ` Pockets: ${placed.slice(0, 12).join(", ")}${placed.length > 12 ? `, and ${placed.length - 12} more` : ""}.` : "") +
+      (placed.length ? ` Binder SKUs: ${placed.slice(0, 12).join(", ")}${placed.length > 12 ? `, and ${placed.length - 12} more` : ""}.` : "") +
       (skipped ? ` ${skipped} left where they were: already at a show or already in a binder.` : "") +
       (errors.length ? ` ⚠ ${errors.join(" · ")}` : "")
     );
@@ -885,10 +910,13 @@ export default function ShowDesk() {
    * renamed with it; resolved ones keep the name they went out under.
    */
   async function renameBinder(binder) {
-    const typed = prompt(`Rename ${binder.name} — it stays “Show Binder …”, so type what comes after`, binderSuffix(binder.name));
+    const typed = prompt(
+      `Name ${binder.name} — its code (${binderCode(binder) || "a new number"}) stays, because every label it has printed carries it. Type a label to go after it, or leave blank:`,
+      binderSuffix(binder.name)
+    );
     if (typed === null) return;
     const name = renamedBinder(typed, stacks.filter((s) => s.id !== binder.id).map((s) => s.name), binder.name);
-    if (!name) { setMsg("That name is blank, longer than 40 characters, or already used by another stack."); return; }
+    if (!name) { setMsg("That label is longer than 40 characters, or the name is already used by another stack."); return; }
     if (name === binder.name) return;
     setBusy(true);
     setMsg("");
@@ -922,9 +950,10 @@ export default function ShowDesk() {
     return binderContents(stackCards, binderLook, {
       isAway: (c) => isCardAway(c, awayIndex),
       offSale: (sku) => offSaleReason(sku, offSale),
-      priceOf: (sku) => (sku ? price.get(String(sku).toLowerCase()) ?? null : null)
+      priceOf: (sku) => (sku ? price.get(String(sku).toLowerCase()) ?? null : null),
+      binderName: stackName.get(binderLook) || null
     });
-  }, [binderLook, stackCards, listings, sales, awayIndex]);
+  }, [binderLook, stackCards, listings, sales, awayIndex, stackName]);
   const binderInsideShown = useMemo(
     () => (binderInside
       ? sortBinderRows(binderInside.rows.filter((r) => !binderLookQ.trim() || titleMatches(r.card.title, binderLookQ) || skuInBatch(r.card.sku, binderLookQ)), showBinderSort)
@@ -958,15 +987,15 @@ export default function ShowDesk() {
    * changed.
    */
   async function repocketBinder(binder) {
-    const plan = repocketPlan(stackCards, binder.id, (c) => isCardAway(c, awayIndex));
+    const plan = repocketPlan(stackCards, binder.id, (c) => isCardAway(c, awayIndex), binder.name);
     if (!plan.ok) {
       setMsg(`${binder.name} has ${plan.away.length} card${plan.away.length === 1 ? "" : "s"} out at a show — check the binder in before re-pocketing, or ${plan.away.length === 1 ? "its pocket" : "their pockets"} would be given away.`);
       return;
     }
     if (plan.moves.length === 0) { setMsg(`${binder.name} is already in A–Z order with no gaps.`); return; }
     if (!confirm(
-      `Re-pocket ${binder.name} A–Z by card name? ${plan.moves.length} of ${plan.order.length} cards change pocket, ` +
-      `and you'll need to move them in the binder to match. A move list stays on screen.`
+      `Re-pocket ${binder.name} A–Z by card name? ${plan.moves.length} of ${plan.order.length} cards get a NEW binder SKU, ` +
+      `so their labels need reprinting and the cards moving to match. A move list stays on screen.`
     )) return;
     setBusy(true);
     setMsg("");
@@ -984,9 +1013,9 @@ export default function ShowDesk() {
     setBinderTick(new Set(plan.moves.map((m) => m.card.id)));
     setShowBinderSort("pocket");
     setMsg(
-      `${binder.name} re-pocketed A–Z: ${plan.moves.length - errors.length} card${plan.moves.length === 1 ? "" : "s"} changed pocket. ` +
+      `${binder.name} re-pocketed A–Z: ${plan.moves.length - errors.length} card${plan.moves.length === 1 ? "" : "s"} got a new binder SKU. ` +
       `The moved cards are ticked, so 🏷 Labels prints just their new labels.` +
-      (errors.length ? ` ⚠ ${errors.length} couldn't be saved and kept their old pocket: ${errors.join(" · ")} — re-pocket again.` : "")
+      (errors.length ? ` ⚠ ${errors.length} couldn't be saved and kept their old binder SKU: ${errors.join(" · ")} — re-pocket again.` : "")
     );
     await load();
   }
@@ -994,7 +1023,7 @@ export default function ShowDesk() {
   /**
    * Take one card out of a binder, onto the back of a stack. It was never
    * checked out, so the listing is untouched — the card is simply somewhere
-   * else now, and its pocket is left empty for the next card filed in.
+   * else now. Its binder SKU is retired with it — new cards go at the back.
    */
   async function removeFromBinder(card, toStackId) {
     const to = stacks.find((st) => st.id === toStackId);
@@ -1010,10 +1039,10 @@ export default function ShowDesk() {
       .eq("id", card.id)
       .is("checked_out_at", null);
     setBusy(false);
-    const pk = pocketOf(card.position)?.label;
+    const pk = binderSlot(stackName.get(card.stack_id), card.position)?.sku;
     setMsg(error
       ? `Couldn't move ${card.sku || "the card"}: ${error.message}`
-      : `Moved ${card.sku || "the card"} out of ${pk ? `pocket ${pk}` : "the binder"} to the back of ${to.name}. Its listing is unchanged.`);
+      : `Moved ${card.sku || "the card"} out of ${pk || "the binder"} to the back of ${to.name}. Its listing is unchanged.`);
     setBinderTick((prev) => { const n = new Set(prev); n.delete(card.id); return n; });
     await load();
   }
@@ -1363,10 +1392,10 @@ export default function ShowDesk() {
     // The box has no order, but a position is still the sort key every stack
     // row carries, so a filed card goes behind what is there.
     if (mode === "back" || mode === "new_stack" || mode === TOPLOADER_RETURN_MODE) base = await maxPosition(sb, stackId);
-    // Into a binder: the first empty pockets. A card that came OUT of this
-    // binder still holds its own pocket and goes straight back into it.
+    // Into a binder: new slots at the back. A card that came OUT of this
+    // binder still holds its own slot and goes straight back into it.
     const homeAgain = (co) => mode === BINDER_RETURN_MODE && co.stack_id === stackId;
-    const pockets = mode === BINDER_RETURN_MODE ? freePockets(stackCards, stackId, items.filter((co) => !homeAgain(co)).length) : [];
+    const pockets = mode === BINDER_RETURN_MODE ? nextSlots(await maxPosition(sb, stackId), items.filter((co) => !homeAgain(co)).length) : [];
     let nextPocket = 0;
 
     let restored = 0;
@@ -1466,7 +1495,7 @@ export default function ShowDesk() {
     a.download = `labels-${slug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
-    setMsg(`${rows.length} label${rows.length === 1 ? "" : "s"} exported for ${binder?.name || "the binder"}, with the SKU and the pocket (p4-7) in the third and fourth columns.${gap}`);
+    setMsg(`${rows.length} label${rows.length === 1 ? "" : "s"} exported for ${binder?.name || "the binder"}, with the eBay SKU and the binder SKU (B1-047) in the third and fourth columns.${gap}`);
   }
 
   /** Price only the ticked cards — the pool route, narrowed by id. */
@@ -1975,7 +2004,7 @@ export default function ShowDesk() {
                       className="btn btn-ghost"
                       onClick={() => downloadBinderLabels(binder)}
                       disabled={binderLabelSet.length === 0}
-                      title="Label file (.xlsx) for the ticked cards — or every card listed, if none are ticked: price, name, eBay SKU and pocket. The price is our eBay ask rounded to a cash price — £1 steps to £20, £5 to £100, £10 above."
+                      title="Label file (.xlsx) for the ticked cards — or every card listed, if none are ticked: price, name, eBay SKU and binder SKU. The price is our eBay ask rounded to a cash price — £1 steps to £20, £5 to £100, £10 above."
                     >
                       🏷 Labels{binderTick.size ? " for ticked" : ""} ({binderLabelSet.filter((r) => r.status !== "sold" && r.status !== "outofstock").length})
                     </button>
@@ -1983,7 +2012,7 @@ export default function ShowDesk() {
                       className="btn btn-ghost"
                       onClick={() => repocketBinder(binder)}
                       disabled={busy || !binder || binderInside.rows.length === 0}
-                      title="Renumber every pocket so the binder runs A–Z by card name, closing the gaps. You get a move list to rearrange the cards from."
+                      title="Give every card a new binder SKU so the binder runs A–Z by card name, closing the gaps. Moved cards need new labels; you get a move list to rearrange from."
                     >
                       ↻ Re-pocket A–Z
                     </button>
@@ -1997,8 +2026,8 @@ export default function ShowDesk() {
                       <button className="btn btn-ghost" onClick={() => setBinderMoves(null)}>Done</button>
                     </div>
                     <p className="hint hint-small" style={{ marginTop: 0 }}>
-                      Easiest done as: take the cards out, then put them back in this order, pocket by pocket. Rows marked
-                      ↻ changed pocket; the rest are already where they belong.
+                      Easiest done as: take the cards out, then put them back in this order. Rows marked ↻ have a new
+                      binder SKU and need a new label; the rest are already where they belong.
                     </p>
                     <div className="stack-list sd-batch-list">
                       {binderMoves.order.map((m, i) => {
@@ -2008,11 +2037,11 @@ export default function ShowDesk() {
                           <Fragment key={m.card.id}>
                             {newPage ? <p className="eyebrow" style={{ margin: "10px 0 2px" }}>Page {m.to?.page}</p> : null}
                             <div className="ps-row sd-rec-row">
-                              <span className="stack-pos" title="New pocket">{m.to?.label}</span>
+                              <span className="stack-pos" title="New binder SKU">{m.to?.sku}</span>
                               <span className="stack-sku">{m.card.sku || "—"}</span>
                               <span className="stack-title">{m.card.title || <em>—</em>}</span>
-                              <span className="badge2" title={moved ? "Moves from this pocket" : "Already in place"}>
-                                {moved ? `↻ was ${m.from?.label || "no pocket"}` : "stays"}
+                              <span className="badge2" title={moved ? "Was this binder SKU" : "Already in place"}>
+                                {moved ? `↻ was ${m.from?.sku || "unnumbered"}` : "stays"}
                               </span>
                             </div>
                           </Fragment>
@@ -2067,7 +2096,7 @@ export default function ShowDesk() {
                         value={showBinderSort}
                         onChange={(e) => setShowBinderSort(e.target.value)}
                         aria-label="Sort the binder list"
-                        title="Only the list is re-ordered — the cards stay in their pockets. ↻ Re-pocket A–Z moves them."
+                        title="Only the list is re-ordered — every card keeps its binder SKU. ↻ Re-pocket A–Z renumbers them."
                       >
                         {BINDER_VIEW_SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                       </select>
@@ -2083,12 +2112,12 @@ export default function ShowDesk() {
                       </select>
                     </div>
                     <div className="stack-list sd-batch-list">
-                      {binderInsideShown.map(({ card, status, pricePence, pocket }, i) => {
+                      {binderInsideShown.map(({ card, status, pricePence, slot }, i) => {
                         // A heading where the page changes, so the list reads
                         // the way the binder is turned.
-                        const prevPage = i > 0 ? binderInsideShown[i - 1].pocket?.page ?? null : undefined;
-                        const pageHead = showBinderSort === "pocket" && (pocket?.page ?? null) !== prevPage
-                          ? <p className="eyebrow" style={{ margin: "10px 0 2px" }}>{pocket ? `Page ${pocket.page}` : "No pocket yet"}</p>
+                        const prevPage = i > 0 ? binderInsideShown[i - 1].slot?.page ?? null : undefined;
+                        const pageHead = showBinderSort === "pocket" && (slot?.page ?? null) !== prevPage
+                          ? <p className="eyebrow" style={{ margin: "10px 0 2px" }}>{slot ? `Page ${slot.page}` : "No binder SKU yet"}</p>
                           : null;
                         // A photo of THIS copy, off its listing — the same map
                         // the counter uses. A card checked out by ending its
@@ -2105,7 +2134,7 @@ export default function ShowDesk() {
                             onChange={() => setBinderTick((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
                             aria-label={`Tick ${card.title || card.sku || "this card"} for labels`}
                           />
-                          <span className="stack-pos" title="Page and pocket — p4-7 is page 4, pocket 7">{pocket?.label || "—"}</span>
+                          <span className="stack-pos" title="Binder SKU — the binder's code and the card's fixed slot">{slot?.sku || "—"}</span>
                           {img ? (
                             <button
                               type="button"
@@ -2136,7 +2165,7 @@ export default function ShowDesk() {
                               className="btn btn-ghost"
                               onClick={() => removeFromBinder(card, binderRemoveTo)}
                               disabled={busy || !binderRemoveTo}
-                              title={binderRemoveTo ? "Take this card out of the binder onto the back of the chosen stack. The listing is unchanged, and its pocket is left empty." : "Choose where removed cards go first (↩ Out goes to…)"}
+                              title={binderRemoveTo ? "Take this card out of the binder onto the back of the chosen stack. The listing is unchanged, and its binder SKU is retired." : "Choose where removed cards go first (↩ Out goes to…)"}
                             >
                               ↩ Out
                             </button>
@@ -2166,7 +2195,7 @@ export default function ShowDesk() {
                 ) : (
                   <>
                     <p className="hint hint-small" style={{ marginTop: 0 }}>
-                      Turn the binder page by page and untick every pocket that is empty — those cards sold. Cards already marked £ Sold at the table
+                      Go through the binder in binder SKU order and untick every card that isn&apos;t there — those sold. Cards already marked £ Sold at the table
                       aren&apos;t listed. A sold card&apos;s price starts at its sticker; change it, or clear it to record the
                       sale without one.
                     </p>
@@ -2175,12 +2204,12 @@ export default function ShowDesk() {
                         const here = !binderMissing.has(co.id);
                         // Page by page, the way the binder is turned at the
                         // table: a heading where the page changes.
-                        const pk = pocketOf(co.position);
-                        const prevPage = i > 0 ? pocketOf(binderOut[i - 1].position)?.page ?? null : undefined;
+                        const pk = binderSlot(stackName.get(binderCheck), co.position);
+                        const prevPage = i > 0 ? binderSlot(stackName.get(binderCheck), binderOut[i - 1].position)?.page ?? null : undefined;
                         return (
                           <Fragment key={co.id}>
                           {(pk?.page ?? null) !== prevPage ? (
-                            <p className="eyebrow" style={{ margin: "10px 0 2px" }}>{pk ? `Page ${pk.page}` : "No pocket"}</p>
+                            <p className="eyebrow" style={{ margin: "10px 0 2px" }}>{pk ? `Page ${pk.page}` : "No binder SKU"}</p>
                           ) : null}
                           <div className="ps-row sd-rec-row">
                             <input
@@ -2189,7 +2218,7 @@ export default function ShowDesk() {
                               aria-label={`${co.title || co.sku || "card"} is in the binder`}
                               onChange={() => setBinderMissing((prev) => { const n = new Set(prev); if (n.has(co.id)) n.delete(co.id); else n.add(co.id); return n; })}
                             />
-                            <span className="stack-pos" title="Page and pocket">{pk?.label || "—"}</span>
+                            <span className="stack-pos" title="Binder SKU">{pk?.sku || "—"}</span>
                             <span className="stack-sku">{co.sku || "—"}</span>
                             <span className="stack-title">{co.title || <em>—</em>}</span>
                             {here ? (

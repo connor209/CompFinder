@@ -23,7 +23,7 @@
  * bare node.
  */
 import { isUnorderedStack } from "./toploader.js";
-import { isShowBinder, pocketOf } from "./showbinder.js";
+import { isShowBinder, binderSlot } from "./showbinder.js";
 
 /**
  * The stack and position an eBay SKU was written as, for Auto-import: `A50` is
@@ -94,11 +94,11 @@ export function positionLabel(stackName, rank, depth = null, position = null) {
   // The toploader box and the Show Binders have no order — you flick through
   // them by name — so a number would send you counting through one that is
   // not in any.
-  // A Show Binder's position IS its pocket — fixed, gaps left — so it is
-  // given as page and pocket, never as a live count (lib/showbinder.js).
+  // A Show Binder card is found by its binder SKU (B1-047) — a fixed slot,
+  // never a live count (lib/showbinder.js).
   if (isShowBinder(stack)) {
-    const pk = pocketOf(position);
-    return pk ? `📒 ${stack} · ${pk.label}` : `📒 ${stack}`;
+    const slot = binderSlot(stack, position);
+    return slot ? `📒 ${stack} · ${slot.sku}` : `📒 ${stack}`;
   }
   if (isUnorderedStack(stack)) return `🗂 ${stack}`;
   if (rank == null) return stack;
