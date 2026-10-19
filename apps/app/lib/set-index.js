@@ -154,17 +154,32 @@ export function appSetIndex(rows) {
   return index;
 }
 
-function matchCanonical(hay, index) {
+function matchCanonical(hay, index, game = "") {
+  // A set from another game is never the answer for a card whose game is
+  // known: "Nidoking 11/102 Base Set Unlimited Pokemon" read longest-first is
+  // Magic's "Unlimited", one letter longer than "Base Set". Only an index that
+  // knows its games can say; a bare core index matches across all of them.
+  const games = game && index.gamesByName ? index.gamesByName : null;
+  // A name the catalogue records no game for is not ruled out: the rule only
+  // stands where the catalogue actually says whose set it is.
+  const allowed = (name) => {
+    const held = games?.get(name);
+    return !held || held.size === 0 || held.has(game);
+  };
   if (index.byFirst) {
     let best = -1;
     for (const tok of new Set(hay.trim().split(" "))) {
       for (const i of index.byFirst.get(tok) || []) {
-        if ((best === -1 || i < best) && hay.includes(` ${index.names[i].norm} `)) best = i;
+        if ((best === -1 || i < best) && allowed(index.names[i].name) && hay.includes(` ${index.names[i].norm} `)) best = i;
       }
     }
     if (best !== -1) return { name: index.names[best].name, code: index.names[best].code || "" };
-    // Names exhausted: core's code pass is a token lookup, already cheap.
-    return coreMatch(hay, { names: [], codes: index.codes });
+    // Names exhausted: the code pass, a token lookup, as core does it.
+    for (const tok of hay.trim().split(" ")) {
+      const hit = index.codes.get(tok);
+      if (hit && allowed(hit.name)) return { name: hit.name, code: hit.code };
+    }
+    return null;
   }
   return coreMatch(hay, index);
 }
@@ -175,23 +190,23 @@ function matchCanonical(hay, index) {
  * left as it is — Last Comp does not use it, and the era reading is about how
  * OUR listings are titled.
  */
-export function matchSetFromTitle(title, index) {
+export function matchSetFromTitle(title, index, { game = "" } = {}) {
   if (!index || !title) return null;
   const hay = canonicalSetTitle(title);
-  const hit = matchCanonical(hay, index);
+  const hit = matchCanonical(hay, index, game);
   const total = String(title).match(/\b\d{1,3}\s*\/\s*(\d{2,3})\b/);
   // The 1999 set as sellers often title it: "Base" with no "Set", or
   // "Shadowless" (a printing only Base Set has), on a number out of 102.
   // Triumphant is also out of 102, which is why the word is required.
   if (!hit) {
     return total && Number(total[1]) === BASE_SET_TOTAL && / (?:base|shadowless) /.test(hay)
-      ? matchCanonical(` ${BASE_SET} `, index)
+      ? matchCanonical(` ${BASE_SET} `, index, game)
       : null;
   }
   if (normalizeForMatch(hit.name).trim() !== BASE_SET) return hit;
   if (!total || Number(total[1]) === BASE_SET_TOTAL) return hit;
   const era = ERA_BY_TOTAL.get(Number(total[1]));
-  return era ? matchCanonical(era, index) : null;
+  return era ? matchCanonical(era, index, game) : null;
 }
 
 /** Does the catalogue hold a set by this exact name for this game? */
@@ -199,8 +214,12 @@ export function setInGame(index, name, game) {
   return Boolean(index?.gamesByName?.get(String(name || ""))?.has(game));
 }
 
-/** A function title -> { name, code } | null over the index, or one that always answers null. */
+/**
+ * A function (title, game?) -> { name, code } | null over the index, or one
+ * that always answers null. Pass the game when it is known — a real slug,
+ * never "unknown" — and only that game's sets are considered.
+ */
 export function setMatcher(index) {
   if (!index) return () => null;
-  return (title) => matchSetFromTitle(title, index);
+  return (title, game) => matchSetFromTitle(title, index, { game: game && game !== "unknown" ? game : "" });
 }

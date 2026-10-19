@@ -245,7 +245,9 @@ function tagsByKey(checkouts, onlineListings, allListings, setOf, gameIndex, isP
       cur.game = g !== UNKNOWN_GAME || !listing?.title ? g : gameOf({ category: listing.category, title: listing.title }, gameIndex);
     }
     if (!cur.set && typeof setOf === "function") {
-      const hit = setOf(title) || (listing?.title && listing.title !== title ? setOf(listing.title) : null);
+      // Inside the card's own game when we know it — see matchCanonical().
+      const g = cur.game && cur.game !== UNKNOWN_GAME ? cur.game : "";
+      const hit = setOf(title, g) || (listing?.title && listing.title !== title ? setOf(listing.title, g) : null);
       if (hit?.name) cur.set = hit.name;
     }
     // A Wizards-era title rarely says "Pokémon", and its set says nothing to

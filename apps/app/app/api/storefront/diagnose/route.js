@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getSetIndex, matchSetFromTitle, canonicalSetTitle, setInGame } from "@/lib/set-index.js";
+import { getSetIndex, matchSetFromTitle, setMatcher, canonicalSetTitle, setInGame } from "@/lib/set-index.js";
 import { gameOf } from "@/lib/games.js";
 import { eraOf } from "@/lib/pokemon-eras.js";
 import { storefrontStock } from "@/lib/storefront.js";
@@ -45,13 +45,15 @@ export async function GET(request) {
   const isPokemonSet = (name) => setInGame(sets.index, name, "pokemon");
   const projected = storefrontStock([], listings || [], {
     includeOnline: true,
-    setOf: (t) => matchSetFromTitle(t, sets.index),
+    setOf: setMatcher(sets.index),
     gameIndex: sets.gameIndex,
     isPokemonSet
   });
 
   const rows = (listings || []).map((l) => {
-    const hit = matchSetFromTitle(l.title, sets.index);
+    const game = gameOf({ category: l.category, title: l.title }, sets.gameIndex);
+    const hit = setMatcher(sets.index)(l.title, game);
+    const anyGame = matchSetFromTitle(l.title, sets.index);
     return {
       title: l.title,
       category: l.category ?? null,
@@ -59,7 +61,9 @@ export async function GET(request) {
       onStorefront: isListingAvailable(l),
       readAs: canonicalSetTitle(l.title).trim(),
       set: hit?.name ?? null,
-      gameOf: gameOf({ category: l.category, title: l.title }, sets.gameIndex),
+      // What the title would match ignoring its game, when that differs.
+      ...(anyGame?.name !== hit?.name ? { setIgnoringGame: anyGame?.name ?? null } : {}),
+      gameOf: game,
       setIsPokemon: hit ? isPokemonSet(hit.name) : null,
       setGames: hit ? [...(sets.index?.gamesByName?.get(hit.name) || [])] : null,
       era: hit ? eraOf(hit.name) : null
