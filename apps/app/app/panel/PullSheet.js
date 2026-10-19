@@ -7,7 +7,7 @@ import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
 import { buildPiles, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
-import { isToploaderStack, compareByTitle } from "@/lib/toploader.js";
+import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -37,14 +37,15 @@ function pileCompare(a, b) {
 }
 
 /**
- * Stacks in walking order, with the toploader box after every stack: it has
- * no positions, so it is one flick through by name at the end of the walk.
+ * Stacks in walking order, with the toploader box and the Show Binders after
+ * every stack: they have no positions, so each is one flick through by name at
+ * the end of the walk.
  * Pick and Pack both sort through this, because the hand you deal from is the
  * order you picked in — two orders would number the hand wrong.
  */
 function stackWalkCompare(a, b) {
-  const ta = isToploaderStack(a);
-  const tb = isToploaderStack(b);
+  const ta = isUnorderedStack(a);
+  const tb = isUnorderedStack(b);
   if (ta !== tb) return ta ? 1 : -1;
   return pileCompare(a, b);
 }
@@ -247,7 +248,7 @@ export default function PullSheet() {
       const na = nameMap.get(a.stackId) || "";
       const nb = nameMap.get(b.stackId) || "";
       if (na !== nb) return stackWalkCompare(na, nb);
-      if (isToploaderStack(na)) return compareByTitle(a, b);
+      if (isUnorderedStack(na)) return compareByTitle(a, b);
       return (idxByCard.get(a.cardId) ?? 0) - (idxByCard.get(b.cardId) ?? 0);
     });
     // Loose picks are walked set-by-set (alphabetically, matching the shelves),
@@ -294,7 +295,7 @@ export default function PullSheet() {
       if (a.matched !== b.matched) return a.matched ? -1 : 1; // loose (no stack) last
       if (a.matched) {
         if (a.stackNm !== b.stackNm) return stackWalkCompare(a.stackNm, b.stackNm);
-        if (isToploaderStack(a.stackNm)) return compareByTitle(a, b);
+        if (isUnorderedStack(a.stackNm)) return compareByTitle(a, b);
         return (a.position ?? 0) - (b.position ?? 0);
       }
       return bySetThenNumber(a, b); // loose picks: same set-by-set walk as the pick list
@@ -596,17 +597,19 @@ export default function PullSheet() {
       ) : null}
 
       {groups.map(([stackId, gr]) => {
-        // The toploader box has no positions: it is listed by name, and the
-        // column a stack uses for "count to" says so instead of a number.
-        const box = isToploaderStack(stackName.get(stackId));
+        // The toploader box and the Show Binders have no positions: they are
+        // listed by name, and the column a stack uses for "count to" says so
+        // instead of a number.
+        const box = isUnorderedStack(stackName.get(stackId));
+        const tl = isToploaderStack(stackName.get(stackId));
         return (
         <div className="panel" key={stackId}>
           <div className="panel-head">
-            <h3>{box ? `🗂 ${stackName.get(stackId)}` : stackName.get(stackId) || "Stack"}</h3>
+            <h3>{box ? `${tl ? "🗂" : "📒"} ${stackName.get(stackId)}` : stackName.get(stackId) || "Stack"}</h3>
             <span className="badge2">{gr.filter((r) => !picked.has(r.cardId)).length} to pick</span>
           </div>
           {box ? (
-            <p className="hint hint-small" style={{ marginTop: 0 }}>In the toploader box, by name — no positions to count.</p>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>{tl ? "In the toploader box" : "In the Show Binder"}, by name — no positions to count.</p>
           ) : null}
           <div className="stack-list">
             {gr.map((r) => {

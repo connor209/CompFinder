@@ -6,7 +6,7 @@ import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
-import { isToploaderStack, compareByTitle } from "@/lib/toploader.js";
+import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
 import Fold from "./Fold";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
@@ -337,8 +337,11 @@ export default function Stacks() {
   }
 
   const sel = useMemo(() => stacks.find((s) => s.id === selId), [stacks, selId]);
-  // The toploader box is a stack with no order: listed by name, never numbered.
-  const selBox = isToploaderStack(sel);
+  // The toploader box and the Show Binders are stacks with no order: listed by
+  // name, never numbered.
+  const selBox = isUnorderedStack(sel);
+  const selTl = isToploaderStack(sel);
+  const boxIcon = selTl ? "🗂" : "📒";
   const shownCards = useMemo(() => (selBox ? [...cards].sort(compareByTitle) : cards), [cards, selBox]);
   // Alphabetise: shorter names first (A–Z, then AA–AH, then longer like ACE /
   // GRADED), alphabetical within each length.
@@ -486,23 +489,25 @@ export default function Stacks() {
 
           <div className="panel">
             <div className="panel-head">
-              <h3>{selBox ? `🗂 ${sel.name}` : sel.name}</h3>
-              <span className="badge2">{cards.length} {selBox ? "in the box" : "in stack"}</span>
+              <h3>{selBox ? `${boxIcon} ${sel.name}` : sel.name}</h3>
+              <span className="badge2">{cards.length} {selBox ? (selTl ? "in the box" : "in the binder") : "in stack"}</span>
             </div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>
-              {selBox
+              {selBox && !selTl
+                ? "A Show Binder: cards that live in it between shows, listed on eBay while it is at home and checked out together before a show. Listed by name — no positions to count. Manage it from the Show desk."
+                : selBox
                 ? "The toploader box: cards kept priced and sleeved between shows, listed by name — there are no positions to count. Check-ins from the Show desk file into it with 🗂 To toploaders."
                 : "Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up."}
               {awayCount > 0 ? <> &nbsp;<b>{awayCount} checked out to a show</b>{selBox ? "." : " — numbering skips them (see Show desk)."}</> : null}
             </p>
             {cards.length === 0 ? (
-              <p className="dd-empty">{selBox ? "Nothing in the box." : "No cards in this stack yet."}</p>
+              <p className="dd-empty">{selBox ? (selTl ? "Nothing in the box." : "Nothing in the binder.") : "No cards in this stack yet."}</p>
             ) : (
               <div className="stack-list rise-group">
                 {shownCards.map((c, idx) => (
                   <div className="stack-row" key={c.id}>
                     {selBox ? (
-                      <span className="stack-pos" title="In the toploader box — no positions">🗂</span>
+                      <span className="stack-pos" title={selTl ? "In the toploader box — no positions" : "In the Show Binder — no positions"}>{boxIcon}</span>
                     ) : (
                       <span className="stack-pos" title="Live position (count from top)">{idx + 1}</span>
                     )}

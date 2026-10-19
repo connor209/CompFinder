@@ -4,7 +4,7 @@
  * skips it), writes a ledger row in stock_checkouts, and (best-effort) hides
  * the eBay listing via /api/ebay/hide.
  */
-import { isToploaderStack, carriedSticker } from "./toploader.js";
+import { isUnorderedStack, carriedSticker } from "./toploader.js";
 
 /**
  * How to take the listing off sale at checkout. "auto" tries the out-of-stock
@@ -113,12 +113,12 @@ export async function checkoutStackCard(sb, { card, stackName, event, hideMode, 
   };
   if (stream) row.pool = "stream";
 
-  // A card out of the toploader box still has its label on, so the checkout
-  // starts with the sticker that label says. Read with `select *` and only
+  // A card out of the toploader box or a Show Binder still has its label on,
+  // so the checkout starts with the sticker that label says. Read with `select *` and only
   // named on the insert when found, so a database without 024 never sees the
   // column — a previous checkout cannot carry a sticker 024 never stored.
   let stickerPence = null;
-  if (!stream && isToploaderStack(stackName)) {
+  if (!stream && isUnorderedStack(stackName)) {
     const { data: prev } = await sb
       .from("stock_checkouts")
       .select("*")

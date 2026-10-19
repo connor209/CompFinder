@@ -39,9 +39,15 @@ import { showOnly, oneOfEach } from "@/lib/streamstock.js";
 import { isSlabTitle, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
 import { checkoutLabelRows, labelWorkbook, LABEL_NAME_KEY } from "@/lib/labelexport.js";
 import {
-  isToploaderStack, toploaderStackOf, fileableStacks, ensureToploaderStack,
+  isToploaderStack, isUnorderedStack, toploaderStackOf, fileableStacks, ensureToploaderStack,
   compareRecs, compareByTitle, TOPLOADER_STACK_NAME, TOPLOADER_RETURN_MODE
 } from "@/lib/toploader.js";
+import {
+  isShowBinder, showBindersOf, nextBinderName, binderCounts, openFromBinder, binderCheckIn
+} from "@/lib/showbinder.js";
+
+/** `return_mode` on a checkout filed into a Show Binder (016 leaves it free text). */
+const BINDER_RETURN_MODE = "binder";
 
 const REC_NO_GRADED_KEY = "cf-rec-no-graded";
 
@@ -54,6 +60,11 @@ const REC_NO_GRADED_KEY = "cf-rec-no-graded";
  * chosen stack, into a freshly allocated stack, or into the toploader box —
  * priced and sleeved, back on eBay, and ready for next weekend (see
  * lib/toploader.js).
+ *
+ * Show Binders (lib/showbinder.js) are the other way round: the cards LIVE in
+ * a binder, listed on eBay, and the whole binder is checked out before a show
+ * and checked back in after it — what is still in a pocket goes back on sale,
+ * what isn't is recorded sold.
  */
 
 const pounds = (pence) => `£${((pence || 0) / 100).toFixed(2)}`;
@@ -412,8 +423,18 @@ export default function ShowDesk() {
   const stackName = useMemo(() => new Map(stacks.map((s) => [s.id, s.name])), [stacks]);
   // The toploader box, if one has ever been filed into. See lib/toploader.js.
   const toploaderBox = useMemo(() => toploaderStackOf(stacks), [stacks]);
-  // Set by "🗂 Toploaders": once the picker has listed the box, tick all of it.
-  const tickBoxOnOpen = useRef(false);
+  // Set by "🗂 Toploaders" and a binder's "⤴ Check out": the id of the box or
+  // binder whose cards to tick, all of them, once the picker has listed it.
+  const tickBoxOnOpen = useRef(null);
+  // Show Binders, in name order. See lib/showbinder.js.
+  const binders = useMemo(() => showBindersOf(stacks), [stacks]);
+  // Which binder "📒 Into" files into, shared by the picker and the recs.
+  const [binderTarget, setBinderTarget] = useState("");
+  // The binder being checked in, the cards said NOT to be in it, and the
+  // price each of those sold for.
+  const [binderCheck, setBinderCheck] = useState(null);
+  const [binderMissing, setBinderMissing] = useState(new Set());
+  const [binderPrices, setBinderPrices] = useState({});
 
   // ---- Checkout ------------------------------------------------------------
 
@@ -529,6 +550,7 @@ export default function ShowDesk() {
         depth: depths.get(c.stack_id) ?? null,
         graded: isSlabTitle(c.title),
         toploaded: isToploaderStack(stackName.get(c.stack_id)),
+        inBinder: isShowBinder(stackName.get(c.stack_id)),
         game: gameOf({ category: categoryBySku.get(String(c.sku).toLowerCase()), title: c.title }, sets.gameIndex)
       }))
       // Toploaded cards first: already priced, stickered and sleeved.
@@ -616,6 +638,13 @@ export default function ShowDesk() {
   // Listed AND at home: a card checked out anywhere — the show box or the
   // stream box — is not one the online list may offer. See awaySkus().
   const awayIndex = useMemo(() => openCheckoutIndex(allOpen), [allOpen]);
+  const binderCount = useMemo(
+    () => binderCounts(binders, stackCards, (c) => isCardAway(c, awayIndex)),
+    [binders, stackCards, awayIndex]
+  );
+  // The binder "📒 Into" files into: the one chosen, else the only one.
+  const intoBinder = binderTarget && binders.some((b) => b.id === binderTarget)
+    ? binderTarget : binders.length === 1 ? binders[0].id : "";
   const homeListings = useMemo(() => atHomeListings(listings, stackCards, awayIndex), [listings, stackCards, awayIndex]);
   const taggedListings = useMemo(
     () => homeListings.map((l) => ({ ...l, game: gameOf({ category: l?.extra?.category, title: l.title }, gameIndex) })),
@@ -706,9 +735,9 @@ export default function ShowDesk() {
     // No listings read means no evidence either way: say nothing rather than
     // call every card on the shelf "not listed".
     const offSale = listings.length > 0 ? offSaleIndex(listings, sales || []) : null;
-    // The toploader box has no order to walk, so it lists by name.
+    // The toploader box and the binders have no order to walk: by name.
     const picked = skuBatch(present, batchPrefix, { stackId: batchStack, rankOf: (c) => ranks.get(c.id), away: awayIndex });
-    if (!batchPrefix.trim() && isToploaderStack(stackName.get(batchStack))) picked.sort(compareByTitle);
+    if (!batchPrefix.trim() && isUnorderedStack(stackName.get(batchStack))) picked.sort(compareByTitle);
     return picked.map((card) => ({
       card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null,
       offSale: offSaleReason(card.sku, offSale)
@@ -731,16 +760,155 @@ export default function ShowDesk() {
   // ticked, rather than a button that checks them out blind: the list is what
   // shows a card that sold on eBay since, and what lets one stay home.
   useEffect(() => {
-    if (!tickBoxOnOpen.current || !toploaderBox || batchStack !== toploaderBox.id) return;
-    tickBoxOnOpen.current = false;
+    if (!tickBoxOnOpen.current || batchStack !== tickBoxOnOpen.current) return;
+    tickBoxOnOpen.current = null;
     setBatchPick(new Set(batchShown.map((r) => r.card.id)));
-  }, [batchShown, batchStack, toploaderBox]);
-  function openToploaders() {
-    if (!toploaderBox) return;
-    tickBoxOnOpen.current = true;
+  }, [batchShown, batchStack]);
+  function openBox(stackId) {
+    if (!stackId) return;
+    tickBoxOnOpen.current = stackId;
     setBatchPrefix("");
-    setBatchStack(toploaderBox.id);
+    setBatchStack(stackId);
     setBatchPick(new Set());
+  }
+  function openToploaders() {
+    if (toploaderBox) openBox(toploaderBox.id);
+  }
+
+  // ---- Show Binders --------------------------------------------------------
+
+  async function newBinder() {
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const { data: { user } } = await sb.auth.getUser();
+    const name = nextBinderName(stacks.map((s) => s.name));
+    const { data, error } = await sb.from("card_stacks").insert({ user_id: user.id, name }).select("id,name").single();
+    setBusy(false);
+    if (error || !data) { setMsg(`Couldn't make a new binder: ${error?.message || "no row came back"}`); return; }
+    setBinderTarget(data.id);
+    setMsg(`Made ${data.name}. Fill it from ★ Recommend show stock or a stack below, with 📒 Into binder.`);
+    await load();
+  }
+
+  /**
+   * Put cards that are at HOME into a binder. Nothing is checked out and the
+   * listing is not touched: a binder at home is stock on sale like any stack.
+   * The card moves stack, so the numbering in the stack it left closes up —
+   * the same as pulling it, which is what you physically did.
+   *
+   * A card already away, or already in a binder, is skipped and counted rather
+   * than moved: the first would move a card that is on a table, the second
+   * would quietly empty one binder into another.
+   */
+  async function fileIntoBinder(cards, binderId) {
+    const binder = binders.find((b) => b.id === binderId);
+    if (!binder || cards.length === 0) return false;
+    const movable = cards.filter((c) => !isCardAway(c, awayIndex) && !c.pulled_at && !isShowBinder(stackName.get(c.stack_id)));
+    const skipped = cards.length - movable.length;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const base = await maxPosition(sb, binderId);
+    let moved = 0;
+    const errors = [];
+    for (let i = 0; i < movable.length; i++) {
+      setProgress(`Filing ${i + 1} of ${movable.length} into ${binder.name}…`);
+      const { error } = await sb
+        .from("stack_cards")
+        .update({ stack_id: binderId, position: base + 1 + i })
+        .eq("id", movable[i].id)
+        .is("checked_out_at", null);
+      if (error) errors.push(`${movable[i].sku || "?"}: ${error.message}`);
+      else moved += 1;
+    }
+    setProgress("");
+    setBusy(false);
+    setMsg(
+      `Filed ${moved} card${moved === 1 ? "" : "s"} into ${binder.name} — still on sale on eBay until the binder is checked out.` +
+      (skipped ? ` ${skipped} left where they were: already at a show or already in a binder.` : "") +
+      (errors.length ? ` ⚠ ${errors.join(" · ")}` : "")
+    );
+    await load();
+    return true;
+  }
+  async function fileBatchIntoBinder() {
+    if (await fileIntoBinder(batchChosen, intoBinder)) setBatchPick(new Set());
+  }
+  async function fileRecsIntoBinder() {
+    if (await fileIntoBinder(recChosen.map((r) => r.card), intoBinder)) setRecPool(null);
+  }
+
+  // A binder goes out through the stack picker, all ticked, like the toploader
+  // box — said out loud, since the Check stock out fold may be shut.
+  function openBinderCheckout(binder) {
+    openBox(binder.id);
+    setMsg(
+      `${binder.name} is listed under Check stock out, every card ticked — anything eBay says has sold is left out. Check it out from there.` +
+      (hideMode === "none" ? " ⚠ Hide on eBay is set to “Don't touch the listing”, so the binder's cards would stay on sale while it is at the show." : "")
+    );
+  }
+
+  function startBinderCheckIn(binderId) {
+    setBinderCheck(binderId);
+    setBinderMissing(new Set());
+    setBinderPrices({});
+  }
+
+  // What the binder being checked in still has out, in the order you flick.
+  const binderOut = useMemo(
+    () => (binderCheck ? openFromBinder(open, binderCheck).sort(compareByTitle) : []),
+    [open, binderCheck]
+  );
+
+  /**
+   * Check a binder back in: every card still in a pocket goes back on sale in
+   * the binder, every card ticked as missing is recorded SOLD — through
+   * sellLine(), the one definition of selling a card, so it is pulled and its
+   * listing ended exactly as £ Sold would. Nothing is left open: a card that
+   * is neither relisted nor sold is a listing hidden for ever.
+   *
+   * Cards already sold at the table (£ Sold, the deal) are not in the list at
+   * all — their checkouts are resolved.
+   */
+  async function checkInBinder() {
+    const binder = binders.find((b) => b.id === binderCheck);
+    if (!binder) return;
+    const { back, sold } = binderCheckIn(binderOut, binderMissing);
+    if (back.length + sold.length === 0) return;
+    if (sold.length > 0 && !confirm(
+      `${sold.length} card${sold.length === 1 ? "" : "s"} will be recorded SOLD at the show and ${sold.length === 1 ? "its listing" : "their listings"} ended. ` +
+      `${back.length} go${back.length === 1 ? "es" : ""} back on sale on eBay. Carry on?`
+    )) return;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const warnings = [];
+    let soldOk = 0;
+    let takings = 0;
+    for (let i = 0; i < sold.length; i++) {
+      const co = sold[i];
+      setProgress(`Recording sale ${i + 1} of ${sold.length}…`);
+      const pence = parsePricePence(binderPrices[co.id] ?? (co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : ""));
+      const r = await sellLine(sb, checkoutLine(co), pence, { event: co.event || event || null });
+      if (!r.ok) { warnings.push(`${co.sku || co.title || "card"}: ${r.error}`); continue; }
+      soldOk += 1;
+      takings += pence || 0;
+      if (r.warning) warnings.push(`${co.sku || "card"}: ${r.warning} — end it on eBay by hand`);
+    }
+    for (let i = 0; i < back.length; i++) {
+      setProgress(`Back on sale ${i + 1} of ${back.length}…`);
+      warnings.push(...await restoreOne(sb, back[i], {}, BINDER_RETURN_MODE, back[i].stack_id));
+    }
+    setProgress("");
+    setBusy(false);
+    setBinderCheck(null);
+    setMsg(
+      `${binder.name} checked in: ${back.length} back on sale on eBay` +
+      (sold.length ? `, ${soldOk} recorded sold${takings ? ` for ${pounds(takings)}` : ""}` : "") +
+      `.${warnings.length ? ` ⚠ ${warnings.join(" · ")}` : ""}`
+    );
+    await load();
   }
   const listingById = useMemo(() => {
     const m = new Map();
@@ -1037,7 +1205,7 @@ export default function ShowDesk() {
     let base = 0;
     // The box has no order, but a position is still the sort key every stack
     // row carries, so a filed card goes behind what is there.
-    if (mode === "back" || mode === "new_stack" || mode === TOPLOADER_RETURN_MODE) base = await maxPosition(sb, stackId);
+    if (mode === "back" || mode === "new_stack" || mode === TOPLOADER_RETURN_MODE || mode === BINDER_RETURN_MODE) base = await maxPosition(sb, stackId);
 
     let restored = 0;
     const warnings = [];
@@ -1054,6 +1222,7 @@ export default function ShowDesk() {
     const modeText = mode === "spot" ? "to their original spots"
       : mode === "back" ? ` to the back of ${stackName.get(stackId) || "the stack"}`
       : mode === TOPLOADER_RETURN_MODE ? "into the toploader box — back on sale on eBay, stickers kept for the next show"
+      : mode === BINDER_RETURN_MODE ? `into ${stackName.get(stackId) || "the binder"} — back on sale on eBay`
       : newStackNote;
     setMsg(`Checked in ${restored} card(s) ${modeText}.${warnings.length ? ` ⚠ ${warnings.join(" · ")}` : ""}`.trim());
     await load();
@@ -1204,6 +1373,38 @@ export default function ShowDesk() {
   }
 
   async function returnOne(co) { await checkin([co], "spot"); }
+
+  // "📒 Into <binder> (N)", with a chooser when there is more than one binder
+  // and a way to make the first. Shared by the stack picker and the recs, so
+  // manual and recommended pulls file the same way.
+  function intoBinderControl(count, onFile) {
+    if (binders.length === 0) {
+      return (
+        <button className="btn btn-ghost" onClick={newBinder} disabled={busy} title="Make a Show Binder to file cards into">
+          ＋ New Show Binder
+        </button>
+      );
+    }
+    const target = binders.find((b) => b.id === intoBinder);
+    return (
+      <>
+        {binders.length > 1 ? (
+          <select className="sd-select" value={intoBinder} onChange={(e) => setBinderTarget(e.target.value)} aria-label="Show Binder to file into">
+            <option value="">Choose a binder…</option>
+            {binders.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        ) : null}
+        <button
+          className="btn btn-ghost"
+          onClick={onFile}
+          disabled={busy || count === 0 || !target}
+          title="Move these cards into the binder. Nothing is checked out and the listings stay live — the binder is checked out as a whole before a show."
+        >
+          📒 Into {target ? target.name : "binder"} ({count})
+        </button>
+      </>
+    );
+  }
 
   // ---- Render --------------------------------------------------------------
 
@@ -1424,6 +1625,8 @@ export default function ShowDesk() {
                     <span className="stack-sku" title="The card's SKU. A name, not an address — it does not move when the stack re-flows.">{card.sku}</span>
                     {isToploaderStack(stackName.get(card.stack_id)) ? (
                       <span className="stack-pos" title="In the toploader box — no positions, find it by name">🗂</span>
+                    ) : isShowBinder(stackName.get(card.stack_id)) ? (
+                      <span className="stack-pos" title="In a Show Binder — no positions, find it by name">📒</span>
                     ) : (
                       <span className="stack-pos" title="Live position — count this many from the top of the stack">{rank ?? "?"}</span>
                     )}
@@ -1443,9 +1646,12 @@ export default function ShowDesk() {
                   </label>
                 ))}
               </div>
-              <button className="btn btn-primary" onClick={checkoutBatch} disabled={busy || batchChosen.length === 0} style={{ marginTop: 10 }}>
-                {busy ? progress || "Checking out…" : `Check out ${batchChosen.length} card(s)`}
-              </button>
+              <div className="ps-actions" style={{ marginTop: 10 }}>
+                <button className="btn btn-primary" onClick={checkoutBatch} disabled={busy || batchChosen.length === 0}>
+                  {busy ? progress || "Checking out…" : `Check out ${batchChosen.length} card(s)`}
+                </button>
+                {isShowBinder(stackName.get(batchStack)) && !batchPrefix.trim() ? null : intoBinderControl(batchChosen.length, fileBatchIntoBinder)}
+              </div>
             </>
           )
         ) : null}
@@ -1460,6 +1666,123 @@ export default function ShowDesk() {
           </label>
         </div>
       </Fold>
+      )}
+
+      {/* Show Binders: cards that live in a binder, checked out and back in as
+          one. Desk chrome — it checks stock out and records sales. */}
+      {customerMode ? null : (
+        <Fold
+          id="showdesk-binders"
+          title="Show Binders"
+          count={binders.length ? `${binders.length}` : null}
+          defaultOpen={false}
+          summary={binders.length
+            ? binders.map((b) => {
+                const n = binderCount.get(b.id) || { home: 0, away: 0 };
+                return `${b.name}: ${n.away ? `${n.away} out` : `${n.home} at home`}`;
+              }).join(" · ")
+            : "None yet — a binder of cards listed on eBay, checked out to a show in one go."}
+          actions={<button className="btn btn-ghost" onClick={newBinder} disabled={busy}>＋ New Show Binder</button>}
+        >
+          <p className="hint hint-small" style={{ marginTop: 0 }}>
+            A binder&apos;s cards stay on sale on eBay while it is at home. <b>⤴ Check out</b> before a show takes every
+            listing in it off sale; <b>↩ Check in</b> afterwards puts what is still in a pocket back on sale and records the
+            rest as sold. Fill one with <b>📒 Into binder</b> under ★ Recommend show stock or a stack. No pockets are
+            numbered — flick through it by name.
+          </p>
+          {binders.length === 0 ? (
+            <p className="dd-empty">No Show Binders yet.</p>
+          ) : (
+            <div className="stack-list">
+              {binders.map((b) => {
+                const n = binderCount.get(b.id) || { home: 0, away: 0 };
+                return (
+                  <div className="ps-row sd-rec-row" key={b.id}>
+                    <span className="stack-pos" aria-hidden="true">📒</span>
+                    <span className="stack-title">{b.name}</span>
+                    <span className="badge2" title="In the binder and on sale on eBay">{n.home} at home</span>
+                    {n.away ? <span className="badge2" title="Checked out to a show — off sale on eBay">{n.away} out</span> : null}
+                    <div className="ps-actions">
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => openBinderCheckout(b)}
+                        disabled={busy || n.home === 0}
+                        title="List everything in the binder, all ticked, under Check stock out — anything eBay says has sold is left out — then check it out"
+                      >
+                        ⤴ Check out
+                      </button>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => startBinderCheckIn(b.id)}
+                        disabled={busy || n.away === 0}
+                        title="Go through the binder: what is still there goes back on sale, what isn't is recorded sold"
+                      >
+                        ↩ Check in
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {binderCheck ? (() => {
+            const binder = binders.find((b) => b.id === binderCheck);
+            const { back, sold } = binderCheckIn(binderOut, binderMissing);
+            return (
+              <div className="sd-plan">
+                <div className="sd-plan-head">
+                  <b>Checking in {binder?.name || "the binder"}</b>
+                  <button className="btn btn-ghost" onClick={() => setBinderCheck(null)} disabled={busy}>Cancel</button>
+                </div>
+                {binderOut.length === 0 ? (
+                  <p className="hint hint-small">Nothing from this binder is still out.</p>
+                ) : (
+                  <>
+                    <p className="hint hint-small" style={{ marginTop: 0 }}>
+                      Untick every card that is <b>not</b> in the binder — those sold. Cards already marked £ Sold at the table
+                      aren&apos;t listed. A sold card&apos;s price starts at its sticker; change it, or clear it to record the
+                      sale without one.
+                    </p>
+                    <div className="stack-list">
+                      {binderOut.map((co) => {
+                        const here = !binderMissing.has(co.id);
+                        return (
+                          <div className="ps-row sd-rec-row" key={co.id}>
+                            <input
+                              type="checkbox"
+                              checked={here}
+                              aria-label={`${co.title || co.sku || "card"} is in the binder`}
+                              onChange={() => setBinderMissing((prev) => { const n = new Set(prev); if (n.has(co.id)) n.delete(co.id); else n.add(co.id); return n; })}
+                            />
+                            <span className="stack-sku">{co.sku || "—"}</span>
+                            <span className="stack-title">{co.title || <em>—</em>}</span>
+                            {here ? (
+                              <span className="badge2">back on eBay</span>
+                            ) : (
+                              <label className="sd-toggle" style={{ color: "var(--bad-ink)" }}>
+                                sold £
+                                <input
+                                  className="sd-count"
+                                  inputMode="decimal"
+                                  value={binderPrices[co.id] ?? (co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : "")}
+                                  onChange={(e) => setBinderPrices((prev) => ({ ...prev, [co.id]: e.target.value }))}
+                                  aria-label="Sold for"
+                                />
+                              </label>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button className="btn btn-primary" onClick={checkInBinder} disabled={busy} style={{ marginTop: 10 }}>
+                      {busy ? progress || "Checking in…" : `Check in · ${back.length} back on eBay · ${sold.length} sold`}
+                    </button>
+                  </>
+                )}
+              </div>
+            );
+          })() : null}
+        </Fold>
       )}
 
       {/* The QR on the table: the binder below, on a visitor's own phone.
@@ -1529,7 +1852,7 @@ export default function ShowDesk() {
                 </label>
               </div>
               <div className="stack-list">
-                {recs.map(({ card, pricePence, rank, depth, toploaded }) => (
+                {recs.map(({ card, pricePence, rank, depth, toploaded, inBinder }) => (
                   <label className="ps-row sd-rec-row" key={card.id}>
                     <input
                       type="checkbox"
@@ -1541,6 +1864,8 @@ export default function ShowDesk() {
                     </span>
                     {toploaded ? (
                       <span className="stack-pos" title="In the toploader box — already priced and sleeved">🗂</span>
+                    ) : inBinder ? (
+                      <span className="stack-pos" title="Already in a Show Binder">📒</span>
                     ) : (
                       <span className="stack-pos" title="Live position — count this many from the top of the stack">
                         {rank ?? "?"}
@@ -1558,9 +1883,12 @@ export default function ShowDesk() {
                 const chosen = recChosen;
                 const total = chosen.reduce((t, r) => t + r.pricePence, 0);
                 return (
-                  <button className="btn btn-primary" onClick={checkoutRecs} disabled={busy || chosen.length === 0} style={{ marginTop: 10 }}>
-                    {busy ? progress || "Checking out…" : `Check out ${chosen.length} card(s) · ${pounds(total)}`}
-                  </button>
+                  <div className="ps-actions" style={{ marginTop: 10 }}>
+                    <button className="btn btn-primary" onClick={checkoutRecs} disabled={busy || chosen.length === 0}>
+                      {busy ? progress || "Checking out…" : `Check out ${chosen.length} card(s) · ${pounds(total)}`}
+                    </button>
+                    {intoBinderControl(chosen.length, fileRecsIntoBinder)}
+                  </div>
                 );
               })()}
             </>
@@ -1759,6 +2087,9 @@ export default function ShowDesk() {
                 <button className="btn btn-primary" onClick={buildPlan} disabled={busy || selCount === 0}>✨ Reallocate ({selCount})</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy || selCount === 0}>↩ Return to spots</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, TOPLOADER_RETURN_MODE)} disabled={busy || selCount === 0} title="Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out">🗂 To toploaders ({selCount})</button>
+                {binders.map((b) => (
+                  <button key={b.id} className="btn btn-ghost" onClick={() => checkin(selected, BINDER_RETURN_MODE, b.id)} disabled={busy || selCount === 0} title={`File them into ${b.name}: back on sale on eBay, and out with the binder next show`}>📒 To {b.name} ({selCount})</button>
+                ))}
                 <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
                 <button className="btn btn-ghost" onClick={downloadSelectedLabels} disabled={busy || selCount === 0} title="Label file (.xlsx) for these cards, from the sticker prices they already carry — no pricing run">🏷 Labels ({selCount})</button>

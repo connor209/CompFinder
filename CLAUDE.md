@@ -167,6 +167,11 @@ stream` (the relay, only while streaming).
   only off a checkout that came BACK, never into the stream box — that
   recommended show stock leads with it, and that the pull sheet's pick list
   and pack hand walk it in the same order.
+- `scripts/check-showbinder.mjs` — Show Binders: which stacks are binders
+  ("Show Binder 2" is, "Binder" and "Show Binders" are not), that a binder,
+  like the toploader box, shows no position and no filing plan picks it, and
+  that checking one in leaves nothing open — every card is back on sale or
+  sold, and only the binder's own show checkouts are touched.
 - `scripts/check-piles.mjs` — which pile a pull-sheet card is dealt into: a
   pile is one buyer at one ADDRESS, not one order, so a buyer's separate
   checkouts fold into one envelope, the same buyer to two addresses stays two,
@@ -2479,6 +2484,37 @@ owns it.
   leaves out a card that sold on eBay since, and what lets one stay home.
 - **★ Recommend show stock leads with the box**, then by value
   (`compareRecs`) — already priced and sleeved, so bringing one costs nothing.
+
+## Show Binders: the cards live in the binder, and the binder goes out whole
+
+The toploader box is cards filed somewhere between shows. A **Show Binder** is
+the other way round: the cards LIVE in a physical binder, on sale on eBay
+while it is at home, and the whole binder is checked out before a show and
+checked in after it. `lib/showbinder.js` owns it; the Show Desk's **Show
+Binders** fold is the screen. Not to be confused with `lib/binder.js`, the
+digital binder the desk turns round to a customer.
+
+- **A binder is a stack whose name starts "Show Binder"** (`SHOW_BINDER_PREFIX`,
+  spelled once), so there can be several, the pull sheet, Stacks and ⌖ locate
+  find a card in one with no new code, and it needs **no migration**.
+- **No positions** (decided 2026-10-19): `isUnorderedStack()` in
+  `toploader.js` is the box OR a binder, and everything about order asks it —
+  `positionLabel()` says "📒 Show Binder 2" with no number, the pull sheet and
+  Stacks list it by name, and `fileableStacks()` keeps every filing plan out.
+- **Filling one moves the card, and touches nothing else.** 📒 Into binder,
+  under ★ Recommend show stock or the stack picker, changes the card's stack:
+  no checkout, the listing stays live. A card already away or already in a
+  binder is skipped and counted. Cards coming back from a show can be filed
+  into one from the away list (`return_mode = 'binder'`).
+- **Checking out is the stack picker opened on the binder, all ticked** — the
+  toploader button's mechanism — so a card eBay says sold is left out rather
+  than checked out blind, and each card goes through `checkoutStackCard()`.
+  Stickers carry out of a binder as they do out of the box.
+- **Checking in leaves nothing open.** `binderCheckIn()` splits the binder's
+  open show checkouts into back (relisted through `restoreCheckout()`, staying
+  in the binder) and missing, which are SOLD through `sellLine()` — pulled and
+  listing ended exactly as £ Sold does, at the sticker unless typed over, or
+  with no price. Cards already sold at the table aren't listed.
 
 ## A SKU is a name; a position is an address
 

@@ -23,6 +23,8 @@
  * bare node.
  */
 
+import { isShowBinder } from "./showbinder.js";
+
 /** The one spelling of the box's name. Never written out anywhere else. */
 export const TOPLOADER_STACK_NAME = "Toploaders";
 
@@ -47,12 +49,24 @@ export function toploaderStackOf(stacks) {
 }
 
 /**
- * Stacks a filing plan may choose. The box is filed into by its own button and
- * never by "the tightest fit" — it has no capacity and no order, and a plan
- * that picked it would be hiding cards in the one place without positions.
+ * A "stack" with no order: the toploader box, or a Show Binder (see
+ * lib/showbinder.js). Both are flicked through by name, so neither ever shows
+ * a position and both list by title. The box and the binders differ in what
+ * they are FOR, which is why the toploader-only rules still ask
+ * isToploaderStack(); anything about order asks this.
+ */
+export function isUnorderedStack(stackOrName) {
+  return isToploaderStack(stackOrName) || isShowBinder(stackOrName);
+}
+
+/**
+ * Stacks a filing plan may choose. The box and the binders are filed into by
+ * their own buttons and never by "the tightest fit" — they have no capacity
+ * and no order, and a plan that picked one would be hiding cards in the one
+ * place without positions.
  */
 export function fileableStacks(stacks) {
-  return (stacks || []).filter((s) => !isToploaderStack(s));
+  return (stacks || []).filter((s) => !isUnorderedStack(s));
 }
 
 /**
