@@ -21,10 +21,18 @@
  * Everything here is framework-free and app-import-free, so the check script
  * can build a real file under bare node and read its bytes back.
  */
-import { stickerRows, labelName, DEFAULT_NAME_MAX } from "./showstock.js";
+import { stickerRows, labelName, toPoundPence, DEFAULT_NAME_MAX } from "./showstock.js";
 
 /** The printer's columns, in the printer's order. Do not reorder. */
 export const LABEL_COLUMNS = ["Price", "Name"];
+
+/**
+ * A Show Binder card's label also carries its eBay SKU, so a card out of a
+ * pocket can be matched back to its listing. The SKU goes AFTER the printer's
+ * two columns rather than between them: a template laid out on Price and Name
+ * keeps working, and the SKU is one more field bound to the "SKU" column.
+ */
+export const BINDER_LABEL_COLUMNS = [...LABEL_COLUMNS, "SKU"];
 
 /** Where the label width preference lives — the Batch screen and the Show
  *  Desk both export labels, and a roll of stationery is the same roll on
@@ -241,4 +249,37 @@ export function checkoutLabelRows(checkouts, { nameMax = DEFAULT_NAME_MAX } = {}
     rows.push({ Price: labelPrice(pence), Name: labelName(c.title || c.sku || "", nameMax) });
   }
   return { rows, unpriced };
+}
+
+/**
+ * Labels for the cards in a Show Binder, each carrying its SKU.
+ *
+ * `rows` is binderContents() rows ({ card, status, pricePence }), already cut
+ * to what is on screen. The price is what we ask on eBay, rounded to the POUND
+ * (toPoundPence) — a binder card at home is a listed card, and the listing is
+ * the decision already made about that copy; the cash ladder is for figures
+ * we derived, and stepping £22.49 down to £20 gives away money nobody agreed
+ * to.
+ *
+ * A card eBay says has SOLD gets no label — it is a card to pull, not one to
+ * sleeve — and is counted. A card with no price is returned as `unpriced`
+ * rather than dropped, for the same reason checkoutLabelRows() does it: a
+ * label run that comes back short says which cards it left out.
+ */
+export function binderLabelRows(rows, { nameMax = DEFAULT_NAME_MAX } = {}) {
+  const out = [];
+  const unpriced = [];
+  let sold = 0;
+  for (const r of rows || []) {
+    if (!r?.card) continue;
+    if (r.status === "sold" || r.status === "outofstock") { sold += 1; continue; }
+    const pence = toPoundPence(r.pricePence);
+    if (pence == null) { unpriced.push(r.card); continue; }
+    out.push({
+      Price: labelPrice(pence),
+      Name: labelName(r.card.title || r.card.sku || "", nameMax),
+      SKU: String(r.card.sku || "").trim()
+    });
+  }
+  return { rows: out, unpriced, sold };
 }

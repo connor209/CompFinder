@@ -2522,6 +2522,14 @@ digital binder the desk turns round to a customer.
   each marked on sale, at a show, not listed or sold on eBay — away is asked
   first, since a checked-out card's hidden listing reads as sold out. Read
   off state the desk already holds, so it costs no request.
+- **The view shows a photo of THIS copy** (the listing's gallery shot, the
+  counter's `images` map; tap for large) and prints **labels with the eBay
+  SKU**: `binderLabelRows()` writes `BINDER_LABEL_COLUMNS` — the printer's
+  Price and Name, THEN SKU, so a template laid out on the first two still
+  works and the SKU is one more field bound to the third column. The price is
+  our eBay ask to the pound (`toPoundPence`), never the cash ladder; a card
+  sold on eBay gets no label and a card with no price is named, not dropped.
+  What the in-binder search shows is what gets labelled.
 - **Checking out is the stack picker opened on the binder, all ticked** — the
   toploader button's mechanism — so a card eBay says sold is left out rather
   than checked out blind, and each card goes through `checkoutStackCard()`.
