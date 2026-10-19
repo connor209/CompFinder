@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
-import { liveRanks, stackDepths, positionLabel, stackFromSku } from "@/lib/stackpos.js";
+import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, compareByTitle } from "@/lib/toploader.js";
 import Fold from "./Fold";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
+import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -94,9 +95,8 @@ export default function Stacks() {
   }, [selId]);
 
   // Auto-create stacks from eBay listing SKUs (prefix = stack, number =
-  // position). e.g. A50 -> Stack A, position 50; YGO-A12 -> Stack YGO-A,
-  // position 12 (see stackFromSku). Reuses existing stacks and
-  // skips SKUs already added.
+  // position). The rules are in lib/stack-import.js, shared with the nightly
+  // sync, which runs the same import unattended.
   //
   // It syncs with eBay FIRST. It reads `ebay_listings`, which is only as fresh
   // as the last sync — so the cards listed since the nightly run, which are
@@ -118,40 +118,13 @@ export default function Stacks() {
     }
     const syncLine = synced.ok ? syncNote(synced) : "Sync failed — imported from the last synced listings.";
     setMsg(`${syncLine} Importing…`);
-    const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title,ebay_item_id").not("sku", "is", null));
-    let unparseable = 0;
-    const parsed = [];
-    for (const l of listings) {
-      const at = stackFromSku(l.sku);
-      if (!at) { unparseable += 1; continue; }
-      parsed.push({ prefix: at.prefix, num: at.num, sku: String(l.sku).trim(), title: l.title || "", ebay_item_id: l.ebay_item_id || null });
+    try {
+      const r = await runStackImport(sb, user.id);
+      setMsg(`${syncLine} ${stackImportNote(r)}`);
+    } catch (e) {
+      setMsg(`${syncLine} Import stopped — ${e.message || "couldn't read your stacks"}. No cards were added.`);
     }
-    const existing = await pagedSelect(() => sb.from("stack_cards").select("sku").not("sku", "is", null));
-    const have = new Set(existing.map((e) => String(e.sku).toLowerCase()));
-    const fresh = parsed.filter((p) => !have.has(p.sku.toLowerCase()));
-
-    const byPrefix = new Map();
-    for (const p of fresh) {
-      if (!byPrefix.has(p.prefix)) byPrefix.set(p.prefix, []);
-      byPrefix.get(p.prefix).push(p);
-    }
-    const stackByName = new Map(stacks.map((s) => [s.name.toUpperCase(), s.id]));
-    for (const prefix of byPrefix.keys()) {
-      if (!stackByName.has(prefix)) {
-        const { data } = await sb.from("card_stacks").insert({ user_id: user.id, name: prefix }).select("id,name").single();
-        if (data) stackByName.set(prefix, data.id);
-      }
-    }
-    const rows = [];
-    for (const [prefix, cs] of byPrefix) {
-      const sid = stackByName.get(prefix);
-      if (!sid) continue;
-      for (const c of cs) rows.push({ user_id: user.id, stack_id: sid, position: c.num, sku: c.sku, title: c.title, ebay_item_id: c.ebay_item_id });
-    }
-    for (let i = 0; i < rows.length; i += 500) await sb.from("stack_cards").insert(rows.slice(i, i + 500));
-
     setBusy(false);
-    setMsg(`${syncLine} Imported ${rows.length} card(s) into ${byPrefix.size} stack(s). Skipped ${parsed.length - fresh.length} already added${unparseable ? `, ${unparseable} with non-standard SKUs` : ""}.`);
     await loadStacks();
     await loadCards(selId);
   }

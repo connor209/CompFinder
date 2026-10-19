@@ -2,11 +2,17 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncUserListings, syncUserSales } from "@/lib/ebay";
 import { snapshotUserPortfolio } from "@/lib/portfolio";
+import { runStackImport } from "@/lib/stack-import.js";
 
 /**
  * Scheduled auto-sync (Vercel Cron, daily — see vercel.json). Re-pulls every
  * connected account's active listings and recent sales so the inventory cache,
  * "already listed?" checks and P&L stay fresh without anyone hitting Sync.
+ *
+ * Then Stacks' auto-import (`runStackImport`), so a card listed during the day
+ * is in its stack by morning. Only after a listings refresh that SUCCEEDED:
+ * importing off a cache the sync just failed to update adds nothing new and
+ * spends the time limit. It only ever adds — never moves or pulls a card.
  *
  * A failure is logged and returned, never only counted: an `errors: 1` with no
  * reason is what made "the sync sometimes doesn't work" impossible to chase
@@ -40,17 +46,30 @@ export async function GET(request) {
   let sales = 0;
   let snapshots = 0;
   let errors = 0;
+  let stackCards = 0;
   const failures = [];
   const incomplete = [];
   for (const a of accounts || []) {
+    let listingsOk = false;
     try {
       const r = await syncUserListings(admin, a.user_id);
       listings += 1;
+      listingsOk = !!r.connected;
       if (r.connected && !r.complete) incomplete.push({ user: a.user_id, missed: r.missed || 0, truncated: !!r.truncated });
     } catch (e) {
       errors += 1;
       failures.push({ user: a.user_id, step: "listings", error: e?.message || String(e) });
       console.error(`[cron/sync] listings failed for ${a.user_id}: ${e?.message || e}`);
+    }
+    if (listingsOk) {
+      try {
+        const r = await runStackImport(admin, a.user_id);
+        stackCards += r.imported;
+        if (r.failed) failures.push({ user: a.user_id, step: "stacks", error: `${r.failed} card(s) couldn't be saved` });
+      } catch (e) {
+        failures.push({ user: a.user_id, step: "stacks", error: e?.message || String(e) });
+        console.error(`[cron/sync] stack import failed for ${a.user_id}: ${e?.message || e}`);
+      }
     }
     try {
       const r = await syncUserSales(admin, a.user_id, 90);
@@ -69,5 +88,5 @@ export async function GET(request) {
     }
   }
   if (incomplete.length) console.warn(`[cron/sync] incomplete listing read, nothing removed: ${JSON.stringify(incomplete)}`);
-  return NextResponse.json({ ok: errors === 0, accounts: (accounts || []).length, listings, sales, snapshots, errors, failures, incomplete });
+  return NextResponse.json({ ok: errors === 0, accounts: (accounts || []).length, listings, stackCards, sales, snapshots, errors, failures, incomplete });
 }
