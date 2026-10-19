@@ -2527,8 +2527,9 @@ digital binder the desk turns round to a customer.
   SKU**: `binderLabelRows()` writes `BINDER_LABEL_COLUMNS` — the printer's
   Price and Name, THEN SKU, so a template laid out on the first two still
   works and the SKU is one more field bound to the third column. The price is
-  our eBay ask to the pound (`toPoundPence`), never the cash ladder; a card
-  sold on eBay gets no label and a card with no price is named, not dropped.
+  our eBay ask on the cash ladder (`stickerPence`, asked for 2026-10-19 — a
+  binder label is read at a table like any sticker); a card sold on eBay gets
+  no label and a card with no price is named, not dropped.
   What the in-binder search shows is what gets labelled.
 - **Checking out is the stack picker opened on the binder, all ticked** — the
   toploader button's mechanism — so a card eBay says sold is left out rather

@@ -1873,7 +1873,7 @@ export default function ShowDesk() {
                       className="btn btn-ghost"
                       onClick={() => downloadBinderLabels(binder)}
                       disabled={binderInsideShown.length === 0}
-                      title="Label file (.xlsx) for the cards listed here: price, name and eBay SKU. The price is our eBay ask, to the pound."
+                      title="Label file (.xlsx) for the cards listed here: price, name and eBay SKU. The price is our eBay ask rounded to a cash price — £1 steps to £20, £5 to £100, £10 above."
                     >
                       🏷 Labels ({binderInsideShown.filter((r) => r.status !== "sold" && r.status !== "outofstock").length})
                     </button>

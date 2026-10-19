@@ -243,7 +243,11 @@ if (failures) {
     { card: { sku: "B16", title: "Alakazam" }, status: "notlisted", pricePence: null }
   ], { nameMax: 30 });
   eq("every label carries its SKU", br.map((r) => r.SKU), ["B12", "B13"]);
-  eq("the eBay ask to the POUND, never down the cash ladder", br.map((r) => r.Price), ["£822", "£22"]);
+  eq("the eBay ask on the cash ladder — £10 steps over £100, £5 to £100", br.map((r) => r.Price), ["£820", "£20"]);
+  {
+    const ladder = binderLabelRows([1249, 1951, 2650, 2749, 9800, 14999, 149].map((p, i) => ({ card: { sku: `L${i}`, title: "Card" }, status: "home", pricePence: p }))).rows.map((r) => r.Price);
+    eq("the same ladder a run's stickers sit on", ladder, ["£12", "£20", "£25", "£25", "£100", "£150", "£1"]);
+  }
   eq("the name is cut by the same rule", br[0].Name, labelName("Umbreon VMAX 215/203 Evolving Skies Alt Art NM", 30));
   eq("a card with no price is named, not dropped", unpriced.map((c) => c.sku), ["B16"]);
   eq("a card sold on eBay gets no label, and is counted", sold, 2);
