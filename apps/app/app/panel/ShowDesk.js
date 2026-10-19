@@ -1,6 +1,6 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
@@ -44,7 +44,8 @@ import {
 } from "@/lib/toploader.js";
 import {
   isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder,
-  binderCounts, binderContents, openFromBinder, binderCheckIn
+  binderCounts, binderContents, openFromBinder, binderCheckIn,
+  freePockets, pocketOf, comparePockets
 } from "@/lib/showbinder.js";
 
 /** `return_mode` on a checkout filed into a Show Binder (016 leaves it free text). */
@@ -444,6 +445,10 @@ export default function ShowDesk() {
   // The binder being looked through, and a name search within it.
   const [binderLook, setBinderLook] = useState(null);
   const [binderLookQ, setBinderLookQ] = useState("");
+  // Cards ticked in the binder view (for labels), and the stack a removed
+  // card goes to.
+  const [binderTick, setBinderTick] = useState(new Set());
+  const [binderRemoveTo, setBinderRemoveTo] = useState("");
 
   // ---- Checkout ------------------------------------------------------------
 
@@ -752,7 +757,8 @@ export default function ShowDesk() {
     const offSale = listings.length > 0 ? offSaleIndex(listings, sales || []) : null;
     // The toploader box and the binders have no order to walk: by name.
     const picked = skuBatch(present, batchPrefix, { stackId: batchStack, name: batchNameQ, rankOf: (c) => ranks.get(c.id), away: awayIndex });
-    if (!batchPrefix.trim() && batchStack && isUnorderedStack(stackName.get(batchStack))) picked.sort(compareByTitle);
+    if (!batchPrefix.trim() && batchStack && isToploaderStack(stackName.get(batchStack))) picked.sort(compareByTitle);
+    else if (!batchPrefix.trim() && batchStack && isShowBinder(stackName.get(batchStack))) picked.sort(comparePockets);
     return picked.map((card) => ({
       card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null,
       offSale: offSaleReason(card.sku, offSale)
@@ -825,23 +831,26 @@ export default function ShowDesk() {
     setBusy(true);
     setMsg("");
     const sb = supabase();
-    const base = await maxPosition(sb, binderId);
+    // The first empty pockets, gaps first — a sold card's pocket is reused.
+    const pockets = freePockets(stackCards, binderId, movable.length);
     let moved = 0;
     const errors = [];
+    const placed = [];
     for (let i = 0; i < movable.length; i++) {
       setProgress(`Filing ${i + 1} of ${movable.length} into ${binder.name}…`);
       const { error } = await sb
         .from("stack_cards")
-        .update({ stack_id: binderId, position: base + 1 + i })
+        .update({ stack_id: binderId, position: pockets[i] })
         .eq("id", movable[i].id)
         .is("checked_out_at", null);
       if (error) errors.push(`${movable[i].sku || "?"}: ${error.message}`);
-      else moved += 1;
+      else { moved += 1; placed.push(`${movable[i].sku || "?"} → ${pocketOf(pockets[i])?.label}`); }
     }
     setProgress("");
     setBusy(false);
     setMsg(
       `Filed ${moved} card${moved === 1 ? "" : "s"} into ${binder.name} — still on sale on eBay until the binder is checked out.` +
+      (placed.length ? ` Pockets: ${placed.slice(0, 12).join(", ")}${placed.length > 12 ? `, and ${placed.length - 12} more` : ""}.` : "") +
       (skipped ? ` ${skipped} left where they were: already at a show or already in a binder.` : "") +
       (errors.length ? ` ⚠ ${errors.join(" · ")}` : "")
     );
@@ -916,12 +925,50 @@ export default function ShowDesk() {
     () => (binderInside ? binderInside.rows.filter((r) => !binderLookQ.trim() || titleMatches(r.card.title, binderLookQ) || skuInBatch(r.card.sku, binderLookQ)) : []),
     [binderInside, binderLookQ]
   );
-
-  // What the binder being checked in still has out, in the order you flick.
-  const binderOut = useMemo(
-    () => (binderCheck ? openFromBinder(open, binderCheck).sort(compareByTitle) : []),
-    [open, binderCheck]
+  // What 🏷 Labels prints: the ticked cards on screen, or — none ticked —
+  // every card on screen. A tick the search has hidden is not printed, the
+  // selectionFor() rule: what a button acts on is what you can see.
+  const binderLabelSet = useMemo(
+    () => (binderTick.size === 0 ? binderInsideShown : binderInsideShown.filter((r) => binderTick.has(r.card.id))),
+    [binderInsideShown, binderTick]
   );
+
+  // What the binder being checked in still has out, page by page. A checkout
+  // row carries no pocket, so it is read off the stack card it came from.
+  const binderOut = useMemo(() => {
+    if (!binderCheck) return [];
+    const posById = new Map(stackCards.map((c) => [c.id, c.position]));
+    return openFromBinder(open, binderCheck)
+      .map((co) => ({ ...co, position: posById.get(co.stack_card_id) ?? null }))
+      .sort(comparePockets);
+  }, [open, binderCheck, stackCards]);
+
+  /**
+   * Take one card out of a binder, onto the back of a stack. It was never
+   * checked out, so the listing is untouched — the card is simply somewhere
+   * else now, and its pocket is left empty for the next card filed in.
+   */
+  async function removeFromBinder(card, toStackId) {
+    const to = stacks.find((st) => st.id === toStackId);
+    if (!to) { setMsg("Choose the stack it goes to first."); return; }
+    if (isCardAway(card, awayIndex)) { setMsg(`${card.sku || "That card"} is checked out with the binder — check it in first.`); return; }
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const base = await maxPosition(sb, to.id);
+    const { error } = await sb
+      .from("stack_cards")
+      .update({ stack_id: to.id, position: base + 1 })
+      .eq("id", card.id)
+      .is("checked_out_at", null);
+    setBusy(false);
+    const pk = pocketOf(card.position)?.label;
+    setMsg(error
+      ? `Couldn't move ${card.sku || "the card"}: ${error.message}`
+      : `Moved ${card.sku || "the card"} out of ${pk ? `pocket ${pk}` : "the binder"} to the back of ${to.name}. Its listing is unchanged.`);
+    setBinderTick((prev) => { const n = new Set(prev); n.delete(card.id); return n; });
+    await load();
+  }
 
   /**
    * Check a binder back in: every card still in a pocket goes back on sale in
@@ -1267,14 +1314,21 @@ export default function ShowDesk() {
     let base = 0;
     // The box has no order, but a position is still the sort key every stack
     // row carries, so a filed card goes behind what is there.
-    if (mode === "back" || mode === "new_stack" || mode === TOPLOADER_RETURN_MODE || mode === BINDER_RETURN_MODE) base = await maxPosition(sb, stackId);
+    if (mode === "back" || mode === "new_stack" || mode === TOPLOADER_RETURN_MODE) base = await maxPosition(sb, stackId);
+    // Into a binder: the first empty pockets. A card that came OUT of this
+    // binder still holds its own pocket and goes straight back into it.
+    const homeAgain = (co) => mode === BINDER_RETURN_MODE && co.stack_id === stackId;
+    const pockets = mode === BINDER_RETURN_MODE ? freePockets(stackCards, stackId, items.filter((co) => !homeAgain(co)).length) : [];
+    let nextPocket = 0;
 
     let restored = 0;
     const warnings = [];
     for (let i = 0; i < items.length; i++) {
       const co = items[i];
       setProgress(`Checking in ${i + 1} of ${items.length}…`);
-      const patch = mode === "spot" ? {} : { stack_id: stackId, position: base + 1 + i };
+      const patch = mode === "spot" || homeAgain(co) ? {}
+        : mode === BINDER_RETURN_MODE ? { stack_id: stackId, position: pockets[nextPocket++] }
+        : { stack_id: stackId, position: base + 1 + i };
       const w = await restoreOne(sb, co, patch, mode, mode === "spot" ? co.stack_id : stackId);
       warnings.push(...w);
       restored += 1;
@@ -1344,7 +1398,7 @@ export default function ShowDesk() {
       const saved = Number(localStorage.getItem(LABEL_NAME_KEY));
       if (saved > 0) nameMax = saved;
     } catch { /* private mode — the default is fine */ }
-    const { rows, unpriced, sold } = binderLabelRows(binderInsideShown, { nameMax });
+    const { rows, unpriced, sold } = binderLabelRows(binderLabelSet, { nameMax });
     const named = unpriced.slice(0, 3).map((c) => c.sku || c.title || "untitled").join(", ");
     const more = unpriced.length > 3 ? ` and ${unpriced.length - 3} more` : "";
     const gap =
@@ -1364,7 +1418,7 @@ export default function ShowDesk() {
     a.download = `labels-${slug}-${new Date().toISOString().slice(0, 10)}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
-    setMsg(`${rows.length} label${rows.length === 1 ? "" : "s"} exported for ${binder?.name || "the binder"}, with the SKU in a third column.${gap}`);
+    setMsg(`${rows.length} label${rows.length === 1 ? "" : "s"} exported for ${binder?.name || "the binder"}, with the SKU and the pocket (p4-7) in the third and fourth columns.${gap}`);
   }
 
   /** Price only the ticked cards — the pool route, narrowed by id. */
@@ -1746,7 +1800,7 @@ export default function ShowDesk() {
                       </span>
                     ) : null}
                     <span className="badge2" title="Where to walk, and how far to count">
-                      {positionLabel(stackName.get(card.stack_id), rank, depth)}
+                      {positionLabel(stackName.get(card.stack_id), rank, depth, card.position)}
                     </span>
                   </label>
                 ))}
@@ -1831,7 +1885,7 @@ export default function ShowDesk() {
                       </button>
                       <button
                         className="btn btn-ghost"
-                        onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); }}
+                        onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); setBinderTick(new Set()); }}
                         aria-pressed={binderLook === b.id}
                         title="List every card in this binder"
                       >
@@ -1872,10 +1926,10 @@ export default function ShowDesk() {
                     <button
                       className="btn btn-ghost"
                       onClick={() => downloadBinderLabels(binder)}
-                      disabled={binderInsideShown.length === 0}
-                      title="Label file (.xlsx) for the cards listed here: price, name and eBay SKU. The price is our eBay ask rounded to a cash price — £1 steps to £20, £5 to £100, £10 above."
+                      disabled={binderLabelSet.length === 0}
+                      title="Label file (.xlsx) for the ticked cards — or every card listed, if none are ticked: price, name, eBay SKU and pocket. The price is our eBay ask rounded to a cash price — £1 steps to £20, £5 to £100, £10 above."
                     >
-                      🏷 Labels ({binderInsideShown.filter((r) => r.status !== "sold" && r.status !== "outofstock").length})
+                      🏷 Labels{binderTick.size ? " for ticked" : ""} ({binderLabelSet.filter((r) => r.status !== "sold" && r.status !== "outofstock").length})
                     </button>
                     <button className="btn btn-ghost" onClick={() => setBinderLook(null)}>Close</button>
                   </div>
@@ -1894,25 +1948,68 @@ export default function ShowDesk() {
                   <p className="dd-empty">Nothing in this binder yet. Fill it with 📒 Into binder.</p>
                 ) : (
                   <>
-                    {binderInside.rows.length > 8 ? (
-                      <input
-                        className="stack-title-inp sd-batch-inp"
-                        value={binderLookQ}
-                        onChange={(e) => setBinderLookQ(e.target.value)}
-                        placeholder="Find a card in the binder — name or SKU"
-                        aria-label="Find a card in the binder"
-                        style={{ marginBottom: 8 }}
-                      />
-                    ) : null}
+                    <div className="sd-recbar">
+                      {binderInside.rows.length > 8 ? (
+                        <input
+                          className="stack-title-inp sd-batch-inp"
+                          value={binderLookQ}
+                          onChange={(e) => setBinderLookQ(e.target.value)}
+                          placeholder="Find a card in the binder — name or SKU"
+                          aria-label="Find a card in the binder"
+                        />
+                      ) : null}
+                      <label className="sd-toggle">
+                        <input
+                          type="checkbox"
+                          checked={binderInsideShown.length > 0 && binderInsideShown.every((r) => binderTick.has(r.card.id))}
+                          ref={(el) => { if (el) el.indeterminate = binderInsideShown.some((r) => binderTick.has(r.card.id)) && !binderInsideShown.every((r) => binderTick.has(r.card.id)); }}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setBinderTick((prev) => {
+                              const n = new Set(prev);
+                              for (const r of binderInsideShown) { if (on) n.add(r.card.id); else n.delete(r.card.id); }
+                              return n;
+                            });
+                          }}
+                          disabled={binderInsideShown.length === 0}
+                        />
+                        {binderTick.size ? `${binderLabelSet.length} ticked` : "Tick cards for labels"}
+                      </label>
+                      <select
+                        className="sd-select"
+                        value={binderRemoveTo}
+                        onChange={(e) => setBinderRemoveTo(e.target.value)}
+                        aria-label="Stack a removed card goes to"
+                        title="Where ↩ Out puts a card taken out of the binder — the back of this stack"
+                      >
+                        <option value="">↩ Out goes to…</option>
+                        {fileableStacks(stacks).map((st) => <option key={st.id} value={st.id}>back of {st.name}</option>)}
+                      </select>
+                    </div>
                     <div className="stack-list sd-batch-list">
-                      {binderInsideShown.map(({ card, status, pricePence }) => {
+                      {binderInsideShown.map(({ card, status, pricePence, pocket }, i) => {
+                        // A heading where the page changes, so the list reads
+                        // the way the binder is turned.
+                        const prevPage = i > 0 ? binderInsideShown[i - 1].pocket?.page ?? null : undefined;
+                        const pageHead = (pocket?.page ?? null) !== prevPage
+                          ? <p className="eyebrow" style={{ margin: "10px 0 2px" }}>{pocket ? `Page ${pocket.page}` : "No pocket yet"}</p>
+                          : null;
                         // A photo of THIS copy, off its listing — the same map
                         // the counter uses. A card checked out by ending its
                         // listing has none, and says so rather than borrowing
                         // catalogue art of a mint copy.
                         const img = card.sku ? images.get(String(card.sku).toLowerCase()) : null;
                         return (
-                        <div className="ps-row sd-rec-row" key={card.id}>
+                        <Fragment key={card.id}>
+                        {pageHead}
+                        <div className="ps-row sd-rec-row">
+                          <input
+                            type="checkbox"
+                            checked={binderTick.has(card.id)}
+                            onChange={() => setBinderTick((prev) => { const n = new Set(prev); if (n.has(card.id)) n.delete(card.id); else n.add(card.id); return n; })}
+                            aria-label={`Tick ${card.title || card.sku || "this card"} for labels`}
+                          />
+                          <span className="stack-pos" title="Page and pocket — p4-7 is page 4, pocket 7">{pocket?.label || "—"}</span>
                           {img ? (
                             <button
                               type="button"
@@ -1938,7 +2035,18 @@ export default function ShowDesk() {
                             {STATUS[status].text}
                           </span>
                           <span className="sd-price">{pricePence != null ? pounds(pricePence) : "—"}</span>
+                          {status !== "away" ? (
+                            <button
+                              className="btn btn-ghost"
+                              onClick={() => removeFromBinder(card, binderRemoveTo)}
+                              disabled={busy || !binderRemoveTo}
+                              title={binderRemoveTo ? "Take this card out of the binder onto the back of the chosen stack. The listing is unchanged, and its pocket is left empty." : "Choose where removed cards go first (↩ Out goes to…)"}
+                            >
+                              ↩ Out
+                            </button>
+                          ) : null}
                         </div>
+                        </Fragment>
                         );
                       })}
                       {binderInsideShown.length === 0 ? <p className="hint hint-small">Nothing in the binder matches that.</p> : null}
@@ -1962,21 +2070,30 @@ export default function ShowDesk() {
                 ) : (
                   <>
                     <p className="hint hint-small" style={{ marginTop: 0 }}>
-                      Untick every card that is <b>not</b> in the binder — those sold. Cards already marked £ Sold at the table
+                      Turn the binder page by page and untick every pocket that is empty — those cards sold. Cards already marked £ Sold at the table
                       aren&apos;t listed. A sold card&apos;s price starts at its sticker; change it, or clear it to record the
                       sale without one.
                     </p>
                     <div className="stack-list">
-                      {binderOut.map((co) => {
+                      {binderOut.map((co, i) => {
                         const here = !binderMissing.has(co.id);
+                        // Page by page, the way the binder is turned at the
+                        // table: a heading where the page changes.
+                        const pk = pocketOf(co.position);
+                        const prevPage = i > 0 ? pocketOf(binderOut[i - 1].position)?.page ?? null : undefined;
                         return (
-                          <div className="ps-row sd-rec-row" key={co.id}>
+                          <Fragment key={co.id}>
+                          {(pk?.page ?? null) !== prevPage ? (
+                            <p className="eyebrow" style={{ margin: "10px 0 2px" }}>{pk ? `Page ${pk.page}` : "No pocket"}</p>
+                          ) : null}
+                          <div className="ps-row sd-rec-row">
                             <input
                               type="checkbox"
                               checked={here}
                               aria-label={`${co.title || co.sku || "card"} is in the binder`}
                               onChange={() => setBinderMissing((prev) => { const n = new Set(prev); if (n.has(co.id)) n.delete(co.id); else n.add(co.id); return n; })}
                             />
+                            <span className="stack-pos" title="Page and pocket">{pk?.label || "—"}</span>
                             <span className="stack-sku">{co.sku || "—"}</span>
                             <span className="stack-title">{co.title || <em>—</em>}</span>
                             {here ? (
@@ -1994,6 +2111,7 @@ export default function ShowDesk() {
                               </label>
                             )}
                           </div>
+                          </Fragment>
                         );
                       })}
                     </div>
@@ -2100,7 +2218,7 @@ export default function ShowDesk() {
                     )}
                     <span className="stack-title">{card.title || <em>—</em>}</span>
                     <span className="badge2" title="Where to walk, and how far to count">
-                      {positionLabel(stackName.get(card.stack_id), rank, depth)}
+                      {positionLabel(stackName.get(card.stack_id), rank, depth, card.position)}
                     </span>
                     <span className="sd-price">{pounds(pricePence)}</span>
                   </label>

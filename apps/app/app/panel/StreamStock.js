@@ -639,7 +639,7 @@ export default function StreamStock() {
                     <span className="stack-sku">{r.card.sku}</span>
                     <span className="stack-title">{r.title || <em>—</em>}</span>
                     <span className="badge2" title="Where to walk, and how far to count">
-                      {positionLabel(stackName.get(r.card.stack_id), ranks.get(r.card.id) ?? null, depths.get(r.card.stack_id) ?? null)}
+                      {positionLabel(stackName.get(r.card.stack_id), ranks.get(r.card.id) ?? null, depths.get(r.card.stack_id) ?? null, r.card.position)}
                     </span>
                     {r.condition !== "unknown" ? <span className="sd-cond">{CONDITIONS.find((c) => c.key === r.condition)?.label}</span> : null}
                     {r.quantity > 1 ? (

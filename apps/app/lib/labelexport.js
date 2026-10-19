@@ -22,17 +22,19 @@
  * can build a real file under bare node and read its bytes back.
  */
 import { stickerRows, stickerPence, labelName, DEFAULT_NAME_MAX } from "./showstock.js";
+import { pocketOf } from "./showbinder.js";
 
 /** The printer's columns, in the printer's order. Do not reorder. */
 export const LABEL_COLUMNS = ["Price", "Name"];
 
 /**
  * A Show Binder card's label also carries its eBay SKU, so a card out of a
- * pocket can be matched back to its listing. The SKU goes AFTER the printer's
- * two columns rather than between them: a template laid out on Price and Name
- * keeps working, and the SKU is one more field bound to the "SKU" column.
+ * pocket can be matched back to its listing, and its POCKET ("p4-7"), so it
+ * goes back where it came from. Both go AFTER the printer's two columns rather
+ * than between them: a template laid out on Price and Name keeps working, and
+ * each is one more field bound to its column.
  */
-export const BINDER_LABEL_COLUMNS = [...LABEL_COLUMNS, "SKU"];
+export const BINDER_LABEL_COLUMNS = [...LABEL_COLUMNS, "SKU", "Pocket"];
 
 /** Where the label width preference lives — the Batch screen and the Show
  *  Desk both export labels, and a roll of stationery is the same roll on
@@ -279,7 +281,8 @@ export function binderLabelRows(rows, { nameMax = DEFAULT_NAME_MAX } = {}) {
     out.push({
       Price: labelPrice(pence),
       Name: labelName(r.card.title || r.card.sku || "", nameMax),
-      SKU: String(r.card.sku || "").trim()
+      SKU: String(r.card.sku || "").trim(),
+      Pocket: pocketOf(r.card.position)?.label || ""
     });
   }
   return { rows: out, unpriced, sold };

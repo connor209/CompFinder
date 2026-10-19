@@ -27,6 +27,53 @@
  */
 
 /** The one spelling of the prefix. Never written out anywhere else. */
+export const POCKETS_PER_PAGE = 9;
+
+/**
+ * POCKETS (decided 2026-10-19, superseding "no positions"): a binder card's
+ * `position` is its pocket — a fixed address, page = ceil(pos / 9). Going
+ * page by page is how a binder is checked back in, so the list, the check-in
+ * and the label all say "p4-7". Unlike a stack, a sold or removed card leaves
+ * its GAP: every other card keeps its pocket, and the next card filed in
+ * takes the first empty one. That is the physical binder; renumbering would
+ * mean reshuffling cards to keep the screen true.
+ */
+export function pocketOf(position) {
+  const n = Math.round(Number(position));
+  if (!Number.isFinite(n) || n < 1) return null;
+  const page = Math.ceil(n / POCKETS_PER_PAGE);
+  const pocket = ((n - 1) % POCKETS_PER_PAGE) + 1;
+  return { page, pocket, label: `p${page}-${pocket}` };
+}
+
+/**
+ * The first `count` empty pockets of a binder, lowest first. A pocket is taken
+ * by any card still in the binder — INCLUDING one away at a show, whose pocket
+ * is waiting for it. A pulled (sold) card frees its pocket.
+ */
+export function freePockets(cards, binderId, count) {
+  const taken = new Set();
+  for (const c of cards || []) {
+    if (!c || c.stack_id !== binderId || c.pulled_at) continue;
+    const n = Math.round(Number(c.position));
+    if (Number.isFinite(n) && n >= 1) taken.add(n);
+  }
+  const out = [];
+  for (let n = 1; out.length < Math.max(0, count | 0); n++) if (!taken.has(n)) out.push(n);
+  return out;
+}
+
+/** Page order, then by name for a card with no pocket (filed before pockets). */
+export function comparePockets(a, b) {
+  const x = pocketOf(a?.position);
+  const y = pocketOf(b?.position);
+  if (x && y) return Number(a.position) - Number(b.position);
+  if (x || y) return x ? -1 : 1;
+  const p = norm(a?.title);
+  const q = norm(b?.title);
+  if (!p || !q) return (p ? 0 : 1) - (q ? 0 : 1);
+  return p.localeCompare(q, undefined, { numeric: true, sensitivity: "base" });
+}
 export const SHOW_BINDER_PREFIX = "Show Binder";
 
 const norm = (s) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
@@ -109,7 +156,7 @@ export function binderCounts(binders, cards, isAway = (c) => !!c.checked_out_at)
 }
 
 /**
- * What is in a binder, one row per card, flicked through by name.
+ * What is in a binder, one row per card, in page order (comparePockets).
  *
  * `cards` is stack_cards rows. `isAway(card)` is the desk's own reading, so a
  * card on a table says so even with its flag lost. `offSale(sku)` is
@@ -121,7 +168,7 @@ export function binderCounts(binders, cards, isAway = (c) => !!c.checked_out_at)
  * would send somebody looking for an order that does not exist. A pulled card
  * has left the binder and is not a row at all.
  *
- * Returns { rows: [{ card, status, pricePence }], counts, valuePence } where
+ * Returns { rows: [{ card, status, pricePence, pocket }], counts, valuePence } where
  * status is "home" | "away" | "sold" | "outofstock" | "notlisted", counts
  * keys the same, and valuePence sums the prices of cards still ours to sell
  * (home and away) — a sold card's price is not stock.
@@ -142,14 +189,9 @@ export function binderContents(cards, binderId, { isAway = (c) => !!c.checked_ou
     const pricePence = Number.isFinite(p) && p > 0 ? Math.round(p) : null;
     counts[status] += 1;
     if (pricePence != null && (status === "home" || status === "away")) valuePence += pricePence;
-    rows.push({ card, status, pricePence });
+    rows.push({ card, status, pricePence, pocket: pocketOf(card.position) });
   }
-  rows.sort((a, b) => {
-    const x = norm(a.card.title);
-    const y = norm(b.card.title);
-    if (!x || !y) return (x ? 0 : 1) - (y ? 0 : 1);
-    return x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" });
-  });
+  rows.sort((a, b) => comparePockets(a.card, b.card));
   return { rows, counts, valuePence };
 }
 
@@ -184,5 +226,6 @@ export function binderCheckIn(open, missing) {
 
 export default {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
-  binderSuffix, renamedBinder, binderCounts, binderContents, openFromBinder, binderCheckIn
+  binderSuffix, renamedBinder, binderCounts, binderContents,
+  POCKETS_PER_PAGE, pocketOf, freePockets, comparePockets, openFromBinder, binderCheckIn
 };

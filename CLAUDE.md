@@ -2497,10 +2497,15 @@ digital binder the desk turns round to a customer.
 - **A binder is a stack whose name starts "Show Binder"** (`SHOW_BINDER_PREFIX`,
   spelled once), so there can be several, the pull sheet, Stacks and ⌖ locate
   find a card in one with no new code, and it needs **no migration**.
-- **No positions** (decided 2026-10-19): `isUnorderedStack()` in
-  `toploader.js` is the box OR a binder, and everything about order asks it —
-  `positionLabel()` says "📒 Show Binder 2" with no number, the pull sheet and
-  Stacks list it by name, and `fileableStacks()` keeps every filing plan out.
+- **Pockets, with the gaps kept** (decided 2026-10-19, replacing "no
+  positions" the same day). A binder card's `position` is a FIXED address,
+  nine to a page — `pocketOf()` reads 34 as `p4-7` — never a live count. A
+  sold or removed card leaves its pocket empty and nothing renumbers, because
+  the physical binder doesn't; `freePockets()` hands the next card filed in
+  the first gap, and a pocket held by a card away at a show is not a gap. The
+  view, the check-in, the stack picker, Stacks and the pull sheet all run page
+  by page (`comparePockets`), and `positionLabel()` says "📒 Show Binder 2 ·
+  p4-7". `fileableStacks()` still keeps every filing plan out of a binder.
 - **Filling one moves the card, and touches nothing else.** 📒 Into binder,
   under ★ Recommend show stock or the stack picker, changes the card's stack:
   no checkout, the listing stays live. A card already away or already in a
@@ -2522,11 +2527,15 @@ digital binder the desk turns round to a customer.
   each marked on sale, at a show, not listed or sold on eBay — away is asked
   first, since a checked-out card's hidden listing reads as sold out. Read
   off state the desk already holds, so it costs no request.
+- **↩ Out takes one card out**, onto the back of a chosen stack: no checkout,
+  listing untouched, pocket left empty. Not offered for a card away at a show.
+- **Labels for the ticked cards**, or every card on screen when none are
+  ticked — a tick the search hides is not printed, the `selectionFor()` rule.
 - **The view shows a photo of THIS copy** (the listing's gallery shot, the
   counter's `images` map; tap for large) and prints **labels with the eBay
-  SKU**: `binderLabelRows()` writes `BINDER_LABEL_COLUMNS` — the printer's
-  Price and Name, THEN SKU, so a template laid out on the first two still
-  works and the SKU is one more field bound to the third column. The price is
+  SKU and pocket**: `binderLabelRows()` writes `BINDER_LABEL_COLUMNS` — the
+  printer's Price and Name, THEN SKU and Pocket, so a template laid out on the
+  first two still works and each is one more field bound to its column. The price is
   our eBay ask on the cash ladder (`stickerPence`, asked for 2026-10-19 — a
   binder label is read at a table like any sticker); a card sold on eBay gets
   no label and a card with no price is named, not dropped.
