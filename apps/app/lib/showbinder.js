@@ -13,10 +13,10 @@
  * it in a binder with no new code, and why it needs no migration. There can be
  * several: every stack whose name starts "Show Binder" is one.
  *
- * And like the box it has NO POSITIONS (decided 2026-10-19): pockets are not
- * addresses, and a card is found in a binder by flicking through it by name.
- * So it never shows a number, and no filing plan ever chooses it — a card
- * meant for a stack landing in a binder is a card nobody finds.
+ * Unlike the box, every card in it has a BINDER SKU — "B1-047", the binder's
+ * code and the card's slot (binderSlot below). Slots never move, new cards go
+ * at the back, and no filing plan ever chooses a binder — a card meant for a
+ * stack landing in one is a card nobody finds.
  *
  * Not the same thing as lib/binder.js, which is the DIGITAL binder — the 3x3
  * pages the Show Desk turns round to a customer. That one is a way of showing
@@ -29,57 +29,15 @@
 import { labelName } from "./showstock.js";
 
 /** The one spelling of the prefix. Never written out anywhere else. */
-export const POCKETS_PER_PAGE = 9;
-
-/**
- * POCKETS (decided 2026-10-19, superseding "no positions"): a binder card's
- * `position` is its pocket — a fixed address, page = ceil(pos / 9). Going
- * page by page is how a binder is checked back in, so the list, the check-in
- * and the label all say "p4-7". Unlike a stack, a sold or removed card leaves
- * its GAP: every other card keeps its pocket, and the next card filed in
- * takes the first empty one. That is the physical binder; renumbering would
- * mean reshuffling cards to keep the screen true.
- */
-export function pocketOf(position) {
-  const n = Math.round(Number(position));
-  if (!Number.isFinite(n) || n < 1) return null;
-  const page = Math.ceil(n / POCKETS_PER_PAGE);
-  const pocket = ((n - 1) % POCKETS_PER_PAGE) + 1;
-  return { page, pocket, label: `p${page}-${pocket}` };
-}
-
-/**
- * The first `count` empty pockets of a binder, lowest first. A pocket is taken
- * by any card still in the binder — INCLUDING one away at a show, whose pocket
- * is waiting for it. A pulled (sold) card frees its pocket.
- */
-export function freePockets(cards, binderId, count) {
-  const taken = new Set();
-  for (const c of cards || []) {
-    if (!c || c.stack_id !== binderId || c.pulled_at) continue;
-    const n = Math.round(Number(c.position));
-    if (Number.isFinite(n) && n >= 1) taken.add(n);
-  }
-  const out = [];
-  for (let n = 1; out.length < Math.max(0, count | 0); n++) if (!taken.has(n)) out.push(n);
-  return out;
-}
-
-/** Page order, then by name for a card with no pocket (filed before pockets). */
-export function comparePockets(a, b) {
-  const x = pocketOf(a?.position);
-  const y = pocketOf(b?.position);
-  if (x && y) return Number(a.position) - Number(b.position);
-  if (x || y) return x ? -1 : 1;
-  const p = norm(a?.title);
-  const q = norm(b?.title);
-  if (!p || !q) return (p ? 0 : 1) - (q ? 0 : 1);
-  return p.localeCompare(q, undefined, { numeric: true, sensitivity: "base" });
-}
 export const SHOW_BINDER_PREFIX = "Show Binder";
+
+/** Pages are still how a binder is turned: a heading every nine slots. */
+export const POCKETS_PER_PAGE = 9;
 
 const norm = (s) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 const PREFIX_RE = new RegExp(`^${SHOW_BINDER_PREFIX.toLowerCase()}(?:$|[^a-z])`);
+// "Show Binder 3", "Show Binder 3 · Pokémon", "Show Binder B3 Pokémon".
+const NUMBERED_RE = new RegExp(`^${SHOW_BINDER_PREFIX.toLowerCase()}\\s+b?(\\d+)\\b\\s*(?:[·\\-—:]\\s*)?(.*)$`, "i");
 
 /**
  * Is this a Show Binder? Takes a stack row ({ name }) or a bare name.
@@ -92,50 +50,140 @@ export function isShowBinder(stackOrName) {
   return PREFIX_RE.test(norm(name));
 }
 
-/** Every Show Binder among a list of stacks, in name order. */
+/**
+ * A binder's NUMBER, the thing its code is made of (decided 2026-10-19). It
+ * lives in the name — "Show Binder 3 · Pokémon" — because a stack has no
+ * column for it and a migration would be one more thing to apply by hand,
+ * and ✎ Rename keeps it. So the code survives every rename, and a label
+ * printed as B3-047 a month ago still names this binder.
+ */
+export function binderNumber(stackOrName) {
+  const name = stackOrName && typeof stackOrName === "object" ? stackOrName.name : stackOrName;
+  if (!isShowBinder(name)) return null;
+  const m = NUMBERED_RE.exec(String(name).trim().replace(/\s+/g, " "));
+  return m ? Number(m[1]) : null;
+}
+
+/** "B3", or null for a binder with no number yet (see codeless()). */
+export function binderCode(stackOrName) {
+  const n = binderNumber(stackOrName);
+  return n == null ? null : `B${n}`;
+}
+
+/** Every Show Binder among a list of stacks, by number, then name. */
 export function showBindersOf(stacks) {
   return (stacks || [])
     .filter((s) => isShowBinder(s))
-    .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: "base" }));
+    .sort((a, b) => (binderNumber(a) ?? Infinity) - (binderNumber(b) ?? Infinity)
+      || String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: "base" }));
 }
+
+const nextNumber = (existingNames) =>
+  Math.max(0, ...(existingNames || []).map((n) => binderNumber(n) ?? 0)) + 1;
 
 /** "Show Binder 3" — one past the highest number already used. */
 export function nextBinderName(existingNames) {
-  let max = 0;
-  for (const n of existingNames || []) {
-    if (!isShowBinder(n)) continue;
-    const m = /(\d+)\s*$/.exec(String(n).trim());
-    max = Math.max(max, m ? Number(m[1]) : 1);
-  }
-  return `${SHOW_BINDER_PREFIX} ${max + 1}`;
+  return `${SHOW_BINDER_PREFIX} ${nextNumber(existingNames)}`;
 }
 
 /**
- * The part of a binder's name after the prefix — "Pokémon" out of "Show
- * Binder Pokémon" — which is what a rename edits. The prefix itself is not
- * offered for editing: it is what makes the stack a binder, and a rename that
- * dropped it would quietly turn a binder back into a numbered stack.
+ * Binders that have no number — named by hand, or renamed before codes
+ * existed ("Show Binder Pokémon") — each given the next free one, keeping
+ * their label: [{ id, name: "Show Binder 4 · Pokémon" }]. The desk applies
+ * these once and says so, because a binder with no code cannot give its
+ * cards a binder SKU.
+ */
+export function codeless(stacks) {
+  const names = (stacks || []).map((s) => s.name);
+  const out = [];
+  for (const b of showBindersOf(stacks)) {
+    if (binderNumber(b) != null) continue;
+    const n = nextNumber(names);
+    const label = binderSuffix(b.name);
+    const name = `${SHOW_BINDER_PREFIX} ${n}${label ? ` · ${label}` : ""}`;
+    names.push(name);
+    out.push({ id: b.id, name });
+  }
+  return out;
+}
+
+/**
+ * The part of a binder's name after its code — "Pokémon" out of "Show Binder
+ * 3 · Pokémon" — which is what a rename edits. The prefix and the number are
+ * not offered for editing: the prefix makes the stack a binder, and the
+ * number is the code on every label it has printed.
  */
 export function binderSuffix(name) {
   const n = String(name ?? "").trim().replace(/\s+/g, " ");
-  return isShowBinder(n) ? n.slice(SHOW_BINDER_PREFIX.length).replace(/^[\s\-—:·]+/, "").trim() : n;
+  if (!isShowBinder(n)) return n;
+  const m = NUMBERED_RE.exec(n);
+  if (m) return m[2].trim();
+  return n.slice(SHOW_BINDER_PREFIX.length).replace(/^[\s\-—:·]+/, "").trim();
 }
 
 /**
- * The full stack name for a rename: the prefix, then what was typed. Typing
- * the prefix as well is forgiven rather than doubled. Returns null for a name
- * that is blank, too long, or already used by ANOTHER stack (case-blind) —
- * two stacks of one name would make every screen that finds a card by its
- * stack name point at the wrong one.
+ * The full stack name for a rename: prefix, the binder's own number, then
+ * what was typed — "Show Binder 3 · Pokémon". Blank goes back to plain "Show
+ * Binder 3". Typing the prefix as well is forgiven rather than doubled.
+ * Returns null for a label over 40 characters or a name ANOTHER stack has
+ * (case-blind) — two stacks of one name would point every screen that finds
+ * a card by its stack name at the wrong one.
  */
 export function renamedBinder(typed, existingNames = [], currentName = "") {
-  const rest = binderSuffix(typed);
-  if (!rest || rest.length > 40) return null;
-  const name = `${SHOW_BINDER_PREFIX} ${rest}`;
+  let rest = String(typed ?? "").trim().replace(/\s+/g, " ");
+  if (isShowBinder(rest)) rest = binderSuffix(rest);
+  if (rest.length > 40) return null;
+  const n = binderNumber(currentName) ?? nextNumber(existingNames);
+  const name = `${SHOW_BINDER_PREFIX} ${n}${rest ? ` · ${rest}` : ""}`;
   const key = norm(name);
   if (key === norm(currentName)) return name;
-  if ((existingNames || []).some((n) => norm(n) === key)) return null;
+  if ((existingNames || []).some((x) => norm(x) === key)) return null;
   return name;
+}
+
+/**
+ * A card's BINDER SKU: the binder's code and its slot, "B1-047" (decided
+ * 2026-10-19, replacing the p4-7 pocket labels). The slot is the card's
+ * `position` in the binder and never changes: a sold or removed card leaves
+ * its number behind, and NEW CARDS GO AT THE BACK — one past the highest
+ * slot the binder has ever used, sold cards included, so a code on an old
+ * label never comes to mean a different card. The binder sits in slot order;
+ * ↻ Re-pocket A–Z is the only thing that renumbers it.
+ *
+ * Returns { sku, page } — the page is still a heading every nine slots, the
+ * way the binder is turned at check-in — or null for a card with no slot.
+ * A binder with no code yet reads "#047".
+ */
+export function binderSlot(stackOrName, position) {
+  const n = Math.round(Number(position));
+  if (!Number.isFinite(n) || n < 1) return null;
+  const code = binderCode(stackOrName);
+  const num = String(n).padStart(3, "0");
+  return { sku: code ? `${code}-${num}` : `#${num}`, page: Math.ceil(n / POCKETS_PER_PAGE) };
+}
+
+/**
+ * Slots for `count` new cards: after the back of the binder. `maxUsed` is the
+ * highest position the binder has EVER held (maxPosition() reads pulled cards
+ * too, which is what stops a sold card's code being reused).
+ */
+export function nextSlots(maxUsed, count) {
+  const base = Math.max(0, Math.round(Number(maxUsed)) || 0);
+  return Array.from({ length: Math.max(0, count | 0) }, (_, i) => base + 1 + i);
+}
+
+/** Slot order, then by name for a card with no slot. */
+export function comparePockets(a, b) {
+  const x = Number(a?.position);
+  const y = Number(b?.position);
+  const hx = Number.isFinite(x) && x >= 1;
+  const hy = Number.isFinite(y) && y >= 1;
+  if (hx && hy) return x - y;
+  if (hx || hy) return hx ? -1 : 1;
+  const p = norm(a?.title);
+  const q = norm(b?.title);
+  if (!p || !q) return (p ? 0 : 1) - (q ? 0 : 1);
+  return p.localeCompare(q, undefined, { numeric: true, sensitivity: "base" });
 }
 
 /**
@@ -169,7 +217,7 @@ export function compareByCardName(a, b) {
 
 /** The binder view's sort choices. Pocket order is the binder as it sits. */
 export const BINDER_VIEW_SORTS = [
-  { key: "pocket", label: "Pocket order" },
+  { key: "pocket", label: "Binder SKU order" },
   { key: "name", label: "Name A–Z" },
   { key: "price-desc", label: "Price, high first" },
   { key: "price-asc", label: "Price, low first" }
@@ -209,14 +257,14 @@ export function sortBinderRows(rows, sort = "pocket") {
  * every card in its NEW pocket order (the sheet you rearrange from) and
  * `moves` only the cards whose pocket changes; or { ok: false, away }.
  */
-export function repocketPlan(cards, binderId, isAway = (c) => !!c.checked_out_at) {
+export function repocketPlan(cards, binderId, isAway = (c) => !!c.checked_out_at, binderName = null) {
   const inside = (cards || []).filter((c) => c && c.stack_id === binderId && !c.pulled_at);
   const away = inside.filter((c) => isAway(c));
   if (away.length) return { ok: false, away };
   const order = [...inside].sort(compareByCardName).map((card, i) => ({
     card,
-    from: pocketOf(card.position),
-    to: pocketOf(i + 1),
+    from: binderSlot(binderName, card.position),
+    to: binderSlot(binderName, i + 1),
     position: i + 1
   }));
   return { ok: true, order, moves: order.filter((m) => Math.round(Number(m.card.position)) !== m.position) };
@@ -254,12 +302,12 @@ export function binderCounts(binders, cards, isAway = (c) => !!c.checked_out_at)
  * would send somebody looking for an order that does not exist. A pulled card
  * has left the binder and is not a row at all.
  *
- * Returns { rows: [{ card, status, pricePence, pocket }], counts, valuePence } where
+ * Returns { rows: [{ card, status, pricePence, slot }], counts, valuePence } where
  * status is "home" | "away" | "sold" | "outofstock" | "notlisted", counts
  * keys the same, and valuePence sums the prices of cards still ours to sell
  * (home and away) — a sold card's price is not stock.
  */
-export function binderContents(cards, binderId, { isAway = (c) => !!c.checked_out_at, offSale = () => null, priceOf = () => null } = {}) {
+export function binderContents(cards, binderId, { isAway = (c) => !!c.checked_out_at, offSale = () => null, priceOf = () => null, binderName = null } = {}) {
   const counts = { home: 0, away: 0, sold: 0, outofstock: 0, notlisted: 0 };
   let valuePence = 0;
   const rows = [];
@@ -275,7 +323,7 @@ export function binderContents(cards, binderId, { isAway = (c) => !!c.checked_ou
     const pricePence = Number.isFinite(p) && p > 0 ? Math.round(p) : null;
     counts[status] += 1;
     if (pricePence != null && (status === "home" || status === "away")) valuePence += pricePence;
-    rows.push({ card, status, pricePence, pocket: pocketOf(card.position) });
+    rows.push({ card, status, pricePence, slot: binderSlot(binderName, card.position) });
   }
   rows.sort((a, b) => comparePockets(a.card, b.card));
   return { rows, counts, valuePence };
@@ -313,6 +361,7 @@ export function binderCheckIn(open, missing) {
 export default {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
   binderSuffix, renamedBinder, binderCounts, binderContents,
-  POCKETS_PER_PAGE, pocketOf, freePockets, comparePockets, openFromBinder, binderCheckIn,
+  POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
+  openFromBinder, binderCheckIn,
   nameKey, compareByCardName, BINDER_VIEW_SORTS, sortBinderRows, repocketPlan
 };

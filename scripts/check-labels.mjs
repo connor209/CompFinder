@@ -230,16 +230,16 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(exporter)) {
 
 // --- Show Binder labels: the printer's two columns, THEN the SKU -------------
 {
-  eq("a binder label keeps Price then Name first, SKU and pocket after", BINDER_LABEL_COLUMNS, ["Price", "Name", "SKU", "Pocket"]);
+  eq("a binder label keeps Price then Name first, SKU and binder SKU after", BINDER_LABEL_COLUMNS, ["Price", "Name", "SKU", "Binder SKU"]);
   const { rows: br, unpriced, sold } = binderLabelRows([
-    { card: { sku: "B12", title: "Umbreon VMAX 215/203 Evolving Skies Alt Art NM", position: 34 }, status: "home", pricePence: 82249 },
+    { card: { sku: "B12", title: "Umbreon VMAX 215/203 Evolving Skies Alt Art NM", position: 34 }, slot: { sku: "B1-034", page: 4 }, status: "home", pricePence: 82249 },
     { card: { sku: "B13", title: "Gengar 94/102" }, status: "away", pricePence: 2249 },
     { card: { sku: "B14", title: "Pikachu" }, status: "sold", pricePence: 999 },
     { card: { sku: "B15", title: "Mew" }, status: "outofstock", pricePence: 999 },
     { card: { sku: "B16", title: "Alakazam" }, status: "notlisted", pricePence: null }
   ], { nameMax: 30 });
   eq("every label carries its SKU", br.map((r) => r.SKU), ["B12", "B13"]);
-  eq("and its pocket, blank where it has none", br.map((r) => r.Pocket), ["p4-7", ""]);
+  eq("and its binder SKU, blank where it has none", br.map((r) => r["Binder SKU"]), ["B1-034", ""]);
   eq("the eBay ask on the cash ladder — £10 steps over £100, £5 to £100", br.map((r) => r.Price), ["£820", "£20"]);
   {
     const ladder = binderLabelRows([1249, 1951, 2650, 2749, 9800, 14999, 149].map((p, i) => ({ card: { sku: `L${i}`, title: "Card" }, status: "home", pricePence: p }))).rows.map((r) => r.Price);
@@ -249,9 +249,9 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(exporter)) {
   eq("a card with no price is named, not dropped", unpriced.map((c) => c.sku), ["B16"]);
   eq("a card sold on eBay gets no label, and is counted", sold, 2);
   const sheet = Buffer.from(labelWorkbook(br, BINDER_LABEL_COLUMNS)).toString("latin1");
-  const at = ["Price", "Name", "SKU", "Pocket"].map((h) => sheet.indexOf(`>${h}<`));
-  ok("the workbook's header runs Price, Name, SKU, Pocket", at.every((i) => i > 0) && at[0] < at[1] && at[1] < at[2] && at[2] < at[3]);
-  ok("the pocket is in the file", sheet.includes(">p4-7<"));
+  const at = ["Price", "Name", "SKU", "Binder SKU"].map((h) => sheet.indexOf(`>${h}<`));
+  ok("the workbook's header runs Price, Name, SKU, Binder SKU", at.every((i) => i > 0) && at[0] < at[1] && at[1] < at[2] && at[2] < at[3]);
+  ok("the binder SKU is in the file", sheet.includes(">B1-034<"));
   ok("the SKU is in the file", sheet.includes(">B12<"));
 }
 

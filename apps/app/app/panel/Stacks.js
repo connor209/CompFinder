@@ -7,7 +7,7 @@ import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
-import { pocketOf, comparePockets } from "@/lib/showbinder.js";
+import { binderSlot, comparePockets } from "@/lib/showbinder.js";
 import Fold from "./Fold";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
@@ -499,7 +499,7 @@ export default function Stacks() {
             </div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>
               {selBox && !selTl
-                ? "A Show Binder: cards that live in it between shows, listed on eBay while it is at home and checked out together before a show. Listed page by page — p4-7 is page 4, pocket 7, and a sold card leaves its pocket empty. Manage it from the Show desk."
+                ? "A Show Binder: cards that live in it between shows, listed on eBay while it is at home and checked out together before a show. Listed by binder SKU — B1-047 is slot 47 of binder B1; slots never move and new cards go at the back. Manage it from the Show desk."
                 : selBox
                 ? "The toploader box: cards kept priced and sleeved between shows, listed by name — there are no positions to count. Check-ins from the Show desk file into it with 🗂 To toploaders."
                 : "Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up."}
@@ -512,7 +512,7 @@ export default function Stacks() {
                 {shownCards.map((c, idx) => (
                   <div className="stack-row" key={c.id}>
                     {selBox ? (
-                      <span className="stack-pos" title={selTl ? "In the toploader box — no positions" : "Page and pocket in the Show Binder"}>{selTl ? boxIcon : (pocketOf(c.position)?.label || boxIcon)}</span>
+                      <span className="stack-pos" title={selTl ? "In the toploader box — no positions" : "Binder SKU — the card's fixed slot"}>{selTl ? boxIcon : (binderSlot(sel, c.position)?.sku || boxIcon)}</span>
                     ) : (
                       <span className="stack-pos" title="Live position (count from top)">{idx + 1}</span>
                     )}
