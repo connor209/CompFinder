@@ -2408,3 +2408,15 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 /* Pull sheet pack mode: one pile at a time */
 .ps-pile-who { min-width:0; display:flex; flex-direction:column; gap:2px; }
 .ps-pile-nav { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:12px; }
+.ps-allpiles { margin-bottom:12px; }
+.ps-allpiles-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+.ps-allpile { display:grid; grid-template-columns:2.2em minmax(0,1fr) auto auto; align-items:center; gap:10px; padding:6px 8px; border-radius:6px; background:var(--surface-2, rgba(255,255,255,0.03)); }
+.ps-allpile-no { font-family:var(--font-mono); font-weight:700; text-align:right; }
+.ps-allpile-who { min-width:0; display:flex; flex-direction:column; }
+.ps-allpile-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ps-allpile-cards { font-family:var(--font-mono); font-size:12px; color:var(--ink-faint); white-space:nowrap; }
+.ps-allpile-state { font-size:12px; white-space:nowrap; min-width:4.5em; text-align:right; }
+.ps-allpile.done { opacity:0.55; }
+.ps-allpile.done .ps-allpile-state { color:var(--conf-high); }
+.ps-allpile.current { outline:1px solid var(--conf-high); }
+.ps-allpile.current .ps-allpile-state { font-weight:700; }
