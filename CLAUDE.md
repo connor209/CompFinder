@@ -255,6 +255,12 @@ stream` (the relay, only while streaming).
   picks because their page was never read. And a grep that a table not keyed
   on `id` names its own key, since ordering by a missing column reads nothing.
 
+- `scripts/check-listingsync.mjs` — what an eBay listings sync may conclude
+  from what it read: a failed page is retried and a refused token is not, and
+  ended listings are swept ONLY on a complete read — a listing the moving
+  pagination skipped, or an answer with no ActiveList, removes nothing. eBay
+  and Supabase are both faked.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails

@@ -291,7 +291,34 @@ function normalizeItem(it) {
   };
 }
 
-async function getMyeBaySellingPage(accessToken, pageNumber) {
+/**
+ * One page of the ActiveList. A thrown page used to throw the whole sync: on a
+ * 40-page account that is 40 chances for one eBay 500, one dropped connection
+ * or one 429 to cost the night's refresh, and nothing said so but a stale
+ * "last synced". A page is retried a few times before it counts as a failure.
+ *
+ * `listed` is false when eBay answered without an ActiveList at all. That is
+ * not the same as an empty one, and a sync must never delete on it.
+ */
+const PAGE_ATTEMPTS = 3;
+
+async function getMyeBaySellingPage(accessToken, pageNumber, { attempts = PAGE_ATTEMPTS, backoffMs = 1000 } = {}) {
+  let lastErr;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      return await getMyeBaySellingPageOnce(accessToken, pageNumber);
+    } catch (e) {
+      lastErr = e;
+      if (e.permanent || attempt === attempts) break;
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, backoffMs * attempt));
+    }
+  }
+  throw new Error(`Page ${pageNumber}: ${lastErr?.message || "eBay listing fetch failed."}`);
+}
+
+async function getMyeBaySellingPageOnce(accessToken, pageNumber) {
   const body =
     `<?xml version="1.0" encoding="utf-8"?>` +
     `<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
@@ -311,7 +338,12 @@ async function getMyeBaySellingPage(accessToken, pageNumber) {
     body
   });
   const text = await res.text();
-  if (!res.ok) throw new Error(`eBay listing fetch failed (${res.status}).`);
+  if (!res.ok) {
+    const err = new Error(`eBay listing fetch failed (${res.status}).`);
+    // A refused token stays refused; retrying it only spends the time limit.
+    err.permanent = res.status === 401 || res.status === 403;
+    throw err;
+  }
 
   const doc = parser.parse(text);
   const resp = doc?.GetMyeBaySellingResponse || {};
@@ -320,11 +352,13 @@ async function getMyeBaySellingPage(accessToken, pageNumber) {
     const msg = Array.isArray(errs) ? errs[0]?.LongMessage : errs?.LongMessage;
     throw new Error(msg || "eBay rejected the listing request.");
   }
+  const listed = resp.ActiveList != null;
   const active = resp.ActiveList || {};
   const itemArray = active.ItemArray?.Item;
   const items = itemArray == null ? [] : Array.isArray(itemArray) ? itemArray : [itemArray];
   const totalPages = Number(active.PaginationResult?.TotalNumberOfPages || 1) || 1;
-  return { items: items.map(normalizeItem).filter((x) => x.ebay_item_id), totalPages };
+  const totalEntries = numOrNull(active.PaginationResult?.TotalNumberOfEntries);
+  return { items: items.map(normalizeItem).filter((x) => x.ebay_item_id), totalPages, totalEntries, listed };
 }
 
 /**
@@ -339,17 +373,26 @@ async function getMyeBaySellingPage(accessToken, pageNumber) {
  *
  * Pages after the first are fetched a few at a time: 40 pages one after the
  * other is most of a serverless function's time limit on its own.
+ *
+ * `complete` is whether the read can be trusted to say what is NOT listed.
+ * Pages are numbered over a list that moves while it is read: a sale that
+ * ends a listing on page 3 shifts every later listing forward one place, so
+ * the listing that was first on page 4 is now last on page 3 — already read
+ * — and is never seen. Deleting on that read takes a live card out of
+ * `ebay_listings` until the next sync, which is "the sync sometimes loses
+ * listings" with no error anywhere. Fewer unique listings than eBay said it
+ * had is the tell.
  */
 export const MAX_LISTING_PAGES = 150; // 30,000 listings
 const LISTING_PAGE_CONCURRENCY = 5;
 
-export async function fetchAllActiveListings(accessToken, { maxPages = MAX_LISTING_PAGES } = {}) {
-  const first = await getMyeBaySellingPage(accessToken, 1);
+export async function fetchAllActiveListings(accessToken, { maxPages = MAX_LISTING_PAGES, pageOptions } = {}) {
+  const first = await getMyeBaySellingPage(accessToken, 1, pageOptions);
   const pages = Math.min(first.totalPages, maxPages);
   const rest = [];
   for (let p = 2; p <= pages; p += LISTING_PAGE_CONCURRENCY) {
     const batch = [];
-    for (let q = p; q < p + LISTING_PAGE_CONCURRENCY && q <= pages; q++) batch.push(getMyeBaySellingPage(accessToken, q));
+    for (let q = p; q < p + LISTING_PAGE_CONCURRENCY && q <= pages; q++) batch.push(getMyeBaySellingPage(accessToken, q, pageOptions));
     // eslint-disable-next-line no-await-in-loop
     for (const r of await Promise.all(batch)) rest.push(...r.items);
   }
@@ -357,7 +400,12 @@ export async function fetchAllActiveListings(accessToken, { maxPages = MAX_LISTI
   // twice; one row per item id, or the upsert refuses the whole chunk.
   const byId = new Map();
   for (const l of [...first.items, ...rest]) byId.set(l.ebay_item_id, l);
-  return { listings: [...byId.values()], totalPages: first.totalPages, truncated: first.totalPages > maxPages };
+  const listings = [...byId.values()];
+  const truncated = first.totalPages > maxPages;
+  const expected = first.totalEntries;
+  const missed = expected != null && listings.length < expected ? expected - listings.length : 0;
+  const complete = first.listed && !truncated && missed === 0;
+  return { listings, totalPages: first.totalPages, truncated, expected, missed, complete };
 }
 
 /**
@@ -1032,7 +1080,7 @@ export async function syncUserListings(admin, userId) {
   const token = await getValidUserAccessToken(admin, userId);
   if (!token) return { connected: false, count: 0 };
 
-  const { listings, truncated } = await fetchAllActiveListings(token);
+  const { listings, truncated, complete, missed } = await fetchAllActiveListings(token);
   const nowIso = new Date().toISOString();
 
   if (listings.length) {
@@ -1052,11 +1100,13 @@ export async function syncUserListings(admin, userId) {
     }
   }
   // Everything still current was just stamped nowIso; anything older is a
-  // listing eBay no longer reports as active.
-  if (!truncated) {
+  // listing eBay no longer reports as active — but only if the read was
+  // complete. A listing the pagination skipped is still live, so an
+  // incomplete read upserts what it saw and removes nothing.
+  if (complete) {
     const { error } = await admin.from("ebay_listings").delete().eq("user_id", userId).lt("synced_at", nowIso);
     if (error) throw new Error(error.message);
   }
   await admin.from("ebay_accounts").update({ last_synced_at: nowIso }).eq("user_id", userId);
-  return { connected: true, count: listings.length, truncated };
+  return { connected: true, count: listings.length, truncated, complete, missed };
 }

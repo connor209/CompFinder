@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Fold from "../panel/Fold";
+import { syncListings, syncNote } from "@/lib/listing-sync.js";
 
 /**
  * "Connect your eBay account" card for Settings. Shows connection state,
@@ -35,17 +36,9 @@ export default function EbayConnect({ flash }) {
   async function handleSync() {
     setSyncing(true);
     setMsg("");
-    try {
-      const res = await fetch("/api/ebay/sync", { method: "POST" }).then((r) => r.json());
-      if (res.ok) {
-        setMsg(`Synced ${res.count} active listing${res.count === 1 ? "" : "s"}.${res.truncated ? " (Capped — you have a lot of listings.)" : ""}`);
-        await loadStatus();
-      } else {
-        setMsg(res.error || "Sync failed.");
-      }
-    } catch {
-      setMsg("Sync failed.");
-    }
+    const res = await syncListings();
+    setMsg(syncNote(res));
+    if (res.ok) await loadStatus();
     setSyncing(false);
   }
 
