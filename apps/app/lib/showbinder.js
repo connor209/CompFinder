@@ -109,6 +109,51 @@ export function binderCounts(binders, cards, isAway = (c) => !!c.checked_out_at)
 }
 
 /**
+ * What is in a binder, one row per card, flicked through by name.
+ *
+ * `cards` is stack_cards rows. `isAway(card)` is the desk's own reading, so a
+ * card on a table says so even with its flag lost. `offSale(sku)` is
+ * offSaleReason() over the listings: "sold", "outofstock", "notlisted" or
+ * null for on sale. `priceOf(sku)` is what we ask on eBay, in pence, or null.
+ *
+ * Away is asked FIRST: a checked-out card's listing is hidden on purpose, so
+ * its listing reads as sold out, and calling a card on a table "sold on eBay"
+ * would send somebody looking for an order that does not exist. A pulled card
+ * has left the binder and is not a row at all.
+ *
+ * Returns { rows: [{ card, status, pricePence }], counts, valuePence } where
+ * status is "home" | "away" | "sold" | "outofstock" | "notlisted", counts
+ * keys the same, and valuePence sums the prices of cards still ours to sell
+ * (home and away) — a sold card's price is not stock.
+ */
+export function binderContents(cards, binderId, { isAway = (c) => !!c.checked_out_at, offSale = () => null, priceOf = () => null } = {}) {
+  const counts = { home: 0, away: 0, sold: 0, outofstock: 0, notlisted: 0 };
+  let valuePence = 0;
+  const rows = [];
+  for (const card of cards || []) {
+    if (!card || card.stack_id !== binderId || card.pulled_at) continue;
+    let status = "home";
+    if (isAway(card)) status = "away";
+    else {
+      const why = offSale(card.sku);
+      if (why === "sold" || why === "outofstock" || why === "notlisted") status = why;
+    }
+    const p = priceOf(card.sku);
+    const pricePence = Number.isFinite(p) && p > 0 ? Math.round(p) : null;
+    counts[status] += 1;
+    if (pricePence != null && (status === "home" || status === "away")) valuePence += pricePence;
+    rows.push({ card, status, pricePence });
+  }
+  rows.sort((a, b) => {
+    const x = norm(a.card.title);
+    const y = norm(b.card.title);
+    if (!x || !y) return (x ? 0 : 1) - (y ? 0 : 1);
+    return x.localeCompare(y, undefined, { numeric: true, sensitivity: "base" });
+  });
+  return { rows, counts, valuePence };
+}
+
+/**
  * The binder's checkouts still to check in: open, SHOW pool, out of this
  * binder. The stream box never takes a binder card out, but a checkout row is
  * the one place that can say so, so it is asked.
@@ -139,5 +184,5 @@ export function binderCheckIn(open, missing) {
 
 export default {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
-  binderSuffix, renamedBinder, binderCounts, openFromBinder, binderCheckIn
+  binderSuffix, renamedBinder, binderCounts, binderContents, openFromBinder, binderCheckIn
 };
