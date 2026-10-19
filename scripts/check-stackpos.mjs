@@ -125,8 +125,9 @@ for (const [sku, want] of [
   const got = stackFromSku(sku);
   eq(`stackFromSku(${JSON.stringify(sku)})`, got ? `${got.prefix} ${got.num}` : null, want);
 }
-if (!/stackFromSku\(l\.sku\)/.test(read("apps/app/app/panel/Stacks.js")) || /match\(\/\^\(\[A-Za-z\]\+\)/.test(read("apps/app/app/panel/Stacks.js"))) {
-  fail("Stacks.js auto-import must read SKUs through stackFromSku(), not a regex of its own");
+// The auto-import moved to lib/stack-import.js (shared with the nightly sync).
+if (!/stackFromSku\(sku\)/.test(read("apps/app/lib/stack-import.js")) || /match\(\/\^\(\[A-Za-z\]\+\)/.test(read("apps/app/app/panel/Stacks.js") + read("apps/app/lib/stack-import.js"))) {
+  fail("auto-import must read SKUs through stackFromSku(), not a regex of its own");
 }
 
 if (/^\s*import\s+.*from\s+["']@\//m.test(read("apps/app/lib/stackpos.js"))) {

@@ -261,6 +261,13 @@ stream` (the relay, only while streaming).
   pagination skipped, or an answer with no ActiveList, removes nothing. eBay
   and Supabase are both faked.
 
+- `scripts/check-stackimport.mjs` — Stacks' auto-import, which the nightly
+  sync now runs unattended after a successful listings refresh: a failed read
+  stops it before it writes (a short `stack_cards` read would re-add the whole
+  inventory), a quantity-0 listing is a sold card and never stacked, every
+  read names `user_id` because the cron has no RLS behind it, running it twice
+  adds nothing, and both callers go through `runStackImport()`.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
