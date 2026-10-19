@@ -13,9 +13,11 @@
  * - Which stacks ARE binders. "Show Binder 2" is; a stack somebody called
  *   "Binder" or "Show Binders" is not, and reading it as one would stop
  *   numbering a real stack.
- * - A binder has NO POSITIONS (decided 2026-10-19) and no filing plan picks
- *   it, exactly like the toploader box: a number sends somebody counting
- *   pockets, and a plan that chose a binder hides cards nobody numbers.
+ * - A binder has POCKETS, not a live count (decided 2026-10-19): position is
+ *   a fixed address shown as p4-7, nine to a page, and a sold or removed card
+ *   leaves its GAP — the next card filed in takes the first empty pocket, and
+ *   a pocket held by a card away at a show is not empty. No filing plan picks
+ *   a binder, exactly like the toploader box.
  * - Check-in leaves NOTHING open. Every card is either back on sale or sold;
  *   a card that is neither is a listing hidden for ever.
  * - Only the binder's own SHOW checkouts are checked in — never a card that
@@ -24,7 +26,8 @@
 import { readFileSync } from "node:fs";
 import {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
-  binderSuffix, renamedBinder, binderCounts, binderContents, openFromBinder, binderCheckIn
+  binderSuffix, renamedBinder, binderCounts, binderContents,
+  POCKETS_PER_PAGE, pocketOf, freePockets, comparePockets, openFromBinder, binderCheckIn
 } from "../apps/app/lib/showbinder.js";
 import { isUnorderedStack, fileableStacks, isToploaderStack } from "../apps/app/lib/toploader.js";
 import { positionLabel, locationsBySku } from "../apps/app/lib/stackpos.js";
@@ -74,20 +77,45 @@ eq("another stack's name is refused, case-blind", renamedBinder("pokemon", ["Sho
 eq("its own name, re-cased, is fine", renamedBinder("one", [], "Show Binder One"), "Show Binder one");
 eq("too long is refused", renamedBinder("x".repeat(41), [], "Show Binder 1"), null);
 
-// --- 2. no positions, never filed into by a plan ------------------------------
+// --- 2. pockets, never filed into by a plan ----------------------------------
+eq("nine to a page", POCKETS_PER_PAGE, 9);
+eq("the first pocket", pocketOf(1)?.label, "p1-1");
+eq("the last of page one", pocketOf(9)?.label, "p1-9");
+eq("the first of page two", pocketOf(10)?.label, "p2-1");
+eq("page 4, pocket 7", pocketOf(34), { page: 4, pocket: 7, label: "p4-7" });
+eq("no position is no pocket", pocketOf(null), null);
+eq("zero is no pocket", pocketOf(0), null);
+{
+  const inB = [
+    { id: "1", stack_id: "b", position: 1 },
+    { id: "2", stack_id: "b", position: 2, pulled_at: "2026-10-18" },      // sold: its pocket is free
+    { id: "3", stack_id: "b", position: 3, checked_out_at: "2026-10-18" }, // at a show: pocket held
+    { id: "4", stack_id: "b", position: 5 },
+    { id: "5", stack_id: "a", position: 4 }                                // another stack
+  ];
+  eq("gaps first, a sold card's pocket reused, an away card's kept", freePockets(inB, "b", 3), [2, 4, 6]);
+  eq("an empty binder starts at pocket 1", freePockets([], "b", 2), [1, 2]);
+  eq("asking for none gets none", freePockets(inB, "b", 0), []);
+  const order = [
+    { title: "Zed", position: 12 }, { title: "Abra", position: null }, { title: "Mew", position: 3 }, { title: "Bulba" }
+  ].sort(comparePockets).map((c) => c.title);
+  eq("page order, unpocketed cards last by name", order, ["Mew", "Zed", "Abra", "Bulba"]);
+}
+
 eq("a binder is unordered", isUnorderedStack("Show Binder 1"), true);
 eq("so is the box", isUnorderedStack("Toploaders"), true);
 eq("a stack is not", isUnorderedStack("A"), false);
 eq("a binder is not the toploader box", isToploaderStack("Show Binder 1"), false);
 eq("no plan files into a binder or the box", fileableStacks(stacks).map((s) => s.id), ["a"]);
-eq("a binder label carries no number", positionLabel("Show Binder 1", 4, 9), "📒 Show Binder 1");
+eq("a binder label gives the pocket, never a live count", positionLabel("Show Binder 1", 4, 9, 34), "📒 Show Binder 1 · p4-7");
+eq("a binder card with no pocket says only the binder", positionLabel("Show Binder 1", 4, 9), "📒 Show Binder 1");
 eq("the box keeps its own icon", positionLabel("Toploaders", 4, 9), "🗂 Toploaders");
 eq("a stack still counts", positionLabel("A", 4, 9), "A · 4 of 9");
 const located = locationsBySku(
   [{ id: "1", sku: "B1", stack_id: "b2", position: 1 }, { id: "2", sku: "A1", stack_id: "a", position: 1 }],
   new Map([["b2", "Show Binder 2"], ["a", "A"]])
 );
-eq("⌖ locate names the binder, no number", located.get("b1"), "📒 Show Binder 2");
+eq("⌖ locate names the binder and the pocket", located.get("b1"), "📒 Show Binder 2 · p1-1");
 const plan = planReallocation(3, fileableStacks(stacks).map((s) => ({ ...s, used: 0 })), 100);
 eq("a filing plan only ever picks a real stack", plan.groups.map((g) => g.stackId), ["a"]);
 
@@ -154,6 +182,9 @@ const desk = read("apps/app/app/panel/ShowDesk.js");
 if (!/sellLine\(sb, checkoutLine\(co\)/.test(desk)) {
   fail("a missing binder card must be sold through sellLine(), the one definition of a sale");
 }
+if ((desk.match(/freePockets\(stackCards,/g) || []).length < 2) {
+  fail("filing into a binder (📒 Into, and a check-in To a binder) must take the first free pockets via freePockets()");
+}
 if (!/binderCheckIn\(binderOut, binderMissing\)/.test(desk)) {
   fail("the binder check-in must split through binderCheckIn(), or a card can be left open");
 }
@@ -168,4 +199,4 @@ if (failures) {
   console.error(`\n✗ check-showbinder: ${failures} failure(s)`);
   process.exit(1);
 }
-console.log("✓ check-showbinder: binders named, unnumbered, never planned into, and checked in with nothing left open");
+console.log("✓ check-showbinder: binders named, pocketed with gaps kept, never planned into, and checked in with nothing left open");

@@ -285,7 +285,7 @@ export function pullPlanFor(cards, lines, stackNames = new Map()) {
   const names = stackNames instanceof Map ? stackNames : new Map(Object.entries(stackNames || {}));
   const whereIs = (c) => {
     const rank = ranks.get(c?.id);
-    return rank == null ? null : positionLabel(names.get(c.stack_id), rank, depths.get(c.stack_id));
+    return rank == null ? null : positionLabel(names.get(c.stack_id), rank, depths.get(c.stack_id), c.position);
   };
 
   // Away and already-pulled copies answer a different question — "we own one,

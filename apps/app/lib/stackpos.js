@@ -22,7 +22,8 @@
  * Framework-free and app-import-free, so check-stackpos.mjs can load it under
  * bare node.
  */
-import { isToploaderStack, isUnorderedStack } from "./toploader.js";
+import { isUnorderedStack } from "./toploader.js";
+import { isShowBinder, pocketOf } from "./showbinder.js";
 
 /**
  * The stack and position an eBay SKU was written as, for Auto-import: `A50` is
@@ -88,12 +89,18 @@ export function stackDepths(cards) {
  * whether to start counting from the front or the back of the box, and "12 of
  * 40" tells you it is near the front.
  */
-export function positionLabel(stackName, rank, depth = null) {
+export function positionLabel(stackName, rank, depth = null, position = null) {
   const stack = String(stackName || "").trim() || "—";
   // The toploader box and the Show Binders have no order — you flick through
   // them by name — so a number would send you counting through one that is
   // not in any.
-  if (isUnorderedStack(stack)) return `${isToploaderStack(stack) ? "🗂" : "📒"} ${stack}`;
+  // A Show Binder's position IS its pocket — fixed, gaps left — so it is
+  // given as page and pocket, never as a live count (lib/showbinder.js).
+  if (isShowBinder(stack)) {
+    const pk = pocketOf(position);
+    return pk ? `📒 ${stack} · ${pk.label}` : `📒 ${stack}`;
+  }
+  if (isUnorderedStack(stack)) return `🗂 ${stack}`;
   if (rank == null) return stack;
   return depth ? `${stack} · ${rank} of ${depth}` : `${stack} · ${rank}`;
 }
@@ -122,7 +129,7 @@ export function locationsBySku(cards, stackNames) {
     if (rank == null) continue; // pulled or away: no honest number
     const key = String(c.sku).toLowerCase();
     if (out.has(key)) continue; // first wins, matching the sorted rank order
-    out.set(key, positionLabel(names.get(c.stack_id), rank, depths.get(c.stack_id)));
+    out.set(key, positionLabel(names.get(c.stack_id), rank, depths.get(c.stack_id), c.position));
   }
   return out;
 }

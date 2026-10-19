@@ -228,21 +228,18 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(exporter)) {
   fail("labelexport.js has picked up an app-aliased import — it has to stay loadable under bare node for this check");
 }
 
-if (failures) {
-  console.error(`\ncheck-labels: ${failures} failure(s)\n`);
-  process.exit(1);
-}
 // --- Show Binder labels: the printer's two columns, THEN the SKU -------------
 {
-  eq("a binder label keeps Price then Name first, SKU after", BINDER_LABEL_COLUMNS, ["Price", "Name", "SKU"]);
+  eq("a binder label keeps Price then Name first, SKU and pocket after", BINDER_LABEL_COLUMNS, ["Price", "Name", "SKU", "Pocket"]);
   const { rows: br, unpriced, sold } = binderLabelRows([
-    { card: { sku: "B12", title: "Umbreon VMAX 215/203 Evolving Skies Alt Art NM" }, status: "home", pricePence: 82249 },
+    { card: { sku: "B12", title: "Umbreon VMAX 215/203 Evolving Skies Alt Art NM", position: 34 }, status: "home", pricePence: 82249 },
     { card: { sku: "B13", title: "Gengar 94/102" }, status: "away", pricePence: 2249 },
     { card: { sku: "B14", title: "Pikachu" }, status: "sold", pricePence: 999 },
     { card: { sku: "B15", title: "Mew" }, status: "outofstock", pricePence: 999 },
     { card: { sku: "B16", title: "Alakazam" }, status: "notlisted", pricePence: null }
   ], { nameMax: 30 });
   eq("every label carries its SKU", br.map((r) => r.SKU), ["B12", "B13"]);
+  eq("and its pocket, blank where it has none", br.map((r) => r.Pocket), ["p4-7", ""]);
   eq("the eBay ask on the cash ladder — £10 steps over £100, £5 to £100", br.map((r) => r.Price), ["£820", "£20"]);
   {
     const ladder = binderLabelRows([1249, 1951, 2650, 2749, 9800, 14999, 149].map((p, i) => ({ card: { sku: `L${i}`, title: "Card" }, status: "home", pricePence: p }))).rows.map((r) => r.Price);
@@ -252,9 +249,15 @@ if (failures) {
   eq("a card with no price is named, not dropped", unpriced.map((c) => c.sku), ["B16"]);
   eq("a card sold on eBay gets no label, and is counted", sold, 2);
   const sheet = Buffer.from(labelWorkbook(br, BINDER_LABEL_COLUMNS)).toString("latin1");
-  const at = ["Price", "Name", "SKU"].map((h) => sheet.indexOf(`>${h}<`));
-  ok("the workbook's header runs Price, Name, SKU", at.every((i) => i > 0) && at[0] < at[1] && at[1] < at[2]);
+  const at = ["Price", "Name", "SKU", "Pocket"].map((h) => sheet.indexOf(`>${h}<`));
+  ok("the workbook's header runs Price, Name, SKU, Pocket", at.every((i) => i > 0) && at[0] < at[1] && at[1] < at[2] && at[2] < at[3]);
+  ok("the pocket is in the file", sheet.includes(">p4-7<"));
   ok("the SKU is in the file", sheet.includes(">B12<"));
+}
+
+if (failures) {
+  console.error(`\ncheck-labels: ${failures} failure(s)\n`);
+  process.exit(1);
 }
 
 console.log("check-labels: OK — Price then Name, whole pounds, names cut to fit, and a workbook that opens.");

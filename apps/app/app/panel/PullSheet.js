@@ -8,6 +8,7 @@ import { queuesBySku } from "@/lib/copyqueue";
 import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
+import { pocketOf } from "@/lib/showbinder.js";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -259,7 +260,7 @@ export default function PullSheet() {
         units.push({ lineItemId: l.lineItemId, pulled });
         if (card) {
           takenBySku.set(skl, seen + 1);
-          active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, buyer: l.buyer, ...unitOf });
+          active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
         } else if (skl && awaySkus.has(skl)) {
           // Ordered on eBay while the card is checked out to a show — it can't
           // be picked from a stack. Needs a human call (it's in the show case).
@@ -277,7 +278,8 @@ export default function PullSheet() {
       const na = nameMap.get(a.stackId) || "";
       const nb = nameMap.get(b.stackId) || "";
       if (na !== nb) return stackWalkCompare(na, nb);
-      if (isUnorderedStack(na)) return compareByTitle(a, b);
+      // The box by name; a Show Binder in pocket order, which is position.
+      if (isToploaderStack(na)) return compareByTitle(a, b);
       return (idxByCard.get(a.cardId) ?? 0) - (idxByCard.get(b.cardId) ?? 0);
     });
     // Loose picks are walked set-by-set (alphabetically, matching the shelves),
@@ -327,7 +329,7 @@ export default function PullSheet() {
       if (a.matched !== b.matched) return a.matched ? -1 : 1; // loose (no stack) last
       if (a.matched) {
         if (a.stackNm !== b.stackNm) return stackWalkCompare(a.stackNm, b.stackNm);
-        if (isUnorderedStack(a.stackNm)) return compareByTitle(a, b);
+        if (isToploaderStack(a.stackNm)) return compareByTitle(a, b);
         return (a.position ?? 0) - (b.position ?? 0);
       }
       return bySetThenNumber(a, b); // loose picks: same set-by-set walk as the pick list
@@ -633,9 +635,10 @@ export default function PullSheet() {
       ) : null}
 
       {groups.map(([stackId, gr]) => {
-        // The toploader box and the Show Binders have no positions: they are
-        // listed by name, and the column a stack uses for "count to" says so
-        // instead of a number.
+        // The toploader box has no positions: it is listed by name, and the
+        // column a stack uses for "count to" says so instead of a number. A
+        // Show Binder has POCKETS (fixed, gaps left) — shown as p4-7, in
+        // page order, never as a live count.
         const box = isUnorderedStack(stackName.get(stackId));
         const tl = isToploaderStack(stackName.get(stackId));
         return (
@@ -645,12 +648,12 @@ export default function PullSheet() {
             <span className="badge2">{gr.filter((r) => !picked.has(r.cardId)).length} to pick</span>
           </div>
           {box ? (
-            <p className="hint hint-small" style={{ marginTop: 0 }}>{tl ? "In the toploader box" : "In the Show Binder"}, by name — no positions to count.</p>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>{tl ? "In the toploader box, by name — no positions to count." : "In the Show Binder, page by page — p4-7 is page 4, pocket 7."}</p>
           ) : null}
           <div className="stack-list">
             {gr.map((r) => {
               const isPicked = picked.has(r.cardId);
-              const rank = box ? "🗂" : liveRank(r);
+              const rank = !box ? liveRank(r) : tl ? "🗂" : (pocketOf(r.position)?.label || "📒");
               return (
                 <label className={`ps-row${isPicked ? " done" : ""}`} key={r.key}>
                   <input type="checkbox" checked={isPicked} onChange={() => togglePick(r.cardId)} />

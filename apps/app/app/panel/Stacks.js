@@ -7,6 +7,7 @@ import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
+import { pocketOf, comparePockets } from "@/lib/showbinder.js";
 import Fold from "./Fold";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
@@ -330,7 +331,7 @@ export default function Stacks() {
     const depths = stackDepths(siblings);
     const byStack = new Map(stacks.map((s) => [s.id, s.name]));
     const lines = hits.slice(0, 5).map((h) => {
-      const where = positionLabel(byStack.get(h.stack_id) || "Stack", ranks.get(h.id) ?? null, depths.get(h.stack_id) ?? null);
+      const where = positionLabel(byStack.get(h.stack_id) || "Stack", ranks.get(h.id) ?? null, depths.get(h.stack_id) ?? null, h.position);
       return `${where}${h.sku ? ` (${h.sku})` : ""}`;
     });
     setFinderMsg({ ok: true, text: lines.join(" · ") });
@@ -342,7 +343,11 @@ export default function Stacks() {
   const selBox = isUnorderedStack(sel);
   const selTl = isToploaderStack(sel);
   const boxIcon = selTl ? "🗂" : "📒";
-  const shownCards = useMemo(() => (selBox ? [...cards].sort(compareByTitle) : cards), [cards, selBox]);
+  // The box by name; a Show Binder page by page (its position is its pocket).
+  const shownCards = useMemo(
+    () => (selTl ? [...cards].sort(compareByTitle) : selBox ? [...cards].sort(comparePockets) : cards),
+    [cards, selBox, selTl]
+  );
   // Alphabetise: shorter names first (A–Z, then AA–AH, then longer like ACE /
   // GRADED), alphabetical within each length.
   const sortedStacks = useMemo(
@@ -494,7 +499,7 @@ export default function Stacks() {
             </div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>
               {selBox && !selTl
-                ? "A Show Binder: cards that live in it between shows, listed on eBay while it is at home and checked out together before a show. Listed by name — no positions to count. Manage it from the Show desk."
+                ? "A Show Binder: cards that live in it between shows, listed on eBay while it is at home and checked out together before a show. Listed page by page — p4-7 is page 4, pocket 7, and a sold card leaves its pocket empty. Manage it from the Show desk."
                 : selBox
                 ? "The toploader box: cards kept priced and sleeved between shows, listed by name — there are no positions to count. Check-ins from the Show desk file into it with 🗂 To toploaders."
                 : "Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up."}
@@ -507,7 +512,7 @@ export default function Stacks() {
                 {shownCards.map((c, idx) => (
                   <div className="stack-row" key={c.id}>
                     {selBox ? (
-                      <span className="stack-pos" title={selTl ? "In the toploader box — no positions" : "In the Show Binder — no positions"}>{boxIcon}</span>
+                      <span className="stack-pos" title={selTl ? "In the toploader box — no positions" : "Page and pocket in the Show Binder"}>{selTl ? boxIcon : (pocketOf(c.position)?.label || boxIcon)}</span>
                     ) : (
                       <span className="stack-pos" title="Live position (count from top)">{idx + 1}</span>
                     )}
