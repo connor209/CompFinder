@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { queuesBySku } from "@/lib/copyqueue";
-import { buildPiles, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
+import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
 
@@ -63,6 +63,30 @@ function readDoneLog() {
   }
 }
 
+// Loose / variation picks have no stack card to set pulled_at on, so a Commit
+// records their unit keys here instead — same lifetime as the deal. Without it
+// they could never reach Pack, which only deals committed pulls.
+const LOOSE_KEY = "cf-pullsheet-loose";
+
+function readLooseCommitted() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOOSE_KEY) || "null");
+    if (!raw || !Array.isArray(raw.keys) || Date.now() - (raw.at || 0) > DEAL_TTL_MS) return new Set();
+    return new Set(raw.keys.map(String));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeLooseCommitted(keys) {
+  try {
+    if (keys.size) localStorage.setItem(LOOSE_KEY, JSON.stringify({ at: Date.now(), keys: [...keys] }));
+    else localStorage.removeItem(LOOSE_KEY);
+  } catch {
+    /* private window — committed loose picks won't survive a reload */
+  }
+}
+
 function writeDoneLog(log) {
   try {
     if (log.length) localStorage.setItem(DONE_KEY, JSON.stringify({ at: Date.now(), log }));
@@ -76,7 +100,8 @@ function writeDoneLog(log) {
  * Pull sheet — the daily picking workflow. Lists unshipped eBay orders matched
  * to their stack + live position. You pick a card, tick it, and any other
  * sheet items in the same stack re-rank live (a working preview). Nothing hits
- * the database until you Commit, which marks them pulled for real.
+ * the database until you Commit, which marks them pulled for real. Pack deals
+ * only what has been committed — a tick is a preview, not a card in your hand.
  */
 export default function PullSheet() {
   const [loading, setLoading] = useState(true);
@@ -211,6 +236,8 @@ export default function PullSheet() {
     const active = [];
     const unm = [];
     const awayLines = [];
+    const units = []; // one per card: { lineItemId, pulled } — what Pack may deal
+    const looseDone = readLooseCommitted();
     let done = 0;
     for (const l of lines) {
       const skl = l.sku ? l.sku.trim().toLowerCase() || null : null;
@@ -220,14 +247,16 @@ export default function PullSheet() {
       // first time one isn't. Each unit is its own row, its own tick and its
       // own card — `commit()` keys on card id, so two units of one order commit
       // as the two cards they are.
-      const units = Math.max(1, Number(l.quantity) || 1);
-      for (let n = 0; n < units; n++) {
+      const count = Math.max(1, Number(l.quantity) || 1);
+      for (let n = 0; n < count; n++) {
         const seen = takenBySku.get(skl) || 0;
         const card = skl ? (copyQueues.get(skl) || [])[seen] || null : null;
         // A key per UNIT. Sharing the line item id would collapse two cards
         // back into one row and pull half the order.
-        const key = units > 1 ? `${l.lineItemId}#${n + 1}` : l.lineItemId;
-        const unitOf = units > 1 ? { unit: n + 1, ofUnits: units } : null;
+        const key = count > 1 ? `${l.lineItemId}#${n + 1}` : l.lineItemId;
+        const unitOf = count > 1 ? { unit: n + 1, ofUnits: count } : null;
+        const pulled = !card && !(skl && awaySkus.has(skl)) && ((skl && pulledSkus.has(skl)) || looseDone.has(String(key)));
+        units.push({ lineItemId: l.lineItemId, pulled });
         if (card) {
           takenBySku.set(skl, seen + 1);
           active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, buyer: l.buyer, ...unitOf });
@@ -235,7 +264,7 @@ export default function PullSheet() {
           // Ordered on eBay while the card is checked out to a show — it can't
           // be picked from a stack. Needs a human call (it's in the show case).
           awayLines.push({ key, sku: l.sku, title: l.title });
-        } else if (skl && pulledSkus.has(skl)) {
+        } else if (pulled) {
           done += 1;
         } else {
           // Loose / variation pick — no stack match. Sort these by card number so
@@ -259,15 +288,18 @@ export default function PullSheet() {
     };
     unm.sort(bySetThenNumber);
 
-    // ---- Pack data: every order line in PULL order (stack, then position;
-    // loose/variation picks by card number, last). Piles are numbered later
-    // from the display sequence, so they form left-to-right as you deal.
-    const anyBySku = new Map();
+    // ---- Pack data: every COMMITTED order line in PULL order (stack, then
+    // position; loose/variation picks by card number, last). A line ticked but
+    // not committed is still in its stack as far as the database knows, so it
+    // stays off Pack. Piles are numbered later from the display sequence, so
+    // they form left-to-right as you deal.
+    const committed = committedLineIds(units);
+    const anyBySku = new Map(); // the PULLED copy where there is one — that is the card in your hand
     for (const c of cards) {
       const skl = c.sku ? String(c.sku).trim().toLowerCase() || null : null;
-      if (skl && !anyBySku.has(skl)) anyBySku.set(skl, c);
+      if (skl && (!anyBySku.has(skl) || (c.pulled_at && !anyBySku.get(skl).pulled_at))) anyBySku.set(skl, c);
     }
-    const pack = lines.map((l) => {
+    const pack = lines.filter((l) => committed.has(String(l.lineItemId))).map((l) => {
       const skl = l.sku ? l.sku.trim().toLowerCase() || null : null;
       const card = skl ? anyBySku.get(skl) : null;
       return {
@@ -356,16 +388,19 @@ export default function PullSheet() {
 
   async function commit() {
     const ids = [...picked];
-    if (ids.length === 0) return;
-    if (!confirm(`Commit ${ids.length} pull(s)? This marks them pulled in your stacks.`)) return;
+    const loose = unmatched.filter((u) => loosePicked.has(u.key)).map((u) => String(u.key));
+    const n = ids.length + loose.length;
+    if (n === 0) return;
+    if (!confirm(`Commit ${n} pull(s)? This marks them pulled in your stacks and sends them to Pack.`)) return;
     setCommitting(true);
     setNote("");
     const sb = supabase();
     for (let i = 0; i < ids.length; i += 200) {
       await sb.from("stack_cards").update({ pulled_at: new Date().toISOString() }).in("id", ids.slice(i, i + 200));
     }
+    if (loose.length) writeLooseCommitted(new Set([...readLooseCommitted(), ...loose]));
     setCommitting(false);
-    setNote(`Committed ${ids.length} pull(s). Done for the day 🎉`);
+    setNote(`Committed ${n} pull(s) — they're on Pack now. 🎉`);
     await load();
   }
 
@@ -509,6 +544,7 @@ export default function PullSheet() {
 
   const total = rows.length;
   const pickedInSheet = rows.filter((r) => picked.has(r.cardId)).length;
+  const toCommit = pickedInSheet + unmatched.filter((u) => loosePicked.has(u.key)).length;
   const pileTicked = pileCards.filter((c) => placed.has(c.key)).length;
 
   return (
@@ -537,8 +573,8 @@ export default function PullSheet() {
           <button className="btn btn-ghost" onClick={() => window.print()}>🖨 Print</button>
           <button className="btn btn-ghost" onClick={load} disabled={committing}>↻ Refresh</button>
           {mode === "pick" ? (
-            <button className="btn btn-primary" onClick={commit} disabled={committing || pickedInSheet === 0}>
-              {committing ? "Committing…" : `Commit ${pickedInSheet} pull(s)`}
+            <button className="btn btn-primary" onClick={commit} disabled={committing || toCommit === 0}>
+              {committing ? "Committing…" : `Commit ${toCommit} pull(s)`}
             </button>
           ) : null}
         </div>
@@ -701,7 +737,13 @@ export default function PullSheet() {
         </div>
       ) : null}
       {packView.items.length === 0 ? (
-        <div className="panel"><p className="dd-empty">Nothing to pack — no open orders. 🎉</p></div>
+        <div className="panel">
+          <p className="dd-empty">
+            {total + unmatched.length > 0
+              ? `Nothing committed yet — ${total + unmatched.length} card(s) still to pick. Tick them on Pick and Commit, and they appear here.`
+              : "Nothing to pack — no open orders. 🎉"}
+          </p>
+        </div>
       ) : pile == null ? (
         <div className="panel">
           <p className="dd-empty" style={{ color: "var(--conf-high)" }}>All {packView.piles.length} pile(s) complete — ready to pack &amp; ship. 🎉</p>

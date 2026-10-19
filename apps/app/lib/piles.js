@@ -172,3 +172,21 @@ export function pileLivePositions(cards, pos, ticked) {
   }
   return out;
 }
+
+/**
+ * Which order lines may be dealt on Pack: only those whose every card has been
+ * COMMITTED as pulled. A tick on Pick is a working preview; until Commit the
+ * card may still be in its stack, and dealing it into a pile sends you
+ * reaching into a hand it is not in. A quantity-2 line is one envelope of two
+ * cards, so it waits for both — half an order in a parcel is a short parcel.
+ *
+ * `units` is one entry per CARD: { lineItemId, pulled }.
+ */
+export function committedLineIds(units) {
+  const state = new Map();
+  for (const u of units || []) {
+    const id = String(u.lineItemId);
+    state.set(id, (state.get(id) ?? true) && !!u.pulled);
+  }
+  return new Set([...state].filter(([, ok]) => ok).map(([id]) => id));
+}

@@ -12,7 +12,7 @@
  * guessed into anybody else's pile.
  */
 import { readFileSync } from "node:fs";
-import { buildPiles, currentPileNo, handPositions, pileKeyOf, pileLivePositions, pileOverview, pilePullOrder, shipKeyOf } from "../apps/app/lib/piles.js";
+import { buildPiles, committedLineIds, currentPileNo, handPositions, pileKeyOf, pileLivePositions, pileOverview, pilePullOrder, shipKeyOf } from "../apps/app/lib/piles.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -136,11 +136,26 @@ eq("a postcode alone still compares", shipKeyOf({ postalCode: "G1 1AA" }), "G11A
   eq("overview: nothing done, pile 1 is now", pileOverview(items, piles, new Set()).map((p) => p.state), ["current", "todo", "todo"]);
 }
 
+// --- only committed pulls reach Pack ----------------------------------------
+{
+  const got = committedLineIds([
+    { lineItemId: "a", pulled: true },
+    { lineItemId: "b", pulled: false },
+    { lineItemId: "c", pulled: true },
+    { lineItemId: "c", pulled: false },
+    { lineItemId: "d", pulled: true },
+    { lineItemId: "d", pulled: true },
+  ]);
+  eq("committed: a pulled line packs, an unpulled one does not, a half-pulled quantity-2 waits", [...got].sort(), ["a", "d"]);
+  eq("committed: nothing in, nothing out", [...committedLineIds([])], []);
+}
+
 // --- greps: one definition --------------------------------------------------
 const sheet = readFileSync(new URL("../apps/app/app/panel/PullSheet.js", import.meta.url), "utf8");
 if (!/buildPiles\(/.test(sheet)) fail("PullSheet.js no longer builds piles through lib/piles.js");
 if (!/handPositions\(/.test(sheet)) fail("PullSheet.js numbers the hand itself — use handPositions(), or a finished pile stays counted");
 if (/orderPile\s*=\s*new Map/.test(sheet)) fail("PullSheet.js is numbering piles per ORDER again — use buildPiles()");
+if (!/committedLineIds\(/.test(sheet)) fail("PullSheet.js no longer filters Pack to committed pulls — an uncommitted tick would be dealt into a pile");
 const ebay = readFileSync(new URL("../apps/app/lib/ebay.js", import.meta.url), "utf8");
 if (!/shipKey/.test(ebay)) fail("fetchPendingOrders no longer sends shipKey — every buyer's orders would fold regardless of address");
 
