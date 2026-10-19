@@ -132,6 +132,15 @@ ok(f.games.some((g) => g.key === "pokemon"), "the game options come from the lis
   ok(gsame === 2000, `the game reader's word index disagreed with the full walk on ${2000 - gsame} titles`);
 }
 
+// A Pokémon "Base Set Unlimited" is not Magic's "Unlimited" on My listings
+// either: tagListing() decides the game first and looks inside it.
+{
+  const rows = [["pokemon", "Base Set"], ["magic", "Unlimited"]].map(([game, set_name]) => ({ game, set_name, set_code: "" }));
+  const setOf2 = setMatcher(appSetIndex(rows));
+  const t = tagListing({ title: "Nidoking 11/102 Base Set Unlimited Pokemon Holo MP" }, { setOf: setOf2, gameIndex: buildSetGameIndex(rows) });
+  ok(t.game === "pokemon" && t.set === "Base Set", `My listings filed a Pokémon Base Set Unlimited card as ${t.game} / ${t.set}`);
+}
+
 // The screen goes through the module, not a copy of its readings.
 const inv = readFileSync(new URL("../apps/app/app/panel/Inventory.js", import.meta.url), "utf8");
 ok(/matchesListingFilters/.test(inv) && /tagListing/.test(inv), "Inventory.js filters through lib/listingfilter.js");

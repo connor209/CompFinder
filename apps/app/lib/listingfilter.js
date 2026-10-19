@@ -55,9 +55,12 @@ export const EMPTY_LISTING_FILTERS = Object.freeze({ game: "", set: "", conditio
  */
 export function tagListing(listing, { setOf = null, gameIndex = null } = {}) {
   const title = listing?.title || "";
-  const set = setOf ? setOf(title) : null;
+  const game = gameOf({ category: listing?.extra?.category, title }, gameIndex);
+  // The set is looked for inside the listing's own game when that is known:
+  // a Pokémon "Base Set Unlimited" is not Magic's "Unlimited".
+  const set = setOf ? setOf(title, game) : null;
   return {
-    game: gameOf({ category: listing?.extra?.category, title }, gameIndex),
+    game,
     set: set?.name || NO_SET,
     condition: conditionOf(listing) || NO_CONDITION,
     printing: printingOf(title)

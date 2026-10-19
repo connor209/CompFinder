@@ -236,6 +236,27 @@ const listings = [
   ok(by(/mystery/i)?.set === null, "a number out of 102 with no 'base' or 'shadowless' was read as Base Set — Triumphant is /102 too");
   ok(storefrontFacets(st.cards).sets.pokemon?.some((x) => x.name === "Base Set"), "Base Set is not offered in the Pokémon picker");
 
+  // Found with /api/storefront/diagnose on the real stock, 2026-10-19: every
+  // 1999 card is titled "… Base Set Unlimited Pokemon …", and longest-first
+  // that is Magic's "Unlimited" set. A card whose game is known looks only
+  // at its own game's sets; an unidentified one still matches across games.
+  {
+    const rows2 = [["pokemon", "Base Set"], ["pokemon", "Base Set 2"], ["pokemon", "Base Expansion Pack"], ["pokemon", "Sun & Moon"], ["magic", "Unlimited"]]
+      .map(([game, set_name]) => ({ game, set_name, set_code: "" }));
+    const idx2 = appSetIndex(rows2);
+    const st2 = storefrontStock([], [
+      L(11, "Nidoking 11/102 Base Set Unlimited Pokemon Holo MP", null),
+      L(12, "Energy Removal 92/102 Base Set Unlimited Pokemon HP", null),
+      L(13, "Mr. Mime 27/130 Base Set 2 Pokemon LP", null),
+      L(14, "Switch 132/149 SM Base Set Pokemon Reverse Holo LP", null),
+      L(15, "Black Lotus Unlimited MTG", null)
+    ], { setOf: setMatcher(idx2), gameIndex: buildSetGameIndex(rows2), isPokemonSet: (n) => setInGame(idx2, n, "pokemon") });
+    const by2 = (re) => st2.cards.find((c) => re.test(c.name));
+    ok(by2(/nidoking/i)?.set === "Base Set" && by2(/energy removal/i)?.set === "Base Set", `a Pokémon "Base Set Unlimited" title was filed under ${by2(/nidoking/i)?.set}`);
+    ok(by2(/mr\. mime/i)?.set === "Base Set 2" && by2(/switch/i)?.set === "Sun & Moon", "the game-scoped matcher lost a set it used to find");
+    ok(by2(/black lotus/i)?.game === "magic" && by2(/black lotus/i)?.set === "Unlimited", "a real Magic Unlimited card lost its set");
+  }
+
   const loading = src("apps/app/app/show/[token]/loading.js");
   ok(!/import|fetch\(|props|params/.test(loading), "the loading screen reaches for data — it renders before anything is known about the link");
 }
