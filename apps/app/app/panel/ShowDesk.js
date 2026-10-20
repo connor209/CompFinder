@@ -36,7 +36,7 @@ import Fold from "./Fold";
 import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine, bulkSalePrices, bulkSaleBlockers, parseDealPence } from "@/lib/deal.js";
 import { showOnly, oneOfEach } from "@/lib/streamstock.js";
-import { isSlabTitle, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
+import { isSlabTitle, DEFAULT_NAME_MAX, ebayAskPence, ebayStickerPlan } from "@/lib/showstock.js";
 import { checkoutLabelRows, binderLabelRows, labelWorkbook, LABEL_NAME_KEY, BINDER_LABEL_COLUMNS } from "@/lib/labelexport.js";
 import {
   isToploaderStack, isUnorderedStack, toploaderStackOf, fileableStacks, ensureToploaderStack,
@@ -1561,9 +1561,12 @@ export default function ShowDesk() {
    * is that the number on the label is the number somebody chose.
    */
   async function setSticker(co) {
-    const current = co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : "";
+    // No sticker yet: the box starts at what we ask on eBay, so taking it is
+    // one Enter. Never over a sticker already on the card.
+    const ask = co.sticker_pence == null ? ebayAskPence(co, listings) : null;
+    const current = co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : ask != null ? (ask / 100).toFixed(2) : "";
     const raw = prompt(
-      `Sticker price for "${co.sku || co.title || "card"}" — £… (leave blank to take the sticker off)`,
+      `Sticker price for "${co.sku || co.title || "card"}" — £…${ask != null ? " (filled in from our eBay price)" : ""} (leave blank to take the sticker off)`,
       current
     );
     if (raw === null) return;
@@ -1605,6 +1608,59 @@ export default function ShowDesk() {
     } finally {
       setBusy(false);
     }
+  }
+
+  /**
+   * Put our eBay price on the stickers of the TICKED cards — see
+   * ebayStickerPlan() in showstock.js. Ticked only, like £ Sold: this is for
+   * picking cards out and stickering them, and "nothing ticked means all"
+   * would overwrite the whole box. The ticks are kept, so 🏷 Labels prints the
+   * same cards next. Rounded to the pound, not laddered. Confirms first, and
+   * says how many stickers somebody already set it would replace; a card with
+   * no eBay price keeps its sticker and is named.
+   */
+  async function applyEbayStickers(rows) {
+    const { changes, unlisted, same, replacing } = ebayStickerPlan(rows, listings);
+    const named = unlisted.slice(0, 3).map((c) => c.sku || c.title || "untitled").join(", ");
+    const more = unlisted.length > 3 ? ` and ${unlisted.length - 3} more` : "";
+    const gap = unlisted.length
+      ? ` ${unlisted.length} card${unlisted.length === 1 ? " has" : "s have"} no eBay price and ${unlisted.length === 1 ? "keeps its" : "keep their"} sticker: ${named}${more}.`
+      : "";
+    if (changes.length === 0) {
+      setMsg(`No stickers to change${same ? ` — ${same} already match${same === 1 ? "es" : ""} the eBay price` : ""}.${gap}`);
+      return;
+    }
+    const ok = confirm(
+      `Sticker ${changes.length} card${changes.length === 1 ? "" : "s"} at our eBay price, rounded to the pound?` +
+      (replacing ? `\n\n${replacing} of them already ha${replacing === 1 ? "s a sticker" : "ve stickers"} that will be replaced.` : "") +
+      (unlisted.length ? `\n\n${unlisted.length} with no eBay price will be left as they are.` : "")
+    );
+    if (!ok) return;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const at = new Date().toISOString();
+    let done = 0;
+    let firstErr = null;
+    for (const c of changes) {
+      const { error: upErr } = await sb
+        .from("stock_checkouts")
+        .update({ sticker_pence: c.pence, sticker_set_at: at, sticker_batch_id: null })
+        .eq("id", c.id);
+      if (upErr) { firstErr = firstErr || upErr; continue; }
+      done++;
+    }
+    setBusy(false);
+    if (firstErr && /sticker_pence|does not exist|schema cache/i.test(firstErr.message || "")) {
+      setMsg("Sticker prices can't be saved yet — migration 024 hasn't been applied in Supabase.");
+    } else {
+      setMsg(
+        `${done} sticker${done === 1 ? "" : "s"} set from our eBay price — still ticked, so 🏷 Labels prints them.` +
+        (firstErr ? ` ${changes.length - done} couldn't be saved: ${firstErr.message}` : "") +
+        (same ? ` ${same} already matched.` : "") + gap
+      );
+    }
+    await load();
   }
 
   async function markSold(co) {
@@ -2687,6 +2743,14 @@ export default function ShowDesk() {
                 <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
                 <button className="btn btn-ghost" onClick={downloadSelectedLabels} disabled={busy || selCount === 0} title="Label file (.xlsx) for these cards, from the sticker prices they already carry — no pricing run">🏷 Labels ({selCount})</button>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => applyEbayStickers(soldTicked)}
+                  disabled={busy || soldTicked.length === 0}
+                  title={soldTicked.length ? "Sticker the ticked cards at what we ask on eBay, rounded to the pound — they stay ticked, so 🏷 Labels prints them next" : "Tick the cards to sticker first — this never applies to every card on screen"}
+                >
+                  🏷 eBay price → sticker ({soldTicked.length})
+                </button>
                 <button className="btn btn-ghost" onClick={() => priceSelected(selected.filter((o) => o.title).map((o) => o.id))} disabled={busy || selCount === 0} title="Price just these cards on the Batch screen and get sticker prices for them, rather than the whole pool">💷 Price these ({selCount})</button>
                 <button
                   className="btn btn-ghost"

@@ -33,6 +33,8 @@ import {
   stickerRows,
   stickerSummary,
   toPoundPence,
+  ebayAskPence,
+  ebayStickerPlan,
   STICKER_MIN_PENCE,
   HELD_CONFIDENCE,
   isSlabTitle
@@ -348,6 +350,45 @@ for (const [title, want] of [
 if (!/oneOfEach\(\s*filterByGames\(recPool, recGames\)\.filter\(\(r\) => !\(recNoGraded && r\.graded\)\)/.test(desk) ||
     !/recDistinct\.rows\s*\.slice\(/.test(desk)) {
   fail("the graded filter and the duplicate filter on recommendations must run BEFORE the top-N slice, or 'top 20' shows fewer than 20");
+}
+
+// Our eBay price onto an AWAY card's sticker. The listing of a card at a show
+// is hidden by zeroing its quantity, so the availability test every other
+// screen uses would find no price for exactly the cards on the desk.
+{
+  const listings = [
+    { ebay_item_id: "111", sku: "A1", price_value: "22.49", quantity: 0 },   // hidden by us
+    { ebay_item_id: "222", sku: "A2", price_value: "8.99", quantity: 1 },
+    { ebay_item_id: "333", sku: "A3", price_value: "4.00", quantity: 1 },
+    { ebay_item_id: "444", sku: "OLD", price_value: "50.00", quantity: 1 },
+    { ebay_item_id: "555", sku: "a9", price_value: "3.20", quantity: 1 }
+  ];
+  eq("a zeroed listing still gives its price, to the POUND not the ladder (£22.49 → £22, never £20)",
+    ebayAskPence({ ebay_item_id: "111", sku: "A1" }, listings), 2200);
+  eq("the checkout's item id beats its SKU",
+    ebayAskPence({ ebay_item_id: "444", sku: "A2" }, listings), 5000);
+  eq("an item id no longer listed (ended to hide it) falls back to the SKU, case-folded",
+    ebayAskPence({ ebay_item_id: "999", sku: "A9" }, listings), 300);
+  eq("no listing at all is no price, not £0", ebayAskPence({ ebay_item_id: "999", sku: "ZZ" }, listings), null);
+  eq("a listing with no price is no price", ebayAskPence({ sku: "N" }, [{ sku: "N", price_value: null }]), null);
+
+  const plan = ebayStickerPlan([
+    { id: 1, ebay_item_id: "111", sku: "A1", sticker_pence: null },  // new
+    { id: 2, ebay_item_id: "222", sku: "A2", sticker_pence: 500 },   // replaces £5
+    { id: 3, ebay_item_id: "333", sku: "A3", sticker_pence: 400 },   // already right
+    { id: 4, sku: "GONE", sticker_pence: 700 }                       // keeps its sticker
+  ], listings);
+  eq("only the stickers that MOVE are written", plan.changes.map((c) => [c.id, c.pence, c.was]), [[1, 2200, null], [2, 900, 500]]);
+  eq("a sticker already at the eBay price is counted, not rewritten", plan.same, 1);
+  eq("the confirm can say how many stickers somebody set get replaced", plan.replacing, 1);
+  eq("a card with no eBay price is named and left alone", plan.unlisted.map((c) => c.id), [4]);
+
+  if (!/applyEbayStickers\(soldTicked\)/.test(desk) || /applyEbayStickers\(selected\)/.test(desk)) {
+    fail("🏷 eBay price → sticker must act on the TICKED cards on screen (tickedOnScreen), never selectionFor()'s nothing-ticked-means-all");
+  }
+  if (!/async function applyEbayStickers[\s\S]{0,1600}confirm\(/.test(desk)) {
+    fail("🏷 eBay price → sticker overwrites stickers somebody set, so it must confirm first");
+  }
 }
 
 if (failures) {

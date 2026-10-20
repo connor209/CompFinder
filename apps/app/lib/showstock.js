@@ -165,6 +165,54 @@ export function toPoundPence(pence) {
 }
 
 /**
+ * What we ask on eBay for a card that is AWAY, as the sticker it would become.
+ *
+ * Not `isListingAvailable()`, which is the right test everywhere else: a card
+ * checked out to a show has its listing hidden by zeroing the quantity, so the
+ * cards on the desk are exactly the ones that test calls sold out. That zero
+ * is ours, and the price beside it is still the price we chose. The checkout's
+ * own item id is asked first — it is the listing this copy was hidden from —
+ * then the SKU. A listing ENDED to hide it drops out of `ebay_listings` on the
+ * next sync, and that card has no eBay price to take: it is named, not guessed.
+ *
+ * Rounded with toPoundPence(), never the cash ladder: the eBay price is a
+ * number somebody already decided on.
+ */
+export function ebayAskPence(checkout, listings) {
+  const id = checkout?.ebay_item_id != null ? String(checkout.ebay_item_id) : "";
+  const sku = checkout?.sku ? String(checkout.sku).toLowerCase() : "";
+  let bySku = null;
+  for (const l of listings || []) {
+    if (l?.price_value == null || l.price_value === "") continue;
+    if (id && l.ebay_item_id != null && String(l.ebay_item_id) === id) return toPoundPence(Number(l.price_value) * 100);
+    if (!bySku && sku && l.sku && String(l.sku).toLowerCase() === sku) bySku = l;
+  }
+  return bySku ? toPoundPence(Number(bySku.price_value) * 100) : null;
+}
+
+/**
+ * The away cards' eBay prices, laid out as sticker writes. `changes` are the
+ * rows whose sticker would move — a card already stickered at its eBay price
+ * is `same` and is not written again — and `replacing` counts the changes that
+ * overwrite a sticker somebody set, so the confirm can say so before it does.
+ * A card with no eBay price keeps whatever sticker it has and is `unlisted`.
+ */
+export function ebayStickerPlan(checkouts, listings) {
+  const changes = [];
+  const unlisted = [];
+  let same = 0;
+  let replacing = 0;
+  for (const co of checkouts || []) {
+    const pence = ebayAskPence(co, listings);
+    if (pence == null) { unlisted.push(co); continue; }
+    if (co.sticker_pence === pence) { same++; continue; }
+    if (co.sticker_pence != null) replacing++;
+    changes.push({ id: co.id, pence, was: co.sticker_pence ?? null });
+  }
+  return { changes, unlisted, same, replacing };
+}
+
+/**
  * How much of a card's name fits on a label, by label size. A Niimbot label is
  * physically small, and the printer does not wrap — an over-long name is
  * silently cut off at the edge, or shrunk to something nobody can read across
