@@ -47,6 +47,16 @@ export async function POST(request) {
         .single();
       if (!row) return NextResponse.json({ ok: false, error: "That listing isn't in your synced inventory." }, { status: 404 });
       await reviseItemQuantity(token, itemId, 1);
+      // Our mirror of the listing says what the last sync read — quantity 0,
+      // since the card was away — and nothing reads eBay itself. Left alone,
+      // every screen calls the card "sold out on eBay" until the next sync,
+      // and the binder refuses its label. eBay has just answered, so say so.
+      await admin
+        .from("ebay_listings")
+        .update({ quantity: 1 })
+        .eq("user_id", user.id)
+        .eq("ebay_item_id", itemId)
+        .then(() => {}, () => {});
       return NextResponse.json({ ok: true, itemId });
     }
 
