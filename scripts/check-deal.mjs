@@ -34,7 +34,7 @@ import {
   setLineOn, setLinePrice, setDealTotal, activeLines, dealSubtotal,
   splitDeal, dealPrices, dealBlockers, dealSummary, sellLine, sellDeal,
   retryEnds, parseDealPence, priceSourceLabel, FROM_BOX, FROM_LIVE,
-  loadDeal, saveDeal, DEAL_TTL_MS
+  loadDeal, saveDeal, DEAL_TTL_MS, bulkSalePrices, bulkSaleBlockers
 } from "../apps/app/lib/deal.js";
 
 let failures = 0;
@@ -158,6 +158,26 @@ console.log("2. an agreed lot price, split back over the cards");
 
   eq("no lot total means every card keeps its own price", splitDeal(lines, null), [3400, 2200, 1250, 4199]);
   eq("no lines, no parts", splitDeal([], 5000), []);
+
+  // Several away cards marked sold at once, off the Show Desk.
+  const away = [
+    { id: "a", sticker_pence: 1000 },
+    { id: "b", sticker_pence: 3000 },
+    { id: "c", sticker_pence: null }
+  ];
+  const asMap = (m) => Object.fromEntries(m);
+  eq("untouched boxes start at the sticker", asMap(bulkSalePrices(away, {})), { a: 1000, b: 3000, c: null });
+  eq("a typed price wins, a cleared box records no price",
+    asMap(bulkSalePrices(away, { a: "8", b: "" })), { a: 800, b: null, c: null });
+  const lot = bulkSalePrices(away, {}, 3500);
+  eq("a lot total splits by sticker (the unpriced card is refused by the blockers below)", asMap(lot), { a: 875, b: 2625, c: 0 });
+  eq("and sums to what changed hands", [...lot.values()].reduce((t, n) => t + n, 0), 3500);
+  eq("a lot total with an unpriced card among priced ones is refused, naming it",
+    bulkSaleBlockers(away, {}, 3500).map((r) => r.co.id), ["c"]);
+  eq("text that isn't a price blocks, lot or not", bulkSaleBlockers(away, { a: "ten" }).map((r) => r.co.id), ["a"]);
+  eq("typing its price clears that", bulkSaleBlockers(away, { c: "5" }, 3500), []);
+  eq("with no lot total a blank price is allowed", bulkSaleBlockers(away, {}, null), []);
+  eq("a lot over no prices splits evenly", asMap(bulkSalePrices([{ id: "x" }, { id: "y" }], {}, 1001)), { x: 501, y: 500 });
 }
 
 /* ========================================================= 3. the basket UI

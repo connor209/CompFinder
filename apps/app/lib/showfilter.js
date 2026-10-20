@@ -369,3 +369,16 @@ export function selectionFor(visible, selectedIds) {
   if (ids.size === 0) return rows;
   return rows.filter((co) => ids.has(co.id));
 }
+
+/**
+ * The rows ticked AND on screen, and never "all of them". For an action that
+ * cannot be undone by filing the cards again — recording a sale ends the
+ * listing and pulls the card — nothing ticked means nothing, not every card
+ * the search happens to show. The rest of the selectionFor() rule holds: a
+ * tick the search hides is not acted on.
+ */
+export function tickedOnScreen(visible, selectedIds) {
+  const ids = selectedIds instanceof Set ? selectedIds : new Set(selectedIds || []);
+  if (ids.size === 0) return [];
+  return selectionFor(visible, ids);
+}

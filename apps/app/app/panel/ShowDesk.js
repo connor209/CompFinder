@@ -15,7 +15,7 @@ import {
 } from "@/lib/checkout";
 import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
 import {
-  showView, selectionFor, facetsOf, listingState, matchesQuery, skuBatch, titleMatches, skuInBatch,
+  showView, selectionFor, tickedOnScreen, facetsOf, listingState, matchesQuery, skuBatch, titleMatches, skuInBatch,
   openCheckoutIndex, isCardAway,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
@@ -34,7 +34,7 @@ import StorefrontPanel from "./StorefrontPanel";
 import WishPickup from "./WishPickup";
 import Fold from "./Fold";
 import { parseWishCodes } from "@/lib/wishlist.js";
-import { checkoutLine, listingLine, sellLine } from "@/lib/deal.js";
+import { checkoutLine, listingLine, sellLine, bulkSalePrices, bulkSaleBlockers, parseDealPence } from "@/lib/deal.js";
 import { showOnly, oneOfEach } from "@/lib/streamstock.js";
 import { isSlabTitle, DEFAULT_NAME_MAX } from "@/lib/showstock.js";
 import { checkoutLabelRows, binderLabelRows, labelWorkbook, LABEL_NAME_KEY, BINDER_LABEL_COLUMNS } from "@/lib/labelexport.js";
@@ -260,6 +260,9 @@ export default function ShowDesk() {
   const [usedByStack, setUsedByStack] = useState(new Map());
   const [capacity, setCapacity] = useState(DEFAULT_STACK_CAPACITY);
   const [plan, setPlan] = useState(null); // proposed reallocation, awaiting confirm
+  // Several ticked cards being marked sold at once: the price typed per card
+  // (id -> text; untouched means the sticker) and an optional lot total.
+  const [bulkSale, setBulkSale] = useState(null);
   const profileSettings = useRef({});
   const router = useRouter();
 
@@ -718,6 +721,9 @@ export default function ShowDesk() {
   );
   const visible = view.rows;
   const selected = useMemo(() => selectionFor(visible, sel), [visible, sel]);
+  // What £ Sold (N) sells: ticked AND on screen, never "all" — a sale ends the
+  // listing and pulls the card, so nothing ticked sells nothing.
+  const soldTicked = useMemo(() => tickedOnScreen(visible, sel), [visible, sel]);
   // The customer's list. Same search, same sort, same rows — projected through
   // showcounter.js so what reaches a stranger's eyes is an allow-list rather
   // than this row with the private bits hidden by CSS.
@@ -1625,6 +1631,49 @@ export default function ShowDesk() {
       r.ok
         ? `Marked ${co.sku || "card"} sold${pence != null ? ` for ${pounds(pence)}` : ""}.${r.warning ? ` ⚠ ${r.warning} — end it on eBay by hand.` : ""}`
         : `That sale couldn't be recorded: ${r.error}`
+    );
+    await load();
+  }
+
+  /**
+   * Mark every ticked card sold in one go. Each goes through sellLine(), the
+   * one definition of selling a card, exactly as £ Sold would — resolved,
+   * pulled, listing ended once — so a failed eBay call never rolls a sale
+   * back. A card resolved elsewhere since the list was drawn is refused by
+   * sellLine() and named, rather than counted twice.
+   */
+  async function sellTicked() {
+    if (!bulkSale || soldTicked.length === 0) return;
+    const totalPence = parseDealPence(bulkSale.total).pence;
+    if (bulkSaleBlockers(soldTicked, bulkSale.typed, totalPence).length) return;
+    const prices = bulkSalePrices(soldTicked, bulkSale.typed, totalPence);
+    const sum = [...prices.values()].reduce((t, n) => t + (n || 0), 0);
+    if (!confirm(
+      `Record ${soldTicked.length} card${soldTicked.length === 1 ? "" : "s"} SOLD at the show${sum ? ` for ${pounds(sum)}` : ""} and end ${soldTicked.length === 1 ? "its listing" : "their listings"} on eBay?`
+    )) return;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const warnings = [];
+    const soldIds = [];
+    let takings = 0;
+    for (let i = 0; i < soldTicked.length; i++) {
+      const co = soldTicked[i];
+      setProgress(`Recording sale ${i + 1} of ${soldTicked.length}…`);
+      const pence = prices.get(co.id) ?? null;
+      const r = await sellLine(sb, checkoutLine(co), pence, { event: co.event || event || null });
+      if (!r.ok) { warnings.push(`${co.sku || co.title || "card"}: ${r.error}`); continue; }
+      soldIds.push(co.id);
+      takings += pence || 0;
+      if (r.warning) warnings.push(`${co.sku || "card"}: ${r.warning} — end it on eBay by hand`);
+    }
+    setProgress("");
+    setBusy(false);
+    setSel((prev) => { const n = new Set(prev); for (const id of soldIds) n.delete(id); return n; });
+    if (soldIds.length === soldTicked.length) setBulkSale(null);
+    setMsg(
+      `Marked ${soldIds.length} card${soldIds.length === 1 ? "" : "s"} sold${takings ? ` for ${pounds(takings)}` : ""}.` +
+      (warnings.length ? ` ⚠ ${warnings.join(" · ")}` : "")
     );
     await load();
   }
@@ -2639,6 +2688,15 @@ export default function ShowDesk() {
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
                 <button className="btn btn-ghost" onClick={downloadSelectedLabels} disabled={busy || selCount === 0} title="Label file (.xlsx) for these cards, from the sticker prices they already carry — no pricing run">🏷 Labels ({selCount})</button>
                 <button className="btn btn-ghost" onClick={() => priceSelected(selected.filter((o) => o.title).map((o) => o.id))} disabled={busy || selCount === 0} title="Price just these cards on the Batch screen and get sticker prices for them, rather than the whole pool">💷 Price these ({selCount})</button>
+                <button
+                  className="btn btn-ghost"
+                  style={{ color: "var(--conf-high)" }}
+                  onClick={() => { setPlan(null); setBackPickerOpen(false); setBulkSale((v) => (v ? null : { typed: {}, total: "" })); }}
+                  disabled={busy || soldTicked.length === 0}
+                  title={soldTicked.length ? "Record the ticked cards sold at the show — each one's price, or one lot total split across them" : "Tick the cards that sold first — a sale never applies to every card on screen"}
+                >
+                  £ Sold ({soldTicked.length})
+                </button>
               </div>
               {labelGap.length > 0 ? (
                 <p className="hint hint-small" style={{ marginTop: 6 }}>
@@ -2650,6 +2708,92 @@ export default function ShowDesk() {
               ) : null}
             </div>
             )}
+
+            {bulkSale && !customerMode ? (() => {
+              const totalPence = parseDealPence(bulkSale.total).pence;
+              const totalError = parseDealPence(bulkSale.total).error;
+              const prices = bulkSalePrices(soldTicked, bulkSale.typed, totalPence);
+              const blockers = bulkSaleBlockers(soldTicked, bulkSale.typed, totalPence);
+              const sum = [...prices.values()].reduce((t, n) => t + (n || 0), 0);
+              const unpriced = soldTicked.filter((co) => prices.get(co.id) == null).length;
+              const setTyped = (id, text) => setBulkSale((v) => ({ ...v, typed: { ...v.typed, [id]: text } }));
+              return (
+                <div className="sd-plan">
+                  <div className="sd-plan-head">
+                    <b>Mark {soldTicked.length} card{soldTicked.length === 1 ? "" : "s"} sold</b>
+                    <button className="btn btn-ghost" onClick={() => setBulkSale(null)} disabled={busy}>Cancel</button>
+                  </div>
+                  {soldTicked.length === 0 ? (
+                    <p className="hint hint-small">Nothing ticked on screen — tick the cards that sold.</p>
+                  ) : (
+                    <>
+                      <p className="hint hint-small" style={{ marginTop: 0 }}>
+                        Each price starts at its sticker; change it, or clear it to record that sale without a price. Or type
+                        one lot total and it splits across the cards by their prices, summing to exactly what changed hands.
+                      </p>
+                      <div className="stack-list sd-batch-list">
+                        {soldTicked.map((co) => {
+                          const typed = bulkSale.typed[co.id];
+                          const shown = typed !== undefined ? typed : (co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : "");
+                          const block = blockers.find((b) => b.co.id === co.id);
+                          return (
+                            <div className="ps-row sd-rec-row" key={co.id}>
+                              <span className="stack-sku">{co.sku || "—"}</span>
+                              <span className="stack-title">{co.title || <em>—</em>}</span>
+                              {totalPence != null ? (
+                                <span className="sd-price" title="This card's share of the lot total">{prices.get(co.id) != null ? pounds(prices.get(co.id)) : "—"}</span>
+                              ) : null}
+                              <input
+                                className="sd-count"
+                                style={{ width: 80 }}
+                                inputMode="decimal"
+                                value={shown}
+                                onChange={(e) => setTyped(co.id, e.target.value)}
+                                placeholder="no price"
+                                aria-label={`Price ${co.sku || co.title || "this card"} sold for`}
+                                disabled={busy}
+                              />
+                              {block ? <span className="hint hint-small" style={{ margin: 0, color: "var(--bad-ink)" }}>{block.why}</span> : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="sd-recbar">
+                        <label className="sd-toggle">
+                          Lot total £
+                          <input
+                            className="sd-count"
+                            style={{ width: 90 }}
+                            inputMode="decimal"
+                            value={bulkSale.total}
+                            onChange={(e) => setBulkSale((v) => ({ ...v, total: e.target.value }))}
+                            placeholder="optional"
+                            aria-label="One agreed total for all of these cards"
+                            disabled={busy}
+                          />
+                        </label>
+                        <button
+                          className="btn btn-primary"
+                          onClick={sellTicked}
+                          disabled={busy || blockers.length > 0 || !!totalError}
+                        >
+                          £ Mark {soldTicked.length} sold{sum ? ` — ${pounds(sum)}` : ""}
+                        </button>
+                      </div>
+                      {totalError ? <p className="hint hint-small" style={{ color: "var(--bad-ink)" }}>Lot total: {totalError}</p> : null}
+                      {blockers.length ? (
+                        <p className="hint hint-small" style={{ color: "var(--bad-ink)" }}>
+                          Can&apos;t record this yet: {blockers.slice(0, 3).map((b) => b.co.sku || b.co.title || "a card").join(", ")}
+                          {blockers.length > 3 ? `, and ${blockers.length - 3} more` : ""} — {blockers[0].why}.
+                        </p>
+                      ) : unpriced ? (
+                        <p className="hint hint-small">{unpriced} will be recorded sold with no price.</p>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              );
+            })() : null}
 
             {plan && !customerMode ? (
               <div className="sd-plan">

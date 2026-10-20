@@ -1714,6 +1714,18 @@ and every count on the buttons comes from that one function.
 `check-showfilter.mjs` pins it, along with a grep against the old inline
 convention coming back.
 
+**A sale is the one bulk action where nothing ticked means NOTHING.**
+**£ Sold (N)** on the away list's bulk bar marks the ticked cards sold at
+once, and reads `tickedOnScreen()` rather than `selectionFor()`: filing the
+whole screen by accident is put right by filing the cards again, while a sale
+ends listings and pulls cards. A tick the search hides still is not acted on.
+Each card goes through `sellLine()`, the same as £ Sold and the deal. Every
+price starts at its sticker and can be typed over or cleared (sold with no
+price, as £ Sold allows), or one lot total splits back over the cards through
+`splitDeal()`. `bulkSalePrices()` and `bulkSaleBlockers()` in `deal.js` own
+that, and the sale is refused, naming the cards, when a price box holds text
+that isn't a price or a lot total would book an unpriced card at £0.
+
 Two smaller rules worth keeping. **A card with no sticker sorts last in both
 price directions** — treating it as £0 would head the cheapest-first list with
 the cards that have no price at all, which is the opposite of what that view is

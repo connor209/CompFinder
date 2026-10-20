@@ -273,6 +273,55 @@ export function splitDeal(lines, totalPence) {
   return out;
 }
 
+/**
+ * Several away cards marked sold at once, off the Show Desk's away list.
+ * `rows` are checkout rows, `typed` maps id -> the price text in that row's
+ * box, `totalPence` an agreed lot total or null.
+ *
+ * Per card, the typed price wins; a box left untouched starts at the sticker,
+ * as £ Sold does, and a box CLEARED records the sale with no price, as a
+ * blank £ Sold does. A lot total splits back over the cards through
+ * splitDeal(), so the parts sum to what changed hands; with no card priced
+ * it splits evenly. bulkSaleBlockers() says when it cannot be split at all.
+ *
+ * Returns Map(id -> pence | null).
+ */
+function ownPrice(co, typed) {
+  const t = typed?.[co.id];
+  if (t !== undefined) return parseDealPence(t);
+  return { pence: co.sticker_pence != null ? Math.round(co.sticker_pence) : null, error: null };
+}
+
+export function bulkSalePrices(rows, typed = {}, totalPence = null) {
+  const list = (rows || []).filter(Boolean);
+  const own = list.map((co) => ownPrice(co, typed).pence);
+  if (totalPence == null) return new Map(list.map((co, i) => [co.id, own[i]]));
+  const parts = splitDeal(own.map((p) => ({ price: p })), totalPence);
+  return new Map(list.map((co, i) => [co.id, parts[i]]));
+}
+
+/**
+ * The cards the sale cannot go ahead with, each with why: a price box whose
+ * text isn't a price (recording it blank would lose what was typed), and —
+ * under a lot total — a card priced at nothing while others are priced, which
+ * splitDeal() would book at £0, a sale nobody agreed. Non-empty means the
+ * sale is refused and the cards named, the dealBlockers() rule. With no lot
+ * total a blank price is a sale recorded without one, as £ Sold allows.
+ *
+ * Returns [{ co, why }].
+ */
+export function bulkSaleBlockers(rows, typed = {}, totalPence = null) {
+  const list = (rows || []).filter(Boolean);
+  const own = list.map((co) => ownPrice(co, typed));
+  const priced = own.some((p) => p.pence != null);
+  const out = [];
+  list.forEach((co, i) => {
+    if (own[i].error) out.push({ co, why: own[i].error });
+    else if (totalPence != null && priced && own[i].pence == null) out.push({ co, why: "no price to split the lot by" });
+  });
+  return out;
+}
+
 /** id -> the pence that line will actually be sold at. */
 export function dealPrices(deal) {
   const on = activeLines(deal);
@@ -606,7 +655,7 @@ export default {
   MAX_LINES, FROM_BOX, FROM_LIVE, PRICE_SOURCES, priceSourceLabel,
   listingLine, checkoutLine, emptyDeal, inDeal, addLine, removeLine,
   setLineOn, setLinePrice, setDealTotal, parseDealPence, activeLines,
-  dealSubtotal, splitDeal, dealPrices, dealBlockers, dealSummary,
+  dealSubtotal, splitDeal, dealPrices, dealBlockers, dealSummary, bulkSalePrices, bulkSaleBlockers,
   loadDeal, saveDeal, clearDeal, publishDeal, subscribeDeal,
   sellLine, sellDeal, retryEnds, poundsStr
 };

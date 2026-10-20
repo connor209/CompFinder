@@ -34,7 +34,7 @@ import {
   showView,
   isFiltering,
   facetsOf,
-  selectionFor,
+  selectionFor, tickedOnScreen,
   skuInBatch,
   skuBatch,
   openCheckoutIndex,
@@ -218,6 +218,10 @@ eq("ticked rows are the selection", ids(selectionFor(visible, new Set(["2"]))), 
 eq("a ticked row that is now hidden is NOT acted on", ids(selectionFor(visible, new Set(["2", "3"]))), ["2"]);
 eq("an empty list acts on nothing", ids(selectionFor([], new Set(["1"]))), []);
 eq("an array of ids works like a Set", ids(selectionFor(visible, ["1"])), ["1"]);
+// A sale is not a filing: nothing ticked sells NOTHING, never the screenful.
+eq("nothing ticked sells nothing", ids(tickedOnScreen(visible, new Set())), []);
+eq("ticked rows are sold", ids(tickedOnScreen(visible, new Set(["1", "2"]))), ["1", "2"]);
+eq("a ticked row the search hides is not sold", ids(tickedOnScreen(visible, new Set(["2", "3"]))), ["2"]);
 
 // --- 7. the screen reads this file, and only this file ---------------------
 // Two definitions of "which rows am I looking at" would disagree the moment
