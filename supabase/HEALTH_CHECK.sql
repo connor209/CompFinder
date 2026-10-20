@@ -159,6 +159,10 @@ with schema_checks as (
         then '✅ present' else '❌ missing' end),
     (37, 'SCHEMA · 033 packed orders', 'packed_orders table',
       case when to_regclass('public.packed_orders') is not null
+        then '✅ present' else '❌ missing' end),
+    (38, 'SCHEMA · 034 binder added date', 'stack_cards.binder_added_at column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='stack_cards' and column_name='binder_added_at')
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),

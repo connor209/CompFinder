@@ -2535,10 +2535,13 @@ digital binder the desk turns round to a customer.
   off state the desk already holds, so it costs no request.
 - **Sorting the list never moves a card; ↻ Re-pocket A–Z does.** The view's
   sort (`sortBinderRows`: pocket, newest in binder, name, price — unpriced
-  last both ways) is for finding a card. "Newest" is the highest slot first,
-  since a card filed in always goes to the back; there is no timestamp for
-  it (`added_at` is when the card was first stacked), so after a re-pocket it
-  only knows about cards filed since.
+  last both ways) is for finding a card. "Newest" reads `binder_added_at`
+  (migration 034): stamped by 📒 Into binder and by a check-in into a binder
+  the card was not already in, kept by a re-pocket, cleared by ↩ Out — never
+  `added_at`, which is when the card was first stacked. It is written in a
+  SEPARATE update after the move, so a database without 034 still files the
+  card. Cards with no date went in before 034 and sort after every dated one,
+  highest slot first, which is right until a re-pocket renumbers them.
 - **Filtering is `filterBinderRows()`**: the search (name, eBay SKU or binder
   SKU), a pasted SKU list, and a status, all AND-ed. In the list an eBay SKU
   with a digit is EXACT — "BP12" is never BP120, which the search box's

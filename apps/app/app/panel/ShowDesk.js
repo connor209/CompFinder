@@ -46,7 +46,7 @@ import {
   isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder, binderCode,
   binderCounts, binderContents, openFromBinder, binderCheckIn,
   binderSlot, nextSlots, codeless, comparePockets, sortBinderRows, repocketPlan, BINDER_VIEW_SORTS,
-  BINDER_VIEW_STATUSES, filterBinderRows
+  BINDER_VIEW_STATUSES, filterBinderRows, binderAddedAt
 } from "@/lib/showbinder.js";
 
 /** `return_mode` on a checkout filed into a Show Binder (016 leaves it free text). */
@@ -856,6 +856,17 @@ export default function ShowDesk() {
    * than moved: the first would move a card that is on a table, the second
    * would quietly empty one binder into another.
    */
+  /**
+   * Stamp (or, with null, clear) when cards went into a binder — migration
+   * 034. A separate update AFTER the move, never part of it: on a database
+   * without the column the move must still happen, and a failed stamp only
+   * costs the newest-in-binder sort its date, which falls back to the slot.
+   */
+  async function stampBinderAdded(sb, ids, when) {
+    if (!ids.length) return;
+    await sb.from("stack_cards").update({ binder_added_at: when }).in("id", ids);
+  }
+
   async function fileIntoBinder(cards, binderId) {
     const binder = binders.find((b) => b.id === binderId);
     if (!binder || cards.length === 0) return false;
@@ -870,6 +881,7 @@ export default function ShowDesk() {
     let moved = 0;
     const errors = [];
     const placed = [];
+    const filedIds = [];
     for (let i = 0; i < movable.length; i++) {
       setProgress(`Filing ${i + 1} of ${movable.length} into ${binder.name}…`);
       const { error } = await sb
@@ -878,8 +890,9 @@ export default function ShowDesk() {
         .eq("id", movable[i].id)
         .is("checked_out_at", null);
       if (error) errors.push(`${movable[i].sku || "?"}: ${error.message}`);
-      else { moved += 1; placed.push(`${movable[i].sku || "?"} → ${binderSlot(binder.name, pockets[i])?.sku}`); }
+      else { moved += 1; filedIds.push(movable[i].id); placed.push(`${movable[i].sku || "?"} → ${binderSlot(binder.name, pockets[i])?.sku}`); }
     }
+    await stampBinderAdded(sb, filedIds, new Date().toISOString());
     setProgress("");
     setBusy(false);
     setMsg(
@@ -1048,6 +1061,7 @@ export default function ShowDesk() {
       .update({ stack_id: to.id, position: base + 1 })
       .eq("id", card.id)
       .is("checked_out_at", null);
+    if (!error) await stampBinderAdded(sb, [card.id], null);
     setBusy(false);
     const pk = binderSlot(stackName.get(card.stack_id), card.position)?.sku;
     setMsg(error
@@ -1410,8 +1424,10 @@ export default function ShowDesk() {
 
     let restored = 0;
     const warnings = [];
+    const filedIds = [];
     for (let i = 0; i < items.length; i++) {
       const co = items[i];
+      if (mode === BINDER_RETURN_MODE && !homeAgain(co) && co.stack_card_id) filedIds.push(co.stack_card_id);
       setProgress(`Checking in ${i + 1} of ${items.length}…`);
       const patch = mode === "spot" || homeAgain(co) ? {}
         : mode === BINDER_RETURN_MODE ? { stack_id: stackId, position: pockets[nextPocket++] }
@@ -1420,6 +1436,9 @@ export default function ShowDesk() {
       warnings.push(...w);
       restored += 1;
     }
+    // Filed into a binder it was not already in: stamped like 📒 Into binder.
+    // A card home to its own binder keeps its date — it never left.
+    await stampBinderAdded(sb, filedIds, new Date().toISOString());
     setProgress("");
     setBusy(false);
     const modeText = mode === "spot" ? "to their original spots"
@@ -2200,6 +2219,14 @@ export default function ShowDesk() {
                           )}
                           <span className="stack-sku">{card.sku || "—"}</span>
                           <span className="stack-title">{card.title || <em>—</em>}</span>
+                          {showBinderSort === "newest" ? (() => {
+                            const t = binderAddedAt(card);
+                            return (
+                              <span className="hint hint-small" style={{ margin: 0, flex: "none" }} title={t ? "When this card went into the binder" : "Filed before the binder kept a date (migration 034) — ordered by its slot"}>
+                                {t ? new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "—"}
+                              </span>
+                            );
+                          })() : null}
                           <span
                             className="badge2"
                             title={STATUS[status].title}

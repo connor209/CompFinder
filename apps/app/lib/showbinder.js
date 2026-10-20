@@ -246,15 +246,31 @@ export function sortBinderRows(rows, sort = "pocket") {
 }
 
 /**
- * Newest in the binder first. A card filed in goes to one past the highest
- * slot the binder has ever used (nextSlots), so the highest slot IS the card
- * filed last — no timestamp needed, and none exists: filing a card only moves
- * it, and `added_at` is when the card was first stacked, not when it reached
- * the binder. After ↻ Re-pocket A–Z every slot is renumbered by name, so this
- * order then only knows about cards filed since. A card with no slot sorts
- * last, newest stacked first.
+ * When a card went into its binder (migration 034), as a sortable time, or
+ * null. Null for every card filed before 034, and on a database without it.
+ */
+export function binderAddedAt(card) {
+  const t = Date.parse(card?.binder_added_at || "");
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
+ * Newest in the binder first, by `binder_added_at` (migration 034), which
+ * filing stamps and a re-pocket keeps. A card with no date was filed before
+ * 034 — so before every dated card — and sorts after them by highest slot:
+ * a card filed in goes to one past the highest slot ever used (nextSlots),
+ * so the highest slot is the card filed last, until ↻ Re-pocket A–Z
+ * renumbers by name. Cards filed together share a date and keep slot order
+ * between them. `added_at` is never used: it is when the card was first
+ * stacked, not when it reached the binder. A card with no slot sorts last.
  */
 function newestFirst(a, b) {
+  const da = binderAddedAt(a.card);
+  const db = binderAddedAt(b.card);
+  if (da != null || db != null) {
+    if (da == null || db == null) return da == null ? 1 : -1;
+    if (da !== db) return db - da;
+  }
   const x = Number(a.card?.position);
   const y = Number(b.card?.position);
   const hx = Number.isFinite(x) && x >= 1;
@@ -474,5 +490,5 @@ export default {
   POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
   openFromBinder, binderCheckIn,
   nameKey, compareByCardName, BINDER_VIEW_SORTS, sortBinderRows, repocketPlan,
-  BINDER_VIEW_STATUSES, parseSkuList, filterBinderRows
+  BINDER_VIEW_STATUSES, parseSkuList, filterBinderRows, binderAddedAt
 };

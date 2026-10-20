@@ -30,7 +30,7 @@ import {
   binderSuffix, renamedBinder, binderCounts, binderContents,
   POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
   nameKey, compareByCardName, sortBinderRows, repocketPlan, openFromBinder, binderCheckIn,
-  parseSkuList, filterBinderRows
+  parseSkuList, filterBinderRows, binderAddedAt
 } from "../apps/app/lib/showbinder.js";
 import { titleMatches, skuInBatch } from "../apps/app/lib/showfilter.js";
 import { isUnorderedStack, fileableStacks, isToploaderStack } from "../apps/app/lib/toploader.js";
@@ -177,6 +177,12 @@ eq("accents fold", nameKey("Flabébé 1/2"), "flabebe 1/2");
   eq("pocket order is the default", sortBinderRows(rows).map((r) => r.card.id), ["u", "c2", "a", "c1", "z"]);
   eq("newest in binder first: the highest slot was filed last",
     sortBinderRows(rows, "newest").map((r) => r.card.id), ["z", "c1", "a", "c2", "u"]);
+  // After a re-pocket the slots say nothing about when; the date does. A
+  // card with no date went in before 034, so before every dated card.
+  const dated = rows.map((r) => ({ ...r, card: { ...r.card, binder_added_at: { u: "2026-10-20T10:00:00Z", a: "2026-10-18T10:00:00Z", c1: "2026-10-20T10:00:00Z" }[r.card.id] || null } }));
+  eq("newest by binder date, then slot within a date, undated last by slot",
+    sortBinderRows(dated, "newest").map((r) => r.card.id), ["c1", "u", "a", "z", "c2"]);
+  eq("a bad date is no date", binderAddedAt({ binder_added_at: "not a date" }), null);
   eq("sorting the list never moves a pocket", deck.map((c) => c.position), [1, 2, 4, 7, 8]);
 
   const bound = deck.map((c) => ({ ...c, stack_id: "b" })).concat([{ id: "x", stack_id: "a", title: "Aaa", position: 1 }]);

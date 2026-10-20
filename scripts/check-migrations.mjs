@@ -64,7 +64,8 @@ const MIGRATIONS = [
   ["030", "show expenses", [["table", "show_expenses"]]],
   ["031", "stream stock", [["column", "stock_checkouts", "pool"], ["table", "live_streams"], ["table", "stream_airings"]]],
   ["032", "storefront shop links", [["column", "show_storefronts", "kind"]]],
-  ["033", "packed orders (label-printed orders stay on the pull sheet)", [["table", "packed_orders"]]]
+  ["033", "packed orders (label-printed orders stay on the pull sheet)", [["table", "packed_orders"]]],
+  ["034", "binder added date (newest-in-binder sort)", [["column", "stack_cards", "binder_added_at"]]]
 ];
 
 /**
