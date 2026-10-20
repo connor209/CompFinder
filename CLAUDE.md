@@ -2534,8 +2534,18 @@ digital binder the desk turns round to a customer.
   first, since a checked-out card's hidden listing reads as sold out. Read
   off state the desk already holds, so it costs no request.
 - **Sorting the list never moves a card; ↻ Re-pocket A–Z does.** The view's
-  sort (`sortBinderRows`: pocket, name, price — unpriced last both ways) is
-  for finding a card. Re-pocketing (`repocketPlan`) renumbers every pocket by
+  sort (`sortBinderRows`: pocket, newest in binder, name, price — unpriced
+  last both ways) is for finding a card. "Newest" is the highest slot first,
+  since a card filed in always goes to the back; there is no timestamp for
+  it (`added_at` is when the card was first stacked), so after a re-pocket it
+  only knows about cards filed since.
+- **Filtering is `filterBinderRows()`**: the search (name, eBay SKU or binder
+  SKU), a pasted SKU list, and a status, all AND-ed. In the list an eBay SKU
+  with a digit is EXACT — "BP12" is never BP120, which the search box's
+  prefix allows — letters alone are a batch, and binder SKUs and ranges
+  (`B1-010..B1-020`) work. A listed SKU that is not in the binder is named on
+  screen, asked of the whole binder so a card the status filter hid is not
+  reported missing. Ticks, labels and tick-all act on what is shown. Re-pocketing (`repocketPlan`) renumbers every pocket by
   card name (`nameKey`: the label's reading of the title, game prefixes off),
   gaps closed, on a confirmed click only, and is REFUSED while any card is at
   a show — its pocket is waiting for it. It leaves a move list on screen and

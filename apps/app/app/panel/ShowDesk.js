@@ -45,7 +45,8 @@ import {
 import {
   isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder, binderCode,
   binderCounts, binderContents, openFromBinder, binderCheckIn,
-  binderSlot, nextSlots, codeless, comparePockets, sortBinderRows, repocketPlan, BINDER_VIEW_SORTS
+  binderSlot, nextSlots, codeless, comparePockets, sortBinderRows, repocketPlan, BINDER_VIEW_SORTS,
+  BINDER_VIEW_STATUSES, filterBinderRows
 } from "@/lib/showbinder.js";
 
 /** `return_mode` on a checkout filed into a Show Binder (016 leaves it free text). */
@@ -469,6 +470,10 @@ export default function ShowDesk() {
   // The binder being looked through, and a name search within it.
   const [binderLook, setBinderLook] = useState(null);
   const [binderLookQ, setBinderLookQ] = useState("");
+  // A pasted list of SKUs to show only those (eBay SKUs, binder SKUs or a
+  // binder-SKU range), and a status to narrow to.
+  const [binderLookSkus, setBinderLookSkus] = useState("");
+  const [binderLookStatus, setBinderLookStatus] = useState("");
   // Cards ticked in the binder view (for labels), and the stack a removed
   // card goes to.
   const [binderTick, setBinderTick] = useState(new Set());
@@ -954,12 +959,17 @@ export default function ShowDesk() {
       binderName: stackName.get(binderLook) || null
     });
   }, [binderLook, stackCards, listings, sales, awayIndex, stackName]);
-  const binderInsideShown = useMemo(
+  const binderFiltered = useMemo(
     () => (binderInside
-      ? sortBinderRows(binderInside.rows.filter((r) => !binderLookQ.trim() || titleMatches(r.card.title, binderLookQ) || skuInBatch(r.card.sku, binderLookQ)), showBinderSort)
-      : []),
-    [binderInside, binderLookQ, showBinderSort]
+      ? filterBinderRows(binderInside.rows, { q: binderLookQ, skus: binderLookSkus, status: binderLookStatus }, { matchText: titleMatches, skuInBatch })
+      : { rows: [], unmatched: [] }),
+    [binderInside, binderLookQ, binderLookSkus, binderLookStatus]
   );
+  const binderInsideShown = useMemo(
+    () => sortBinderRows(binderFiltered.rows, showBinderSort),
+    [binderFiltered, showBinderSort]
+  );
+  const binderFiltering = !!(binderLookQ.trim() || binderLookSkus.trim() || binderLookStatus);
   // What 🏷 Labels prints: the ticked cards on screen, or — none ticked —
   // every card on screen. A tick the search has hidden is not printed, the
   // selectionFor() rule: what a button acts on is what you can see.
@@ -1962,7 +1972,7 @@ export default function ShowDesk() {
                       </button>
                       <button
                         className="btn btn-ghost"
-                        onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); setBinderTick(new Set()); setBinderMoves(null); }}
+                        onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); setBinderLookSkus(""); setBinderLookStatus(""); setBinderTick(new Set()); setBinderMoves(null); }}
                         aria-pressed={binderLook === b.id}
                         title="List every card in this binder"
                       >
@@ -2065,14 +2075,41 @@ export default function ShowDesk() {
                 ) : (
                   <>
                     <div className="sd-recbar">
-                      {binderInside.rows.length > 8 ? (
-                        <input
-                          className="stack-title-inp sd-batch-inp"
-                          value={binderLookQ}
-                          onChange={(e) => setBinderLookQ(e.target.value)}
-                          placeholder="Find a card in the binder — name or SKU"
-                          aria-label="Find a card in the binder"
-                        />
+                      {binderInside.rows.length > 8 || binderFiltering ? (
+                        <>
+                          <input
+                            className="stack-title-inp sd-batch-inp"
+                            value={binderLookQ}
+                            onChange={(e) => setBinderLookQ(e.target.value)}
+                            placeholder="Find a card — name, SKU or binder SKU"
+                            aria-label="Find a card in the binder"
+                          />
+                          <input
+                            className="stack-title-inp sd-batch-inp"
+                            value={binderLookSkus}
+                            onChange={(e) => setBinderLookSkus(e.target.value)}
+                            placeholder="Only these SKUs — BP12, BQ3, B1-010..B1-020"
+                            aria-label="Show only these SKUs"
+                            title="Paste or type SKUs separated by commas, spaces or new lines. An eBay SKU with a number is exact (BP12 is never BP120); letters alone are a batch (BP). Binder SKUs work too, and a range of them: B1-010..B1-020."
+                          />
+                          <select
+                            className="sd-select"
+                            value={binderLookStatus}
+                            onChange={(e) => setBinderLookStatus(e.target.value)}
+                            aria-label="Show only cards with this status"
+                          >
+                            {BINDER_VIEW_STATUSES.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                          </select>
+                          {binderFiltering ? (
+                            <button
+                              type="button"
+                              className="btn btn-ghost"
+                              onClick={() => { setBinderLookQ(""); setBinderLookSkus(""); setBinderLookStatus(""); }}
+                            >
+                              Clear filters
+                            </button>
+                          ) : null}
+                        </>
                       ) : null}
                       <label className="sd-toggle">
                         <input
@@ -2111,6 +2148,17 @@ export default function ShowDesk() {
                         {fileableStacks(stacks).map((st) => <option key={st.id} value={st.id}>back of {st.name}</option>)}
                       </select>
                     </div>
+                    {binderFiltering ? (
+                      <p className="hint hint-small" style={{ margin: "4px 0" }}>
+                        Showing {binderInsideShown.length} of {binderInside.rows.length} — ticks, labels and tick-all act on these only.
+                        {binderFiltered.unmatched.length ? (
+                          <span style={{ color: "var(--bad-ink)" }}>
+                            {" "}Not in this binder: {binderFiltered.unmatched.slice(0, 8).join(", ")}
+                            {binderFiltered.unmatched.length > 8 ? `, and ${binderFiltered.unmatched.length - 8} more` : ""}.
+                          </span>
+                        ) : null}
+                      </p>
+                    ) : null}
                     <div className="stack-list sd-batch-list">
                       {binderInsideShown.map(({ card, status, pricePence, slot }, i) => {
                         // A heading where the page changes, so the list reads

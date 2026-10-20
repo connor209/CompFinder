@@ -218,6 +218,7 @@ export function compareByCardName(a, b) {
 /** The binder view's sort choices. Pocket order is the binder as it sits. */
 export const BINDER_VIEW_SORTS = [
   { key: "pocket", label: "Binder SKU order" },
+  { key: "newest", label: "Newest in binder first" },
   { key: "name", label: "Name A–Z" },
   { key: "price-desc", label: "Price, high first" },
   { key: "price-asc", label: "Price, low first" }
@@ -237,10 +238,119 @@ export function sortBinderRows(rows, sort = "pocket") {
     if (x == null || y == null) return (x == null ? 1 : 0) - (y == null ? 1 : 0) || byPocket(a, b);
     return (x - y) * dir || byPocket(a, b);
   };
+  if (sort === "newest") return list.sort(newestFirst);
   if (sort === "name") return list.sort((a, b) => compareByCardName(a.card, b.card) || byPocket(a, b));
   if (sort === "price-desc") return list.sort(price(-1));
   if (sort === "price-asc") return list.sort(price(1));
   return list.sort(byPocket);
+}
+
+/**
+ * Newest in the binder first. A card filed in goes to one past the highest
+ * slot the binder has ever used (nextSlots), so the highest slot IS the card
+ * filed last — no timestamp needed, and none exists: filing a card only moves
+ * it, and `added_at` is when the card was first stacked, not when it reached
+ * the binder. After ↻ Re-pocket A–Z every slot is renumbered by name, so this
+ * order then only knows about cards filed since. A card with no slot sorts
+ * last, newest stacked first.
+ */
+function newestFirst(a, b) {
+  const x = Number(a.card?.position);
+  const y = Number(b.card?.position);
+  const hx = Number.isFinite(x) && x >= 1;
+  const hy = Number.isFinite(y) && y >= 1;
+  if (hx && hy) return y - x;
+  if (hx || hy) return hx ? -1 : 1;
+  return String(b.card?.added_at || "").localeCompare(String(a.card?.added_at || ""));
+}
+
+/** The binder view's status choices — the binderContents() statuses. */
+export const BINDER_VIEW_STATUSES = [
+  { key: "", label: "Any status" },
+  { key: "home", label: "On sale" },
+  { key: "away", label: "At a show" },
+  { key: "sold", label: "Sold on eBay (pull it)" },
+  { key: "notlisted", label: "Not listed" }
+];
+
+/**
+ * A pasted list of SKUs, read into terms. Commas, spaces and new lines all
+ * separate; a binder-SKU RANGE is one term, written "B1-010..B1-020",
+ * "B1-010 – B1-020", "B1-010 to 020" or "B1-10-20".
+ *
+ * Returns [{ text, kind: "range", code, from, to } | { text, kind: "sku", sku }].
+ */
+const RANGE = /^(b\d+)-0*(\d+)(?:\.\.|-|–|—|to)(?:\1-)?0*(\d+)$/i;
+export function parseSkuList(text) {
+  const joined = String(text || "")
+    .replace(/\s*(?:\.\.|–|—|\bto\b)\s*/gi, "..")
+    .replace(/(b\d+-\d+)\s+-\s+/gi, "$1..");
+  const out = [];
+  const seen = new Set();
+  for (const raw of joined.split(/[\s,;]+/)) {
+    const t = raw.trim();
+    if (!t || seen.has(t.toLowerCase())) continue;
+    seen.add(t.toLowerCase());
+    const m = t.match(RANGE);
+    if (m) {
+      const a = Number(m[2]);
+      const b = Number(m[3]);
+      out.push({ text: t, kind: "range", code: m[1].toUpperCase(), from: Math.min(a, b), to: Math.max(a, b) });
+    } else out.push({ text: t, kind: "sku", sku: t.toLowerCase() });
+  }
+  return out;
+}
+
+/**
+ * Does a binderContents() row answer one parsed term? A list is SPECIFIC
+ * SKUs, so one with a digit matches exactly — "BP12" is never BP120, which
+ * the search box's prefix would allow. Letters alone still name a batch
+ * (skuInBatch: "BP" is every BP card and never B). A binder SKU matches
+ * exactly, a range by the card's slot.
+ */
+function rowMatchesTerm(row, term, skuInBatch) {
+  const slot = row.slot?.sku || "";
+  if (term.kind === "range") {
+    const n = Math.round(Number(row.card?.position));
+    return slot.toUpperCase().startsWith(`${term.code}-`) && n >= term.from && n <= term.to;
+  }
+  const sku = String(row.card?.sku || "").trim().toLowerCase();
+  if (sku && (sku === term.sku || (/^[a-z]+$/.test(term.sku) && skuInBatch(sku, term.sku)))) return true;
+  return !!slot && slot.toLowerCase() === term.sku;
+}
+
+/**
+ * The binder view's filters, together: a name-or-SKU search (`q`), a pasted
+ * SKU list (`skus`) and a status. Every one narrows — a card shows only if
+ * it answers all of them — and what is on screen is what 🏷 Labels and the
+ * tick-all act on, so this is the one reading of "shown".
+ *
+ * `matchText(title, q)` and `skuInBatch(sku, prefix)` are showfilter.js's,
+ * handed in so this file stays free of the desk's search module.
+ *
+ * Returns { rows, unmatched } — `unmatched` is every SKU-list term that found
+ * no card in this binder, so a typo or a card that has moved on is said out
+ * loud rather than quietly showing one fewer row.
+ */
+export function filterBinderRows(rows, { q = "", skus = "", status = "" } = {}, { matchText = () => false, skuInBatch = () => false } = {}) {
+  const query = String(q || "").trim();
+  const terms = parseSkuList(skus);
+  const out = (rows || []).filter((r) => {
+    if (status && !(r.status === status || (status === "sold" && r.status === "outofstock"))) return false;
+    if (query) {
+      const slot = r.slot?.sku || "";
+      const bySlot = slot && slot.toLowerCase().startsWith(query.toLowerCase());
+      if (!bySlot && !matchText(r.card?.title, query) && !skuInBatch(r.card?.sku, query)) return false;
+    }
+    if (terms.length) {
+      if (!terms.some((t) => rowMatchesTerm(r, t, skuInBatch))) return false;
+    }
+    return true;
+  });
+  // Asked of the whole binder, not of what the other filters left: a card the
+  // status filter hid is in the binder, and is not reported missing from it.
+  const unmatched = terms.filter((t) => !(rows || []).some((r) => rowMatchesTerm(r, t, skuInBatch))).map((t) => t.text);
+  return { rows: out, unmatched };
 }
 
 /**
@@ -363,5 +473,6 @@ export default {
   binderSuffix, renamedBinder, binderCounts, binderContents,
   POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
   openFromBinder, binderCheckIn,
-  nameKey, compareByCardName, BINDER_VIEW_SORTS, sortBinderRows, repocketPlan
+  nameKey, compareByCardName, BINDER_VIEW_SORTS, sortBinderRows, repocketPlan,
+  BINDER_VIEW_STATUSES, parseSkuList, filterBinderRows
 };

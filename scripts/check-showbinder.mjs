@@ -29,8 +29,10 @@ import {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
   binderSuffix, renamedBinder, binderCounts, binderContents,
   POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
-  nameKey, compareByCardName, sortBinderRows, repocketPlan, openFromBinder, binderCheckIn
+  nameKey, compareByCardName, sortBinderRows, repocketPlan, openFromBinder, binderCheckIn,
+  parseSkuList, filterBinderRows
 } from "../apps/app/lib/showbinder.js";
+import { titleMatches, skuInBatch } from "../apps/app/lib/showfilter.js";
 import { isUnorderedStack, fileableStacks, isToploaderStack } from "../apps/app/lib/toploader.js";
 import { positionLabel, locationsBySku } from "../apps/app/lib/stackpos.js";
 import { planReallocation } from "../apps/app/lib/checkout.js";
@@ -126,6 +128,34 @@ eq("⌖ locate names the binder SKU", located.get("b1"), "📒 Show Binder 2 · 
 const plan = planReallocation(3, fileableStacks(stacks).map((s) => ({ ...s, used: 0 })), 100);
 eq("a filing plan only ever picks a real stack", plan.groups.map((g) => g.stackId), ["a"]);
 
+// --- 2a. Finding cards: a pasted SKU list, ranges, status ------------------
+eq("a SKU list splits on commas, spaces and lines; ranges stay whole",
+  parseSkuList("BP12, BP14\nB1-010 – B1-020  b2-5 to 9 B1-10-20 B1-047 bp12").map((t) => t.kind === "range" ? `${t.code}:${t.from}-${t.to}` : t.sku),
+  ["bp12", "bp14", "B1:10-20", "B2:5-9", "B1:10-20", "b1-047"]);
+eq("a lone binder SKU is not a range", parseSkuList("B1-047")[0].kind, "sku");
+{
+  const cards = [
+    { id: "1", stack_id: "b", position: 1, sku: "BP12", title: "Umbreon VMAX 215/203" },
+    { id: "2", stack_id: "b", position: 2, sku: "BP120", title: "Charizard ex 199/165" },
+    { id: "3", stack_id: "b", position: 12, sku: "A7", title: "Gengar 94/162", checked_out_at: "2026-10-01" },
+    { id: "4", stack_id: "b", position: 15, sku: "BQ1", title: "Mew ex 151/165" }
+  ];
+  const { rows } = binderContents(cards, "b", { binderName: "Show Binder 1" });
+  const helpers = { matchText: titleMatches, skuInBatch };
+  const ids = (f) => filterBinderRows(rows, f, helpers).rows.map((r) => r.card.id);
+  eq("an eBay SKU in the list is exact, not a prefix of BP120", ids({ skus: "BP12" }), ["1"]);
+  eq("letters alone name a batch", ids({ skus: "BP" }), ["1", "2"]);
+  eq("a binder SKU in the list", ids({ skus: "B1-012" }), ["3"]);
+  eq("a binder-SKU range", ids({ skus: "B1-002..B1-012" }), ["2", "3"]);
+  eq("several at once", ids({ skus: "BQ1, B1-001" }), ["1", "4"]);
+  eq("status narrows", ids({ status: "away" }), ["3"]);
+  eq("filters AND together", ids({ skus: "BP", q: "char" }), ["2"]);
+  eq("the search box finds a binder SKU too", ids({ q: "B1-01" }), ["3", "4"]);
+  const miss = filterBinderRows(rows, { skus: "BP12, ZZ9, B1-012", status: "home" }, helpers);
+  eq("a term matching nothing in the binder is named", miss.unmatched, ["ZZ9"]);
+  eq("…but one the status filter hid is not 'missing'", miss.rows.map((r) => r.card.id), ["1"]);
+}
+
 // --- 2b. A–Z by card name, and re-pocketing --------------------------------
 eq("the game word is not the name", nameKey("Pokemon TCG Charizard ex 199/165 151 NM"), "charizard ex 199/165");
 eq("nor another game's prefix", nameKey("MTG Lightning Bolt Alpha"), "lightning bolt alpha");
@@ -145,6 +175,8 @@ eq("accents fold", nameKey("Flabébé 1/2"), "flabebe 1/2");
   eq("price high first, unpriced last", sortBinderRows(rows, "price-desc").map((r) => r.card.id), ["c1", "u", "a", "c2", "z"]);
   eq("price low first, unpriced STILL last", sortBinderRows(rows, "price-asc").map((r) => r.card.id), ["a", "u", "c1", "c2", "z"]);
   eq("pocket order is the default", sortBinderRows(rows).map((r) => r.card.id), ["u", "c2", "a", "c1", "z"]);
+  eq("newest in binder first: the highest slot was filed last",
+    sortBinderRows(rows, "newest").map((r) => r.card.id), ["z", "c1", "a", "c2", "u"]);
   eq("sorting the list never moves a pocket", deck.map((c) => c.position), [1, 2, 4, 7, 8]);
 
   const bound = deck.map((c) => ({ ...c, stack_id: "b" })).concat([{ id: "x", stack_id: "a", title: "Aaa", position: 1 }]);
