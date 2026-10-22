@@ -2560,7 +2560,8 @@ digital binder the desk turns round to a customer.
   prefix allows — letters alone are a batch, and binder SKUs and ranges
   (`B1-010..B1-020`) work. A listed SKU that is not in the binder is named on
   screen, asked of the whole binder so a card the status filter hid is not
-  reported missing. Ticks, labels and tick-all act on what is shown. Re-pocketing (`repocketPlan`) renumbers every pocket by
+  reported missing. Tick-all acts on what is shown; a tick survives the search
+  moving on (see Labels below). Re-pocketing (`repocketPlan`) renumbers every pocket by
   card name (`nameKey`: the label's reading of the title, game prefixes off),
   gaps closed, on a confirmed click only, and is REFUSED while any card is at
   a show — its pocket is waiting for it. It leaves a move list on screen and
@@ -2570,7 +2571,13 @@ digital binder the desk turns round to a customer.
 - **↩ Out takes one card out**, onto the back of a chosen stack: no checkout,
   listing untouched, binder SKU retired. Not offered for a card away at a show.
 - **Labels for the ticked cards**, or every card on screen when none are
-  ticked — a tick the search hides is not printed, the `selectionFor()` rule.
+  ticked. **A tick the search hides IS printed** (asked for 2026-10-22): the
+  way to label two particular cards is search one, tick it, search the other,
+  tick it — and under the `selectionFor()` rule the first silently dropped out
+  of the file. The one deliberate exception to that rule, and safe only
+  because a label file spends nothing and moves nothing; the tick count says
+  how many the search is hiding. Nothing that sells, files or moves a card
+  may borrow it.
 - **The view shows a photo of THIS copy** (the listing's gallery shot, the
   counter's `images` map; tap for large) and prints **labels with the eBay
   SKU and binder SKU**: `binderLabelRows()` writes `BINDER_LABEL_COLUMNS` — the

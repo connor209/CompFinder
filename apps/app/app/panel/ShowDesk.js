@@ -989,13 +989,23 @@ export default function ShowDesk() {
     [binderFiltered, showBinderSort]
   );
   const binderFiltering = !!(binderLookQ.trim() || binderLookSkus.trim() || binderLookStatus);
-  // What 🏷 Labels prints: the ticked cards on screen, or — none ticked —
-  // every card on screen. A tick the search has hidden is not printed, the
-  // selectionFor() rule: what a button acts on is what you can see.
+  // What 🏷 Labels prints: every ticked card in the binder, or — none ticked —
+  // every card on screen. A tick the search has since hidden IS printed: the
+  // way to label two cards is search one, tick, search the other, tick. That
+  // is the one deliberate exception to the selectionFor() rule, and it is safe
+  // only because a label file spends nothing and moves nothing. The button
+  // says how many of its cards the search is hiding.
   const binderLabelSet = useMemo(
-    () => (binderTick.size === 0 ? binderInsideShown : binderInsideShown.filter((r) => binderTick.has(r.card.id))),
-    [binderInsideShown, binderTick]
+    () => (binderTick.size === 0 || !binderInside
+      ? binderInsideShown
+      : sortBinderRows(binderInside.rows.filter((r) => binderTick.has(r.card.id)), showBinderSort)),
+    [binderInside, binderInsideShown, binderTick, showBinderSort]
   );
+  const binderTickHidden = useMemo(() => {
+    if (binderTick.size === 0) return 0;
+    const shown = new Set(binderInsideShown.map((r) => r.card.id));
+    return binderLabelSet.filter((r) => !shown.has(r.card.id)).length;
+  }, [binderLabelSet, binderInsideShown, binderTick]);
 
   // What the binder being checked in still has out, page by page. A checkout
   // row carries no pocket, so it is read off the stack card it came from.
@@ -2138,7 +2148,7 @@ export default function ShowDesk() {
                       className="btn btn-ghost"
                       onClick={() => downloadBinderLabels(binder)}
                       disabled={binderLabelSet.length === 0}
-                      title="Label file (.xlsx) for the ticked cards — or every card listed, if none are ticked: price, name, eBay SKU and binder SKU. The price is our eBay ask rounded to a cash price — £1 steps to £20, £5 to £100, £10 above."
+                      title="Label file (.xlsx) for every ticked card, including any the search is now hiding — or every card listed, if none are ticked: price, name, eBay SKU and binder SKU. The price is our eBay ask rounded to a cash price — £1 steps to £20, £5 to £100, £10 above."
                     >
                       🏷 Labels{binderTick.size ? " for ticked" : ""} ({binderLabelSet.filter((r) => r.status !== "sold" && r.status !== "outofstock").length})
                     </button>
@@ -2250,7 +2260,9 @@ export default function ShowDesk() {
                           }}
                           disabled={binderInsideShown.length === 0}
                         />
-                        {binderTick.size ? `${binderLabelSet.length} ticked` : "Tick cards for labels"}
+                        {binderTick.size
+                          ? `${binderLabelSet.length} ticked${binderTickHidden ? ` (${binderTickHidden} hidden by search)` : ""}`
+                          : "Tick cards for labels"}
                       </label>
                       <select
                         className="sd-select"
@@ -2274,7 +2286,7 @@ export default function ShowDesk() {
                     </div>
                     {binderFiltering ? (
                       <p className="hint hint-small" style={{ margin: "4px 0" }}>
-                        Showing {binderInsideShown.length} of {binderInside.rows.length} — ticks, labels and tick-all act on these only.
+                        Showing {binderInsideShown.length} of {binderInside.rows.length} — tick-all acts on these only; a ticked card stays ticked when the search moves on, and 🏷 Labels prints it.
                         {binderFiltered.unmatched.length ? (
                           <span style={{ color: "var(--bad-ink)" }}>
                             {" "}Not in this binder: {binderFiltered.unmatched.slice(0, 8).join(", ")}
