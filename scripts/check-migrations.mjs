@@ -42,7 +42,8 @@ const HEAD = { apikey: key, Authorization: `Bearer ${key}` };
  *
  * 018 is absent on purpose: it imports Yu-Gi-Oh! rather than changing the
  * schema, so there is nothing to probe. The catalogue summary at the end says
- * whether it ran.
+ * whether it ran. 035 is absent for a different reason: it adds only an index,
+ * which PostgREST cannot see — supabase/HEALTH_CHECK.sql asks for it by name.
  */
 const MIGRATIONS = [
   ["012", "listing photos", [["bucket", "listing-photos"]]],

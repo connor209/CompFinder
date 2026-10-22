@@ -66,6 +66,12 @@ export async function findItemIdForSku(sb, sku) {
 
 const MIGRATION_MSG = "Run migration 016_show_checkouts.sql in the Supabase SQL editor first.";
 const STREAM_MIGRATION_MSG = "Run migration 031_stream_stock.sql in the Supabase SQL editor first.";
+export const ALREADY_OUT_MSG = "already checked out — at a show or in the stream box";
+
+/** Postgres refusing a second OPEN checkout for one stack card (migration 035). */
+export function isDuplicateOpen(err) {
+  return err?.code === "23505" && /stock_checkouts_one_open/.test(`${err.message || ""} ${err.details || ""}`);
+}
 
 /**
  * Check a single stack card out to a show — or, with `pool: "stream"`, into
@@ -83,6 +89,20 @@ const STREAM_MIGRATION_MSG = "Run migration 031_stream_stock.sql in the Supabase
 export async function checkoutStackCard(sb, { card, stackName, event, hideMode, pool = "show" }) {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+
+  // 0) Refuse a card that is already out. Every screen checks against what IT
+  // last loaded, so a second tab or a phone opened before the first run
+  // checked the same fourteen cards out again on 2026-10-16 — two open rows
+  // each, every card twice on the away list, and the second run's hide on top
+  // of the first. Asked here, so all four callers get it. A failed read is not
+  // a "no": migration 035's unique index is the backstop for that.
+  const { data: already } = await sb
+    .from("stock_checkouts")
+    .select("id")
+    .eq("stack_card_id", card.id)
+    .is("resolved_at", null)
+    .limit(1);
+  if (already && already.length) return { ok: false, error: ALREADY_OUT_MSG, alreadyOut: true };
 
   // 1) Flag the card as away — live positions re-flow immediately.
   const { error: flagErr } = await sb
@@ -137,6 +157,9 @@ export async function checkoutStackCard(sb, { card, stackName, event, hideMode, 
     .select("id")
     .single();
   if (coErr) {
+    // Migration 035's index refusing a second open row: the card IS out, so
+    // its flag is the other checkout's and must not be rolled back.
+    if (isDuplicateOpen(coErr)) return { ok: false, error: ALREADY_OUT_MSG, alreadyOut: true };
     // Roll the flag back so the card isn't stuck half checked-out.
     await sb.from("stack_cards").update({ checked_out_at: null }).eq("id", card.id);
     const noPool = stream && /\bpool\b/i.test(coErr.message || "");

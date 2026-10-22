@@ -28,7 +28,7 @@ import {
   carriedSticker, compareRecs, compareByTitle
 } from "../apps/app/lib/toploader.js";
 import { positionLabel, locationsBySku } from "../apps/app/lib/stackpos.js";
-import { planReallocation, checkoutStackCard } from "../apps/app/lib/checkout.js";
+import { planReallocation, checkoutStackCard, ALREADY_OUT_MSG, isDuplicateOpen } from "../apps/app/lib/checkout.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -38,6 +38,7 @@ const eq = (label, got, want) => {
   }
 };
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
+const ok = (label, cond) => { if (!cond) fail(label); };
 
 // --- 1. which stack is the box ----------------------------------------------
 eq("the reserved name", isToploaderStack(TOPLOADER_STACK_NAME), true);
@@ -101,8 +102,8 @@ eq("the box by name, untitled last", [...titles].sort(compareByTitle).map((t) =>
 
 // --- 6. against a fake Supabase: create once, carry on checkout -------------
 /** Just enough of the query builder, recording what was asked. */
-function fakeSb({ prev = null } = {}) {
-  const log = { inserts: [], reads: [] };
+function fakeSb({ prev = null, open = [], insertError = null } = {}) {
+  const log = { inserts: [], reads: [], updates: [] };
   const builder = (table) => {
     const q = { table, filters: [] };
     const chain = {
@@ -110,11 +111,17 @@ function fakeSb({ prev = null } = {}) {
       eq(k, v) { q.filters.push([k, v]); return chain; },
       ilike() { return chain; },
       not() { return chain; },
+      is(k, v) { q.filters.push([k, v]); return chain; },
       order() { return chain; },
       limit() { return chain; },
+      // An awaited read with no maybeSingle(): the "is it already out?" ask.
+      then(res, rej) { return Promise.resolve({ data: table === "stock_checkouts" ? open : [], error: null }).then(res, rej); },
       maybeSingle() { if (table === "stock_checkouts") log.reads.push(q); return Promise.resolve({ data: table === "stock_checkouts" ? prev : null, error: null }); },
-      single() { return Promise.resolve({ data: { id: `${table}-new` }, error: null }); },
-      update() { return { eq: () => Promise.resolve({ error: null }) }; },
+      single() {
+        if (insertError && table === "stock_checkouts") return Promise.resolve({ data: null, error: insertError });
+        return Promise.resolve({ data: { id: `${table}-new` }, error: null });
+      },
+      update(patch) { log.updates.push({ table, patch }); return { eq: () => Promise.resolve({ error: null }) }; },
       insert(row) { log.inserts.push({ table, row }); return chain; }
     };
     return chain;
@@ -160,6 +167,35 @@ const CARD = { id: "c1", stack_id: "t", sku: "A50", title: "Umbreon VMAX 215/203
   const row = sb.log.inserts.find((i) => i.table === "stock_checkouts")?.row;
   eq("a checkout that never came back carries nothing", "sticker_pence" in (row || {}), false);
 }
+
+// --- 6b. a card already out is never checked out again ---------------------
+// 2026-10-16: fourteen cards checked out at 17:59 and again at 18:17 from a
+// screen that had not reloaded, every one listed twice on the away list.
+{
+  const sb = fakeSb({ open: [{ id: "co-open" }] });
+  const r = await checkoutStackCard(sb, { card: CARD, stackName: "A", hideMode: "none" });
+  eq("a card with an open checkout is refused", [r.ok, r.alreadyOut], [false, true]);
+  eq("and says why", r.error, ALREADY_OUT_MSG);
+  eq("no second row is written", sb.log.inserts.length, 0);
+  eq("and its flag is not touched", sb.log.updates.length, 0);
+}
+{
+  // Two devices both read "not out"; migration 035's index refuses the second.
+  const sb = fakeSb({ insertError: { code: "23505", message: 'duplicate key value violates unique constraint "stock_checkouts_one_open"' } });
+  const r = await checkoutStackCard(sb, { card: CARD, stackName: "A", hideMode: "none" });
+  eq("the index's refusal reads as already out", [r.ok, r.alreadyOut], [false, true]);
+  eq("and the flag — the OTHER checkout's — is not rolled back",
+    sb.log.updates.some((u) => u.table === "stack_cards" && u.patch.checked_out_at === null), false);
+}
+{
+  const sb = fakeSb({ insertError: { code: "42P01", message: 'relation "stock_checkouts" does not exist' } });
+  await checkoutStackCard(sb, { card: CARD, stackName: "A", hideMode: "none" });
+  eq("any other failed insert still rolls the flag back",
+    sb.log.updates.some((u) => u.table === "stack_cards" && u.patch.checked_out_at === null), true);
+}
+ok("another table's unique violation is not this one", !isDuplicateOpen({ code: "23505", message: 'violates unique constraint "stacks_name_key"' }));
+ok("the index's name is what the app recognises",
+  read("supabase/migrations/035_one_open_checkout.sql").includes("index if not exists stock_checkouts_one_open"));
 
 // --- 7. greps ---------------------------------------------------------------
 // One spelling of the name. A second literal is how the box ends up as two.
