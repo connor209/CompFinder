@@ -166,7 +166,11 @@ stream` (the relay, only while streaming).
   return) can choose it, that a card's sticker comes out of the box with it —
   only off a checkout that came BACK, never into the stream box — that
   recommended show stock leads with it, and that the pull sheet's pick list
-  and pack hand walk it in the same order.
+  and pack hand walk it in the same order. It also holds `checkoutStackCard()`
+  refusing a card that already has an open checkout, and migration 035's
+  unique index being read as "already out" without rolling back the other
+  checkout's flag — fourteen cards went out twice on 2026-10-16 from a screen
+  that had not reloaded.
 - `scripts/check-showbinder.mjs` — Show Binders: which stacks are binders
   ("Show Binder 2" is, "Binder" and "Show Binders" are not), that a binder's
   code survives a rename and a card's binder SKU (B1-047) never moves, that
