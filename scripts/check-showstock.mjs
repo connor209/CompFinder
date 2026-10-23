@@ -37,7 +37,9 @@ import {
   ebayStickerPlan,
   STICKER_MIN_PENCE,
   HELD_CONFIDENCE,
-  isSlabTitle
+  isSlabTitle,
+  recPriceBand,
+  inPriceBand
 } from "../apps/app/lib/showstock.js";
 import { batchColumns, isMissingPoolName } from "../apps/app/lib/batch-store.js";
 
@@ -347,7 +349,7 @@ for (const [title, want] of [
 
 // The graded filter and the one-copy-each dedupe both run BEFORE the top-N
 // slice, or "top 20" with either in play shows fewer than 20.
-if (!/oneOfEach\(\s*filterByGames\(recPool, recGames\)\.filter\(\(r\) => !\(recNoGraded && r\.graded\)\)/.test(desk) ||
+if (!/oneOfEach\(\s*filterByGames\(recPool, recGames\)\.filter\(\(r\) => !\(recNoGraded && r\.graded\)/.test(desk) ||
     !/recDistinct\.rows\s*\.slice\(/.test(desk)) {
   fail("the graded filter and the duplicate filter on recommendations must run BEFORE the top-N slice, or 'top 20' shows fewer than 20");
 }
@@ -388,6 +390,29 @@ if (!/oneOfEach\(\s*filterByGames\(recPool, recGames\)\.filter\(\(r\) => !\(recN
   }
   if (!/async function applyEbayStickers[\s\S]{0,1600}confirm\(/.test(desk)) {
     fail("🏷 eBay price → sticker overwrites stickers somebody set, so it must confirm first");
+  }
+}
+
+// ---- The price band on ★ Recommend show stock ------------------------------
+{
+  const band = (a, b) => { const r = recPriceBand(a, b); return [r.min, r.max, r.bad, r.active]; };
+  eq("both ends blank is no band at all", band("", ""), [null, null, false, false]);
+  eq("pounds become pence, £ and commas allowed", band("£10", "1,250.50"), [1000, 125050, false, true]);
+  eq("one end alone is a band", band("", "20"), [null, 2000, false, true]);
+  eq("ends the wrong way round are swapped", band("50", "10"), [1000, 5000, false, true]);
+  eq("a typo is reported, never read as no limit", band("1o", "50")[2], true);
+  const b = recPriceBand("10", "50");
+  eq("inclusive at the bottom", inPriceBand(1000, b), true);
+  eq("inclusive at the top", inPriceBand(5000, b), true);
+  eq("a penny under is out", inPriceBand(999, b), false);
+  eq("a penny over is out", inPriceBand(5001, b), false);
+  eq("no band lets everything through", inPriceBand(1, recPriceBand("", "")), true);
+  eq("a card with no price is never inside a band", inPriceBand(null, b), false);
+
+  // Before the top N, like the game chips: "top 20 between £10 and £50" is
+  // twenty cards in the band, not the overall top 20 thinned out.
+  if (!/oneOfEach\(\s*filterByGames\(recPool, recGames\)\.filter\([^\n]{0,200}inPriceBand\(/.test(desk)) {
+    fail("the price band must be applied BEFORE the top N, alongside the game filter");
   }
 }
 

@@ -406,3 +406,37 @@ export function isSlabTitle(title) {
   if (SAYS_RAW.test(t)) return false;
   return SLAB_COMPANY.test(t) || SLAB_TAG_ACE.test(t);
 }
+
+/**
+ * The price band on ★ Recommend show stock: "£10 to £50", either end blank.
+ * Applied BEFORE the top N, like the game chips, so "top 20 between £10 and
+ * £50" is twenty cards in that band rather than whatever of the overall top
+ * 20 happened to fall in it. A blank end is no bound, an end that is not a
+ * price is reported rather than read as no bound — a typo silently widening
+ * the band is a box packed with the wrong cards — and ends typed the wrong
+ * way round are swapped, since nobody means "over £50 and under £10".
+ */
+export function recPriceBand(minText, maxText) {
+  const read = (text) => {
+    const raw = String(text ?? "").trim();
+    if (!raw) return { pence: null, bad: false };
+    const cleaned = raw.replace(/^£\s*/, "").replace(/,/g, "").trim();
+    if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return { pence: null, bad: true };
+    return { pence: Math.round(Number(cleaned) * 100), bad: false };
+  };
+  const lo = read(minText);
+  const hi = read(maxText);
+  let min = lo.pence;
+  let max = hi.pence;
+  if (min != null && max != null && min > max) [min, max] = [max, min];
+  return { min, max, bad: lo.bad || hi.bad, active: min != null || max != null };
+}
+
+/** Inclusive at both ends: "£10 to £50" keeps a £50 card. */
+export function inPriceBand(pricePence, band) {
+  if (!band?.active) return true;
+  if (pricePence == null) return false;
+  if (band.min != null && pricePence < band.min) return false;
+  if (band.max != null && pricePence > band.max) return false;
+  return true;
+}

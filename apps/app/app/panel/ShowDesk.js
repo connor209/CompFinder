@@ -36,7 +36,7 @@ import Fold from "./Fold";
 import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine, bulkSalePrices, bulkSaleBlockers, parseDealPence } from "@/lib/deal.js";
 import { showOnly, oneOfEach } from "@/lib/streamstock.js";
-import { isSlabTitle, DEFAULT_NAME_MAX, ebayAskPence, ebayStickerPlan } from "@/lib/showstock.js";
+import { isSlabTitle, DEFAULT_NAME_MAX, ebayAskPence, ebayStickerPlan, recPriceBand, inPriceBand } from "@/lib/showstock.js";
 import { checkoutLabelRows, binderLabelRows, labelWorkbook, LABEL_NAME_KEY, BINDER_LABEL_COLUMNS } from "@/lib/labelexport.js";
 import {
   isToploaderStack, isUnorderedStack, toploaderStackOf, fileableStacks, ensureToploaderStack,
@@ -241,6 +241,11 @@ export default function ShowDesk() {
   const [recOff, setRecOff] = useState(new Set());
   const [recGames, setRecGames] = useState(new Set()); // empty = every game
   const [recCount, setRecCount] = useState(20);
+  // A price band, typed as pounds, either end blank. Applied before the top N
+  // like the game chips — see recPriceBand().
+  const [recMin, setRecMin] = useState("");
+  const [recMax, setRecMax] = useState("");
+  const recBand = useMemo(() => recPriceBand(recMin, recMax), [recMin, recMax]);
   // Leave the slabs at home. Applied BEFORE the top N, like the game chips, so
   // "top 20" with it ticked is twenty raw cards rather than twenty minus slabs.
   // Remembered on this device: it is a standing choice about what goes to a
@@ -623,10 +628,10 @@ export default function ShowDesk() {
   // BEFORE the top N, so the N are N different cards.
   const recDistinct = useMemo(
     () => (recPool === null ? null : oneOfEach(
-      filterByGames(recPool, recGames).filter((r) => !(recNoGraded && r.graded)),
+      filterByGames(recPool, recGames).filter((r) => !(recNoGraded && r.graded) && inPriceBand(r.pricePence, recBand)),
       open.map((co) => co.title)
     )),
-    [recPool, recGames, recNoGraded, open]
+    [recPool, recGames, recNoGraded, recBand, open]
   );
   const recs = useMemo(
     () => (recDistinct === null ? null : recDistinct.rows
@@ -638,9 +643,28 @@ export default function ShowDesk() {
     () => (recPool && recNoGraded ? filterByGames(recPool, recGames).filter((r) => r.graded).length : 0),
     [recPool, recGames, recNoGraded]
   );
+  // Counted over the chosen games, and shown, like the slabs above.
+  const recBandOut = useMemo(
+    () => (recPool && recBand.active
+      ? filterByGames(recPool, recGames).filter((r) => !(recNoGraded && r.graded) && !inPriceBand(r.pricePence, recBand)).length
+      : 0),
+    [recPool, recGames, recNoGraded, recBand]
+  );
   // What the check-out button acts on: rows on screen that you have not
   // unticked. A ticked card the filter has hidden is never checked out.
   const recChosen = useMemo(() => (recs || []).filter((r) => !recOff.has(r.card.id)), [recs, recOff]);
+
+  // The same two boxes above the button and in the list, so the band can be
+  // set before ranking or narrowed while looking at the result.
+  const recBandControl = (
+    <label className="sd-toggle" title="Only recommend cards whose eBay price is in this range. Leave either end blank for no limit.">
+      £
+      <input className="sd-count" inputMode="decimal" placeholder="min" value={recMin} onChange={(e) => setRecMin(e.target.value)} aria-label="Minimum price" />
+      to £
+      <input className="sd-count" inputMode="decimal" placeholder="max" value={recMax} onChange={(e) => setRecMax(e.target.value)} aria-label="Maximum price" />
+      {recBand.bad ? <span className="hint hint-small" style={{ color: "var(--warn-ink)" }}>not a price — try 12.50</span> : null}
+    </label>
+  );
 
   async function checkoutBatch() {
     if (batchChosen.length === 0) return;
@@ -2057,6 +2081,7 @@ export default function ShowDesk() {
             <input className="sd-count" type="number" min="1" max="200" value={recCount} onChange={(e) => setRecCount(e.target.value)} />
             by value
           </label>
+          {recBandControl}
         </div>
       </Fold>
       )}
@@ -2484,6 +2509,13 @@ export default function ShowDesk() {
                   <span className="hint hint-small">({recGradedOut} slab{recGradedOut === 1 ? "" : "s"} left out)</span>
                 ) : null}
               </label>
+              {recBandControl}
+              {recBand.active && recBandOut > 0 ? (
+                <p className="hint hint-small">
+                  {recBandOut} card{recBandOut === 1 ? "" : "s"} outside {recBand.min != null ? pounds(recBand.min) : "£0"}
+                  {recBand.max != null ? `–${pounds(recBand.max)}` : " and up"} left out.
+                </p>
+              ) : null}
               {recInBinder > 0 ? (
                 <p className="hint hint-small">
                   {recInBinder} card{recInBinder === 1 ? "" : "s"} in Show Binders left out — a binder goes to a show as a
