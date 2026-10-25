@@ -2420,3 +2420,20 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .ps-allpile.done .ps-allpile-state { color:var(--conf-high); }
 .ps-allpile.current { outline:1px solid var(--conf-high); }
 .ps-allpile.current .ps-allpile-state { font-weight:700; }
+
+/* ＋ Deal ×N — which copy of a grouped row goes in the deal (DealCopyPicker).
+   Fixed to the viewport: the table view's scrolling wrapper clips anything
+   positioned inside it. */
+.dcp-back { position:fixed; inset:0; z-index:60; background:rgba(0,0,0,.45); display:flex; align-items:flex-end; justify-content:center; padding:16px; }
+.dcp-sheet { width:100%; max-width:520px; max-height:80vh; display:flex; flex-direction:column; background:var(--surface); border:1px solid var(--line-strong); border-radius:14px; padding:12px 14px; box-shadow:0 12px 40px rgba(0,0,0,.35); }
+.dcp-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.dcp-k { font-size:11px; font-weight:var(--label-weight); letter-spacing:var(--label-spacing-sm); text-transform:var(--label-transform); color:var(--ink-faint); }
+.dcp-title { font-weight:600; color:var(--ink); margin:4px 0 8px; overflow-wrap:anywhere; }
+.dcp-list { overflow-y:auto; display:flex; flex-direction:column; }
+.dcp-row { display:grid; grid-template-columns:auto 1fr auto auto; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--line); font-size:13px; }
+.dcp-row.is-off { opacity:.6; }
+.dcp-sku { font-weight:600; color:var(--ink); }
+.dcp-where { color:var(--ink-soft); min-width:0; overflow-wrap:anywhere; }
+.dcp-detail { color:var(--ink-faint); }
+.dcp-blocked { font-size:12px; color:var(--ink-faint); white-space:nowrap; }
+@media (min-width:700px) { .dcp-back { align-items:center; } }

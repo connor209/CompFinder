@@ -94,6 +94,81 @@ export function DealButton({ deal, update, line, className = "inv-act", title, p
 }
 
 /**
+ * "＋ Deal ×3" — the button for a row that stands for several copies.
+ *
+ * A grouped row is "the three Gengars at £34", and a deal line is ONE physical
+ * card: the one the customer is holding, with the SKU on its sleeve. Adding
+ * whichever copy happened to sort first sells the wrong SKU — ends a listing
+ * for a card still in its stack, and leaves the one that went over the table
+ * live online to sell twice. So a group opens a list of its copies, each with
+ * its SKU and where it lives, and each goes in on its own button.
+ *
+ * `copies` is `[{ line, sku, where, detail, blocked }]`, built by the caller;
+ * `blocked` is a reason a copy cannot go in (the stream box), shown rather
+ * than dropped so the count still adds up to what the row says. A single copy
+ * is the ordinary button — nothing to choose between.
+ *
+ * A sheet fixed to the viewport rather than a dropdown, because the table view
+ * sits in a scrolling wrapper that clips anything positioned inside it.
+ */
+export function DealCopyPicker({ deal, update, copies, className = "inv-act", title }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  const usable = (copies || []).filter((c) => c && c.line);
+  if (!deal || usable.length === 0) return null;
+  if (usable.length === 1 && !usable[0].blocked) {
+    return <DealButton deal={deal} update={update} line={usable[0].line} className={className} title={title} />;
+  }
+  const inCount = usable.filter((c) => inDeal(deal, c.line)).length;
+  return (
+    <>
+      <button
+        className={className}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Choose which copy — by its SKU — goes in the current deal"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {inCount ? `✓ ${inCount} in deal ▾` : `＋ Deal ×${usable.length} ▾`}
+      </button>
+      {open ? (
+        <div className="dcp-back" onClick={() => setOpen(false)}>
+          <div className="dcp-sheet" role="dialog" aria-label="Which copy is going in the deal?" onClick={(e) => e.stopPropagation()}>
+            <div className="dcp-head">
+              <span className="dcp-k">Which copy?</span>
+              <button className="deal-x" onClick={() => setOpen(false)} aria-label="Close">✕</button>
+            </div>
+            <div className="dcp-title">{usable[0].line.title}</div>
+            <div className="dcp-list">
+              {usable.map((c) => (
+                <div className={`dcp-row${c.blocked ? " is-off" : ""}`} key={c.line.id}>
+                  <span className="dcp-sku mono">{c.sku || "no SKU"}</span>
+                  <span className="dcp-where">
+                    {c.where || <span className="muted">no stack position</span>}
+                    {c.detail ? <span className="dcp-detail"> · {c.detail}</span> : null}
+                  </span>
+                  <span className="dcp-price mono">{c.line.price != null ? poundsStr(c.line.price) : "—"}</span>
+                  {c.blocked ? (
+                    <span className="dcp-blocked">{c.blocked}</span>
+                  ) : (
+                    <DealButton deal={deal} update={update} line={c.line} className="itbl-check" />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
  * The basket, read-only — for a screen a customer may be holding.
  *
  * The binder is one of the two customer screens, so the full bar cannot go on

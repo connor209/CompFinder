@@ -12,7 +12,7 @@ import { awayIndex, listingStock } from "@/lib/stockcheck.js";
 import { withPool, isStreamCheckout } from "@/lib/streamstock.js";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { locationsBySku } from "@/lib/stackpos.js";
-import DealBar, { DealButton, useDeal } from "./DealBar";
+import DealBar, { DealButton, DealCopyPicker, useDeal } from "./DealBar";
 import { StreamBar, StreamButton, useRelay } from "./StreamBar";
 import { listingLine } from "@/lib/deal.js";
 import Fold from "./Fold";
@@ -116,15 +116,42 @@ function ageDays(startTime) {
 /**
  * The Current Deal line this row would add.
  *
- * Built from ONE listing — the group's first — because a deal line is a
- * physical card a customer is holding, not "the three Gengars we have at
- * £34". Selling the group would end one listing and leave two live. To put a
- * second copy in the same deal, untick "Group duplicates" and add it from its
- * own row; each copy has its own SKU, so the basket takes both.
+ * Built from ONE listing, because a deal line is a physical card a customer
+ * is holding, not "the three Gengars we have at £34". Only for a row of one
+ * copy — a grouped row goes through dealCopiesFor() and the picker, so the
+ * SKU that sells is the one on the card in the customer's hand.
  */
 function dealLineFor(g, priced) {
   const p = priced && priced.get(g.key);
   return listingLine(g._items[0] || g, { marketPence: p && !p.error ? p.recPence ?? null : null });
+}
+
+/**
+ * Every copy behind a row, for the ＋ Deal picker — the one the customer is
+ * holding has to be the one that sells, so each copy is offered by its own
+ * SKU and where it lives, rather than the group's first standing in for all
+ * of them. A copy in the stream box is listed but cannot go in (no crossover,
+ * the same rule as the single-row button), and one at a show says so.
+ */
+function dealCopiesFor(g, priced, locations, stock) {
+  const p = priced && priced.get(g.key);
+  const marketPence = p && !p.error ? p.recPence ?? null : null;
+  const items = g._items && g._items.length ? g._items : [g];
+  return items.map((l) => {
+    const st = stock && stock.get(l.ebay_item_id);
+    const away = st?.state === "show" ? st.checkout : null;
+    const stream = away && isStreamCheckout(away);
+    const bits = [];
+    if (l.extra?.condition) bits.push(l.extra.condition);
+    if (away && !stream) bits.push(`at a show${away.event ? ` · ${away.event}` : ""}`);
+    return {
+      line: listingLine(l, { marketPence }),
+      sku: l.sku || null,
+      where: locationOf(l.sku, locations),
+      detail: bits.join(" · ") || null,
+      blocked: stream ? "📺 in the stream box" : null
+    };
+  });
 }
 
 /**
@@ -362,7 +389,9 @@ const ALL_COLUMNS = [
           ) : canUpdate ? (
             <button className="itbl-set" onClick={() => ctx.onUpdate(g)} title="Update eBay price to market">↳ {pounds(p.recPence)}</button>
           ) : null}
-          {inStreamBox(g) ? null : (
+          {g._count > 1 ? (
+            <DealCopyPicker className="itbl-check" deal={ctx.deal} update={ctx.onDeal} copies={dealCopiesFor(g, ctx.priced, ctx.locations, ctx.stock)} />
+          ) : inStreamBox(g) ? null : (
             <DealButton className="itbl-check" deal={ctx.deal} update={ctx.onDeal} line={dealLineFor(g, ctx.priced)} />
           )}
           <StreamButton className="itbl-check" relay={ctx.relay} item={streamItemFor(g, ctx.priced)} />
@@ -1325,7 +1354,7 @@ export default function Inventory({ onDeepDive }) {
                   </td>
                   {visibleCols(ALL_COLUMNS).map((c) => (
                     <td key={c.key} className={`itbl-${c.key}`}>
-                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, onShow: showOut, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay, locations })}
+                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, onShow: showOut, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay, locations, stock })}
                     </td>
                   ))}
                 </tr>
@@ -1396,13 +1425,12 @@ export default function Inventory({ onDeepDive }) {
                     {onDeepDive ? (
                       <button className="inv-act" onClick={() => onDeepDive(g.title)}>Deep dive ↗</button>
                     ) : null}
-                    {inStreamBox(g) ? null : <DealButton
+                    {g._count > 1 ? (
+                      <DealCopyPicker deal={deal} update={updateDeal} copies={dealCopiesFor(g, priced, locations, stock)} />
+                    ) : inStreamBox(g) ? null : <DealButton
                       deal={deal}
                       update={updateDeal}
                       line={dealLineFor(g, priced)}
-                      title={g._count > 1
-                        ? "Adds ONE copy to the current deal — untick “Group duplicates” to add another"
-                        : "Add to the current deal — nothing happens on eBay until it sells"}
                     />}
                     <StreamButton relay={relay} item={streamItemFor(g, priced)} />
                     <button className="inv-act" onClick={() => showOut(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
