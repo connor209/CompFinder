@@ -1,0 +1,116 @@
+# Would eBay's Browse API make a better source of live listings for Last Comp
+# than SoldComps' active mode? scripts/compare-browse.mjs, from a button.
+#
+# SPENDS NOTHING AT SOLDCOMPS. Both sides come off what soldcomps_cache already
+# holds, plus one free Browse call per card on the app token. It writes
+# nothing: the answer is the run summary and a JSON artifact.
+#
+# MANUAL ONLY, same posture as the image backfill: it holds the service-role
+# key, so it runs when someone asks and never as a side effect of a commit.
+#
+# Repository secrets:
+#   NEXT_PUBLIC_SUPABASE_URL     the project URL, https://xxxx.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY    the service_role key (soldcomps_cache has RLS)
+#   EBAY_CLIENT_ID               the app's Production keyset — the same pair
+#   EBAY_CLIENT_SECRET           set on comp-finder in Vercel
+name: Compare live listings (Browse vs SoldComps)
+
+on:
+  workflow_dispatch:
+    inputs:
+      n:
+        description: 'How many published cards to compare'
+        default: '40'
+        required: true
+      card:
+        description: 'Or one card, every listing printed (e.g. "Umbreon VMAX 215") — leave blank for a sample'
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      # The script imports the page's own derive() and the app's browseComps(),
+      # so it needs the workspace dependencies both of those pull in.
+      - name: Install
+        run: npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+      - name: Check the secrets are set
+        env:
+          URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EBAY_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+        run: |
+          missing=""
+          [ -n "$URL" ] || missing="$missing NEXT_PUBLIC_SUPABASE_URL"
+          [ -n "$KEY" ] || missing="$missing SUPABASE_SERVICE_ROLE_KEY"
+          [ -n "$EBAY_ID" ] || missing="$missing EBAY_CLIENT_ID"
+          [ -n "$EBAY_SECRET" ] || missing="$missing EBAY_CLIENT_SECRET"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing — add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Compare
+        id: compare
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EBAY_CLIENT_ID: ${{ secrets.EBAY_CLIENT_ID }}
+          EBAY_CLIENT_SECRET: ${{ secrets.EBAY_CLIENT_SECRET }}
+          N: ${{ inputs.n }}
+          CARD: ${{ inputs.card }}
+        run: |
+          set -o pipefail
+          if [ -n "$CARD" ]; then
+            node --no-warnings scripts/compare-browse.mjs --card "$CARD" --json browse-vs-soldcomps.json | tee run.log
+          else
+            node --no-warnings scripts/compare-browse.mjs --n "$N" --json browse-vs-soldcomps.json | tee run.log
+          fi
+
+      - name: Upload the per-card JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browse-vs-soldcomps
+          path: browse-vs-soldcomps.json
+          if-no-files-found: ignore
+
+      # The totals are the part worth reading first, so they lead; every
+      # card's rows follow in a fold.
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Live listings: Browse vs SoldComps"
+            echo
+            if [ "${{ steps.compare.outcome }}" != "success" ]; then
+              echo "> **The run did not finish.** See the Compare step's log."
+              echo
+            fi
+            echo '```'
+            sed -n '/^=== /,$p' run.log 2>/dev/null || true
+            echo '```'
+            echo
+            echo "<details><summary>Every card</summary>"
+            echo
+            echo '```'
+            cat run.log 2>/dev/null || echo "(no output — see the step log above)"
+            echo '```'
+            echo "</details>"
+            echo
+            echo "SoldComps' side is its cached listings, so a difference on an old entry may be the market moving. Download **browse-vs-soldcomps** above for the per-card JSON."
+          } >> "$GITHUB_STEP_SUMMARY"

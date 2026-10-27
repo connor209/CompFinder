@@ -771,7 +771,7 @@ node scripts/audit-big.mjs --json out.json    # price them all, from apps/public
 node scripts/diff-runs.mjs before.json after.json   # per-card, flags LOST prices
 node scripts/inspect-spans.mjs "Card 123 Set"       # read the comps behind one price
 CORPUS_OUT=corpus.json node scripts/probe-rules.mjs # dump every title, test a regex offline
-node scripts/compare-browse.mjs --n 40          # live listings: Browse vs SoldComps, cache only
+node scripts/compare-browse.mjs --n 40          # live listings: Browse vs SoldComps, cache only (or Actions → Compare live listings)
 ```
 
 Sold comps cache for 24 hours, so re-running straight after an audit is free
