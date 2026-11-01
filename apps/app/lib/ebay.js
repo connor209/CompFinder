@@ -807,6 +807,7 @@ export async function fetchItemQuantity(accessToken, itemId) {
     `<ItemID>${safeItem}</ItemID>` +
     `<OutputSelector>Item.Quantity</OutputSelector>` +
     `<OutputSelector>Item.SellingStatus.QuantitySold</OutputSelector>` +
+    `<OutputSelector>Item.SellingStatus.ListingStatus</OutputSelector>` +
     `</GetItemRequest>`;
 
   const res = await fetch(TRADING_URL, {
@@ -835,7 +836,10 @@ export async function fetchItemQuantity(accessToken, itemId) {
   // GetItem's Quantity is everything ever offered on the listing; what is
   // left is that less what has sold.
   const available = quantity == null ? null : Math.max(0, quantity - (sold || 0));
-  return { quantity, sold, available };
+  // "Active", or "Completed"/"Ended" once the listing is over — sold out or
+  // ended by hand. Null when eBay didn't say.
+  const listingStatus = resp.Item?.SellingStatus?.ListingStatus ? String(resp.Item.SellingStatus.ListingStatus) : null;
+  return { quantity, sold, available, listingStatus };
 }
 
 /**

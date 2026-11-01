@@ -20,6 +20,17 @@ import { getValidUserAccessToken, endListing, fetchItemQuantity, reviseItemQuant
  * that sold online since the last sync would otherwise be put back on sale. If
  * the live read fails we end nothing and say so — the sale is already
  * recorded, an un-ended listing is a retry, and guessing either way is worse.
+ *
+ * A listing missing from our mirror is ASKED ABOUT, not refused. The row goes
+ * when a listing ends or sells and a sync, a hide or another sale deletes it
+ * — so "not in your synced inventory" was the answer exactly when it mattered
+ * most, at a table, with a retry that could never succeed. eBay itself only
+ * lets a seller end their own items, so the live call is still guarded.
+ *
+ * A listing that is already over is not an error: nothing is left to end.
+ * `alreadyOver` says so, and `soldOnline` says it ended because a copy SOLD
+ * on eBay — the card may have been sold twice, which the screen must say out
+ * loud rather than file under "listing ended".
  */
 export async function POST(request) {
   const supabase = await createClient();
@@ -43,21 +54,26 @@ export async function POST(request) {
     .select("ebay_item_id,title,price_value,price_currency")
     .eq("user_id", user.id)
     .eq("ebay_item_id", itemId)
-    .single();
-  if (!row) return NextResponse.json({ ok: false, error: "That listing isn't in your synced inventory." }, { status: 404 });
+    .maybeSingle();
 
   try {
     const token = await getValidUserAccessToken(admin, user.id);
     if (!token) return NextResponse.json({ ok: false, error: "eBay account not connected." }, { status: 400 });
 
-    if (body.oneCopy) {
+    if (body.oneCopy || !row) {
       let live;
       try {
         live = await fetchItemQuantity(token, itemId);
       } catch (err) {
-        return NextResponse.json({ ok: false, error: `couldn't read how many copies are left (${err.message || "eBay unreachable"})` }, { status: 502 });
+        return NextResponse.json({ ok: false, error: `couldn't read the listing on eBay (${err.message || "eBay unreachable"})` }, { status: 502 });
       }
-      if (live.available != null && live.available > 1) {
+      if (live.listingStatus && live.listingStatus !== "Active") {
+        if (row) {
+          try { await admin.from("ebay_listings").delete().eq("user_id", user.id).eq("ebay_item_id", itemId); } catch { /* the next sync corrects it */ }
+        }
+        return NextResponse.json({ ok: true, itemId, ended: true, alreadyOver: true, soldOnline: (live.sold || 0) > 0 });
+      }
+      if (body.oneCopy && live.available != null && live.available > 1) {
         const remaining = live.available - 1;
         await reviseItemQuantity(token, itemId, remaining);
         try {
@@ -77,10 +93,10 @@ export async function POST(request) {
       await admin.from("ebay_price_changes").insert({
         user_id: user.id,
         ebay_item_id: itemId,
-        title: row.title || null,
-        old_price: row.price_value != null ? Number(row.price_value) : null,
+        title: row?.title || null,
+        old_price: row?.price_value != null ? Number(row.price_value) : null,
         new_price: null,
-        currency: row.price_currency || null,
+        currency: row?.price_currency || null,
         source: "ended"
       });
     } catch {

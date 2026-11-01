@@ -33,7 +33,7 @@ import {
   listingLine, checkoutLine, emptyDeal, inDeal, addLine, removeLine,
   setLineOn, setLinePrice, setDealTotal, activeLines, dealSubtotal,
   splitDeal, dealPrices, dealBlockers, dealSummary, sellLine, sellDeal,
-  retryEnds, parseDealPence, priceSourceLabel, FROM_BOX, FROM_LIVE,
+  retryEnds, saleWarningText, parseDealPence, priceSourceLabel, FROM_BOX, FROM_LIVE,
   loadDeal, saveDeal, DEAL_TTL_MS, bulkSalePrices, bulkSaleBlockers
 } from "../apps/app/lib/deal.js";
 
@@ -354,6 +354,31 @@ console.log("6. a failed eBay call never rolls a sale back");
   const broken = fakeSb({ failInsert: true });
   const one = await sellLine(broken, listingLine({ ebay_item_id: "555", sku: "X1", title: "Card", price_value: 3 }), 300, { endListing: endsOk([]) });
   ok("an unwritable sale is reported", one.ok === false && Boolean(one.error));
+
+  // A listing that is already OVER on eBay — gone from our mirror, which is
+  // how "That listing isn't in your synced inventory" reached a table on
+  // 2026-11-01 with a retry that could never succeed. Ended by hand: nothing
+  // left to do, and no retry offered.
+  const over = async () => ({ ok: true, ended: true, alreadyOver: true, soldOnline: false });
+  const gone = await sellDeal(fakeSb(), addLine(emptyDeal(), listingLine({ ebay_item_id: "601", sku: "GS25", title: "Squirtle", price_value: 11.99 })), { endListing: over });
+  eq("an already-ended listing is no failure", gone.failed.length, 0);
+  eq("and nothing to retry", gone.unended.length, 0);
+  ok("the receipt says it had already ended", gone.results[0].did.includes("listing had already ended on eBay") && !gone.results[0].warning);
+
+  // Over because it SOLD on eBay: the card may be sold twice. Loud, and not
+  // a retry — there is no listing left to end.
+  const soldThere = async () => ({ ok: true, ended: true, alreadyOver: true, soldOnline: true });
+  const twice = await sellDeal(fakeSb(), addLine(emptyDeal(), listingLine({ ebay_item_id: "602", sku: "GS26", title: "Squirtle", price_value: 11.99 })), { endListing: soldThere });
+  ok("a listing that sold online warns", /SOLD on eBay/.test(twice.results[0].warning || ""));
+  eq("and is not offered as a retry", twice.unended.length, 0);
+  ok("its warning is never told to end the listing by hand", !/by hand/.test(saleWarningText(twice.results[0].warning)));
+  ok("a listing that would not end still is", /by hand/.test(saleWarningText("listing not ended: timeout")));
+
+  // A retry that finds it sold online hands it back rather than calling it ended.
+  const heard = [];
+  const left = await retryEnds(fakeSb(), [{ id: "L:603", sku: "GS27", itemId: "603", checkoutId: "co-9" }], { endListing: soldThere, onSoldOnline: (r) => heard.push(r) });
+  eq("the retry leaves nothing over", left.length, 0);
+  ok("and says which one sold online", heard.length === 1 && heard[0].sku === "GS27" && /SOLD on eBay/.test(heard[0].warning));
 }
 
 /* ================================================ 7. a card sold twice, and

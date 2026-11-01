@@ -8,7 +8,7 @@ import { gameFacets, gameName, UNKNOWN_GAME } from "@/lib/games.js";
 import { getSetIndex } from "@/lib/set-index.js";
 import { listingState, matchesQuery, compareSku } from "@/lib/showfilter.js";
 import { relayUrl } from "@/lib/livestream.js";
-import { checkoutLine, sellLine } from "@/lib/deal.js";
+import { checkoutLine, sellLine, saleWarningText } from "@/lib/deal.js";
 import { parseOverridePence } from "@/lib/price-override.js";
 import { fileableStacks } from "@/lib/toploader.js";
 import {
@@ -380,7 +380,7 @@ export default function StreamStock() {
     setBusy(false);
     setMsg(
       `${co.sku || "Card"} marked sold${pence != null ? ` at ${pounds(pence)}` : ""} and taken out of its stack.` +
-      (r.warning ? ` ⚠ ${r.warning} — end it on eBay by hand.` : " Listing ended.") +
+      (r.warning ? ` ⚠ ${saleWarningText(r.warning)}.` : " Listing ended.") +
       (o.ok ? "" : ` ⚠ The stream tally didn't save: ${o.error}`)
     );
     await load();
