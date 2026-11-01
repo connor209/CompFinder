@@ -15,7 +15,7 @@ import {
 } from "@/lib/checkout";
 import { parseOverridePence, poundsStr } from "@/lib/price-override.js";
 import {
-  showView, selectionFor, tickedOnScreen, facetsOf, listingState, matchesQuery, skuBatch, titleMatches, skuInBatch,
+  showView, selectionFor, tickedOnScreen, tickedAcrossSearches, facetsOf, listingState, matchesQuery, skuBatch, titleMatches, skuInBatch,
   openCheckoutIndex, isCardAway,
   SHOW_SORTS, DEFAULT_SORT, STICKER_FILTERS, LISTING_FILTERS
 } from "@/lib/showfilter.js";
@@ -760,8 +760,22 @@ export default function ShowDesk() {
     }),
     [taggedOpen, q, sort, eventFilter, stackFilter, stickerFilter, listingFilter, gamesFilter]
   );
-  const visible = view.rows;
-  const selected = useMemo(() => selectionFor(visible, sel), [visible, sel]);
+  // "Show ticked": the list narrowed to the ticked cards, wherever the search
+  // has moved since — so a tick the search is hiding can be seen before a
+  // filing button moves it. Falls away by itself once nothing is ticked.
+  const [tickedOnly, setTickedOnly] = useState(false);
+  const tickedView = useMemo(
+    () => (tickedOnly && sel.size > 0 ? showView(taggedOpen, { sort }).rows.filter((co) => sel.has(co.id)) : null),
+    [tickedOnly, sel, taggedOpen, sort]
+  );
+  const visible = tickedView || view.rows;
+  // Searching again, or unticking the last card, goes back to the search.
+  useEffect(() => { setTickedOnly(false); }, [q, eventFilter, stackFilter, stickerFilter, listingFilter, gamesFilter]);
+  useEffect(() => { if (sel.size === 0) setTickedOnly(false); }, [sel]);
+  // What the filing buttons act on: every ticked card, on screen or not, and
+  // with nothing ticked only what is on screen — tickedAcrossSearches().
+  const selected = useMemo(() => tickedAcrossSearches(taggedOpen, visible, sel), [taggedOpen, visible, sel]);
+  const tickedHidden = selected.length - selectionFor(visible, sel).length;
   // What £ Sold (N) sells: ticked AND on screen, never "all" — a sale ends the
   // listing and pulls the card, so nothing ticked sells nothing.
   const soldTicked = useMemo(() => tickedOnScreen(visible, sel), [visible, sel]);
@@ -1422,7 +1436,7 @@ export default function ShowDesk() {
     const res = await recordWant(supabase(), {
       query: raw,
       event,
-      hadMatch: visible.length > 0
+      hadMatch: view.rows.length > 0
     });
     setBusy(false);
     if (res.missing) {
@@ -1435,7 +1449,7 @@ export default function ShowDesk() {
       return;
     }
     setWants((prev) => [res.row, ...prev]);
-    setMsg(`Noted: “${raw}”${visible.length > 0 ? "" : " — we didn't have it"}.`);
+    setMsg(`Noted: “${raw}”${view.rows.length > 0 ? "" : " — we didn't have it"}.`);
   }
 
   async function removeWant(id) {
@@ -1628,8 +1642,8 @@ export default function ShowDesk() {
    * batch run. Pricing the whole pool to reprint three labels spends a
    * SoldComps request per card on cards that already have a price.
    *
-   * Acts on `selected`, so on what is on screen and nothing else, like every
-   * other button in this bar. The label width is the one the Batch screen's
+   * Acts on `selected` like every other filing button in this bar: every
+   * ticked card, or with nothing ticked what is on screen. The label width is the one the Batch screen's
    * sticker panel remembers: same printer, same roll.
    *
    * A ticked card with no sticker is not labelled — a label with no price is
@@ -2924,19 +2938,27 @@ export default function ShowDesk() {
               onChange={setGamesFilter}
               customer={customerMode}
             />
-            {view.filtering && !customerMode ? (
+            {tickedView && !customerMode ? (
+              <p className="hint hint-small sd-find-note">
+                Showing the <b>{tickedView.length}</b> ticked card{tickedView.length === 1 ? "" : "s"}, whatever the search.
+                {" "}<button className="sd-clear-all" onClick={() => setTickedOnly(false)}>Back to the search</button>
+              </p>
+            ) : view.filtering && !customerMode ? (
               /* Said out loud, because the alternative is a button that looks
                  like it does one thing and does another. A card filed while it
                  was off screen leaves nothing behind to notice. */
               <p className="hint hint-small sd-find-note">
                 Showing <b>{view.shown}</b> of {view.total} checked out
                 {view.hidden > 0 ? ` — ${view.hidden} hidden by the search` : ""}.
-                {" "}Everything below acts on {selCount === 1 ? "the one card" : `these ${selCount} cards`}, never on what you can&apos;t see.
+                {sel.size === 0
+                  ? <>{" "}With nothing ticked, everything below acts on {selCount === 1 ? "the one card" : `these ${selCount} cards`}, never on what you can&apos;t see.</>
+                  : <>{" "}Ticks are kept as you search{tickedHidden > 0 ? <> — <b>{tickedHidden} ticked {tickedHidden === 1 ? "card is" : "cards are"} hidden by it</b> and will be filed too</> : ""}. £ Sold only sells ticked cards on screen.</>}
                 {" "}<button className="sd-clear-all" onClick={clearFilters}>Clear</button>
               </p>
             ) : null}
             {customerMode ? null : (
             <div className="sd-bulkbar">
+              <span className="sd-bulk-sel">
               <label className="sd-toggle">
                 <input
                   type="checkbox"
@@ -2946,7 +2968,8 @@ export default function ShowDesk() {
                   }}
                   // Ticking adds the rows on screen and leaves any tick outside
                   // the search alone: unticking a row you can't see is its own
-                  // surprise. selectionFor() is what stops those being acted on.
+                  // surprise. Those still count for the filing buttons
+                  // (tickedAcrossSearches), and the note says how many.
                   onChange={(e) => {
                     const on = e.target.checked;
                     setSel((prev) => {
@@ -2959,6 +2982,19 @@ export default function ShowDesk() {
                 />
                 {sel.size > 0 ? `${selCount} selected` : `All ${visible.length}`}
               </label>
+              {sel.size > 0 && !tickedView ? (
+                <button
+                  className="sd-clear-all"
+                  onClick={() => setTickedOnly(true)}
+                  title="List just the ticked cards, including any the search is hiding"
+                >
+                  {tickedHidden > 0 ? `Show ticked (${tickedHidden} hidden)` : "Show ticked"}
+                </button>
+              ) : null}
+              {sel.size > 0 ? (
+                <button className="sd-clear-all" onClick={() => setSel(new Set())} title="Untick every card, on screen or not">Untick all</button>
+              ) : null}
+              </span>
               {/* Nothing on screen is nothing to act on: a search that matches
                   no card leaves these buttons pointing at an empty set, and a
                   "Return to spots" that quietly does nothing reads as broken. */}

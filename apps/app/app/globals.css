@@ -863,6 +863,7 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-find-note { margin-top:0; margin-bottom:8px; }
 .sd-bulkbar { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; padding-bottom:10px; border-bottom:1px solid var(--line); margin-bottom:4px; }
 .sd-bulkbar .ps-actions { flex-wrap:wrap; }
+.sd-bulk-sel { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .sd-backpicker { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:10px 0; border-bottom:1px solid var(--line); }
 /* A stack that can't take the whole batch — still pickable, just flagged. */
 .stack-tab.sd-tight { opacity:.6; }

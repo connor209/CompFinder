@@ -1714,6 +1714,17 @@ and every count on the buttons comes from that one function.
 `check-showfilter.mjs` pins it, along with a grep against the old inline
 convention coming back.
 
+**A tick survives a new search, for the filing buttons** (asked for
+2026-11-01). Sending a dozen particular cards to the toploader box is search
+one, tick it, search the next — and under the rule above each new search
+dropped the ticks before it. `tickedAcrossSearches()` is what To toploaders,
+Return to spots, the binders, a stack, Labels and Price these now read: every
+ticked card wherever the search has moved, and with NOTHING ticked still only
+what is on screen — the half that filed Saturday. The cost is a forgotten
+tick, so the note under the search counts the ticked cards it is hiding,
+**Show ticked** lists just those, and **Untick all** clears them.
+`selectionFor()` is unchanged for everything else.
+
 **A sale is the one bulk action where nothing ticked means NOTHING.**
 **£ Sold (N)** on the away list's bulk bar marks the ticked cards sold at
 once, and reads `tickedOnScreen()` rather than `selectionFor()`: filing the

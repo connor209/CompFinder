@@ -34,7 +34,7 @@ import {
   showView,
   isFiltering,
   facetsOf,
-  selectionFor, tickedOnScreen,
+  selectionFor, tickedOnScreen, tickedAcrossSearches,
   skuInBatch,
   skuBatch,
   openCheckoutIndex,
@@ -219,6 +219,18 @@ eq("a ticked row that is now hidden is NOT acted on", ids(selectionFor(visible, 
 eq("an empty list acts on nothing", ids(selectionFor([], new Set(["1"]))), []);
 eq("an array of ids works like a Set", ids(selectionFor(visible, ["1"])), ["1"]);
 // A sale is not a filing: nothing ticked sells NOTHING, never the screenful.
+// The filing buttons keep a tick wherever the search has moved since — search,
+// tick, search, tick, To toploaders — but nothing ticked is STILL only what
+// is on screen, which is the half that once filed Saturday's cards.
+{
+  const all = [{ id: "1" }, { id: "2" }, { id: "3" }];
+  eq("filing: nothing ticked is only what you can SEE", ids(tickedAcrossSearches(all, visible, new Set())), ["1", "2"]);
+  eq("filing: nothing ticked never reaches a hidden row", tickedAcrossSearches(all, visible, new Set()).some((r) => r.id === "3"), false);
+  eq("filing: a tick the search hides is kept", ids(tickedAcrossSearches(all, visible, new Set(["2", "3"]))), ["2", "3"]);
+  eq("filing: only hidden ticks still act on them", ids(tickedAcrossSearches(all, visible, new Set(["3"]))), ["3"]);
+  eq("filing: a stale id (checked in since) is never acted on", ids(tickedAcrossSearches(all, visible, new Set(["9"]))), []);
+  eq("filing: each card once", ids(tickedAcrossSearches(all, visible, new Set(["1", "2"]))), ["1", "2"]);
+}
 eq("nothing ticked sells nothing", ids(tickedOnScreen(visible, new Set())), []);
 eq("ticked rows are sold", ids(tickedOnScreen(visible, new Set(["1", "2"]))), ["1", "2"]);
 eq("a ticked row the search hides is not sold", ids(tickedOnScreen(visible, new Set(["2", "3"]))), ["2"]);
@@ -233,9 +245,14 @@ if (!/from "@\/lib\/showfilter\.js"/.test(desk)) {
 }
 for (const [what, re] of [
   ["the view", /showView\(/],
-  ["the selection", /selectionFor\(/]
+  ["the selection", /tickedAcrossSearches\(taggedOpen, visible, sel\)/],
+  ["the sale's selection", /tickedOnScreen\(visible, sel\)/]
 ]) {
   if (!re.test(desk)) fail(`ShowDesk.js does not build ${what} through showfilter.js`);
+}
+// A tick the search is hiding is filed too, so the desk has to SAY so.
+if (!/tickedHidden > 0/.test(desk) || !/Show ticked/.test(desk)) {
+  fail("ShowDesk.js must count the ticks the search is hiding and offer Show ticked — a forgotten tick is filed otherwise");
 }
 // The old convention, spelled out inline, is exactly what this file replaced.
 if (/sel\.size\s*>\s*0\s*\?\s*open\.filter/.test(desk)) {
@@ -337,4 +354,4 @@ if (failures) {
   console.error(`\ncheck-showfilter: ${failures} failure(s)`);
   process.exit(1);
 }
-console.log("check-showfilter: OK — the search finds the card, the order reads right, and a bulk action only ever touches what's on screen.");
+console.log("check-showfilter: OK — the search finds the card, the order reads right, a bulk action with nothing ticked only touches what's on screen, and a tick survives a new search.");

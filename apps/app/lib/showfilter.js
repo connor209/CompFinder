@@ -371,6 +371,35 @@ export function selectionFor(visible, selectedIds) {
 }
 
 /**
+ * What the away list's FILING buttons act on — To toploaders, Return to spots,
+ * the binders, a stack, Labels, Price these. Asked for 2026-11-01: the way to
+ * send a dozen particular cards to the toploader box is search one, tick it,
+ * search the next, tick that — and under selectionFor() each new search
+ * silently dropped the ticks before it.
+ *
+ * The half of selectionFor() that cost cards is kept exactly: NOTHING ticked
+ * still means only what is on screen, never the whole list ("sunday" and ↩
+ * Return used to file Saturday too). What changes is that a tick is a tick
+ * wherever the search has moved since, because somebody put it there on
+ * purpose — and the desk says how many of them the search is hiding, with a
+ * way to list just those, so a forgotten one is in view before it moves.
+ *
+ * `all` is the whole list the ticks were made from: a stale id (a card checked
+ * in since) is in neither and is never acted on. On-screen ticks come first,
+ * in screen order, then the hidden ones in list order.
+ *
+ * Not for a SALE: £ Sold ends listings and pulls cards, so it stays on
+ * tickedOnScreen().
+ */
+export function tickedAcrossSearches(all, visible, selectedIds) {
+  const ids = selectedIds instanceof Set ? selectedIds : new Set(selectedIds || []);
+  const shown = selectionFor(visible, ids);
+  if (ids.size === 0) return shown;
+  const seen = new Set(shown.map((co) => co.id));
+  return [...shown, ...(all || []).filter((co) => co && ids.has(co.id) && !seen.has(co.id))];
+}
+
+/**
  * The rows ticked AND on screen, and never "all of them". For an action that
  * cannot be undone by filing the cards again — recording a sale ends the
  * listing and pulls the card — nothing ticked means nothing, not every card
