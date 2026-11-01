@@ -173,7 +173,7 @@ const desk = read("apps/app/app/panel/ShowDesk.js");
 if (!/const stacksWithSpace = useMemo\(\s*\(\) => fileableStacks\(stacks\)/.test(desk)) {
   fail("ShowDesk's stacksWithSpace no longer goes through fileableStacks() — Reallocate and Pick a stack can choose the box");
 }
-if (!/checkin\(selected, TOPLOADER_RETURN_MODE\)/.test(desk)) fail("ShowDesk has lost its 🗂 To toploaders check-in");
+if (!/checkin\(items, TOPLOADER_RETURN_MODE\)/.test(desk)) fail("ShowDesk has lost its 🗂 To toploaders check-in");
 if (!/\.sort\(compareRecs\)/.test(desk)) fail("Recommended show stock no longer leads with the toploader box");
 const stream = read("apps/app/app/panel/StreamStock.js");
 for (const m of stream.matchAll(/planReallocation\(([^\n]*)/g)) {
@@ -188,6 +188,15 @@ if ((sheet.match(/return pileCompare\(/g) || []).length !== 1) {
 }
 if (/^\s*import\s+.*from\s+["']@\//m.test(read("apps/app/lib/toploader.js"))) {
   fail("toploader.js has picked up an app-aliased import — it has to stay loadable under bare node");
+}
+
+// 🗂 To toploaders asks first: ticks survive a new search, so the cards about
+// to move may not all be on screen, and the question names them.
+{
+  const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
+  if (!/onClick=\{\(\) => toToploaders\(selected\)\}/.test(deskSrc) || !/if \(ok\) checkin\(items, TOPLOADER_RETURN_MODE\)/.test(deskSrc)) {
+    fail("🗂 To toploaders must go through toToploaders(), which confirms before filing");
+  }
 }
 
 if (failures) {
