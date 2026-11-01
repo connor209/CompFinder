@@ -2596,6 +2596,15 @@ digital binder the desk turns round to a customer.
   in the binder) and missing, which are SOLD through `sellLine()` — pulled and
   listing ended exactly as £ Sold does, at the sticker unless typed over, or
   with no price. Cards already sold at the table aren't listed.
+- **A check-in is saved as you go**, on this device (`checkInProgress()`):
+  what is marked not there, the prices typed and a 📍 where you stopped, so a
+  binder that has been to several shows can be gone through over more than
+  one sitting — ↩ Check in reads "↩ Resume check-in" while one is saved.
+  Nothing is sold or relisted until the button is pressed. It is only ever
+  read back against the checkouts open NOW (`restoreCheckInProgress()`), so a
+  card sold at the desk since drops out and the next trip starts clean; a sale
+  that fails to record stays marked not there, because reopened as "here" it
+  would go back on eBay.
 
 ## A SKU is a name; a position is an address
 

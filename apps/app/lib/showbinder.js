@@ -484,11 +484,72 @@ export function binderCheckIn(open, missing) {
   return { back, sold };
 }
 
+/**
+ * A check-in in progress, kept on this device so a binder can be gone through
+ * over more than one sitting. After a run of shows a binder can be hundreds of
+ * cards, and what has been ticked lived only in the open screen: navigate away
+ * and the walk started again from page one.
+ *
+ * What is kept is what the person SAID — which cards are missing, the price
+ * typed for each, and where they stopped — never a decision. Nothing is sold
+ * or relisted until ↩ Check in is pressed.
+ *
+ * Keyed on the binder, but every id in it is a checkout id, and it is only
+ * ever read back against the binder's checkouts that are open NOW
+ * (restoreCheckInProgress). So a card sold or returned at the desk since
+ * drops out, and the binder's NEXT trip, whose checkouts are new rows, starts
+ * clean without needing an expiry.
+ */
+export const CHECKIN_PROGRESS_PREFIX = "cf-binder-checkin:";
+
+export function checkInProgressKey(binderId) {
+  return `${CHECKIN_PROGRESS_PREFIX}${binderId}`;
+}
+
+/** The saved shape, or null when there is nothing worth keeping. */
+export function checkInProgress({ missing, prices, mark } = {}, now = Date.now()) {
+  const ids = [...(missing || [])].map(String);
+  const kept = {};
+  for (const [id, v] of Object.entries(prices || {})) {
+    if (v != null && String(v) !== "") kept[String(id)] = String(v);
+  }
+  const m = mark == null || mark === "" ? null : String(mark);
+  if (ids.length === 0 && Object.keys(kept).length === 0 && m == null) return null;
+  return { v: 1, missing: ids, prices: kept, mark: m, savedAt: now };
+}
+
+/**
+ * Read a saved check-in back against the binder's open checkouts. Anything
+ * naming a checkout that is no longer open is dropped and counted — it was
+ * sold or returned from the desk since. Junk reads as nothing saved.
+ */
+export function restoreCheckInProgress(saved, open) {
+  const empty = { missing: new Set(), prices: {}, mark: null, dropped: 0, found: false };
+  if (!saved || typeof saved !== "object" || saved.v !== 1) return empty;
+  // Ids come back as the checkouts' own ids, not their string form, so the
+  // Set binderCheckIn() asks is answered whatever type the rows carry.
+  const live = new Map((open || []).filter((co) => co && co.id != null).map((co) => [String(co.id), co.id]));
+  const missing = new Set();
+  let dropped = 0;
+  for (const id of Array.isArray(saved.missing) ? saved.missing : []) {
+    if (live.has(String(id))) missing.add(live.get(String(id))); else dropped += 1;
+  }
+  const prices = {};
+  const raw = saved.prices && typeof saved.prices === "object" ? saved.prices : {};
+  for (const [id, v] of Object.entries(raw)) {
+    if (live.has(String(id)) && typeof v === "string") prices[id] = v;
+  }
+  const mark = saved.mark != null && live.has(String(saved.mark)) ? live.get(String(saved.mark)) : null;
+  const found = missing.size > 0 || Object.keys(prices).length > 0 || mark != null;
+  return { missing, prices, mark, dropped, found };
+}
+
 export default {
   SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
   binderSuffix, renamedBinder, binderCounts, binderContents,
   POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
   openFromBinder, binderCheckIn,
+  CHECKIN_PROGRESS_PREFIX, checkInProgressKey, checkInProgress, restoreCheckInProgress,
   nameKey, compareByCardName, BINDER_VIEW_SORTS, sortBinderRows, repocketPlan,
   BINDER_VIEW_STATUSES, parseSkuList, filterBinderRows, binderAddedAt
 };

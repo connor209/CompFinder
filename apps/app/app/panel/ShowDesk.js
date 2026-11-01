@@ -45,6 +45,7 @@ import {
 import {
   isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder, binderCode,
   binderCounts, binderContents, openFromBinder, binderCheckIn,
+  CHECKIN_PROGRESS_PREFIX, checkInProgressKey, checkInProgress, restoreCheckInProgress,
   binderSlot, nextSlots, codeless, comparePockets, sortBinderRows, repocketPlan, BINDER_VIEW_SORTS,
   BINDER_VIEW_STATUSES, filterBinderRows, binderAddedAt
 } from "@/lib/showbinder.js";
@@ -475,6 +476,22 @@ export default function ShowDesk() {
   const [binderCheck, setBinderCheck] = useState(null);
   const [binderMissing, setBinderMissing] = useState(new Set());
   const [binderPrices, setBinderPrices] = useState({});
+  // Where the person checking in stopped, and which binders have a check-in
+  // saved on this device (checkInProgress() in showbinder.js) — so the walk
+  // through a big binder can be picked up again after closing it.
+  const [binderMark, setBinderMark] = useState(null);
+  const [binderSaved, setBinderSaved] = useState(() => new Set());
+  const [binderResumed, setBinderResumed] = useState("");
+  useEffect(() => {
+    try {
+      const ids = new Set();
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(CHECKIN_PROGRESS_PREFIX)) ids.add(k.slice(CHECKIN_PROGRESS_PREFIX.length));
+      }
+      setBinderSaved(ids);
+    } catch { /* private mode — nothing saved, nothing to resume */ }
+  }, []);
   // The binder being looked through, and a name search within it.
   const [binderLook, setBinderLook] = useState(null);
   const [binderLookQ, setBinderLookQ] = useState("");
@@ -1016,9 +1033,42 @@ export default function ShowDesk() {
   }
 
   function startBinderCheckIn(binderId) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(checkInProgressKey(binderId)) || "null"); } catch { /* unreadable — start clean */ }
+    const r = restoreCheckInProgress(saved, openFromBinder(open, binderId));
     setBinderCheck(binderId);
+    setBinderMissing(r.missing);
+    setBinderPrices(r.prices);
+    setBinderMark(r.mark);
+    setBinderResumed(r.found
+      ? `Picked up where you left off: ${r.missing.size} marked not there${r.dropped ? ` (${r.dropped} more sold or returned at the desk since, so no longer listed)` : ""}.`
+      : "");
+  }
+
+  /** Write the check-in so far to this device, or forget it when empty. */
+  function saveBinderProgress(binderId, state) {
+    const key = checkInProgressKey(binderId);
+    const value = checkInProgress(state);
+    try {
+      if (value) localStorage.setItem(key, JSON.stringify(value)); else localStorage.removeItem(key);
+    } catch { /* best-effort: the check-in still works, it just isn't kept */ }
+    setBinderSaved((prev) => {
+      const id = String(binderId);
+      if (!!value === prev.has(id)) return prev;
+      const n = new Set(prev);
+      if (value) n.add(id); else n.delete(id);
+      return n;
+    });
+  }
+
+  function startBinderOver() {
+    if (!binderCheck) return;
+    if (!confirm("Forget what you've marked so far on this binder and start the check-in again from the top?")) return;
+    saveBinderProgress(binderCheck, {});
     setBinderMissing(new Set());
     setBinderPrices({});
+    setBinderMark(null);
+    setBinderResumed("");
   }
 
   // What is in the binder being looked through. Read off the desk's own state
@@ -1078,6 +1128,12 @@ export default function ShowDesk() {
       .map((co) => ({ ...co, position: posById.get(co.stack_card_id) ?? null }))
       .sort(comparePockets);
   }, [open, binderCheck, stackCards]);
+
+  // Every tick, price and 📍 is written as it happens, so closing the panel,
+  // leaving the desk or a reload loses nothing of a half-done check-in.
+  useEffect(() => {
+    if (binderCheck) saveBinderProgress(binderCheck, { missing: binderMissing, prices: binderPrices, mark: binderMark });
+  }, [binderCheck, binderMissing, binderPrices, binderMark]);
 
   /**
    * Re-pocket a binder A–Z by card name — repocketPlan() in showbinder.js.
@@ -1174,12 +1230,13 @@ export default function ShowDesk() {
     const warnings = [];
     let soldOk = 0;
     let takings = 0;
+    const unsold = [];
     for (let i = 0; i < sold.length; i++) {
       const co = sold[i];
       setProgress(`Recording sale ${i + 1} of ${sold.length}…`);
       const pence = parsePricePence(binderPrices[co.id] ?? (co.sticker_pence != null ? (co.sticker_pence / 100).toFixed(2) : ""));
       const r = await sellLine(sb, checkoutLine(co), pence, { event: co.event || event || null });
-      if (!r.ok) { warnings.push(`${co.sku || co.title || "card"}: ${r.error}`); continue; }
+      if (!r.ok) { unsold.push(co.id); warnings.push(`${co.sku || co.title || "card"}: ${r.error}`); continue; }
       soldOk += 1;
       takings += pence || 0;
       if (r.warning) warnings.push(`${co.sku || "card"}: ${saleWarningText(r.warning)}`);
@@ -1190,7 +1247,16 @@ export default function ShowDesk() {
     }
     setProgress("");
     setBusy(false);
+    // Done, so the saved walk goes — except a sale that failed to record: that
+    // card is still open, and coming back to it marked "here" would put a sold
+    // card back on eBay. It stays marked not there for the retry.
+    saveBinderProgress(binder.id, {
+      missing: unsold,
+      prices: Object.fromEntries(unsold.filter((id) => binderPrices[id] != null).map((id) => [id, binderPrices[id]]))
+    });
     setBinderCheck(null);
+    setBinderMark(null);
+    setBinderResumed("");
     setMsg(
       `${binder.name} checked in: ${back.length} back on sale on eBay` +
       (sold.length ? `, ${soldOk} recorded sold${takings ? ` for ${pounds(takings)}` : ""}` : "") +
@@ -2231,9 +2297,11 @@ export default function ShowDesk() {
                         className="btn btn-ghost"
                         onClick={() => startBinderCheckIn(b.id)}
                         disabled={busy || n.away === 0}
-                        title="Go through the binder: what is still there goes back on sale, what isn't is recorded sold"
+                        title={binderSaved.has(String(b.id))
+                          ? "A check-in of this binder is saved on this device — carry on from where you stopped"
+                          : "Go through the binder: what is still there goes back on sale, what isn't is recorded sold"}
                       >
-                        ↩ Check in
+                        {binderSaved.has(String(b.id)) ? "↩ Resume check-in" : "↩ Check in"}
                       </button>
                     </div>
                   </div>
@@ -2492,7 +2560,21 @@ export default function ShowDesk() {
               <div className="sd-plan">
                 <div className="sd-plan-head">
                   <b>Checking in {binder?.name || "the binder"}</b>
-                  <button className="btn btn-ghost" onClick={() => setBinderCheck(null)} disabled={busy}>Cancel</button>
+                  <div className="sd-plan-actions">
+                    {binderMark != null && binderOut.some((co) => co.id === binderMark) ? (
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => document.getElementById(`bci-${binderMark}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                        title="Scroll to the card you marked 📍"
+                      >
+                        📍 Where I stopped
+                      </button>
+                    ) : null}
+                    {binderMissing.size > 0 || binderMark != null ? (
+                      <button className="btn btn-ghost" onClick={startBinderOver} disabled={busy} title="Forget what is marked and start again">Start over</button>
+                    ) : null}
+                    <button className="btn btn-ghost" onClick={() => setBinderCheck(null)} disabled={busy} title="Close — what you have marked is kept on this device">Close</button>
+                  </div>
                 </div>
                 {binderOut.length === 0 ? (
                   <p className="hint hint-small">Nothing from this binder is still out.</p>
@@ -2503,6 +2585,11 @@ export default function ShowDesk() {
                       aren&apos;t listed. A sold card&apos;s price starts at its sticker; change it, or clear it to record the
                       sale without one.
                     </p>
+                    <p className="hint hint-small">
+                      Saved on this device as you go: close it and come back to it later, nothing is sold or put back on
+                      eBay until you press Check in. Tap 📍 on a card to remember where you stopped.
+                    </p>
+                    {binderResumed ? <p className="hint hint-small"><b>{binderResumed}</b></p> : null}
                     <div className="stack-list">
                       {binderOut.map((co, i) => {
                         const here = !binderMissing.has(co.id);
@@ -2515,7 +2602,10 @@ export default function ShowDesk() {
                           {(pk?.page ?? null) !== prevPage ? (
                             <p className="eyebrow" style={{ margin: "10px 0 2px" }}>{pk ? `Page ${pk.page}` : "No binder SKU"}</p>
                           ) : null}
-                          <div className="ps-row sd-rec-row">
+                          {binderMark === co.id ? (
+                            <p className="hint hint-small" style={{ margin: "6px 0 2px" }}>📍 You stopped here</p>
+                          ) : null}
+                          <div className="ps-row sd-rec-row" id={`bci-${co.id}`}>
                             <input
                               type="checkbox"
                               checked={here}
@@ -2525,6 +2615,14 @@ export default function ShowDesk() {
                             <span className="stack-pos" title="Binder SKU">{pk?.sku || "—"}</span>
                             <span className="stack-sku">{co.sku || "—"}</span>
                             <span className="stack-title">{co.title || <em>—</em>}</span>
+                            <button
+                              className="btn btn-ghost"
+                              onClick={() => setBinderMark(binderMark === co.id ? null : co.id)}
+                              aria-pressed={binderMark === co.id}
+                              title={binderMark === co.id ? "Clear the bookmark" : "Remember that you got this far"}
+                            >
+                              📍
+                            </button>
                             {here ? (
                               <span className="badge2">back on eBay</span>
                             ) : (

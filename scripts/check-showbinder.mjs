@@ -30,7 +30,8 @@ import {
   binderSuffix, renamedBinder, binderCounts, binderContents,
   POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
   nameKey, compareByCardName, sortBinderRows, repocketPlan, openFromBinder, binderCheckIn,
-  parseSkuList, filterBinderRows, binderAddedAt
+  parseSkuList, filterBinderRows, binderAddedAt,
+  checkInProgressKey, checkInProgress, restoreCheckInProgress
 } from "../apps/app/lib/showbinder.js";
 import { titleMatches, skuInBatch } from "../apps/app/lib/showfilter.js";
 import { isUnorderedStack, fileableStacks, isToploaderStack } from "../apps/app/lib/toploader.js";
@@ -258,6 +259,28 @@ eq("nothing left open", ci.back.length + ci.sold.length, out.length);
 eq("a stale id from another stack is ignored", ci.sold.some((c) => c.id === "c5"), false);
 eq("all present: all back", binderCheckIn(out, []).back.length, 3);
 
+// --- 4b. a check-in saved part-way ----------------------------------------
+// A binder after a run of shows is hundreds of cards, gone through over more
+// than one sitting. What was marked is kept; it is only ever read back against
+// the checkouts open NOW, so a card sold at the desk since drops out and the
+// binder's next trip starts clean.
+{
+  const openNow = [{ id: 11 }, { id: 12 }, { id: 13 }];
+  eq("nothing marked saves nothing", checkInProgress({ missing: new Set(), prices: {}, mark: null }), null);
+  eq("an empty price is not worth keeping", checkInProgress({ missing: [], prices: { 11: "" } }), null);
+  const saved = JSON.parse(JSON.stringify(checkInProgress({ missing: new Set([12, 99]), prices: { 12: "4.00", 99: "1" }, mark: 13 }, 1)));
+  const r = restoreCheckInProgress(saved, openNow);
+  eq("a missing card comes back as the checkout's own id", [...r.missing], [12]);
+  eq("a card no longer open is dropped and counted", r.dropped, 1);
+  eq("its price goes with it", r.prices, { 12: "4.00" });
+  eq("the bookmark comes back", r.mark, 13);
+  eq("restored ticks split through binderCheckIn", binderCheckIn(openNow, r.missing).sold.map((c) => c.id), [12]);
+  eq("the next trip (new checkout ids) starts clean", restoreCheckInProgress(saved, [{ id: 21 }]).found, false);
+  eq("junk reads as nothing saved", restoreCheckInProgress({ v: 9, missing: [12] }, openNow).found, false);
+  eq("null reads as nothing saved", restoreCheckInProgress(null, openNow).missing.size, 0);
+  eq("the key names the binder", checkInProgressKey("b1").endsWith("b1"), true);
+}
+
 // --- 5. the desk wiring ------------------------------------------------------
 const desk = read("apps/app/app/panel/ShowDesk.js");
 if (!/sellLine\(sb, checkoutLine\(co\)/.test(desk)) {
@@ -271,6 +294,12 @@ if ((desk.match(/nextSlots\(await maxPosition\(sb, /g) || []).length < 2) {
 }
 if (!/binderCheckIn\(binderOut, binderMissing\)/.test(desk)) {
   fail("the binder check-in must split through binderCheckIn(), or a card can be left open");
+}
+if (!/restoreCheckInProgress\(saved, openFromBinder\(open, binderId\)\)/.test(desk)) {
+  fail("a saved check-in must be read back against the binder's checkouts open NOW, or a card sold at the desk since is sold twice");
+}
+if (!/missing: unsold/.test(desk)) {
+  fail("after a check-in, a sale that failed to record must stay marked not there — reopened as 'here' it goes back on eBay");
 }
 if (!/!isCardAway\(c, awayIndex\) && !inBinder\(c\)/.test(desk)) {
   fail("★ Recommend show stock must leave out cards in a Show Binder — the binder goes to a show whole");

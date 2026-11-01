@@ -868,6 +868,7 @@ html, body { overflow-x: clip; max-width: 100%; }
 .stack-tab.sd-tight { opacity:.6; }
 .sd-plan { border:1px solid color-mix(in srgb,var(--accent) 35%, var(--line)); background:var(--accent-soft); border-radius:var(--radius); padding:12px 14px; margin:10px 0; }
 .sd-plan-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:8px; }
+.sd-plan-actions { display:flex; gap:6px; flex-wrap:wrap; }
 .sd-plan-rows { display:flex; flex-direction:column; gap:2px; margin-bottom:6px; }
 .sd-plan-row { display:flex; align-items:center; gap:10px; padding:6px 0; border-top:1px solid color-mix(in srgb,var(--accent) 18%, transparent); }
 .sd-plan-row:first-child { border-top:0; }
