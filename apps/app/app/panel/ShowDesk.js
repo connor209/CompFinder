@@ -34,7 +34,7 @@ import StorefrontPanel from "./StorefrontPanel";
 import WishPickup from "./WishPickup";
 import Fold from "./Fold";
 import { parseWishCodes } from "@/lib/wishlist.js";
-import { checkoutLine, listingLine, sellLine, bulkSalePrices, bulkSaleBlockers, parseDealPence } from "@/lib/deal.js";
+import { checkoutLine, listingLine, sellLine, saleWarningText, bulkSalePrices, bulkSaleBlockers, parseDealPence } from "@/lib/deal.js";
 import { showOnly, oneOfEach } from "@/lib/streamstock.js";
 import { isSlabTitle, DEFAULT_NAME_MAX, ebayAskPence, ebayStickerPlan, recPriceBand, inPriceBand } from "@/lib/showstock.js";
 import { checkoutLabelRows, binderLabelRows, labelWorkbook, LABEL_NAME_KEY, BINDER_LABEL_COLUMNS } from "@/lib/labelexport.js";
@@ -1182,7 +1182,7 @@ export default function ShowDesk() {
       if (!r.ok) { warnings.push(`${co.sku || co.title || "card"}: ${r.error}`); continue; }
       soldOk += 1;
       takings += pence || 0;
-      if (r.warning) warnings.push(`${co.sku || "card"}: ${r.warning} — end it on eBay by hand`);
+      if (r.warning) warnings.push(`${co.sku || "card"}: ${saleWarningText(r.warning)}`);
     }
     for (let i = 0; i < back.length; i++) {
       setProgress(`Back on sale ${i + 1} of ${back.length}…`);
@@ -1786,7 +1786,7 @@ export default function ShowDesk() {
     setBusy(false);
     setMsg(
       r.ok
-        ? `Marked ${co.sku || "card"} sold${pence != null ? ` for ${pounds(pence)}` : ""}.${r.warning ? ` ⚠ ${r.warning} — end it on eBay by hand.` : ""}`
+        ? `Marked ${co.sku || "card"} sold${pence != null ? ` for ${pounds(pence)}` : ""}.${r.warning ? ` ⚠ ${saleWarningText(r.warning)}.` : ""}`
         : `That sale couldn't be recorded: ${r.error}`
     );
     await load();
@@ -1822,7 +1822,7 @@ export default function ShowDesk() {
       if (!r.ok) { warnings.push(`${co.sku || co.title || "card"}: ${r.error}`); continue; }
       soldIds.push(co.id);
       takings += pence || 0;
-      if (r.warning) warnings.push(`${co.sku || "card"}: ${r.warning} — end it on eBay by hand`);
+      if (r.warning) warnings.push(`${co.sku || "card"}: ${saleWarningText(r.warning)}`);
     }
     setProgress("");
     setBusy(false);

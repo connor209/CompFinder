@@ -453,7 +453,7 @@ async function endListingViaApi(itemId) {
       body: JSON.stringify({ itemId, oneCopy: true })
     }).then((r) => r.json());
     return res && res.ok
-      ? { ok: true, ended: res.ended !== false, remaining: res.remaining ?? null }
+      ? { ok: true, ended: res.ended !== false, remaining: res.remaining ?? null, alreadyOver: !!res.alreadyOver, soldOnline: !!res.soldOnline }
       : { ok: false, error: (res && res.error) || "End failed" };
   } catch {
     return { ok: false, error: "Couldn't reach eBay to end the listing." };
@@ -570,6 +570,20 @@ export async function sellLine(sb, line, pence, { event = null, userId = null, e
       // More copies behind this listing: one came off and the rest are still
       // for sale, so the row must NOT claim the listing was ended.
       did.push(r.remaining != null ? `one copy taken off the listing — ${r.remaining} still listed` : "one copy taken off the listing");
+    } else if (r && r.ok && r.alreadyOver && r.soldOnline) {
+      // Over on eBay because a copy SOLD there. The table sale is recorded
+      // either way, but this card may now be sold twice — said as a warning,
+      // never filed under "ended", and not one the retry button can fix.
+      did.push("listing had already ended on eBay");
+      warning = "this listing had already SOLD on eBay — check your eBay orders: the card may have been sold twice";
+      if (checkoutId) {
+        try { await sb.from("stock_checkouts").update({ hide_method: "ended", hide_error: warning }).eq("id", checkoutId); } catch { /* cosmetic */ }
+      }
+    } else if (r && r.ok && r.alreadyOver) {
+      did.push("listing had already ended on eBay");
+      if (checkoutId) {
+        try { await sb.from("stock_checkouts").update({ hide_method: "ended" }).eq("id", checkoutId); } catch { /* cosmetic */ }
+      }
     } else if (r && r.ok) {
       did.push("listing ended on eBay");
       if (checkoutId) {
@@ -628,13 +642,22 @@ export async function sellDeal(sb, deal, { event = null, endListing = endListing
  * Try the listings that didn't end again. The sale is already recorded, so
  * this only ever touches eBay and the row's own record of it.
  */
-export async function retryEnds(sb, unended, { endListing = endListingViaApi } = {}) {
+export async function retryEnds(sb, unended, { endListing = endListingViaApi, onSoldOnline = null } = {}) {
   const still = [];
   for (const r of unended || []) {
     if (!r.itemId) continue;
     // eslint-disable-next-line no-await-in-loop
     const res = await endListing(r.itemId);
-    if (res && res.ok) {
+    if (res && res.ok && res.alreadyOver && res.soldOnline) {
+      // Nothing left to end, because it SOLD on eBay — the same warning
+      // sellLine() gives, handed back so the receipt can say it.
+      const warning = "this listing had already SOLD on eBay — check your eBay orders: the card may have been sold twice";
+      if (r.checkoutId) {
+        // eslint-disable-next-line no-await-in-loop
+        try { await sb.from("stock_checkouts").update({ hide_method: "ended", hide_error: warning }).eq("id", r.checkoutId); } catch { /* cosmetic */ }
+      }
+      if (onSoldOnline) onSoldOnline({ ...r, warning });
+    } else if (res && res.ok) {
       if (r.checkoutId && res.ended !== false) {
         // eslint-disable-next-line no-await-in-loop
         try { await sb.from("stock_checkouts").update({ hide_method: "ended", hide_error: null }).eq("id", r.checkoutId); } catch { /* cosmetic */ }
@@ -647,6 +670,17 @@ export async function retryEnds(sb, unended, { endListing = endListingViaApi } =
     }
   }
   return still;
+}
+
+/**
+ * A sellLine() warning as a sentence for the screen. Only a listing that
+ * would not end gets "end it on eBay by hand" — a listing that had already
+ * sold on eBay has nothing left to end, and telling somebody to go and end it
+ * sends them looking for the wrong problem.
+ */
+export function saleWarningText(warning) {
+  if (!warning) return "";
+  return warning.startsWith("listing not ended") ? `${warning} — end it on eBay by hand` : warning;
 }
 
 export { poundsStr };

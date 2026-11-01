@@ -300,9 +300,18 @@ export default function DealBar({ deal, update, onSold }) {
 
   async function retry() {
     setBusy(true);
-    const still = await retryEnds(createClient(), receipt.unended);
-    setReceipt({ ...receipt, unended: still });
-    setMsg(still.length ? `${still.length} listing(s) still wouldn't end — end them on eBay by hand.` : "All listings ended.");
+    const soldTwice = [];
+    const still = await retryEnds(createClient(), receipt.unended, { onSoldOnline: (r) => soldTwice.push(r) });
+    const fixed = new Map(soldTwice.map((r) => [r.id, r.warning]));
+    setReceipt({
+      ...receipt,
+      results: receipt.results.map((r) => (fixed.has(r.id) ? { ...r, warning: fixed.get(r.id) } : r)),
+      unended: still
+    });
+    setMsg(
+      (still.length ? `${still.length} listing(s) still wouldn't end — end them on eBay by hand.` : "All listings ended.") +
+      (soldTwice.length ? ` ⚠ ${soldTwice.map((r) => r.sku || r.title).join(", ")} had already SOLD on eBay — check your eBay orders.` : "")
+    );
     setBusy(false);
   }
 
