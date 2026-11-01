@@ -1549,24 +1549,39 @@ export default function ShowDesk() {
   }
 
   /**
-   * 🗂 To toploaders, asked first (2026-11-01). Ticks now survive a new
-   * search, so the cards about to move may not all be on screen: the question
-   * names them, says how many the search is hiding, and filing happens only
-   * on OK.
+   * 🗂 To toploaders and 📒 To <binder>, asked first (2026-11-01). Ticks now
+   * survive a new search, so the cards about to move may not all be on
+   * screen: the question names them, says how many the search is hiding and
+   * what happens to their listings, and filing happens only on OK.
    */
-  function toToploaders(items) {
+  function confirmFiling(items, mode, stackId = null) {
     if (items.length === 0) return;
+    const n = items.length;
+    const them = n === 1 ? "it" : "them";
     const onScreen = new Set(visible.map((co) => co.id));
     const hidden = items.filter((co) => !onScreen.has(co.id)).length;
     const SHOW = 12;
     const names = items.slice(0, SHOW).map((co) => `• ${co.sku ? `${co.sku}  ` : ""}${co.title || "card"}`);
-    if (items.length > SHOW) names.push(`…and ${items.length - SHOW} more`);
+    if (n > SHOW) names.push(`…and ${n - SHOW} more`);
+    let question;
+    if (mode === BINDER_RETURN_MODE) {
+      // The same reading checkin() makes: a binder still out at a show keeps
+      // what is filed into it off sale until its own ↩ Check in.
+      const ids = new Set(items.map((co) => co.id));
+      const stillOut = openFromBinder(open, stackId).some((co) => !ids.has(co.id));
+      const where = stackName.get(stackId) || "the binder";
+      question = stillOut
+        ? `File ${n} card${n === 1 ? "" : "s"} into ${where}? The binder is still out at a show, so ${n === 1 ? "it stays" : "they stay"} off sale on eBay and come${n === 1 ? "s" : ""} home with it at ↩ Check in.`
+        : `File ${n} card${n === 1 ? "" : "s"} into ${where} and put ${them} back on sale on eBay?`;
+    } else {
+      question = `File ${n} card${n === 1 ? "" : "s"} into the toploader box and put ${them} back on sale on eBay?`;
+    }
     const ok = confirm(
-      `File ${items.length} card${items.length === 1 ? "" : "s"} into the toploader box and put ${items.length === 1 ? "it" : "them"} back on sale on eBay?` +
-      (hidden > 0 ? `\n\n${hidden} of ${items.length === 1 ? "it is" : "them are"} ticked but hidden by the search.` : "") +
+      question +
+      (hidden > 0 ? `\n\n${hidden} of ${n === 1 ? "it is" : "them are"} ticked but hidden by the search.` : "") +
       `\n\n${names.join("\n")}`
     );
-    if (ok) checkin(items, TOPLOADER_RETURN_MODE);
+    if (ok) checkin(items, mode, stackId);
   }
 
   async function checkin(items, mode, chosenStackId = null) {
@@ -3022,9 +3037,9 @@ export default function ShowDesk() {
               <div className="ps-actions">
                 <button className="btn btn-primary" onClick={buildPlan} disabled={busy || selCount === 0}>✨ Reallocate ({selCount})</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy || selCount === 0}>↩ Return to spots</button>
-                <button className="btn btn-ghost" onClick={() => toToploaders(selected)} disabled={busy || selCount === 0} title="Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out">🗂 To toploaders ({selCount})</button>
+                <button className="btn btn-ghost" onClick={() => confirmFiling(selected, TOPLOADER_RETURN_MODE)} disabled={busy || selCount === 0} title="Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out">🗂 To toploaders ({selCount})</button>
                 {binders.map((b) => (
-                  <button key={b.id} className="btn btn-ghost" onClick={() => checkin(selected, BINDER_RETURN_MODE, b.id)} disabled={busy || selCount === 0} title={`File them into ${b.name}: back on sale on eBay, and out with the binder next show`}>📒 To {b.name} ({selCount})</button>
+                  <button key={b.id} className="btn btn-ghost" onClick={() => confirmFiling(selected, BINDER_RETURN_MODE, b.id)} disabled={busy || selCount === 0} title={`File them into ${b.name}: back on sale on eBay, and out with the binder next show`}>📒 To {b.name} ({selCount})</button>
                 ))}
                 <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
