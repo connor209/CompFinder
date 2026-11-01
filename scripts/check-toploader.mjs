@@ -202,6 +202,23 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(read("apps/app/lib/toploader.js"))) {
   }
 }
 
+// The box made a Show Binder (2026-11-01): a rename and nothing else. It takes
+// the next free binder number, stops being the box, and the desk only offers
+// 🗂 To toploaders while a box still exists — or the button would make a new
+// empty one the first time it was pressed.
+{
+  const { renamedBinder, isShowBinder: isBinder } = await import("../apps/app/lib/showbinder.js");
+  const others = ["Show Binder 1 · ONE PIECE BINDER 1", "Show Binder 2 · POKEMON BINDER 1", "A"];
+  const name = renamedBinder(TOPLOADER_STACK_NAME, others, TOPLOADER_STACK_NAME);
+  if (name !== "Show Binder 3 · Toploaders") fail(`the box as a binder should be "Show Binder 3 · Toploaders", got ${JSON.stringify(name)}`);
+  if (!isBinder(name) || isToploaderStack(name)) fail("the renamed box must read as a Show Binder and no longer as the toploader box");
+  const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
+  if (!/\{toploaderBox \? \(\s*<button[^\n]*confirmFiling\(selected, TOPLOADER_RETURN_MODE\)/.test(deskSrc)) {
+    fail("🗂 To toploaders must only show while a toploader box exists — pressed after the box became a binder, it would make a new empty box");
+  }
+  if (!/async function toploadersToBinder\(\)/.test(deskSrc)) fail("the desk has lost 📒 Make it a Show Binder for the toploader box");
+}
+
 if (failures) {
   console.error(`\ncheck-toploader: ${failures} failure(s)\n`);
   process.exit(1);

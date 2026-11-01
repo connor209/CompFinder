@@ -1026,6 +1026,40 @@ export default function ShowDesk() {
    * name as a snapshot (the away list's stack filter reads it), so they are
    * renamed with it; resolved ones keep the name they went out under.
    */
+  /**
+   * The toploader box, made a Show Binder (decided 2026-11-01): one set of
+   * rules rather than two — it goes out whole, comes back through ↩ Check in
+   * with what is missing recorded sold, and gets 👁 View cards and labels.
+   *
+   * It is a RENAME and nothing else, the same one ✎ Rename makes: the cards
+   * stay where they are, the stack id is unchanged, and their positions —
+   * already filed at the back one after another — become their binder SKUs.
+   * Open checkouts out of the box are renamed with it, so a card from it that
+   * is at a show now comes home through the binder's check-in.
+   */
+  async function toploadersToBinder() {
+    const box = toploaderBox;
+    if (!box) return;
+    const name = renamedBinder(TOPLOADER_STACK_NAME, stacks.filter((s) => s.id !== box.id).map((s) => s.name), box.name);
+    if (!name) { setMsg("Couldn't name the toploader box as a binder — another stack already has that name."); return; }
+    const inBox = stackCards.filter((c) => c.stack_id === box.id && !c.pulled_at).length;
+    const out = openFromBinder(open, box.id).length;
+    if (!confirm(
+      `Make the toploader box (${inBox} card${inBox === 1 ? "" : "s"}) a Show Binder called "${name}"?\n\n` +
+      `Nothing moves: each card gets a binder SKU from where it already sits, and from now on the box goes out whole and comes back through ↩ Check in, like the other binders.` +
+      (out ? `\n\n${out} of its cards ${out === 1 ? "is" : "are"} out at a show now — ${out === 1 ? "it comes" : "they come"} home through the binder's ↩ Check in.` : "")
+    )) return;
+    setBusy(true);
+    setMsg("");
+    const sb = supabase();
+    const { error } = await sb.from("card_stacks").update({ name }).eq("id", box.id);
+    if (error) { setBusy(false); setMsg(`Couldn't change the toploader box: ${error.message}`); return; }
+    const { error: coErr } = await sb.from("stock_checkouts").update({ stack_name: name }).eq("stack_id", box.id).is("resolved_at", null);
+    setBusy(false);
+    setMsg(`The toploader box is now ${name}.${coErr ? ` ⚠ The cards it has out still show the old name: ${coErr.message}` : ""}`);
+    await load();
+  }
+
   async function renameBinder(binder) {
     const typed = prompt(
       `Name ${binder.name} — its code (${binderCode(binder) || "a new number"}) stays, because every label it has printed carries it. Type a label to go after it, or leave blank:`,
@@ -2305,6 +2339,18 @@ export default function ShowDesk() {
             rest as sold. Fill one with <b>📒 Into binder</b> under ★ Recommend show stock or a stack. No pockets are
             numbered — flick through it by name.
           </p>
+          {toploaderBox ? (
+            <div className="sd-plan">
+              <div className="sd-plan-head">
+                <b>🗂 The toploader box isn&apos;t a binder yet</b>
+                <button className="btn btn-primary" onClick={toploadersToBinder} disabled={busy}>📒 Make it a Show Binder</button>
+              </div>
+              <p className="hint hint-small" style={{ margin: 0 }}>
+                It would go out whole and come back through ↩ Check in like the binders below, with 👁 View cards and labels.
+                Nothing moves — its cards get binder SKUs from where they already sit.
+              </p>
+            </div>
+          ) : null}
           {binders.length === 0 ? (
             <p className="dd-empty">No Show Binders yet.</p>
           ) : (
@@ -3037,7 +3083,9 @@ export default function ShowDesk() {
               <div className="ps-actions">
                 <button className="btn btn-primary" onClick={buildPlan} disabled={busy || selCount === 0}>✨ Reallocate ({selCount})</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy || selCount === 0}>↩ Return to spots</button>
-                <button className="btn btn-ghost" onClick={() => confirmFiling(selected, TOPLOADER_RETURN_MODE)} disabled={busy || selCount === 0} title="Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out">🗂 To toploaders ({selCount})</button>
+                {toploaderBox ? (
+                  <button className="btn btn-ghost" onClick={() => confirmFiling(selected, TOPLOADER_RETURN_MODE)} disabled={busy || selCount === 0} title="Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out">🗂 To toploaders ({selCount})</button>
+                ) : null}
                 {binders.map((b) => (
                   <button key={b.id} className="btn btn-ghost" onClick={() => confirmFiling(selected, BINDER_RETURN_MODE, b.id)} disabled={busy || selCount === 0} title={`File them into ${b.name}: back on sale on eBay, and out with the binder next show`}>📒 To {b.name} ({selCount})</button>
                 ))}

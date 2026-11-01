@@ -2475,6 +2475,14 @@ knowing:
 
 ## The toploader box: priced, sleeved, and not in a stack
 
+**Being retired into a Show Binder (decided 2026-11-01).** One set of rules
+rather than two: the Show Binders fold offers **📒 Make it a Show Binder** while
+a box exists, which is a rename and nothing else (`toploadersToBinder()`) —
+"Show Binder N · Toploaders", same stack id, the cards' positions becoming
+their binder SKUs, open checkouts renamed with it. **🗂 To toploaders** only
+shows while a box still exists, because pressed afterwards it would make a new
+empty one. The rest of this section describes the box until it is converted.
+
 A month with a show every weekend made the check-in the expensive half: pull
 cards from the stacks, price them, sleeve them in toploaders, then file them
 back on Sunday only to do it all again on Friday. **🗂 To toploaders** on the
