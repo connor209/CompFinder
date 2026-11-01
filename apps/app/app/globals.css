@@ -823,7 +823,22 @@ html, body { overflow-x: clip; max-width: 100%; }
 .sd-select { border:1px solid var(--line-strong); border-radius:10px; padding:8px 10px; background:var(--surface); color:var(--ink); font-size:13px; max-width:100%; }
 .sd-select:focus { outline:none; border-color:var(--accent); }
 .sd-recbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
-.sd-batch-inp { flex:0 1 200px; min-width:0; text-transform:uppercase; }
+.sd-batch-inp { flex:0 1 170px; min-width:0; }
+.sd-batch-inp:not(:placeholder-shown) { text-transform:uppercase; }
+/* Check stock out: one row of controls per section, every control the same
+   height, wrapping on a phone rather than running off the side. */
+.sd-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.sd-row + .sd-row { margin-top:10px; }
+.sd-row .btn { height:42px; }
+.sd-row .dd-inp { height:42px; }
+.sd-row .dd-inp input { padding:0; height:100%; font-size:15px; }
+.sd-grow { flex:1 1 220px; min-width:0; }
+.sd-field { height:42px; border:1px solid var(--line-strong); border-radius:12px; padding:0 12px; background:var(--surface); color:var(--ink); font-size:14px; min-width:0; }
+.sd-field:focus { outline:none; border-color:var(--accent); }
+select.sd-field { padding:0 10px; }
+.sd-row-quiet .sd-field { height:36px; font-size:13px; }
+.sd-section { margin-top:16px; padding-top:14px; border-top:1px solid var(--line); }
+.sd-section-head { margin:0 0 10px; }
 /* A batch can be a hundred-odd cards; the list scrolls so the button under it stays in reach. */
 .sd-batch-list { max-height:420px; overflow-y:auto; }
 /* Game chips on the recommended list. They WRAP: a row of eleven games that
@@ -1442,6 +1457,26 @@ html, body { overflow-x: clip; max-width: 100%; }
 .col-menu input { accent-color:var(--accent); }
 .col-menu-reset { margin-top:4px; border:0; border-top:1px solid var(--line); background:none; color:var(--ink-faint); font:inherit; font-size:12px; text-align:left; padding:7px 8px 3px; cursor:pointer; }
 .col-menu-reset:hover { color:var(--ink); }
+/* Menu.js — a button that opens a list of actions. Left-aligned by default:
+   these sit at the start of a wrapping row, where a right-aligned list would
+   open off the left edge of a phone. */
+.act-menu-list { left:0; right:auto; min-width:220px; max-width:calc(100vw - 32px); }
+.act-menu-list.is-right { left:auto; right:0; }
+.act-menu-item { display:block; width:100%; text-align:left; border:0; background:none; color:var(--ink); font:inherit; font-size:13.5px; padding:8px 10px; border-radius:8px; cursor:pointer; white-space:normal; }
+.act-menu-item:hover:not(:disabled) { background:var(--surface-sink); }
+.act-menu-item:disabled { opacity:.45; cursor:default; }
+.act-menu-head { margin:6px 10px 2px; }
+.act-menu-head:first-child { margin-top:2px; }
+/* Show Cases: the name is the button that opens the case. */
+.sd-case-row { align-items:center; }
+.sd-case-name { flex:1 1 220px; min-width:0; display:grid; grid-template-columns:auto 1fr auto; grid-template-rows:auto auto; column-gap:10px; align-items:center; text-align:left; border:0; background:none; color:var(--ink); font:inherit; padding:6px 4px; border-radius:10px; cursor:pointer; }
+.sd-case-name:hover { background:var(--surface-sink); }
+.sd-case-icon { grid-row:1 / span 2; font-size:18px; }
+.sd-case-title { font-weight:600; font-size:14.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sd-case-sub { grid-column:2; font-size:12.5px; color:var(--ink-soft); }
+.sd-case-caret { grid-row:1 / span 2; grid-column:3; color:var(--ink-faint); }
+.sd-case-row.is-open .sd-case-title { color:var(--accent-2); }
+.sd-icon-btn { min-width:42px; padding-left:0; padding-right:0; justify-content:center; }
 .col-count { display:inline-block; min-width:16px; padding:0 4px; margin-left:2px; border-radius:6px; background:var(--surface-sink); color:var(--ink-faint); font-size:11px; }
 .itbl { width:100%; border-collapse:collapse; font-size:13px; }
 .itbl th { text-align:left; font-weight:var(--label-weight); font-size:11px; letter-spacing:var(--label-spacing-sm); text-transform:var(--label-transform); color:var(--ink-faint); padding:8px 10px; border-bottom:1px solid var(--line-strong); white-space:nowrap; }

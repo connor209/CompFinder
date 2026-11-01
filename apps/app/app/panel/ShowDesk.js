@@ -33,6 +33,7 @@ import DealBar, { DealButton, DealTally, useDeal } from "./DealBar";
 import StorefrontPanel from "./StorefrontPanel";
 import WishPickup from "./WishPickup";
 import Fold from "./Fold";
+import Menu from "./Menu";
 import { parseWishCodes } from "@/lib/wishlist.js";
 import { checkoutLine, listingLine, sellLine, saleWarningText, bulkSalePrices, bulkSaleBlockers, parseDealPence } from "@/lib/deal.js";
 import { showOnly, oneOfEach } from "@/lib/streamstock.js";
@@ -424,10 +425,9 @@ export default function ShowDesk() {
         if (!live) return;
         setSetup(deskSetup({
           stickers: probeState(stickerErr),
-          poolName: probeState(poolErr),
-          // Already known: load() asked for the wants and got told. Asking
-          // again would be a second round trip for an answer we hold.
-          wants: wantsMissing ? "absent" : "present"
+          poolName: probeState(poolErr)
+          // Not the wants (026): asked to stop warning about it on 2026-11-01.
+          // The want list still degrades quietly while it is pending.
         }));
       } catch {
         // A probe that cannot run tells us nothing, and nothing is what it says.
@@ -435,7 +435,7 @@ export default function ShowDesk() {
       }
     })();
     return () => { live = false; };
-  }, [loading, needsMigration, wantsMissing]);
+  }, [loading, needsMigration]);
 
   const stackName = useMemo(() => new Map(stacks.map((s) => [s.id, s.name])), [stacks]);
   // The toploader box, if one has ever been filed into. See lib/toploader.js.
@@ -2123,86 +2123,93 @@ export default function ShowDesk() {
           </div>
         ) : null}
       >
-        <div className="sd-opts">
-          <input
-            className="stack-title-inp"
-            value={event}
-            onChange={(e) => saveEvent(e.target.value)}
-            placeholder="Show / event name (optional — tags each checkout)"
-            aria-label="Show name"
-          />
-          <label className="sd-toggle" title="How each card's eBay listing is taken off sale while it's at the show">
-            Hide on eBay:
-            <select className="sd-select" value={hideMode} onChange={(e) => saveHideMode(e.target.value)}>
-              {HIDE_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-            </select>
-          </label>
-          <button className="btn btn-ghost" onClick={() => setShowBulk((v) => !v)}>{showBulk ? "Single SKU" : "Bulk paste"}</button>
-        </div>
+        {/* Laid out as three plain sections — check one out, pick from the
+            shelf, or be recommended some — each with one row of controls the
+            same height, rather than four rows of mismatched inputs. */}
         {showBulk ? (
           <>
-            <p className="hint hint-small" style={{ marginTop: 0 }}>One SKU per line — each card is checked out of its stack and its listing hidden.</p>
-            <textarea rows={5} value={bulk} onChange={(e) => setBulk(e.target.value)} placeholder={"AB11\nAB12\nC4"} />
-            <button className="btn btn-primary" onClick={() => doCheckout(bulk.split("\n").map((l) => l.split(/[,\t ]/)[0]))} disabled={busy || !bulk.trim()} style={{ marginTop: 10 }}>
-              {busy ? progress || "Checking out…" : "Check out all"}
-            </button>
+            <textarea rows={5} value={bulk} onChange={(e) => setBulk(e.target.value)} placeholder={"One SKU per line\nAB11\nAB12"} aria-label="SKUs to check out, one per line" />
+            <div className="ps-actions" style={{ marginTop: 10 }}>
+              <button className="btn btn-primary" onClick={() => doCheckout(bulk.split("\n").map((l) => l.split(/[,\t ]/)[0]))} disabled={busy || !bulk.trim()}>
+                {busy ? progress || "Checking out…" : "Check out all"}
+              </button>
+              <button className="btn btn-ghost" onClick={() => setShowBulk(false)}>One SKU</button>
+            </div>
           </>
         ) : (
-          <div className="dd-search" style={{ marginBottom: 0 }}>
-            <div className="dd-combo"><div className="dd-inp"><span className="mag" aria-hidden="true">#</span>
+          <div className="sd-row">
+            <div className="dd-inp sd-grow"><span className="mag" aria-hidden="true">#</span>
               <input
                 value={sku}
                 onChange={(e) => setSku(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && sku.trim() && !busy) doCheckout([sku]); }}
-                placeholder="SKU (e.g. AB11) — Enter to check out"
+                placeholder="SKU — Enter to check out"
                 aria-label="SKU to check out"
               />
-            </div></div>
+            </div>
             <button className="btn btn-primary" onClick={() => doCheckout([sku])} disabled={busy || !sku.trim()}>
               {busy ? progress || "…" : "Check out"}
             </button>
+            <button className="btn btn-ghost" onClick={() => setShowBulk(true)} title="Paste a list of SKUs, one per line">Paste a list</button>
           </div>
         )}
-        <div className="sd-recbar">
+        <div className="sd-row sd-row-quiet">
           <input
-            className="stack-title-inp sd-batch-inp"
-            value={batchPrefix}
-            onChange={(e) => { setBatchPrefix(e.target.value); setBatchPick(new Set()); }}
-            placeholder="SKU batch (e.g. BP)"
-            aria-label="SKU batch to pick from"
+            className="sd-field sd-grow"
+            value={event}
+            onChange={(e) => saveEvent(e.target.value)}
+            placeholder="Show name (optional)"
+            aria-label="Show name — tags each checkout"
+            title="Tags each checkout, so Show history can group them"
           />
-          <input
-            className="stack-title-inp sd-batch-inp"
-            value={batchName}
-            onChange={(e) => { setBatchName(e.target.value); setBatchPick(new Set()); }}
-            placeholder="Card name (e.g. charizard)"
-            aria-label="Card name to pick from"
-          />
-          <select
-            className="sd-select"
-            value={batchStack}
-            onChange={(e) => { setBatchStack(e.target.value); setBatchPick(new Set()); }}
-            aria-label="Stack to pick from"
-          >
-            <option value="">any stack</option>
-            {stacks.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
-          </select>
-          {toploaderBox ? (
-            <button
-              className="btn btn-ghost"
-              onClick={openToploaders}
-              disabled={busy || toploaderCount === 0}
-              title="List everything in the toploader box, all ticked — untick anything staying home, then check out. Each card takes its sticker with it."
-            >
-              🗂 {TOPLOADER_STACK_NAME} ({toploaderCount})
-            </button>
-          ) : null}
-          {batchOpen ? (
-            <button className="btn btn-ghost" onClick={() => { setBatchPrefix(""); setBatchName(""); setBatchStack(""); setBatchPick(new Set()); }}>Close</button>
-          ) : (
-            <span className="hint hint-small">list a stack, a SKU batch or a card name and tick the cards to take</span>
-          )}
+          <label className="sd-toggle" title="How each card's eBay listing is taken off sale while it's at the show">
+            Hide on eBay
+            <select className="sd-select sd-field" value={hideMode} onChange={(e) => saveHideMode(e.target.value)}>
+              {HIDE_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
+          </label>
         </div>
+
+        <div className="sd-section">
+          <p className="eyebrow sd-section-head">Pick from the shelf</p>
+          <div className="sd-row">
+            <select
+              className="sd-select sd-field"
+              value={batchStack}
+              onChange={(e) => { setBatchStack(e.target.value); setBatchPick(new Set()); }}
+              aria-label="Stack to pick from"
+            >
+              <option value="">Any stack</option>
+              {stacks.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+            </select>
+            <input
+              className="sd-field sd-batch-inp"
+              value={batchPrefix}
+              onChange={(e) => { setBatchPrefix(e.target.value); setBatchPick(new Set()); }}
+              placeholder="SKU batch, e.g. BP"
+              aria-label="SKU batch to pick from"
+            />
+            <input
+              className="sd-field sd-grow"
+              value={batchName}
+              onChange={(e) => { setBatchName(e.target.value); setBatchPick(new Set()); }}
+              placeholder="Card name, e.g. charizard"
+              aria-label="Card name to pick from"
+            />
+            {toploaderBox ? (
+              <button
+                className="btn btn-ghost"
+                onClick={openToploaders}
+                disabled={busy || toploaderCount === 0}
+                title="List everything in the toploader box, all ticked — untick anything staying home, then check out. Each card takes its sticker with it."
+              >
+                🗂 {TOPLOADER_STACK_NAME} ({toploaderCount})
+              </button>
+            ) : null}
+            {batchOpen ? (
+              <button className="btn btn-ghost" onClick={() => { setBatchPrefix(""); setBatchName(""); setBatchStack(""); setBatchPick(new Set()); }}>Clear</button>
+            ) : null}
+          </div>
         {batchOpen ? (
           batchRows.length === 0 ? (
             <p className="hint hint-small">
@@ -2278,29 +2285,32 @@ export default function ShowDesk() {
             </>
           )
         ) : null}
-        <div className="sd-recbar">
-          <button className="btn btn-ghost" onClick={buildRecs} disabled={busy || recsLoading}>
-            {recsLoading ? "Ranking your stock…" : "★ Recommend show stock"}
-          </button>
-          {/* The same choice as the game chips on the list below, offered
-              before it is built: the top N is taken AFTER the game, so
-              "top 50 Pokémon" is fifty Pokémon cards. */}
-          <select
-            className="sd-select"
-            value={recGames.size === 0 ? "" : recGames.size === 1 ? [...recGames][0] : "__several"}
-            onChange={(e) => { if (e.target.value !== "__several") setRecGames(e.target.value ? new Set([e.target.value]) : new Set()); }}
-            aria-label="Game to recommend"
-          >
-            <option value="">every game</option>
-            {GAMES.map((g) => <option key={g.slug} value={g.slug}>{g.name}</option>)}
-            {recGames.size > 1 ? <option value="__several">{recGames.size} games</option> : null}
-          </select>
-          <label className="sd-toggle">
-            top
-            <input className="sd-count" type="number" min="1" max="200" value={recCount} onChange={(e) => setRecCount(e.target.value)} />
-            by value
-          </label>
-          {recBandControl}
+        </div>
+        <div className="sd-section">
+          <p className="eyebrow sd-section-head">Recommend</p>
+          <div className="sd-row">
+            <button className="btn btn-ghost" onClick={buildRecs} disabled={busy || recsLoading}>
+              {recsLoading ? "Ranking your stock…" : "★ Recommend show stock"}
+            </button>
+            {/* The same choice as the game chips on the list below, offered
+                before it is built: the top N is taken AFTER the game, so
+                "top 50 Pokémon" is fifty Pokémon cards. */}
+            <select
+              className="sd-select sd-field"
+              value={recGames.size === 0 ? "" : recGames.size === 1 ? [...recGames][0] : "__several"}
+              onChange={(e) => { if (e.target.value !== "__several") setRecGames(e.target.value ? new Set([e.target.value]) : new Set()); }}
+              aria-label="Game to recommend"
+            >
+              <option value="">Every game</option>
+              {GAMES.map((g) => <option key={g.slug} value={g.slug}>{g.name}</option>)}
+              {recGames.size > 1 ? <option value="__several">{recGames.size} games</option> : null}
+            </select>
+            <label className="sd-toggle">
+              top
+              <input className="sd-count" type="number" min="1" max="200" value={recCount} onChange={(e) => setRecCount(e.target.value)} />
+            </label>
+            {recBandControl}
+          </div>
         </div>
       </Fold>
       )}
@@ -2319,10 +2329,17 @@ export default function ShowDesk() {
                 return `${b.name}: ${n.away ? `${n.away} out` : `${n.home} at home`}`;
               }).join(" · ")
             : "None yet — a binder or toploader box of cards listed on eBay, checked out to a show in one go."}
-          actions={<>
-            <button className="btn btn-ghost" onClick={() => newBinder("binder")} disabled={busy}>＋ New Show Binder</button>
-            <button className="btn btn-ghost" onClick={() => newBinder("box")} disabled={busy}>＋ New Toploader Box</button>
-          </>}
+          actions={
+            <Menu
+              label="＋ New"
+              align="right"
+              disabled={busy}
+              items={[
+                { key: "binder", label: "📒 Show Binder", onClick: () => newBinder("binder") },
+                { key: "box", label: "🗂 Toploader Box", onClick: () => newBinder("box") }
+              ]}
+            />
+          }
           alert={(() => {
             // A binder out at a show with cards still on sale online: filed in
             // while it was away, before 📒 Into binder checked them out with
@@ -2332,77 +2349,69 @@ export default function ShowDesk() {
               .filter(({ n }) => n.away && n.home);
             return leaks.length ? (
               <p className="hint hint-small" style={{ color: "var(--warn-ink)" }}>
-                ⚠ {leaks.map(({ b, n }) => `${b.name} is out at a show but ${n.home} of its card${n.home === 1 ? " is" : "s are"} still on sale on eBay`).join("; ")}.
-                {" "}Open Show Cases and press <b>⤴ Check out</b> on it to take {leaks.length === 1 && leaks[0].n.home === 1 ? "it" : "them"} off sale with the rest.
+                ⚠ {leaks.length === 1 ? `${leaks[0].b.name} is out at a show` : `${leaks.length} cases are out at a show`} with cards still on sale on eBay — <b>⤴ Check out</b> takes them off sale.
               </p>
             ) : null;
           })()}
         >
-          <p className="hint hint-small" style={{ marginTop: 0 }}>
-            Show Binders (📒, cards B1-001) and Toploader Boxes (🗂, cards T1-001) work the same way. Their cards stay on sale on eBay while they are at home. <b>⤴ Check out</b> before a show takes every
-            listing in it off sale; <b>↩ Check in</b> afterwards puts what is still there back on sale and records the
-            rest as sold. Fill one with <b>Into</b> under ★ Recommend show stock or a stack, or file cards into it as they come back. No pockets are
-            numbered — flick through by name.
-          </p>
           {toploaderBox ? (
             <div className="sd-plan">
               <div className="sd-plan-head">
                 <b>🗂 The toploader box isn&apos;t a show case yet</b>
                 <button className="btn btn-primary" onClick={toploadersToBinder} disabled={busy}>🗂 Make it Toploader Box {binderNumber(nextBinderName(stacks.map((s) => s.name), "box"))}</button>
               </div>
-              <p className="hint hint-small" style={{ margin: 0 }}>
-                It would go out whole and come back through ↩ Check in like the binders, with 👁 View cards and labels.
-                Nothing moves — its cards get T SKUs (T1-001…) from where they already sit.
-              </p>
+              <p className="hint hint-small" style={{ margin: 0 }}>Nothing moves — its cards get T SKUs from where they sit.</p>
             </div>
           ) : null}
           {binders.length === 0 ? (
-            <p className="dd-empty">No Show Binders or Toploader Boxes yet.</p>
+            <p className="dd-empty">
+              No cases yet. A Show Binder or Toploader Box stays on sale on eBay at home, goes to a show whole with
+              ⤴ Check out, and comes back with ↩ Check in — what&apos;s missing is recorded sold.
+            </p>
           ) : (
             <div className="stack-list">
               {binders.map((b) => {
                 const n = binderCount.get(b.id) || { home: 0, away: 0 };
                 return (
-                  <div className="ps-row sd-rec-row" key={b.id}>
-                    <span className="stack-pos" aria-hidden="true">{caseKind(b)?.icon || "📒"}</span>
-                    <span className="stack-title">{b.name}</span>
-                    {n.away && n.home ? (
-                      // Out at a show, yet some of it is still on sale online —
-                      // said in the fold's alert too, so it shows while shut.
-                      <span className="badge2" title="This binder is out at a show but these cards are still on sale on eBay — ⤴ Check out to take them off sale with the rest" style={{ color: "var(--warn)" }}>{n.home} still on sale online</span>
-                    ) : (
-                      <span className="badge2" title="In the binder and on sale on eBay">{n.home} at home</span>
-                    )}
-                    {n.away ? <span className="badge2" title="Checked out to a show — off sale on eBay">{n.away} out</span> : null}
+                  <div className={`ps-row sd-rec-row sd-case-row${binderLook === b.id ? " is-open" : ""}`} key={b.id}>
+                    {/* The name opens the case: what is in it is the first
+                        thing anybody wants from a row, so it is the row's own
+                        button rather than one more beside it. */}
+                    <button
+                      className="sd-case-name"
+                      onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); setBinderLookSkus(""); setBinderLookStatus(""); setBinderTick(new Set()); setBinderMoves(null); }}
+                      aria-expanded={binderLook === b.id}
+                      title={binderLook === b.id ? "Close" : "See every card in it"}
+                    >
+                      <span className="sd-case-icon" aria-hidden="true">{caseKind(b)?.icon || "📒"}</span>
+                      <span className="sd-case-title">{b.name}</span>
+                      <span className="sd-case-sub">
+                        {n.away ? `${n.away} out` : `${n.home} at home`}
+                        {n.away && n.home ? <span style={{ color: "var(--warn-ink)" }} title="Out at a show but these cards are still on sale on eBay — ⤴ Check out to take them off sale"> · {n.home} still on sale</span> : null}
+                      </span>
+                      <span className="sd-case-caret" aria-hidden="true">{binderLook === b.id ? "▾" : "▸"}</span>
+                    </button>
                     <div className="ps-actions">
                       <button
                         className="btn btn-ghost"
                         onClick={() => openBinderCheckout(b)}
                         disabled={busy || n.home === 0}
-                        title="List everything in the binder, all ticked, under Check stock out — anything eBay says has sold is left out — then check it out"
+                        title="List everything in it, all ticked, under Check stock out — anything eBay says has sold is left out — then check it out"
                       >
                         ⤴ Check out
-                      </button>
-                      <button
-                        className="btn btn-ghost"
-                        onClick={() => { setBinderLook(binderLook === b.id ? null : b.id); setBinderLookQ(""); setBinderLookSkus(""); setBinderLookStatus(""); setBinderTick(new Set()); setBinderMoves(null); }}
-                        aria-pressed={binderLook === b.id}
-                        title="List every card in this binder"
-                      >
-                        {binderLook === b.id ? "Hide cards" : "👁 View cards"}
-                      </button>
-                      <button className="btn btn-ghost" onClick={() => renameBinder(b)} disabled={busy} title="Rename this binder">
-                        ✎ Rename
                       </button>
                       <button
                         className="btn btn-ghost"
                         onClick={() => startBinderCheckIn(b.id)}
                         disabled={busy || n.away === 0}
                         title={binderSaved.has(String(b.id))
-                          ? "A check-in of this binder is saved on this device — carry on from where you stopped"
-                          : "Go through the binder: what is still there goes back on sale, what isn't is recorded sold"}
+                          ? "A check-in is saved on this device — carry on from where you stopped"
+                          : "Go through it: what is still there goes back on sale, what isn't is recorded sold"}
                       >
-                        {binderSaved.has(String(b.id)) ? "↩ Resume check-in" : "↩ Check in"}
+                        {binderSaved.has(String(b.id)) ? "↩ Resume" : "↩ Check in"}
+                      </button>
+                      <button className="btn btn-ghost sd-icon-btn" onClick={() => renameBinder(b)} disabled={busy} title={`Rename ${b.name}`} aria-label={`Rename ${b.name}`}>
+                        ✎
                       </button>
                     </div>
                   </div>
@@ -3085,27 +3094,49 @@ export default function ShowDesk() {
               {/* Nothing on screen is nothing to act on: a search that matches
                   no card leaves these buttons pointing at an empty set, and a
                   "Return to spots" that quietly does nothing reads as broken. */}
+              {/* Three choices rather than a dozen buttons (2026-11-01): where
+                  the cards go back to, what to print or price, and the sale.
+                  Each menu holds the same actions, wired exactly as before. */}
               <div className="ps-actions">
-                <button className="btn btn-primary" onClick={buildPlan} disabled={busy || selCount === 0}>✨ Reallocate ({selCount})</button>
-                <button className="btn btn-ghost" onClick={() => checkin(selected, "spot")} disabled={busy || selCount === 0}>↩ Return to spots</button>
-                {toploaderBox ? (
-                  <button className="btn btn-ghost" onClick={() => confirmFiling(selected, TOPLOADER_RETURN_MODE)} disabled={busy || selCount === 0} title="Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out">🗂 To toploaders ({selCount})</button>
-                ) : null}
-                {binders.map((b) => (
-                  <button key={b.id} className="btn btn-ghost" onClick={() => confirmFiling(selected, BINDER_RETURN_MODE, b.id)} disabled={busy || selCount === 0} title={`File them into ${b.name}: back on sale on eBay, and out with it next show`}>{caseKind(b)?.icon || "📒"} To {b.name} ({selCount})</button>
-                ))}
-                <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
-                <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>
-                <button className="btn btn-ghost" onClick={downloadSelectedLabels} disabled={busy || selCount === 0} title="Label file (.xlsx) for these cards, from the sticker prices they already carry — no pricing run">🏷 Labels ({selCount})</button>
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => applyEbayStickers(soldTicked)}
-                  disabled={busy || soldTicked.length === 0}
-                  title={soldTicked.length ? "Sticker the ticked cards at what we ask on eBay, rounded to the pound — they stay ticked, so 🏷 Labels prints them next" : "Tick the cards to sticker first — this never applies to every card on screen"}
-                >
-                  🏷 eBay price → sticker ({soldTicked.length})
-                </button>
-                <button className="btn btn-ghost" onClick={() => priceSelected(selected.filter((o) => o.title).map((o) => o.id))} disabled={busy || selCount === 0} title="Price just these cards on the Batch screen and get sticker prices for them, rather than the whole pool">💷 Price these ({selCount})</button>
+                <Menu
+                  label={`↩ File back (${selCount})`}
+                  disabled={busy || selCount === 0}
+                  items={[
+                    { key: "h-shelf", heading: "Into the stacks" },
+                    { key: "spot", label: "↩ Return to their spots", onClick: () => checkin(selected, "spot") },
+                    { key: "realloc", label: "✨ Reallocate — fill the stacks with room", onClick: buildPlan },
+                    { key: "pick", label: "⤵ Pick a stack…", onClick: () => { setPlan(null); setBackPickerOpen(true); } },
+                    { key: "new", label: "✚ Into a new stack", onClick: () => checkin(selected, "new_stack") },
+                    ...(binders.length || toploaderBox ? [{ key: "h-case", heading: "Into a case" }] : []),
+                    ...binders.map((b) => ({
+                      key: `case-${b.id}`,
+                      label: `${caseKind(b)?.icon || "📒"} ${b.name}`,
+                      title: `File them into ${b.name}: back on sale on eBay, and out with it next show`,
+                      onClick: () => confirmFiling(selected, BINDER_RETURN_MODE, b.id)
+                    })),
+                    ...(toploaderBox ? [{
+                      key: "legacy-box",
+                      label: "🗂 Into the toploader box",
+                      title: "Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out",
+                      onClick: () => confirmFiling(selected, TOPLOADER_RETURN_MODE)
+                    }] : [])
+                  ]}
+                />
+                <Menu
+                  label={`🏷 Price & labels (${selCount})`}
+                  disabled={busy || selCount === 0}
+                  items={[
+                    { key: "labels", label: `🏷 Labels (${selCount})`, title: "Label file (.xlsx) for these cards, from the sticker prices they already carry — no pricing run", onClick: downloadSelectedLabels },
+                    {
+                      key: "ebay-sticker",
+                      label: `🏷 eBay price → sticker (${soldTicked.length})`,
+                      disabled: soldTicked.length === 0,
+                      title: soldTicked.length ? "Sticker the ticked cards at what we ask on eBay, rounded to the pound — they stay ticked, so Labels prints them next" : "Tick the cards to sticker first — this never applies to every card on screen",
+                      onClick: () => applyEbayStickers(soldTicked)
+                    },
+                    { key: "price", label: `💷 Price these (${selCount})`, title: "Price just these cards on the Batch screen and get sticker prices for them, rather than the whole pool", onClick: () => priceSelected(selected.filter((o) => o.title).map((o) => o.id)) }
+                  ]}
+                />
                 <button
                   className="btn btn-ghost"
                   style={{ color: "var(--conf-high)" }}

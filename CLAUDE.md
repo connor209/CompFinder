@@ -1663,6 +1663,8 @@ stranger their card is worth.
   RLS refusal all read as UNKNOWN and say nothing, because the person reading it
   is at a show and cannot check. Never rendered in counter mode: a filename and
   "one-off setup needed" read to a customer like a till about to go down.
+  **Migration 026 (the want list) is no longer warned about** — asked for on
+  2026-11-01; the want list still degrades quietly until it is run.
   `scripts/check-migrations.mjs` is the whole-database version and is right for
   a terminal; twenty round trips to report on the price guide is not what
   anybody wants at a table.
@@ -1724,6 +1726,12 @@ what is on screen — the half that filed Saturday. The cost is a forgotten
 tick, so the note under the search counts the ticked cards it is hiding,
 **Show ticked** lists just those, and **Untick all** clears them.
 `selectionFor()` is unchanged for everything else.
+
+**The bar is three choices, not a dozen buttons** (2026-11-01):
+**↩ File back** (spots, Reallocate, a stack, a new stack, each case),
+**🏷 Price & labels** (Labels, eBay price → sticker, Price these) and **£ Sold**
+on its own, because it is the one that ends listings. `app/panel/Menu.js` is
+the dropdown; opening one runs nothing.
 
 **A sale is the one bulk action where nothing ticked means NOTHING.**
 **£ Sold (N)** on the away list's bulk bar marks the ticked cards sold at

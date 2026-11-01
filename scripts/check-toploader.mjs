@@ -194,10 +194,10 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(read("apps/app/lib/toploader.js"))) {
 // to move may not all be on screen, and the question names them.
 {
   const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
-  if (!/onClick=\{\(\) => confirmFiling\(selected, TOPLOADER_RETURN_MODE\)\}/.test(deskSrc) || !/if \(ok\) checkin\(items, mode, stackId\)/.test(deskSrc)) {
+  if (!/onClick: \(\) => confirmFiling\(selected, TOPLOADER_RETURN_MODE\)/.test(deskSrc) || !/if \(ok\) checkin\(items, mode, stackId\)/.test(deskSrc)) {
     fail("🗂 To toploaders must go through confirmFiling(), which asks before filing");
   }
-  if (!/onClick=\{\(\) => confirmFiling\(selected, BINDER_RETURN_MODE, b\.id\)\}/.test(deskSrc)) {
+  if (!/onClick: \(\) => confirmFiling\(selected, BINDER_RETURN_MODE, b\.id\)/.test(deskSrc)) {
     fail("📒 To <binder> on the away list must go through confirmFiling(), which asks before filing");
   }
 }
@@ -216,7 +216,7 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(read("apps/app/lib/toploader.js"))) {
   if (caseKind(name)?.icon !== "🗂") fail("a Toploader Box is shown as 🗂");
   if (!isUnorderedStack(name) || fileableStacks([{ id: 1, name }]).length) fail("a Toploader Box is unordered and never planned into, like a binder");
   const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
-  if (!/\{toploaderBox \? \(\s*<button[^\n]*confirmFiling\(selected, TOPLOADER_RETURN_MODE\)/.test(deskSrc)) {
+  if (!/\(toploaderBox \? \[\{[\s\S]{0,400}?confirmFiling\(selected, TOPLOADER_RETURN_MODE\)/.test(deskSrc)) {
     fail("🗂 To toploaders must only show while a toploader box exists — pressed after the box became a binder, it would make a new empty box");
   }
   if (!/async function toploadersToBinder\(\)/.test(deskSrc)) fail("the desk has lost 📒 Make it a Show Binder for the toploader box");
