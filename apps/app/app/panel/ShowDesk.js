@@ -923,10 +923,48 @@ export default function ShowDesk() {
       else { moved += 1; filedIds.push(movable[i].id); placed.push(`${movable[i].sku || "?"} → ${binderSlot(binder.name, pockets[i])?.sku}`); }
     }
     await stampBinderAdded(sb, filedIds, new Date().toISOString());
+
+    // A binder that is OUT at a show is off sale on eBay, so a card filed into
+    // it has to go out with it: checked out to the same show, listing hidden.
+    // Left as a plain move, the card sat in a binder on a table while its
+    // listing stayed live — sellable twice — and it had no checkout, so the
+    // desk's £ Sold and the binder's check-in could not see it at all.
+    const outWith = openFromBinder(open, binderId);
+    let outText = "";
+    if (outWith.length > 0 && filedIds.length > 0) {
+      const latest = outWith.reduce((a, b) => (String(b.checked_out_at || "") > String(a.checked_out_at || "") ? b : a));
+      const showEvent = latest.event || event.trim() || null;
+      const filed = new Set(filedIds);
+      const goOut = movable.filter((c) => filed.has(c.id)).map((c) => ({ ...c, stack_id: binderId }));
+      const res = [];
+      for (let i = 0; i < goOut.length; i++) {
+        setProgress(`${binder.name} is at a show — checking out ${i + 1} of ${goOut.length}…`);
+        const r = await checkoutStackCard(sb, {
+          card: goOut[i],
+          stackName: binder.name,
+          event: showEvent,
+          // Hidden the way the rest of the binder was, so check-in puts it
+          // back the same way; the desk's setting only if that says nothing.
+          hideMode: latest.hide_method === "quantity" || latest.hide_method === "ended" ? latest.hide_method : hideMode
+        });
+        res.push({ sku: goOut[i].sku, ...r });
+        if (r.needsMigration) { setNeedsMigration(true); break; }
+      }
+      const okN = res.filter((r) => r.ok).length;
+      const failed = res.filter((r) => !r.ok).map((r) => `${r.sku || "?"}: ${r.error}`);
+      const unhidden = res.filter((r) => r.ok && r.hideError).map((r) => `${r.sku || "?"}: listing not hidden — ${r.hideError}`);
+      outText =
+        ` ${binder.name} is out${showEvent ? ` at ${showEvent}` : " at a show"}, so ${okN === 1 ? "it was" : `${okN} were`} checked out with it and taken off sale on eBay.` +
+        (failed.length ? ` ⚠ Not checked out, still on sale online: ${failed.join(" · ")}` : "") +
+        (unhidden.length ? ` ⚠ ${unhidden.join(" · ")}` : "");
+    }
+
     setProgress("");
     setBusy(false);
     setMsg(
-      `Filed ${moved} card${moved === 1 ? "" : "s"} into ${binder.name} — still on sale on eBay until the binder is checked out.` +
+      `Filed ${moved} card${moved === 1 ? "" : "s"} into ${binder.name}` +
+      (outText ? "." : " — still on sale on eBay until the binder is checked out.") +
+      outText +
       (placed.length ? ` Binder SKUs: ${placed.slice(0, 12).join(", ")}${placed.length > 12 ? `, and ${placed.length - 12} more` : ""}.` : "") +
       (skipped ? ` ${skipped} left where they were: already at a show or already in a binder.` : "") +
       (errors.length ? ` ⚠ ${errors.join(" · ")}` : "")
@@ -1462,12 +1500,40 @@ export default function ShowDesk() {
     const pockets = mode === BINDER_RETURN_MODE ? nextSlots(await maxPosition(sb, stackId), items.filter((co) => !homeAgain(co)).length) : [];
     let nextPocket = 0;
 
+    // Into a binder that is itself still OUT at a show — the rest of it has
+    // open checkouts these cards are not part of. Relisting them would put a
+    // card in a pocket on the table back on sale online, the same leak 📒 Into
+    // binder had. So they stay checked out and their checkout moves to the
+    // binder: the card goes in the pocket, the listing stays hidden, and the
+    // binder's own ↩ Check in is what brings them home with the rest.
+    const checkingIn = new Set(items.map((co) => co.id));
+    const binderStillOut = mode === BINDER_RETURN_MODE &&
+      openFromBinder(open, stackId).some((co) => !checkingIn.has(co.id));
+
     let restored = 0;
     const warnings = [];
     const filedIds = [];
     for (let i = 0; i < items.length; i++) {
       const co = items[i];
       if (mode === BINDER_RETURN_MODE && !homeAgain(co) && co.stack_card_id) filedIds.push(co.stack_card_id);
+      if (binderStillOut) {
+        setProgress(`Filing ${i + 1} of ${items.length} into ${stackName.get(stackId) || "the binder"}…`);
+        const pocket = homeAgain(co) ? {} : { stack_id: stackId, position: pockets[nextPocket++] };
+        if (!co.stack_card_id) {
+          warnings.push(`${co.sku || "?"}: its stack card no longer exists — add it to the binder by hand.`);
+        } else if (pocket.stack_id) {
+          const { error } = await sb.from("stack_cards").update(pocket).eq("id", co.stack_card_id);
+          if (error) { warnings.push(`${co.sku || "?"}: not moved into the binder — ${error.message}`); continue; }
+        }
+        const { error: coErr } = await sb
+          .from("stock_checkouts")
+          .update({ stack_id: stackId, stack_name: stackName.get(stackId) || null })
+          .eq("id", co.id)
+          .is("resolved_at", null);
+        if (coErr) warnings.push(`${co.sku || "?"}: filed, but its checkout still names its old stack — ${coErr.message}`);
+        restored += 1;
+        continue;
+      }
       setProgress(`Checking in ${i + 1} of ${items.length}…`);
       const patch = mode === "spot" || homeAgain(co) ? {}
         : mode === BINDER_RETURN_MODE ? { stack_id: stackId, position: pockets[nextPocket++] }
@@ -1484,9 +1550,10 @@ export default function ShowDesk() {
     const modeText = mode === "spot" ? "to their original spots"
       : mode === "back" ? ` to the back of ${stackName.get(stackId) || "the stack"}`
       : mode === TOPLOADER_RETURN_MODE ? "into the toploader box — back on sale on eBay, stickers kept for the next show"
+      : mode === BINDER_RETURN_MODE && binderStillOut ? `into ${stackName.get(stackId) || "the binder"} — the binder is still out at a show, so they stay off sale on eBay and come home with it at ↩ Check in`
       : mode === BINDER_RETURN_MODE ? `into ${stackName.get(stackId) || "the binder"} — back on sale on eBay`
       : newStackNote;
-    setMsg(`Checked in ${restored} card(s) ${modeText}.${warnings.length ? ` ⚠ ${warnings.join(" · ")}` : ""}`.trim());
+    setMsg(`${binderStillOut ? "Filed" : "Checked in"} ${restored} card(s) ${modeText}.${warnings.length ? ` ⚠ ${warnings.join(" · ")}` : ""}`.trim());
     await load();
   }
 
@@ -2101,6 +2168,20 @@ export default function ShowDesk() {
               }).join(" · ")
             : "None yet — a binder of cards listed on eBay, checked out to a show in one go."}
           actions={<button className="btn btn-ghost" onClick={newBinder} disabled={busy}>＋ New Show Binder</button>}
+          alert={(() => {
+            // A binder out at a show with cards still on sale online: filed in
+            // while it was away, before 📒 Into binder checked them out with
+            // it. They can sell twice, and the desk cannot sell them at all.
+            const leaks = binders
+              .map((b) => ({ b, n: binderCount.get(b.id) || { home: 0, away: 0 } }))
+              .filter(({ n }) => n.away && n.home);
+            return leaks.length ? (
+              <p className="hint hint-small" style={{ color: "var(--warn-ink)" }}>
+                ⚠ {leaks.map(({ b, n }) => `${b.name} is out at a show but ${n.home} of its card${n.home === 1 ? " is" : "s are"} still on sale on eBay`).join("; ")}.
+                {" "}Open Show Binders and press <b>⤴ Check out</b> on it to take {leaks.length === 1 && leaks[0].n.home === 1 ? "it" : "them"} off sale with the rest.
+              </p>
+            ) : null;
+          })()}
         >
           <p className="hint hint-small" style={{ marginTop: 0 }}>
             A binder&apos;s cards stay on sale on eBay while it is at home. <b>⤴ Check out</b> before a show takes every
@@ -2118,7 +2199,13 @@ export default function ShowDesk() {
                   <div className="ps-row sd-rec-row" key={b.id}>
                     <span className="stack-pos" aria-hidden="true">📒</span>
                     <span className="stack-title">{b.name}</span>
-                    <span className="badge2" title="In the binder and on sale on eBay">{n.home} at home</span>
+                    {n.away && n.home ? (
+                      // Out at a show, yet some of it is still on sale online —
+                      // said in the fold's alert too, so it shows while shut.
+                      <span className="badge2" title="This binder is out at a show but these cards are still on sale on eBay — ⤴ Check out to take them off sale with the rest" style={{ color: "var(--warn)" }}>{n.home} still on sale online</span>
+                    ) : (
+                      <span className="badge2" title="In the binder and on sale on eBay">{n.home} at home</span>
+                    )}
                     {n.away ? <span className="badge2" title="Checked out to a show — off sale on eBay">{n.away} out</span> : null}
                     <div className="ps-actions">
                       <button
