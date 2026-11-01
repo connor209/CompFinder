@@ -53,6 +53,7 @@
  * handed, so scripts/check-copyqueue.mjs can load it under bare node.
  */
 import { liveRanks, stackDepths, positionLabel } from "./stackpos.js";
+import { isMtgListingSku } from "./mtgstock.js";
 
 /**
  * `listing_copy_state` (migration 027) is named in THIS FILE ONLY — the rule
@@ -150,6 +151,94 @@ export function queuesBySku(cards) {
   }
   for (const list of out.values()) list.sort(copyOrder);
   return out;
+}
+
+/**
+ * Which copies an order takes, out of one SKU's queue.
+ *
+ * **Ordinarily the head of the queue, in order** — the copy in the listing's
+ * photograph goes first, which is what the queue exists for, and every
+ * listing that is not a Magic multi-quantity listing behaves exactly as it
+ * always has.
+ *
+ * **A Magic listing is picked by STACK** (`stackAware`). Its copies are
+ * interchangeable by construction — the SKU is built from name, set, number,
+ * finish, condition and language (mtgstock.js) — and its photograph is of one
+ * representative copy, so the only thing worth optimising is the walk:
+ *
+ *   1. One stack, if any single stack holds the whole order: two from MTG-A
+ *      rather than one each from MTG-G and MTG-AZ.
+ *   2. Among those, a stack the sheet is already opening for another card.
+ *   3. Then the stack with the FEWEST copies, so a stack holding two clears
+ *      out rather than every stack being nibbled at for ever.
+ *   4. When no single stack can cover it, the fewest stacks: already-open
+ *      ones first, then the deepest holdings.
+ *
+ * Within a stack the shallowest copy goes first. `taken` holds copy ids
+ * already given to an earlier line, so two orders for one card never name the
+ * same copy; `visited` is the set of stacks the sheet already sends you to.
+ */
+export function allocateCopies(queue, count, { taken = new Set(), visited = new Set(), stackAware = false } = {}) {
+  const free = (queue || []).filter((c) => c && !taken.has(c.id));
+  const want = Math.max(0, Number(count) || 0);
+  if (!stackAware) return free.slice(0, want);
+
+  const byStack = new Map();
+  free.forEach((c, i) => {
+    const k = String(c.stack_id ?? "");
+    if (!byStack.has(k)) byStack.set(k, { stack: k, copies: [], first: i });
+    byStack.get(k).copies.push(c);
+  });
+  const groups = [...byStack.values()];
+  for (const g of groups) g.copies.sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || copyOrder(a, b));
+  const open = (g) => (visited.has(g.stack) ? 0 : 1);
+
+  const whole = groups.filter((g) => g.copies.length >= want);
+  if (whole.length) {
+    whole.sort((a, b) => open(a) - open(b) || a.copies.length - b.copies.length || a.first - b.first);
+    return whole[0].copies.slice(0, want);
+  }
+  groups.sort((a, b) => open(a) - open(b) || b.copies.length - a.copies.length || a.first - b.first);
+  const out = [];
+  for (const g of groups) {
+    for (const c of g.copies) {
+      if (out.length >= want) break;
+      out.push(c);
+    }
+    if (out.length >= want) break;
+  }
+  return out;
+}
+
+/**
+ * Copies for every order line at once: `lines[i]` gets `result[i]`, an array
+ * of up to `quantity` copies (shorter when stock runs out).
+ *
+ * Two passes. Lines whose copy is FIXED — any ordinary listing — go first, and
+ * the stacks they send you to seed `visited`, so a Magic copy that could come
+ * from a stack you are opening anyway does. Magic lines then go in sheet
+ * order, each adding its stacks for the next.
+ */
+export function allocateLines(lines, queues) {
+  const result = (lines || []).map(() => []);
+  const taken = new Set();
+  const visited = new Set();
+  const run = (aware) => {
+    (lines || []).forEach((l, i) => {
+      const k = skuKey(l?.sku);
+      if (!k || isMtgListingSku(k) !== aware) return;
+      const qty = Math.max(1, Number(l?.quantity) || 1);
+      const copies = allocateCopies(queues.get(k) || [], qty, { taken, visited, stackAware: aware });
+      for (const c of copies) {
+        taken.add(c.id);
+        if (c.stack_id != null) visited.add(String(c.stack_id));
+      }
+      result[i] = copies;
+    });
+  };
+  run(false);
+  run(true);
+  return result;
 }
 
 /**
@@ -273,7 +362,6 @@ export function reconcile(desired, listing, state = null) {
  */
 export function pullPlanFor(cards, lines, stackNames = new Map()) {
   const queues = queuesBySku(cards);
-  const taken = new Map(); // sku -> how many units of that queue are spoken for
 
   // Where each COPY is, not where its SKU is. `locationsBySku` keeps one label
   // per SKU — right everywhere else, because a SKU has always named one card —
@@ -300,15 +388,13 @@ export function pullPlanFor(cards, lines, stackNames = new Map()) {
     if (c.pulled_at) pulledSkus.add(k);
   }
 
+  const allocated = allocateLines(lines, queues);
   const units = [];
-  for (const l of lines || []) {
+  (lines || []).forEach((l, li) => {
     const k = skuKey(l?.sku);
     const qty = Math.max(1, Number(l?.quantity) || 1);
     for (let n = 0; n < qty; n++) {
-      const seen = taken.get(k) || 0;
-      const queue = k ? queues.get(k) || [] : [];
-      const copy = queue[seen] || null;
-      if (copy) taken.set(k, seen + 1);
+      const copy = allocated[li][n] || null;
       units.push({
         // Unique per UNIT: two units of one line item are two rows, two ticks
         // and two cards, and a shared key would collapse them back into one.
@@ -330,7 +416,7 @@ export function pullPlanFor(cards, lines, stackNames = new Map()) {
           : "no copy left in the stack"
       });
     }
-  }
+  });
   return units;
 }
 

@@ -639,6 +639,10 @@ export async function addFixedPriceListing(accessToken, L) {
     `<?xml version="1.0" encoding="utf-8"?>` +
     `<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><Item>` +
     `<Title>${escapeXml(L.title).slice(0, 80)}</Title>` +
+    // The Custom Label. Only when a caller names one: an order carries it back,
+    // and it is how the pull sheet finds the copies of a multi-quantity Magic
+    // listing (mtgstock.js). Callers that never passed one send nothing new.
+    (L.sku ? `<SKU>${escapeXml(String(L.sku).slice(0, 50))}</SKU>` : "") +
     `<Description><![CDATA[${L.description || L.title || ""}]]></Description>` +
     `<PrimaryCategory><CategoryID>${escapeXml(L.categoryId)}</CategoryID></PrimaryCategory>` +
     `<StartPrice>${Number(L.price).toFixed(2)}</StartPrice>` +

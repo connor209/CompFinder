@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
-import { queuesBySku } from "@/lib/copyqueue";
+import { queuesBySku, allocateLines } from "@/lib/copyqueue";
 import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
@@ -213,7 +213,6 @@ export default function PullSheet() {
     // photograph. copyqueue.js owns that order; this used to keep the first row
     // an unordered `select *` happened to return.
     const copyQueues = queuesBySku(cards);
-    const takenBySku = new Map(); // sku -> units of its queue already spoken for
     const pulledSkus = new Set();
     const awaySkus = new Set(); // checked out to a show — physically not here
     const order = new Map();
@@ -240,7 +239,13 @@ export default function PullSheet() {
     const units = []; // one per card: { lineItemId, pulled } — what Pack may deal
     const looseDone = readLooseCommitted();
     let done = 0;
-    for (const l of lines) {
+    // Which copy each unit takes is decided for the whole sheet at once. An
+    // ordinary listing still takes the head of its queue — the copy in the
+    // photograph. A Magic multi-quantity listing (mtgstock.js) takes its
+    // copies BY STACK: the whole order from one stack where one holds enough,
+    // preferring a stack the sheet already opens, then the smallest holding.
+    const allocated = allocateLines(lines, copyQueues);
+    for (const [li, l] of lines.entries()) {
       const skl = l.sku ? l.sku.trim().toLowerCase() || null : null;
       // ONE LINE ITEM CAN BE SEVERAL CARDS. fetchPendingOrders has always
       // returned the quantity and this loop always ignored it, which is
@@ -250,8 +255,7 @@ export default function PullSheet() {
       // as the two cards they are.
       const count = Math.max(1, Number(l.quantity) || 1);
       for (let n = 0; n < count; n++) {
-        const seen = takenBySku.get(skl) || 0;
-        const card = skl ? (copyQueues.get(skl) || [])[seen] || null : null;
+        const card = skl ? allocated[li][n] || null : null;
         // A key per UNIT. Sharing the line item id would collapse two cards
         // back into one row and pull half the order.
         const key = count > 1 ? `${l.lineItemId}#${n + 1}` : l.lineItemId;
@@ -259,7 +263,6 @@ export default function PullSheet() {
         const pulled = !card && !(skl && awaySkus.has(skl)) && ((skl && pulledSkus.has(skl)) || looseDone.has(String(key)));
         units.push({ lineItemId: l.lineItemId, pulled });
         if (card) {
-          takenBySku.set(skl, seen + 1);
           active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
         } else if (skl && awaySkus.has(skl)) {
           // Ordered on eBay while the card is checked out to a show — it can't

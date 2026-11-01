@@ -2474,3 +2474,24 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .dcp-detail { color:var(--ink-faint); }
 .dcp-blocked { font-size:12px; color:var(--ink-faint); white-space:nowrap; }
 @media (min-width:700px) { .dcp-back { align-items:center; } }
+
+/* Into MTG stock (MtgIntake.js). Every row of controls wraps: on a phone a
+   control that does not fit is otherwise simply off the screen. */
+.mi-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin:12px 0; }
+.mi-inline { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.mi-inline input { width:90px; }
+.mi-refused { margin:8px 0; }
+.mi-list { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+.mi-row { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); }
+.mi-row-done { opacity:.7; }
+.mi-tick { padding-top:4px; }
+.mi-scan { width:52px; height:72px; object-fit:contain; flex-shrink:0; border-radius:4px; background:var(--surface-sink); }
+.mi-noscan { display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--ink-soft); text-align:center; }
+.mi-main { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.mi-name { font-size:14px; }
+.mi-count { font-weight:600; color:var(--accent); }
+.mi-meta { font-size:12.5px; color:var(--ink-soft); overflow-wrap:anywhere; }
+.mi-edit { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; }
+.mi-title { flex:1; min-width:200px; }
+.mi-title input { width:100%; }
+.mi-price input { width:90px; }

@@ -8,6 +8,8 @@ import {
 } from "@/lib/import-store.js";
 import { SpecificsEditor, TitleEditor, StockFields } from "./CardFields";
 import Fold from "./Fold";
+import MtgIntake from "./MtgIntake";
+import { isMtgItem } from "@/lib/mtgstock.js";
 
 /**
  * Imports — a CardUploader export, brought in whole.
@@ -39,6 +41,7 @@ export default function Imports({ onPrice }) {
   const [busy, setBusy] = useState(false);
   const [viewer, setViewer] = useState(null);   // { title, images, index }
   const [search, setSearch] = useState("");
+  const [intake, setIntake] = useState(false);  // the open import, going into MTG stock
 
   const say = (text, isError = false) => { setNotice(text); setNoticeIsError(isError); };
 
@@ -132,6 +135,7 @@ export default function Imports({ onPrice }) {
       if (res.missing) { setMissing(true); return; }
       if (!res.ok) { say(`Could not open that import: ${res.error}`, true); return; }
       setOpen({ imported: res.imported, items: res.items });
+      setIntake(false);
       say("");
     } finally {
       setBusy(false);
@@ -181,6 +185,7 @@ export default function Imports({ onPrice }) {
   }, [items, search]);
   const editedCount = items.filter(isEdited).length;
   const noScanCount = items.filter((i) => !i.images?.length).length;
+  const mtgCount = items.filter(isMtgItem).length;
 
   return (
     <>
@@ -269,7 +274,21 @@ export default function Imports({ onPrice }) {
                 🏷 Price these {items.length}
               </button>
             ) : null}
+            {mtgCount ? (
+              <button
+                className="btn btn-ghost"
+                onClick={() => setIntake(true)}
+                disabled={intake}
+                title="Each Magic card becomes one eBay listing with a quantity — added to the listing we already have for it, or created — and its copies are filed into a stack you choose. Nothing happens until you press the button on the next screen."
+              >
+                🃏 Into MTG stock ({mtgCount})
+              </button>
+            ) : null}
           </div>
+
+          {intake ? (
+            <MtgIntake items={items} label={open.imported.label} onClose={() => setIntake(false)} />
+          ) : null}
 
           {/* Nothing is dropped quietly: a card with no scan is a card
               CardUploader had no picture for, and that is worth knowing before

@@ -54,7 +54,7 @@ stream` (the relay, only while streaming).
 
 ## Checks
 
-`npm run check` runs forty table tests, no framework, non-zero exit on failure:
+`npm run check` runs forty-one table tests, no framework, non-zero exit on failure:
 
 - `scripts/check-language.mjs` — which sets `languageOf` calls English.
 - `scripts/check-corebrowser.mjs` — what shared code ships to a BROWSER: a
@@ -204,6 +204,12 @@ stream` (the relay, only while streaming).
   the copy in the photograph is the copy that goes, that a quantity-2 order is
   two cards at two positions, and that running the reconcile twice does nothing
   the second time.
+- `scripts/check-mtgstock.mjs` — Magic stock, one listing per card: which
+  card a CardUploader row is (name, set, number, finish, condition, language)
+  and that two copies of it build one SKU, that the SKU never parses as a
+  stack position, which rows are refused and why, that a re-uploaded file adds
+  nothing, and — the case that asked for it — that an order for two Lightning
+  Bolts comes out of the one stack holding exactly two.
 - `scripts/check-desksetup.mjs` — what the Show Desk says is still to run, and
   mostly what it refuses to say: a probe that fails on venue wifi is never
   reported as a missing migration.
@@ -2720,6 +2726,46 @@ node scripts/copyqueue-run.mjs --item <id> --apply  # send one, on purpose
 
 `--apply` requires `--item`: the first live test is one listing you chose, not
 every listing you happen to hold two of.
+
+## Magic stock: one listing per card, the copies wherever they landed
+
+Listing Magic singles one copy at a time is more work than the cards are
+worth, so a Magic card is ONE eBay listing at quantity N and its copies are
+chaos-sorted — two in MTG-A, four in MTG-G, four in MTG-AZ. Imports → open a
+CardUploader file → **🃏 Into MTG stock**. `lib/mtgstock.js` owns the rules,
+`MtgIntake.js` the screen, `/api/mtg/intake` the write. No migration (027's
+`scan_url` is used when present). `packages/core` is untouched.
+
+- **The listing SKU is DERIVED from the card** — name, set, collector number,
+  finish, condition, language, plus a hash of all six — so the second file
+  finds the listing the first one made, by SKU, exactly. Each copy is a
+  `stack_cards` row carrying that SKU, because an order carries the listing's
+  SKU and nothing about which copy sold. Four-plus segments, so `stackFromSku`
+  never reads it as a position and the nightly auto-import leaves it alone.
+- **A row that can't be identified is refused and named** — no condition, a
+  placeholder set, graded, not Magic. A guess builds a different SKU, which
+  quietly opens a second listing for a card we already list.
+- **Finish is read off the TITLE**, because the import stores and edits the
+  title and not `*C:Finish`; the same row on two days must build one SKU.
+- **The stack is written before eBay, and undone if eBay refuses.** An add
+  reads the LIVE quantity and adds to it — a sold copy still sits unpulled in
+  its stack, so the stack's count would put it back on sale. Copies left
+  filed with nothing on sale (the undo failed too) are folded into the next
+  run's quantity for that card.
+- **A re-uploaded file adds nothing**: a row whose first scan URL is already on
+  a stack card is skipped. Without migration 027 that guard is off and the
+  screen says so.
+- **A hand-made listing that might be the card is offered, never chosen.** A
+  title is not evidence about the object.
+- **£2.49 is not a price.** A new listing at CardUploader's placeholder is
+  refused, naming the cards, as everywhere else.
+- **The pull sheet picks a Magic listing's copies BY STACK**
+  (`allocateCopies()` in `copyqueue.js`): the whole order from one stack where
+  one holds enough, a stack the sheet already opens first, then the smallest
+  holding so it clears out. Every other listing still takes the head of its
+  queue — the copy in the photograph — exactly as before.
+- **Untested against live eBay.** The item specifics follow the bulk lister's
+  and eBay may ask for more; errors are shown on the row.
 
 ## A printed label is not a packed parcel
 
