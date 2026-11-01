@@ -23,7 +23,7 @@
  * bare node.
  */
 import { isUnorderedStack } from "./toploader.js";
-import { isShowBinder, binderSlot } from "./showbinder.js";
+import { isShowBinder, binderSlot, caseKind } from "./showbinder.js";
 
 /**
  * The stack and position an eBay SKU was written as, for Auto-import: `A50` is
@@ -98,7 +98,8 @@ export function positionLabel(stackName, rank, depth = null, position = null) {
   // never a live count (lib/showbinder.js).
   if (isShowBinder(stack)) {
     const slot = binderSlot(stack, position);
-    return slot ? `📒 ${stack} · ${slot.sku}` : `📒 ${stack}`;
+    const icon = caseKind(stack).icon;
+    return slot ? `${icon} ${stack} · ${slot.sku}` : `${icon} ${stack}`;
   }
   if (isUnorderedStack(stack)) return `🗂 ${stack}`;
   if (rank == null) return stack;

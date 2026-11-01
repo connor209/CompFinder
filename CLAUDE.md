@@ -2475,13 +2475,19 @@ knowing:
 
 ## The toploader box: priced, sleeved, and not in a stack
 
-**Being retired into a Show Binder (decided 2026-11-01).** One set of rules
-rather than two: the Show Binders fold offers **📒 Make it a Show Binder** while
-a box exists, which is a rename and nothing else (`toploadersToBinder()`) —
-"Show Binder N · Toploaders", same stack id, the cards' positions becoming
-their binder SKUs, open checkouts renamed with it. **🗂 To toploaders** only
-shows while a box still exists, because pressed afterwards it would make a new
-empty one. The rest of this section describes the box until it is converted.
+**Being retired into a Toploader Box (decided 2026-11-01).** The Show Desk's
+binder area is now **Show Cases**, holding two kinds that share every binder
+rule in `lib/showbinder.js` (`CASE_KINDS`): 📒 Show Binders (B1-001) and 🗂
+**Toploader Boxes** — "Toploader Box 1", cards **T1-001**, numbered apart from
+the binders. So a box goes out whole, comes back through ↩ Check in with what
+is missing recorded sold, and gets 👁 View cards and labels.
+`isShowBinder()` answers for both kinds; its name is historical. While the old
+"Toploaders" stack exists, Show Cases offers **🗂 Make it Toploader Box N**
+(`toploadersToBinder()`), a rename and nothing else — same stack id, positions
+becoming T SKUs, open checkouts renamed with it. **🗂 To toploaders** only
+shows while that legacy box exists, because pressed afterwards it would make a
+new empty one. The rest of this section describes the box until it is
+converted.
 
 A month with a show every weekend made the check-in the expensive half: pull
 cards from the stacks, price them, sleeve them in toploaders, then file them

@@ -7,7 +7,7 @@ import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
-import { binderSlot, comparePockets } from "@/lib/showbinder.js";
+import { binderSlot, comparePockets, caseKind } from "@/lib/showbinder.js";
 import Fold from "./Fold";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
@@ -342,7 +342,7 @@ export default function Stacks() {
   // name, never numbered.
   const selBox = isUnorderedStack(sel);
   const selTl = isToploaderStack(sel);
-  const boxIcon = selTl ? "🗂" : "📒";
+  const boxIcon = selTl ? "🗂" : caseKind(sel)?.icon || "📒";
   // The box by name; a Show Binder page by page (its position is its pocket).
   const shownCards = useMemo(
     () => (selTl ? [...cards].sort(compareByTitle) : selBox ? [...cards].sort(comparePockets) : cards),

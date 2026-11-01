@@ -44,7 +44,7 @@ import {
 } from "@/lib/toploader.js";
 import {
   isShowBinder, showBindersOf, nextBinderName, binderSuffix, renamedBinder, binderCode,
-  binderCounts, binderContents, openFromBinder, binderCheckIn,
+  binderCounts, binderContents, openFromBinder, binderCheckIn, caseKind, binderNumber,
   CHECKIN_PROGRESS_PREFIX, checkInProgressKey, checkInProgress, restoreCheckInProgress,
   binderSlot, nextSlots, codeless, comparePockets, sortBinderRows, repocketPlan, BINDER_VIEW_SORTS,
   BINDER_VIEW_STATUSES, filterBinderRows, binderAddedAt
@@ -893,17 +893,17 @@ export default function ShowDesk() {
 
   // ---- Show Binders --------------------------------------------------------
 
-  async function newBinder() {
+  async function newBinder(kind = "binder") {
     setBusy(true);
     setMsg("");
     const sb = supabase();
     const { data: { user } } = await sb.auth.getUser();
-    const name = nextBinderName(stacks.map((s) => s.name));
+    const name = nextBinderName(stacks.map((s) => s.name), kind);
     const { data, error } = await sb.from("card_stacks").insert({ user_id: user.id, name }).select("id,name").single();
     setBusy(false);
-    if (error || !data) { setMsg(`Couldn't make a new binder: ${error?.message || "no row came back"}`); return; }
+    if (error || !data) { setMsg(`Couldn't make a new ${kind === "box" ? "toploader box" : "binder"}: ${error?.message || "no row came back"}`); return; }
     setBinderTarget(data.id);
-    setMsg(`Made ${data.name}. Fill it from ★ Recommend show stock or a stack below, with 📒 Into binder.`);
+    setMsg(`Made ${data.name}. Fill it from ★ Recommend show stock or a stack below, with ${caseKind(data.name)?.icon || "📒"} Into, or file cards into it as they come back from a show.`);
     await load();
   }
 
@@ -1027,27 +1027,28 @@ export default function ShowDesk() {
    * renamed with it; resolved ones keep the name they went out under.
    */
   /**
-   * The toploader box, made a Show Binder (decided 2026-11-01): one set of
-   * rules rather than two — it goes out whole, comes back through ↩ Check in
-   * with what is missing recorded sold, and gets 👁 View cards and labels.
+   * The old toploader box, made a show case (decided 2026-11-01): "Toploader
+   * Box 1", cards T1-001. One set of rules with the binders — it goes out
+   * whole, comes back through ↩ Check in with what is missing recorded sold,
+   * and gets 👁 View cards and labels — under its own name and letter.
    *
    * It is a RENAME and nothing else, the same one ✎ Rename makes: the cards
    * stay where they are, the stack id is unchanged, and their positions —
-   * already filed at the back one after another — become their binder SKUs.
+   * already filed at the back one after another — become their box SKUs.
    * Open checkouts out of the box are renamed with it, so a card from it that
-   * is at a show now comes home through the binder's check-in.
+   * is at a show now comes home through the box's check-in.
    */
   async function toploadersToBinder() {
     const box = toploaderBox;
     if (!box) return;
-    const name = renamedBinder(TOPLOADER_STACK_NAME, stacks.filter((s) => s.id !== box.id).map((s) => s.name), box.name);
-    if (!name) { setMsg("Couldn't name the toploader box as a binder — another stack already has that name."); return; }
+    const name = renamedBinder("", stacks.filter((s) => s.id !== box.id).map((s) => s.name), box.name, "box");
+    if (!name) { setMsg("Couldn't rename the toploader box — another stack already has that name."); return; }
     const inBox = stackCards.filter((c) => c.stack_id === box.id && !c.pulled_at).length;
     const out = openFromBinder(open, box.id).length;
     if (!confirm(
-      `Make the toploader box (${inBox} card${inBox === 1 ? "" : "s"}) a Show Binder called "${name}"?\n\n` +
-      `Nothing moves: each card gets a binder SKU from where it already sits, and from now on the box goes out whole and comes back through ↩ Check in, like the other binders.` +
-      (out ? `\n\n${out} of its cards ${out === 1 ? "is" : "are"} out at a show now — ${out === 1 ? "it comes" : "they come"} home through the binder's ↩ Check in.` : "")
+      `Make the toploader box (${inBox} card${inBox === 1 ? "" : "s"}) a show case called "${name}"?\n\n` +
+      `Nothing moves: each card gets a ${binderCode(name) || "T"}- SKU from where it already sits, and from now on the box goes out whole and comes back through ↩ Check in, like the binders.` +
+      (out ? `\n\n${out} of its cards ${out === 1 ? "is" : "are"} out at a show now — ${out === 1 ? "it comes" : "they come"} home through the box's ↩ Check in.` : "")
     )) return;
     setBusy(true);
     setMsg("");
@@ -1604,8 +1605,9 @@ export default function ShowDesk() {
       const ids = new Set(items.map((co) => co.id));
       const stillOut = openFromBinder(open, stackId).some((co) => !ids.has(co.id));
       const where = stackName.get(stackId) || "the binder";
+      const noun = caseKind(where)?.noun || "binder";
       question = stillOut
-        ? `File ${n} card${n === 1 ? "" : "s"} into ${where}? The binder is still out at a show, so ${n === 1 ? "it stays" : "they stay"} off sale on eBay and come${n === 1 ? "s" : ""} home with it at ↩ Check in.`
+        ? `File ${n} card${n === 1 ? "" : "s"} into ${where}? The ${noun} is still out at a show, so ${n === 1 ? "it stays" : "they stay"} off sale on eBay and come${n === 1 ? "s" : ""} home with it at ↩ Check in.`
         : `File ${n} card${n === 1 ? "" : "s"} into ${where} and put ${them} back on sale on eBay?`;
     } else {
       question = `File ${n} card${n === 1 ? "" : "s"} into the toploader box and put ${them} back on sale on eBay?`;
@@ -2003,7 +2005,7 @@ export default function ShowDesk() {
       <>
         {binders.length > 1 ? (
           <select className="sd-select" value={intoBinder} onChange={(e) => setBinderTarget(e.target.value)} aria-label="Show Binder to file into">
-            <option value="">Choose a binder…</option>
+            <option value="">Choose a binder or box…</option>
             {binders.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         ) : null}
@@ -2013,7 +2015,7 @@ export default function ShowDesk() {
           disabled={busy || count === 0 || !target}
           title="Move these cards into the binder. Nothing is checked out and the listings stay live — the binder is checked out as a whole before a show."
         >
-          📒 Into {target ? target.name : "binder"} ({count})
+          {caseKind(target)?.icon || "📒"} Into {target ? target.name : "binder"} ({count})
         </button>
       </>
     );
@@ -2247,7 +2249,7 @@ export default function ShowDesk() {
                     {isToploaderStack(stackName.get(card.stack_id)) ? (
                       <span className="stack-pos" title="In the toploader box — no positions, find it by name">🗂</span>
                     ) : isShowBinder(stackName.get(card.stack_id)) ? (
-                      <span className="stack-pos" title="In a Show Binder — no positions, find it by name">📒</span>
+                      <span className="stack-pos" title={`In ${stackName.get(card.stack_id)} — no positions, find it by name`}>{caseKind(stackName.get(card.stack_id))?.icon || "📒"}</span>
                     ) : (
                       <span className="stack-pos" title="Live position — count this many from the top of the stack">{rank ?? "?"}</span>
                     )}
@@ -2308,7 +2310,7 @@ export default function ShowDesk() {
       {customerMode ? null : (
         <Fold
           id="showdesk-binders"
-          title="Show Binders"
+          title="Show Cases"
           count={binders.length ? `${binders.length}` : null}
           defaultOpen={false}
           summary={binders.length
@@ -2316,8 +2318,11 @@ export default function ShowDesk() {
                 const n = binderCount.get(b.id) || { home: 0, away: 0 };
                 return `${b.name}: ${n.away ? `${n.away} out` : `${n.home} at home`}`;
               }).join(" · ")
-            : "None yet — a binder of cards listed on eBay, checked out to a show in one go."}
-          actions={<button className="btn btn-ghost" onClick={newBinder} disabled={busy}>＋ New Show Binder</button>}
+            : "None yet — a binder or toploader box of cards listed on eBay, checked out to a show in one go."}
+          actions={<>
+            <button className="btn btn-ghost" onClick={() => newBinder("binder")} disabled={busy}>＋ New Show Binder</button>
+            <button className="btn btn-ghost" onClick={() => newBinder("box")} disabled={busy}>＋ New Toploader Box</button>
+          </>}
           alert={(() => {
             // A binder out at a show with cards still on sale online: filed in
             // while it was away, before 📒 Into binder checked them out with
@@ -2328,38 +2333,38 @@ export default function ShowDesk() {
             return leaks.length ? (
               <p className="hint hint-small" style={{ color: "var(--warn-ink)" }}>
                 ⚠ {leaks.map(({ b, n }) => `${b.name} is out at a show but ${n.home} of its card${n.home === 1 ? " is" : "s are"} still on sale on eBay`).join("; ")}.
-                {" "}Open Show Binders and press <b>⤴ Check out</b> on it to take {leaks.length === 1 && leaks[0].n.home === 1 ? "it" : "them"} off sale with the rest.
+                {" "}Open Show Cases and press <b>⤴ Check out</b> on it to take {leaks.length === 1 && leaks[0].n.home === 1 ? "it" : "them"} off sale with the rest.
               </p>
             ) : null;
           })()}
         >
           <p className="hint hint-small" style={{ marginTop: 0 }}>
-            A binder&apos;s cards stay on sale on eBay while it is at home. <b>⤴ Check out</b> before a show takes every
-            listing in it off sale; <b>↩ Check in</b> afterwards puts what is still in a pocket back on sale and records the
-            rest as sold. Fill one with <b>📒 Into binder</b> under ★ Recommend show stock or a stack. No pockets are
-            numbered — flick through it by name.
+            Show Binders (📒, cards B1-001) and Toploader Boxes (🗂, cards T1-001) work the same way. Their cards stay on sale on eBay while they are at home. <b>⤴ Check out</b> before a show takes every
+            listing in it off sale; <b>↩ Check in</b> afterwards puts what is still there back on sale and records the
+            rest as sold. Fill one with <b>Into</b> under ★ Recommend show stock or a stack, or file cards into it as they come back. No pockets are
+            numbered — flick through by name.
           </p>
           {toploaderBox ? (
             <div className="sd-plan">
               <div className="sd-plan-head">
-                <b>🗂 The toploader box isn&apos;t a binder yet</b>
-                <button className="btn btn-primary" onClick={toploadersToBinder} disabled={busy}>📒 Make it a Show Binder</button>
+                <b>🗂 The toploader box isn&apos;t a show case yet</b>
+                <button className="btn btn-primary" onClick={toploadersToBinder} disabled={busy}>🗂 Make it Toploader Box {binderNumber(nextBinderName(stacks.map((s) => s.name), "box"))}</button>
               </div>
               <p className="hint hint-small" style={{ margin: 0 }}>
-                It would go out whole and come back through ↩ Check in like the binders below, with 👁 View cards and labels.
-                Nothing moves — its cards get binder SKUs from where they already sit.
+                It would go out whole and come back through ↩ Check in like the binders, with 👁 View cards and labels.
+                Nothing moves — its cards get T SKUs (T1-001…) from where they already sit.
               </p>
             </div>
           ) : null}
           {binders.length === 0 ? (
-            <p className="dd-empty">No Show Binders yet.</p>
+            <p className="dd-empty">No Show Binders or Toploader Boxes yet.</p>
           ) : (
             <div className="stack-list">
               {binders.map((b) => {
                 const n = binderCount.get(b.id) || { home: 0, away: 0 };
                 return (
                   <div className="ps-row sd-rec-row" key={b.id}>
-                    <span className="stack-pos" aria-hidden="true">📒</span>
+                    <span className="stack-pos" aria-hidden="true">{caseKind(b)?.icon || "📒"}</span>
                     <span className="stack-title">{b.name}</span>
                     {n.away && n.home ? (
                       // Out at a show, yet some of it is still on sale online —
@@ -2677,7 +2682,7 @@ export default function ShowDesk() {
                 ) : (
                   <>
                     <p className="hint hint-small" style={{ marginTop: 0 }}>
-                      Go through the binder in binder SKU order and untick every card that isn&apos;t there — those sold. Cards already marked £ Sold at the table
+                      Go through it in SKU order and untick every card that isn&apos;t there — those sold. Cards already marked £ Sold at the table
                       aren&apos;t listed. A sold card&apos;s price starts at its sticker; change it, or clear it to record the
                       sale without one.
                     </p>
@@ -2705,7 +2710,7 @@ export default function ShowDesk() {
                             <input
                               type="checkbox"
                               checked={here}
-                              aria-label={`${co.title || co.sku || "card"} is in the binder`}
+                              aria-label={`${co.title || co.sku || "card"} is still there`}
                               onChange={() => setBinderMissing((prev) => { const n = new Set(prev); if (n.has(co.id)) n.delete(co.id); else n.add(co.id); return n; })}
                             />
                             <span className="stack-pos" title="Binder SKU">{pk?.sku || "—"}</span>
@@ -3087,7 +3092,7 @@ export default function ShowDesk() {
                   <button className="btn btn-ghost" onClick={() => confirmFiling(selected, TOPLOADER_RETURN_MODE)} disabled={busy || selCount === 0} title="Keep them priced and sleeved for the next show: off the stacks, back on sale on eBay, and the sticker comes with them when they next go out">🗂 To toploaders ({selCount})</button>
                 ) : null}
                 {binders.map((b) => (
-                  <button key={b.id} className="btn btn-ghost" onClick={() => confirmFiling(selected, BINDER_RETURN_MODE, b.id)} disabled={busy || selCount === 0} title={`File them into ${b.name}: back on sale on eBay, and out with the binder next show`}>📒 To {b.name} ({selCount})</button>
+                  <button key={b.id} className="btn btn-ghost" onClick={() => confirmFiling(selected, BINDER_RETURN_MODE, b.id)} disabled={busy || selCount === 0} title={`File them into ${b.name}: back on sale on eBay, and out with it next show`}>{caseKind(b)?.icon || "📒"} To {b.name} ({selCount})</button>
                 ))}
                 <button className="btn btn-ghost" onClick={() => { setPlan(null); setBackPickerOpen((v) => !v); }} disabled={busy || selCount === 0}>⤵ Pick a stack…</button>
                 <button className="btn btn-ghost" onClick={() => checkin(selected, "new_stack")} disabled={busy || selCount === 0}>✚ New stack</button>

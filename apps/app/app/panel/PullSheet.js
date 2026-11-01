@@ -8,7 +8,7 @@ import { queuesBySku } from "@/lib/copyqueue";
 import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
-import { binderSlot } from "@/lib/showbinder.js";
+import { binderSlot, caseKind } from "@/lib/showbinder.js";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -644,7 +644,7 @@ export default function PullSheet() {
         return (
         <div className="panel" key={stackId}>
           <div className="panel-head">
-            <h3>{box ? `${tl ? "🗂" : "📒"} ${stackName.get(stackId)}` : stackName.get(stackId) || "Stack"}</h3>
+            <h3>{box ? `${tl ? "🗂" : caseKind(stackName.get(stackId))?.icon || "📒"} ${stackName.get(stackId)}` : stackName.get(stackId) || "Stack"}</h3>
             <span className="badge2">{gr.filter((r) => !picked.has(r.cardId)).length} to pick</span>
           </div>
           {box ? (
@@ -653,7 +653,7 @@ export default function PullSheet() {
           <div className="stack-list">
             {gr.map((r) => {
               const isPicked = picked.has(r.cardId);
-              const rank = !box ? liveRank(r) : tl ? "🗂" : (binderSlot(stackName.get(stackId), r.position)?.sku || "📒");
+              const rank = !box ? liveRank(r) : tl ? "🗂" : (binderSlot(stackName.get(stackId), r.position)?.sku || caseKind(stackName.get(stackId))?.icon || "📒");
               return (
                 <label className={`ps-row${isPicked ? " done" : ""}`} key={r.key}>
                   <input type="checkbox" checked={isPicked} onChange={() => togglePick(r.cardId)} />

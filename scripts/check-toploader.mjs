@@ -24,7 +24,7 @@
 import { readFileSync } from "node:fs";
 import {
   TOPLOADER_STACK_NAME, TOPLOADER_RETURN_MODE,
-  isToploaderStack, toploaderStackOf, fileableStacks, ensureToploaderStack,
+  isToploaderStack, isUnorderedStack, toploaderStackOf, fileableStacks, ensureToploaderStack,
   carriedSticker, compareRecs, compareByTitle
 } from "../apps/app/lib/toploader.js";
 import { positionLabel, locationsBySku } from "../apps/app/lib/stackpos.js";
@@ -202,16 +202,19 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(read("apps/app/lib/toploader.js"))) {
   }
 }
 
-// The box made a Show Binder (2026-11-01): a rename and nothing else. It takes
-// the next free binder number, stops being the box, and the desk only offers
-// 🗂 To toploaders while a box still exists — or the button would make a new
-// empty one the first time it was pressed.
+// The box made a show case (2026-11-01): "Toploader Box 1", cards T1-001 — a
+// rename and nothing else. It stops being the legacy box, and the desk only
+// offers 🗂 To toploaders while a legacy box still exists, or the button would
+// make a new empty one the first time it was pressed.
 {
-  const { renamedBinder, isShowBinder: isBinder } = await import("../apps/app/lib/showbinder.js");
+  const { renamedBinder, isShowBinder: isCase, binderCode, binderSlot: slotOf, caseKind } = await import("../apps/app/lib/showbinder.js");
   const others = ["Show Binder 1 · ONE PIECE BINDER 1", "Show Binder 2 · POKEMON BINDER 1", "A"];
-  const name = renamedBinder(TOPLOADER_STACK_NAME, others, TOPLOADER_STACK_NAME);
-  if (name !== "Show Binder 3 · Toploaders") fail(`the box as a binder should be "Show Binder 3 · Toploaders", got ${JSON.stringify(name)}`);
-  if (!isBinder(name) || isToploaderStack(name)) fail("the renamed box must read as a Show Binder and no longer as the toploader box");
+  const name = renamedBinder("", others, TOPLOADER_STACK_NAME, "box");
+  if (name !== "Toploader Box 1") fail(`the converted box should be "Toploader Box 1" (boxes number apart from binders), got ${JSON.stringify(name)}`);
+  if (!isCase(name) || isToploaderStack(name)) fail("the converted box must read as a show case and no longer as the legacy toploader box");
+  if (binderCode(name) !== "T1" || slotOf(name, 7)?.sku !== "T1-007") fail("a Toploader Box's cards must be coded T1-007, not B");
+  if (caseKind(name)?.icon !== "🗂") fail("a Toploader Box is shown as 🗂");
+  if (!isUnorderedStack(name) || fileableStacks([{ id: 1, name }]).length) fail("a Toploader Box is unordered and never planned into, like a binder");
   const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
   if (!/\{toploaderBox \? \(\s*<button[^\n]*confirmFiling\(selected, TOPLOADER_RETURN_MODE\)/.test(deskSrc)) {
     fail("🗂 To toploaders must only show while a toploader box exists — pressed after the box became a binder, it would make a new empty box");

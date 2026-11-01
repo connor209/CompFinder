@@ -31,7 +31,7 @@ import {
   POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
   nameKey, compareByCardName, sortBinderRows, repocketPlan, openFromBinder, binderCheckIn,
   parseSkuList, filterBinderRows, binderAddedAt,
-  checkInProgressKey, checkInProgress, restoreCheckInProgress
+  checkInProgressKey, checkInProgress, restoreCheckInProgress, caseKind
 } from "../apps/app/lib/showbinder.js";
 import { titleMatches, skuInBatch } from "../apps/app/lib/showfilter.js";
 import { isUnorderedStack, fileableStacks, isToploaderStack } from "../apps/app/lib/toploader.js";
@@ -258,6 +258,23 @@ eq("everything else goes back on sale", ci.back.map((c) => c.id), ["c1", "c6"]);
 eq("nothing left open", ci.back.length + ci.sold.length, out.length);
 eq("a stale id from another stack is ignored", ci.sold.some((c) => c.id === "c5"), false);
 eq("all present: all back", binderCheckIn(out, []).back.length, 3);
+
+// --- 4a. Toploader Boxes: the same rules, their own name and letter ---------
+// "Show Cases" holds both. Numbered apart, so Show Binder 2 and Toploader Box
+// 1 are B2 and T1, and a rename never turns one kind into the other.
+{
+  const names = ["Show Binder 1", "Show Binder 2 · POKEMON", "Toploader Box 1"];
+  eq("a Toploader Box is a show case", isShowBinder("Toploader Box 1"), true);
+  eq("its code is T", binderCode("Toploader Box 1"), "T1");
+  eq("its SKU is T", binderSlot("Toploader Box 2 · Dear", 12)?.sku, "T2-012");
+  eq("boxes number apart from binders", nextBinderName(names, "box"), "Toploader Box 2");
+  eq("binders number apart from boxes", nextBinderName(names), "Show Binder 3");
+  eq("a box rename keeps it a box", renamedBinder("Dear", names, "Toploader Box 1"), "Toploader Box 1 · Dear");
+  eq("'Toploader Boxes' is not one", isShowBinder("Toploader Boxes"), false);
+  eq("the legacy 'Toploaders' stack is not one", isShowBinder("Toploaders"), false);
+  eq("a binder is 📒", caseKind("Show Binder 1")?.icon, "📒");
+  eq("a codeless box gets a box number", codeless([{ id: 1, name: "Toploader Box" }, { id: 2, name: "Show Binder 1" }])[0]?.name, "Toploader Box 1");
+}
 
 // --- 4b. a check-in saved part-way ----------------------------------------
 // A binder after a run of shows is hundreds of cards, gone through over more

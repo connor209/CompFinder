@@ -31,43 +31,75 @@ import { labelName } from "./showstock.js";
 /** The one spelling of the prefix. Never written out anywhere else. */
 export const SHOW_BINDER_PREFIX = "Show Binder";
 
+/**
+ * The toploader box as a SHOW CASE (decided 2026-11-01): the same rules as a
+ * binder — out whole, back through ↩ Check in, fixed SKUs, View cards — under
+ * its own name and its own letter, so a label says which kind of thing a card
+ * lives in. "Toploader Box 1", cards T1-001. Not the legacy "Toploaders"
+ * stack in lib/toploader.js, which is the box before it was converted.
+ */
+export const TOPLOADER_BOX_PREFIX = "Toploader Box";
+
+/**
+ * The kinds of show case. Everything below reads a name through this table,
+ * so a binder and a box share every rule and differ only in what they are
+ * called. "Show Cases" is the Show Desk area that holds both.
+ */
+export const CASE_KINDS = [
+  { kind: "binder", prefix: SHOW_BINDER_PREFIX, letter: "B", icon: "📒", noun: "binder" },
+  { kind: "box", prefix: TOPLOADER_BOX_PREFIX, letter: "T", icon: "🗂", noun: "box" }
+];
+
 /** Pages are still how a binder is turned: a heading every nine slots. */
 export const POCKETS_PER_PAGE = 9;
 
 const norm = (s) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-const PREFIX_RE = new RegExp(`^${SHOW_BINDER_PREFIX.toLowerCase()}(?:$|[^a-z])`);
-// "Show Binder 3", "Show Binder 3 · Pokémon", "Show Binder B3 Pokémon".
-const NUMBERED_RE = new RegExp(`^${SHOW_BINDER_PREFIX.toLowerCase()}\\s+b?(\\d+)\\b\\s*(?:[·\\-—:]\\s*)?(.*)$`, "i");
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+for (const k of CASE_KINDS) {
+  k.prefixRe = new RegExp(`^${esc(k.prefix.toLowerCase())}(?:$|[^a-z])`);
+  // "Show Binder 3", "Show Binder 3 · Pokémon", "Show Binder B3 Pokémon";
+  // "Toploader Box 1", "Toploader Box T1 · Dear".
+  k.numberedRe = new RegExp(`^${esc(k.prefix.toLowerCase())}\\s+${k.letter.toLowerCase()}?(\\d+)\\b\\s*(?:[·\\-—:]\\s*)?(.*)$`, "i");
+}
+const nameOf = (stackOrName) => (stackOrName && typeof stackOrName === "object" ? stackOrName.name : stackOrName);
 
-/**
- * Is this a Show Binder? Takes a stack row ({ name }) or a bare name.
- * "Show Binder 2" and "show binder — Pokémon" are; "Binder" and "Show
- * Binders" are not, because a stack someone happened to call that is not one
- * we should stop numbering.
- */
-export function isShowBinder(stackOrName) {
-  const name = stackOrName && typeof stackOrName === "object" ? stackOrName.name : stackOrName;
-  return PREFIX_RE.test(norm(name));
+/** Which kind of show case a stack is ({ kind, prefix, letter, icon, noun }), or null. */
+export function caseKind(stackOrName) {
+  const n = norm(nameOf(stackOrName));
+  return CASE_KINDS.find((k) => k.prefixRe.test(n)) || null;
 }
 
 /**
- * A binder's NUMBER, the thing its code is made of (decided 2026-10-19). It
+ * Is this a show case — a Show Binder or a Toploader Box? Takes a stack row
+ * ({ name }) or a bare name. "Show Binder 2" and "show binder — Pokémon" are;
+ * "Binder" and "Show Binders" are not, because a stack someone happened to
+ * call that is not one we should stop numbering. The name is historical: it
+ * answers for every kind in CASE_KINDS.
+ */
+export function isShowBinder(stackOrName) {
+  return caseKind(stackOrName) != null;
+}
+
+/**
+ * A case's NUMBER, the thing its code is made of (decided 2026-10-19). It
  * lives in the name — "Show Binder 3 · Pokémon" — because a stack has no
  * column for it and a migration would be one more thing to apply by hand,
  * and ✎ Rename keeps it. So the code survives every rename, and a label
- * printed as B3-047 a month ago still names this binder.
+ * printed as B3-047 a month ago still names this binder. Binders and boxes
+ * are numbered separately: Show Binder 1 and Toploader Box 1 are B1 and T1.
  */
 export function binderNumber(stackOrName) {
-  const name = stackOrName && typeof stackOrName === "object" ? stackOrName.name : stackOrName;
-  if (!isShowBinder(name)) return null;
-  const m = NUMBERED_RE.exec(String(name).trim().replace(/\s+/g, " "));
+  const name = nameOf(stackOrName);
+  const k = caseKind(name);
+  if (!k) return null;
+  const m = k.numberedRe.exec(String(name).trim().replace(/\s+/g, " "));
   return m ? Number(m[1]) : null;
 }
 
-/** "B3", or null for a binder with no number yet (see codeless()). */
+/** "B3" or "T1", or null for a case with no number yet (see codeless()). */
 export function binderCode(stackOrName) {
   const n = binderNumber(stackOrName);
-  return n == null ? null : `B${n}`;
+  return n == null ? null : `${caseKind(stackOrName).letter}${n}`;
 }
 
 /** Every Show Binder among a list of stacks, by number, then name. */
@@ -78,12 +110,13 @@ export function showBindersOf(stacks) {
       || String(a.name).localeCompare(String(b.name), undefined, { numeric: true, sensitivity: "base" }));
 }
 
-const nextNumber = (existingNames) =>
-  Math.max(0, ...(existingNames || []).map((n) => binderNumber(n) ?? 0)) + 1;
+const kindOf = (kind) => CASE_KINDS.find((k) => k.kind === kind) || CASE_KINDS[0];
+const nextNumber = (existingNames, kind = "binder") =>
+  Math.max(0, ...(existingNames || []).map((n) => (caseKind(n)?.kind === kind ? binderNumber(n) ?? 0 : 0))) + 1;
 
-/** "Show Binder 3" — one past the highest number already used. */
-export function nextBinderName(existingNames) {
-  return `${SHOW_BINDER_PREFIX} ${nextNumber(existingNames)}`;
+/** "Show Binder 3" or "Toploader Box 2" — one past the highest of that kind. */
+export function nextBinderName(existingNames, kind = "binder") {
+  return `${kindOf(kind).prefix} ${nextNumber(existingNames, kind)}`;
 }
 
 /**
@@ -98,9 +131,10 @@ export function codeless(stacks) {
   const out = [];
   for (const b of showBindersOf(stacks)) {
     if (binderNumber(b) != null) continue;
-    const n = nextNumber(names);
+    const k = caseKind(b);
+    const n = nextNumber(names, k.kind);
     const label = binderSuffix(b.name);
-    const name = `${SHOW_BINDER_PREFIX} ${n}${label ? ` · ${label}` : ""}`;
+    const name = `${k.prefix} ${n}${label ? ` · ${label}` : ""}`;
     names.push(name);
     out.push({ id: b.id, name });
   }
@@ -115,10 +149,11 @@ export function codeless(stacks) {
  */
 export function binderSuffix(name) {
   const n = String(name ?? "").trim().replace(/\s+/g, " ");
-  if (!isShowBinder(n)) return n;
-  const m = NUMBERED_RE.exec(n);
+  const k = caseKind(n);
+  if (!k) return n;
+  const m = k.numberedRe.exec(n);
   if (m) return m[2].trim();
-  return n.slice(SHOW_BINDER_PREFIX.length).replace(/^[\s\-—:·]+/, "").trim();
+  return n.slice(k.prefix.length).replace(/^[\s\-—:·]+/, "").trim();
 }
 
 /**
@@ -129,12 +164,15 @@ export function binderSuffix(name) {
  * (case-blind) — two stacks of one name would point every screen that finds
  * a card by its stack name at the wrong one.
  */
-export function renamedBinder(typed, existingNames = [], currentName = "") {
+export function renamedBinder(typed, existingNames = [], currentName = "", kind = null) {
   let rest = String(typed ?? "").trim().replace(/\s+/g, " ");
   if (isShowBinder(rest)) rest = binderSuffix(rest);
   if (rest.length > 40) return null;
-  const n = binderNumber(currentName) ?? nextNumber(existingNames);
-  const name = `${SHOW_BINDER_PREFIX} ${n}${rest ? ` · ${rest}` : ""}`;
+  // A case keeps its own kind; a stack becoming one (the old toploader box)
+  // takes the kind it is asked to be.
+  const k = caseKind(currentName) || kindOf(kind || "binder");
+  const n = binderNumber(currentName) ?? nextNumber(existingNames, k.kind);
+  const name = `${k.prefix} ${n}${rest ? ` · ${rest}` : ""}`;
   const key = norm(name);
   if (key === norm(currentName)) return name;
   if ((existingNames || []).some((x) => norm(x) === key)) return null;
@@ -545,7 +583,7 @@ export function restoreCheckInProgress(saved, open) {
 }
 
 export default {
-  SHOW_BINDER_PREFIX, isShowBinder, showBindersOf, nextBinderName,
+  SHOW_BINDER_PREFIX, TOPLOADER_BOX_PREFIX, CASE_KINDS, caseKind, isShowBinder, showBindersOf, nextBinderName,
   binderSuffix, renamedBinder, binderCounts, binderContents,
   POCKETS_PER_PAGE, binderNumber, binderCode, codeless, binderSlot, nextSlots, comparePockets,
   openFromBinder, binderCheckIn,
