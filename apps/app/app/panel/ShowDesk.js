@@ -1500,12 +1500,40 @@ export default function ShowDesk() {
     const pockets = mode === BINDER_RETURN_MODE ? nextSlots(await maxPosition(sb, stackId), items.filter((co) => !homeAgain(co)).length) : [];
     let nextPocket = 0;
 
+    // Into a binder that is itself still OUT at a show — the rest of it has
+    // open checkouts these cards are not part of. Relisting them would put a
+    // card in a pocket on the table back on sale online, the same leak 📒 Into
+    // binder had. So they stay checked out and their checkout moves to the
+    // binder: the card goes in the pocket, the listing stays hidden, and the
+    // binder's own ↩ Check in is what brings them home with the rest.
+    const checkingIn = new Set(items.map((co) => co.id));
+    const binderStillOut = mode === BINDER_RETURN_MODE &&
+      openFromBinder(open, stackId).some((co) => !checkingIn.has(co.id));
+
     let restored = 0;
     const warnings = [];
     const filedIds = [];
     for (let i = 0; i < items.length; i++) {
       const co = items[i];
       if (mode === BINDER_RETURN_MODE && !homeAgain(co) && co.stack_card_id) filedIds.push(co.stack_card_id);
+      if (binderStillOut) {
+        setProgress(`Filing ${i + 1} of ${items.length} into ${stackName.get(stackId) || "the binder"}…`);
+        const pocket = homeAgain(co) ? {} : { stack_id: stackId, position: pockets[nextPocket++] };
+        if (!co.stack_card_id) {
+          warnings.push(`${co.sku || "?"}: its stack card no longer exists — add it to the binder by hand.`);
+        } else if (pocket.stack_id) {
+          const { error } = await sb.from("stack_cards").update(pocket).eq("id", co.stack_card_id);
+          if (error) { warnings.push(`${co.sku || "?"}: not moved into the binder — ${error.message}`); continue; }
+        }
+        const { error: coErr } = await sb
+          .from("stock_checkouts")
+          .update({ stack_id: stackId, stack_name: stackName.get(stackId) || null })
+          .eq("id", co.id)
+          .is("resolved_at", null);
+        if (coErr) warnings.push(`${co.sku || "?"}: filed, but its checkout still names its old stack — ${coErr.message}`);
+        restored += 1;
+        continue;
+      }
       setProgress(`Checking in ${i + 1} of ${items.length}…`);
       const patch = mode === "spot" || homeAgain(co) ? {}
         : mode === BINDER_RETURN_MODE ? { stack_id: stackId, position: pockets[nextPocket++] }
@@ -1522,9 +1550,10 @@ export default function ShowDesk() {
     const modeText = mode === "spot" ? "to their original spots"
       : mode === "back" ? ` to the back of ${stackName.get(stackId) || "the stack"}`
       : mode === TOPLOADER_RETURN_MODE ? "into the toploader box — back on sale on eBay, stickers kept for the next show"
+      : mode === BINDER_RETURN_MODE && binderStillOut ? `into ${stackName.get(stackId) || "the binder"} — the binder is still out at a show, so they stay off sale on eBay and come home with it at ↩ Check in`
       : mode === BINDER_RETURN_MODE ? `into ${stackName.get(stackId) || "the binder"} — back on sale on eBay`
       : newStackNote;
-    setMsg(`Checked in ${restored} card(s) ${modeText}.${warnings.length ? ` ⚠ ${warnings.join(" · ")}` : ""}`.trim());
+    setMsg(`${binderStillOut ? "Filed" : "Checked in"} ${restored} card(s) ${modeText}.${warnings.length ? ` ⚠ ${warnings.join(" · ")}` : ""}`.trim());
     await load();
   }
 
