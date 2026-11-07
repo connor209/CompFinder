@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { syncUserListings, syncUserSales } from "@/lib/ebay";
 import { snapshotUserPortfolio } from "@/lib/portfolio";
 import { runStackImport } from "@/lib/stack-import.js";
+import { runCopySync } from "@/lib/copysync";
 
 /**
  * Scheduled auto-sync (Vercel Cron, daily — see vercel.json). Re-pulls every
@@ -10,7 +11,8 @@ import { runStackImport } from "@/lib/stack-import.js";
  * "already listed?" checks and P&L stay fresh without anyone hitting Sync.
  *
  * Then Stacks' auto-import (`runStackImport`), so a card listed during the day
- * is in its stack by morning. Only after a listings refresh that SUCCEEDED:
+ * is in its stack by morning, and the multi-copy reconcile (`runCopySync`),
+ * while the listings mirror is fresh enough to set a quantity from. Only after a listings refresh that SUCCEEDED:
  * importing off a cache the sync just failed to update adds nothing new and
  * spends the time limit. It only ever adds — never moves or pulls a card.
  *
@@ -47,6 +49,7 @@ export async function GET(request) {
   let snapshots = 0;
   let errors = 0;
   let stackCards = 0;
+  let copies = 0;
   const failures = [];
   const incomplete = [];
   for (const a of accounts || []) {
@@ -71,6 +74,19 @@ export async function GET(request) {
         console.error(`[cron/sync] stack import failed for ${a.user_id}: ${e?.message || e}`);
       }
     }
+    if (listingsOk) {
+      // Pooled listings, picture AND quantity, while the mirror is minutes old
+      // — the one time of day its quantity is safe to reconcile against
+      // (lib/copysync.js). Inert unless COPY_SYNC is set.
+      try {
+        const r = await runCopySync(admin, a.user_id, { trigger: "nightly" });
+        copies += r.changed.length;
+        for (const e of r.errors || []) failures.push({ user: a.user_id, step: "copies", error: e });
+      } catch (e) {
+        failures.push({ user: a.user_id, step: "copies", error: e?.message || String(e) });
+        console.error(`[cron/sync] copy sync failed for ${a.user_id}: ${e?.message || e}`);
+      }
+    }
     try {
       const r = await syncUserSales(admin, a.user_id, 90);
       if (!r.scopeError) sales += 1;
@@ -88,5 +104,5 @@ export async function GET(request) {
     }
   }
   if (incomplete.length) console.warn(`[cron/sync] incomplete listing read, nothing removed: ${JSON.stringify(incomplete)}`);
-  return NextResponse.json({ ok: errors === 0, accounts: (accounts || []).length, listings, stackCards, sales, snapshots, errors, failures, incomplete });
+  return NextResponse.json({ ok: errors === 0, accounts: (accounts || []).length, listings, stackCards, copies, sales, snapshots, errors, failures, incomplete });
 }

@@ -279,7 +279,7 @@ export default function PullSheet() {
         units.push({ lineItemId: l.lineItemId, pulled });
         if (card) {
           const ref = skl && (skuRows.get(skl) || 0) > 1 ? unitRef(l.lineItemId, n + 1) : null;
-          active.push({ key, ref, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
+          active.push({ key, ref, itemId: card.ebay_item_id || null, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
         } else if (skl && awaySkus.has(skl)) {
           // Ordered on eBay while the card is checked out to a show — it can't
           // be picked from a stack. Needs a human call (it's in the show case).
@@ -423,10 +423,19 @@ export default function PullSheet() {
     // SEPARATE write after the pull, so a database without the column still
     // pulls the card: the cost of losing it is one copy too few offered until
     // the order ships, never a card left in the stack.
-    const refs = rows.filter((r) => r.ref && picked.has(r.cardId)).map((r) => [r.cardId, r.ref]);
+    const refRows = rows.filter((r) => r.ref && picked.has(r.cardId));
+    const refs = refRows.map((r) => [r.cardId, r.ref]);
     for (let i = 0; i < refs.length; i += 10) {
       await Promise.all(refs.slice(i, i + 10).map(([id, ref]) =>
         sb.from("stack_cards").update({ pulled_for: ref }).eq("id", id).then(() => {}, () => {})));
+    }
+    // Pooled listings these pulls belong to: put their picture and quantity
+    // right now rather than at the next sweep (lib/copysync.js, "box").
+    // Fire-and-forget — the pull is recorded whatever eBay says, and the
+    // sweep catches anything this misses. Only rows with a ref are multi-copy.
+    const pooledIds = [...new Set(refRows.map((r) => r.itemId).filter(Boolean).map(String))];
+    if (pooledIds.length) {
+      fetch("/api/ebay/copies", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemIds: pooledIds }) }).catch(() => {});
     }
     if (loose.length) writeLooseCommitted(new Set([...readLooseCommitted(), ...loose]));
     setCommitting(false);

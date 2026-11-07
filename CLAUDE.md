@@ -206,6 +206,12 @@ stream` (the relay, only while streaming).
   the second time. And that the picture moves at the SALE rather than the pull
   — a sold, unpulled copy is owed to its buyer — that a copy pulled for an
   order answers it, and that without the orders a quantity is never raised.
+- `scripts/check-copysync.mjs` — the same listings with nobody watching: off
+  until `COPY_SYNC` is set, only pooled listings (two or more stack rows on
+  one item id) whatever a caller names, nothing done without the unshipped
+  orders, a sale moving the picture and never the quantity, a quantity set
+  only off a number read that minute, and a notification believed only on
+  eBay's signature.
 - `scripts/check-desksetup.mjs` — what the Show Desk says is still to run, and
   mostly what it refuses to say: a probe that fails on venue wifi is never
   reported as a missing migration.
@@ -2713,6 +2719,36 @@ whether the method is worth having at all.
 - **A copy at a show is not a copy you can post.** Away and pulled both leave
   the queue, and the listing's quantity drops with them — a listing left at 3
   while one of the three is on a table sells a card twice.
+
+**It runs itself** (`apps/app/lib/copysync.js`, `runCopySync()`), from four
+places that all go through that one function:
+
+| trigger | from | changes |
+|---|---|---|
+| sale | eBay's notification (`/api/ebay/notify`) and a 15-minute sweep (`/api/cron/copies`, called by `.github/workflows/copy-sync.yml`) | picture only |
+| box | the pull sheet's Commit (`/api/ebay/copies`) | picture + quantity, off a live eBay read |
+| nightly | `/api/cron/sync`, after a successful listings refresh | picture + quantity, off the fresh mirror |
+
+- **A sale changes the picture and nothing else.** eBay lowers the quantity
+  itself, so deciding the picture needs no eBay read — the orders and
+  `listing_copy_state` are enough — which is what makes a sweep every fifteen
+  minutes affordable.
+- **A quantity is only ever set off a number read that minute.** The mirror at
+  any other time is up to a day old, and a copy sold since would go back on.
+- **Never blind**: no orders read, nothing changed. **Only pooled listings**
+  (two or more stack rows ever filed on the item id): the single listings are
+  never in the target set, whatever id a caller or a notification names.
+  **At most 40 revisions a run**, so a fault stops itself.
+- **Off until `COPY_SYNC`** is set on comp-finder — "dry" logs what it would
+  do, "on" sends. The sweep needs `CRON_SECRET` (secret) and `APP_URL`
+  (variable) in Actions, and its route refuses every call without the secret
+  rather than falling open like `/api/cron/sync`. In the GitHub workflow
+  because the Vercel plan runs scheduled jobs once a day.
+- **The notification is believed on eBay's signature alone** —
+  `Base64(MD5(Timestamp + DevID + AppID + CertID))`, timestamp within ten
+  minutes — so it needs `EBAY_DEV_ID`. `scripts/ebay-notifications.mjs --on
+  <url>` switches it on. Untested against live eBay; the sweep does the same
+  job if it never fires.
 
 Two bugs in shipped code came out of building it, both invisible while every
 listing was a single card. **A line item carries a quantity and the pull sheet

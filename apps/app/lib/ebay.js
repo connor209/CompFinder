@@ -560,6 +560,79 @@ export async function reviseFixedPriceListing(accessToken, itemId, { imageUrls =
   return { ok: true, ack: resp.Ack, warning, pictures: pics.length, quantity: qty };
 }
 
+/**
+ * Platform Notifications — eBay calling us when a copy sells, so a pooled
+ * listing's picture moves within seconds rather than at the next sweep
+ * (lib/copysync.js). Trading API, one call to set, one to read back.
+ *
+ * `url` is where eBay POSTs (the app's /api/ebay/notify). It is set at the
+ * APPLICATION level — one URL for every account on this keyset — and the
+ * events are switched on per user, with that user's token. `enable: false`
+ * switches the events off and leaves the URL alone.
+ *
+ * UNTESTED against live eBay: written to the Trading API reference. The
+ * 15-minute sweep does the same job more slowly, so this failing costs speed,
+ * never a wrong picture.
+ */
+export async function setNotificationPreferences(accessToken, { url = null, enable = true, events = ["FixedPriceTransaction", "AuctionCheckoutComplete"] } = {}) {
+  const state = enable ? "Enable" : "Disable";
+  const app = url
+    ? `<ApplicationDeliveryPreferences><ApplicationURL>${escapeXml(url)}</ApplicationURL>` +
+      `<ApplicationEnable>Enable</ApplicationEnable><DeviceType>Platform</DeviceType></ApplicationDeliveryPreferences>`
+    : "";
+  const body =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<SetNotificationPreferencesRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
+    app +
+    `<UserDeliveryPreferenceArray>` +
+    events.map((e) => `<NotificationEnable><EventType>${escapeXml(e)}</EventType><EventEnable>${state}</EventEnable></NotificationEnable>`).join("") +
+    `</UserDeliveryPreferenceArray>` +
+    `</SetNotificationPreferencesRequest>`;
+  const resp = await tradingCall(accessToken, "SetNotificationPreferences", body);
+  return { ok: true, ack: resp.Ack };
+}
+
+/** What eBay has on file: the application URL and this user's events. */
+export async function getNotificationPreferences(accessToken) {
+  const read = async (level) => tradingCall(accessToken, "GetNotificationPreferences",
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<GetNotificationPreferencesRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
+    `<PreferenceLevel>${level}</PreferenceLevel></GetNotificationPreferencesRequest>`);
+  const app = await read("Application");
+  const user = await read("User");
+  const raw = user?.UserDeliveryPreferenceArray?.NotificationEnable;
+  const list = raw == null ? [] : Array.isArray(raw) ? raw : [raw];
+  return {
+    url: app?.ApplicationDeliveryPreferences?.ApplicationURL || null,
+    appEnabled: app?.ApplicationDeliveryPreferences?.ApplicationEnable || null,
+    events: list.map((n) => ({ event: String(n.EventType), state: String(n.EventEnable) }))
+  };
+}
+
+/** One Trading API call, parsed, with eBay's own error message on failure. */
+async function tradingCall(accessToken, callName, body) {
+  const res = await fetch(TRADING_URL, {
+    method: "POST",
+    headers: {
+      "X-EBAY-API-CALL-NAME": callName,
+      "X-EBAY-API-SITEID": SITE_ID_UK,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
+      "X-EBAY-API-IAF-TOKEN": accessToken,
+      "Content-Type": "text/xml"
+    },
+    body
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`eBay ${callName} failed (${res.status}).`);
+  const resp = parser.parse(text)?.[`${callName}Response`] || {};
+  if (resp.Ack !== "Success" && resp.Ack !== "Warning") {
+    const errs = resp.Errors;
+    const msg = Array.isArray(errs) ? errs[0]?.LongMessage : errs?.LongMessage;
+    throw new Error(msg || `eBay rejected ${callName}.`);
+  }
+  return resp;
+}
+
 function escapeXml(s) {
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;")
