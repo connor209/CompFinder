@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
-import { queuesBySku } from "@/lib/copyqueue";
+import { allocateUnits, unitRef } from "@/lib/copyqueue";
 import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
@@ -210,10 +210,27 @@ export default function PullSheet() {
     // still the ordinary case and behaves exactly as before — the queue is one
     // long. A multi-quantity listing is several copies sharing the listing's
     // SKU, and then WHICH copy goes matters: it is the one in the listing's
-    // photograph. copyqueue.js owns that order; this used to keep the first row
-    // an unordered `select *` happened to return.
-    const copyQueues = queuesBySku(cards);
-    const takenBySku = new Map(); // sku -> units of its queue already spoken for
+    // photograph. copyqueue.js owns that order AND the allocation — the same
+    // allocateUnits() the listing's picture is worked out from, so the copy
+    // this sheet sends you to is the copy the next buyer is not shown.
+    //
+    // A unit whose copy was pulled FOR it (`pulled_for`, migration 035) is
+    // done. Before that link, a multi-copy order still unshipped after Commit
+    // was handed the NEXT copy in the queue: back on the sheet as a fresh
+    // pick, and never on Pack.
+    const allocByLine = new Map();
+    for (const u of allocateUnits(cards, lines)) {
+      const k = String(u.lineItemId ?? "");
+      if (!allocByLine.has(k)) allocByLine.set(k, []);
+      allocByLine.get(k).push(u);
+    }
+    // SKUs held as more than one stack row: the only cards whose pull needs
+    // to be tied to its order, so Commit writes `pulled_for` for these alone.
+    const skuRows = new Map();
+    for (const c of cards) {
+      const skl = c.sku ? String(c.sku).trim().toLowerCase() || null : null;
+      if (skl) skuRows.set(skl, (skuRows.get(skl) || 0) + 1);
+    }
     const pulledSkus = new Set();
     const awaySkus = new Set(); // checked out to a show — physically not here
     const order = new Map();
@@ -249,18 +266,20 @@ export default function PullSheet() {
       // own card — `commit()` keys on card id, so two units of one order commit
       // as the two cards they are.
       const count = Math.max(1, Number(l.quantity) || 1);
+      const lineUnits = allocByLine.get(String(l.lineItemId ?? "")) || [];
       for (let n = 0; n < count; n++) {
-        const seen = takenBySku.get(skl) || 0;
-        const card = skl ? (copyQueues.get(skl) || [])[seen] || null : null;
+        const u = lineUnits[n] || null;
+        const card = u?.state === "reserved" ? u.copy : null;
         // A key per UNIT. Sharing the line item id would collapse two cards
         // back into one row and pull half the order.
         const key = count > 1 ? `${l.lineItemId}#${n + 1}` : l.lineItemId;
         const unitOf = count > 1 ? { unit: n + 1, ofUnits: count } : null;
-        const pulled = !card && !(skl && awaySkus.has(skl)) && ((skl && pulledSkus.has(skl)) || looseDone.has(String(key)));
+        const pulled = u?.state === "pulled" ||
+          (!card && !(skl && awaySkus.has(skl)) && ((skl && pulledSkus.has(skl)) || looseDone.has(String(key))));
         units.push({ lineItemId: l.lineItemId, pulled });
         if (card) {
-          takenBySku.set(skl, seen + 1);
-          active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
+          const ref = skl && (skuRows.get(skl) || 0) > 1 ? unitRef(l.lineItemId, n + 1) : null;
+          active.push({ key, ref, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
         } else if (skl && awaySkus.has(skl)) {
           // Ordered on eBay while the card is checked out to a show — it can't
           // be picked from a stack. Needs a human call (it's in the show case).
@@ -399,6 +418,15 @@ export default function PullSheet() {
     const sb = supabase();
     for (let i = 0; i < ids.length; i += 200) {
       await sb.from("stack_cards").update({ pulled_at: new Date().toISOString() }).in("id", ids.slice(i, i + 200));
+    }
+    // Which order unit each multi-copy pull answers (migration 035). A
+    // SEPARATE write after the pull, so a database without the column still
+    // pulls the card: the cost of losing it is one copy too few offered until
+    // the order ships, never a card left in the stack.
+    const refs = rows.filter((r) => r.ref && picked.has(r.cardId)).map((r) => [r.cardId, r.ref]);
+    for (let i = 0; i < refs.length; i += 10) {
+      await Promise.all(refs.slice(i, i + 10).map(([id, ref]) =>
+        sb.from("stack_cards").update({ pulled_for: ref }).eq("id", id).then(() => {}, () => {})));
     }
     if (loose.length) writeLooseCommitted(new Set([...readLooseCommitted(), ...loose]));
     setCommitting(false);

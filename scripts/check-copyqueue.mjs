@@ -14,7 +14,8 @@
  */
 import {
   queueFor, queuesBySku, queuesByListing, pictureUrlsFor, desiredStateFor,
-  reconcile, pullPlanFor, isSellableCopy, isMissingSchema, MAX_PICTURES
+  reconcile, pullPlanFor, isSellableCopy, isMissingSchema, MAX_PICTURES,
+  allocateUnits, unitRef, pulledForIndex
 } from "../apps/app/lib/copyqueue.js";
 
 let failures = 0;
@@ -102,7 +103,8 @@ eq("blank counts as no scan", pictureUrlsFor(copy(1, { scan_url: "   " }), []), 
 // --- 4. reconcile: running it twice does nothing the second time -----------
 // This is the whole reason there is no ledger. The desired state is a function
 // of what is in the box, so a repeat run has nothing to say.
-const want3 = desiredStateFor(ITEM, THREE);
+// `lines: []` — the unshipped orders WERE read, and there are none.
+const want3 = desiredStateFor(ITEM, THREE, { lines: [] });
 const settled = reconcile(want3, { quantity: 3 }, { pictured_copy_id: "copy-1" });
 eq("a listing that already says the right thing gets no revision", settled.changes, {});
 ok("...and reports itself settled", settled.empty);
@@ -114,7 +116,7 @@ eq("and its quantity is already right, so it is left alone", firstRun.changes.qu
 
 // One sells: the pull sheet marks copy-1 pulled, and the listing follows.
 const AFTER_ONE = [copy(1, { pulled_at: "2026-08-30T09:00:00Z" }), copy(2), copy(3)];
-const after = reconcile(desiredStateFor(ITEM, AFTER_ONE), { quantity: 3 }, { pictured_copy_id: "copy-1" });
+const after = reconcile(desiredStateFor(ITEM, AFTER_ONE, { lines: [] }), { quantity: 3 }, { pictured_copy_id: "copy-1" });
 eq("after a sale the quantity comes down", after.changes.quantity, 2);
 eq("...and the picture becomes the next copy's scan",
   after.changes.pictureUrls, ["https://store.example/scan-2.jpg"]);
@@ -123,7 +125,7 @@ eq("...and the picture becomes the next copy's scan",
 // Quantity 0 hides the listing while keeping the item id. There is no picture
 // to rotate to, and proposing one would be proposing to strip every picture.
 const NONE = THREE.map((c) => ({ ...c, pulled_at: "2026-08-30T09:00:00Z" }));
-const empty = reconcile(desiredStateFor(ITEM, NONE), { quantity: 3 }, { pictured_copy_id: "copy-3" });
+const empty = reconcile(desiredStateFor(ITEM, NONE, { lines: [] }), { quantity: 3 }, { pictured_copy_id: "copy-3" });
 eq("an empty queue drives quantity to zero", empty.changes.quantity, 0);
 eq("...never below it", Math.sign(empty.changes.quantity), 0);
 eq("...and touches no pictures", empty.changes.pictureUrls, undefined);
@@ -210,6 +212,78 @@ ok("a missing table reads as a pending migration", isMissingSchema({ code: "42P0
 ok("so does a missing column", isMissingSchema({ code: "42703" }));
 ok("so does PostgREST's schema cache", isMissingSchema({ message: "Could not find the 'scan_url' column in the schema cache" }));
 ok("an ordinary failure is not one", !isMissingSchema({ message: "network unreachable" }));
+
+// --- 11. the picture follows the SALE, not the pull -------------------------
+// eBay sells copy-1 at 10:00; nobody reaches the stack until the evening. In
+// between, copy-1 belongs to that buyer. The old reading kept it at the head
+// of the queue, so the listing showed a card that was already sold and the
+// next buyer bought a photograph of someone else's card.
+const SOLD_ONE = [{ lineItemId: "L1", sku: "UMB-215", quantity: 1 }];
+const owed = desiredStateFor(ITEM, THREE, { lines: SOLD_ONE });
+eq("a sold, unpulled copy is reserved for its buyer", owed.reserved.map((c) => c.id), ["copy-1"]);
+eq("...so the picture is already the NEXT copy", owed.head?.id, "copy-2");
+eq("...and only two are on offer", owed.quantity, 2);
+const atSale = reconcile(owed, { quantity: 2 }, { pictured_copy_id: "copy-1" });
+eq("eBay already took one off, so the quantity is left alone", atSale.changes.quantity, undefined);
+eq("...and the one revision is the picture", atSale.changes.pictureUrls, ["https://store.example/scan-2.jpg"]);
+
+// The evening: copy-1 is pulled FOR L1#1. The order is still unshipped, but it
+// is answered by the card in hand and must not reserve a second copy.
+const PULLED_FOR = [copy(1, { pulled_at: "2026-08-30T19:00:00Z", pulled_for: "L1#1" }), copy(2), copy(3)];
+const evening = desiredStateFor(ITEM, PULLED_FOR, { lines: SOLD_ONE });
+eq("a copy pulled for the order answers it", evening.reserved.length, 0);
+eq("...so two remain on offer", evening.quantity, 2);
+eq("...and the picture does not move again", reconcile(evening, { quantity: 2 }, { pictured_copy_id: "copy-2" }).empty, true);
+eq("the pull plan has nothing left to pick for it", pullPlanFor(PULLED_FOR, SOLD_ONE, NAMES).map((u) => [u.copy, u.pulled?.id]), [[null, "copy-1"]]);
+
+// Before migration 035 a pulled copy carries no `pulled_for`, so the order
+// reserves another until it ships: one copy too FEW, never one too many.
+const NO_LINK = [copy(1, { pulled_at: "2026-08-30T19:00:00Z" }), copy(2), copy(3)];
+const unlinked = desiredStateFor(ITEM, NO_LINK, { lines: SOLD_ONE });
+eq("an unlinked pull errs low, never high", unlinked.quantity, 1);
+eq("...picture one copy early rather than on a sold card", unlinked.head?.id, "copy-3");
+
+// Two sales between runs: both copies owed, the third is the picture.
+const twoSold = desiredStateFor(ITEM, THREE, { lines: [{ lineItemId: "L1", sku: "UMB-215", quantity: 1 }, { lineItemId: "L2", sku: "UMB-215", quantity: 1 }] });
+eq("two buyers, two reserved copies, in queue order", twoSold.reserved.map((c) => c.id), ["copy-1", "copy-2"]);
+eq("a quantity-2 line reserves two the same way",
+  desiredStateFor(ITEM, THREE, { lines: [{ lineItemId: "L1", sku: "UMB-215", quantity: 2 }] }).head?.id, "copy-3");
+const allOwed = desiredStateFor(ITEM, THREE, { lines: [{ lineItemId: "L1", sku: "UMB-215", quantity: 3 }] });
+eq("every copy owed is quantity 0", allOwed.quantity, 0);
+eq("...with no picture proposed", reconcile(allOwed, { quantity: 0 }, { pictured_copy_id: "copy-1" }).changes.pictureUrls, undefined);
+
+// Another listing's order never reserves this listing's copies.
+eq("an order for a different SKU reserves nothing here",
+  desiredStateFor(ITEM, THREE, { lines: [{ lineItemId: "L9", sku: "OTHER-1", quantity: 1 }] }).reserved.length, 0);
+
+// The merge we plan later keeps each copy's OWN SKU and ties copies to the
+// listing by item id. An order line carrying the item id must find them.
+const OWN_SKUS = [copy(1, { sku: "A50" }), copy(2, { sku: "C12" }), copy(3, { sku: "F7" })];
+eq("a line's item id finds copies that keep their own SKUs",
+  desiredStateFor(ITEM, OWN_SKUS, { lines: [{ lineItemId: "L1", sku: "LISTING-SKU", itemId: ITEM, quantity: 1 }] }).head?.id, "copy-2");
+eq("...and the pull sheet sends you to the first of them",
+  pullPlanFor(OWN_SKUS, [{ lineItemId: "L1", sku: "LISTING-SKU", itemId: ITEM, quantity: 1 }], NAMES)[0].copy?.id, "copy-1");
+
+// --- 12. orders not read: never raise a quantity ---------------------------
+// eBay takes one off on every sale before anybody pulls the card, so "more in
+// the box than eBay offers" is exactly what a sold-but-unpulled copy looks
+// like. Without the orders, putting it back sells it twice.
+const blind = desiredStateFor(ITEM, THREE);
+eq("without orders, ordersKnown is false", blind.ordersKnown, false);
+const noRaise = reconcile(blind, { quantity: 2 }, { pictured_copy_id: "copy-1" });
+eq("a quantity is never raised blind", noRaise.changes.quantity, undefined);
+ok("...and it says why", noRaise.blocked.some((b) => /not read/.test(b)));
+eq("lowering is still safe blind",
+  reconcile(desiredStateFor(ITEM, AFTER_ONE), { quantity: 3 }, { pictured_copy_id: "copy-2" }).changes.quantity, 2);
+eq("nor set from nothing blind", reconcile(blind, { quantity: null }, { pictured_copy_id: "copy-1" }).changes.quantity, undefined);
+
+// --- 13. the unit's name is stable ------------------------------------------
+eq("a unit ref always carries its number", [unitRef("L1"), unitRef("L1", 2), unitRef(null)], ["L1#1", "L1#2", null]);
+eq("only a PULLED copy answers a ref",
+  [...pulledForIndex([copy(1, { pulled_for: "L1#1" }), copy(2, { pulled_for: "L2#1", pulled_at: "x" })]).keys()], ["L2#1"]);
+eq("allocation says which state each unit is in",
+  allocateUnits(PULLED_FOR, [{ lineItemId: "L1", sku: "UMB-215", quantity: 1 }, { lineItemId: "L2", sku: "UMB-215", quantity: 1 }]).map((u) => `${u.state}:${u.copy?.id}`),
+  ["pulled:copy-1", "reserved:copy-2"]);
 
 if (failures) {
   console.error(`\ncheck-copyqueue: ${failures} failure(s).`);

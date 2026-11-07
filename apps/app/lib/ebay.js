@@ -1029,6 +1029,10 @@ export async function fetchPendingOrders(accessToken, { labelledWithinDays = 0 }
         orderId: String(order.orderId || ""),
         lineItemId: String(li.lineItemId || ""),
         sku: li.sku != null ? String(li.sku) : null,
+        // The listing it sold from. A multi-copy listing whose copies keep
+        // their own SKUs is found by this rather than by the line's SKU
+        // (copyqueue.js allocateUnits).
+        itemId: li.legacyItemId != null ? String(li.legacyItemId) : null,
         title: li.title != null ? String(li.title) : "",
         variation,
         quantity: li.quantity != null ? Number(li.quantity) : 1,

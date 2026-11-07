@@ -203,7 +203,9 @@ stream` (the relay, only while streaming).
 - `scripts/check-copyqueue.mjs` — one listing, several copies of the card: that
   the copy in the photograph is the copy that goes, that a quantity-2 order is
   two cards at two positions, and that running the reconcile twice does nothing
-  the second time.
+  the second time. And that the picture moves at the SALE rather than the pull
+  — a sold, unpulled copy is owed to its buyer — that a copy pulled for an
+  order answers it, and that without the orders a quantity is never raised.
 - `scripts/check-desksetup.mjs` — what the Show Desk says is still to run, and
   mostly what it refuses to say: a probe that fails on venue wifi is never
   reported as a missing migration.
@@ -2667,8 +2669,8 @@ screen, and untested against live eBay** — see `docs/MULTI_QUANTITY_LISTINGS.m
 for the process to run it by hand and for the 20-card experiment that decides
 whether the method is worth having at all.
 
-`apps/app/lib/copyqueue.js` owns it, `packages/core` is untouched, and migration
-027 adds `copy_seq`, `scan_url` and `listing_copy_state`.
+`apps/app/lib/copyqueue.js` owns it, `packages/core` is untouched, migration
+027 adds `copy_seq`, `scan_url` and `listing_copy_state`, and 035 `pulled_for`.
 
 - **eBay reports the LISTING's SKU on a sale, never the copy's.** A sale says
   "this item id sold two" and carries nothing that separates copy 1 from copy 2,
@@ -2701,6 +2703,13 @@ whether the method is worth having at all.
   (`reviseFixedPriceListing`); `ReviseInventoryStatus` does price and quantity
   only, and both changes go in one call so there is no window advertising a card
   that has gone.
+- **The picture follows the SALE, not the pull.** A copy eBay has sold and
+  nobody has pulled belongs to its buyer, so `allocateUnits()` reserves it
+  from the unshipped orders and the listing shows the next one. Migration 035
+  (`pulled_for`) ties a pulled copy to its order unit so a still-unshipped
+  order doesn't reserve a second; without it the error runs LOW. Without the
+  orders at all, a quantity is never raised — that is what a sold, unpulled
+  copy looks like.
 - **A copy at a show is not a copy you can post.** Away and pulled both leave
   the queue, and the listing's quantity drops with them — a listing left at 3
   while one of the three is on a table sells a card twice.

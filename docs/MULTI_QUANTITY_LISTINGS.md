@@ -64,6 +64,41 @@ one redundant revision per listing.
 
 ---
 
+## The picture follows the sale, not the pull
+
+The first version derived the picture from what was still in the box, so it
+moved only when a copy was **pulled**. Between the sale and the pull — usually
+hours — the listing went on showing the copy that had just sold, and the next
+buyer was looking at someone else's card.
+
+`allocateUnits()` now reads the unshipped orders and gives each unit a copy:
+**pulled** (a copy was pulled for exactly that unit), **reserved** (still in
+the box, owed to that buyer), or **unfilled** (with a reason). Then:
+
+```
+quantity = copies in the box − copies reserved for unshipped orders
+picture  = the first copy reserved for nobody
+```
+
+eBay drops the quantity itself on a sale, so at the sale the only revision is
+the picture. The pull sheet uses the same allocation, so the copy it sends you
+to is the copy the next buyer is not shown.
+
+- **Migration 035 (`stack_cards.pulled_for`)** ties a pulled copy to its order
+  unit (`<lineItemId>#<unit>`). Commit writes it for SKUs held as more than one
+  stack row, in a separate update so a database without the column still pulls
+  the card. Without it, a pulled-but-unshipped order reserves a second copy:
+  one too FEW offered, never one too many. It also fixes the pull sheet, which
+  handed such an order the NEXT copy as a fresh pick and never sent it to Pack.
+- **Orders not read means a quantity is never raised.** "More in the box than
+  eBay offers" is exactly what a sold, unpulled copy looks like. The script
+  refuses `--apply` without the orders for the same reason.
+- **An order line's item id finds the queue before its SKU does**, so copies
+  can keep their own SKUs and be tied to the listing by item id — the shape a
+  later merge of single listings would want, since old SKU labels stay true.
+
+---
+
 ## What got built
 
 | | Where |
@@ -100,7 +135,7 @@ the same `stackpos.js` rule.
 
 ## Running the process by hand
 
-**1. Apply migration 027** in the Supabase SQL editor. Until you do, everything
+**1. Apply migrations 027 and 035** in the Supabase SQL editor. Until you do, everything
 below still runs: the queue orders itself by when each copy was added, quantity
 reconciliation works, and no picture change is ever proposed.
 
@@ -121,8 +156,12 @@ in the order they were scanned.
 
 ```
 NEXT_PUBLIC_SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… \
+  EBAY_CLIENT_ID=… EBAY_CLIENT_SECRET=… \
   node scripts/copyqueue-run.mjs
 ```
+
+The eBay keys are needed even dry: without the unshipped orders a sold, unpulled
+copy can't be seen.
 
 Dry. Prints every listing holding more than one copy, the queue in order, which
 copy is pictured and next to pull, and what it would change.

@@ -21,10 +21,15 @@
  * person holding the card.
  *
  * So nothing here consumes anything. The desired state of a listing is a pure
- * function of which copies are still in the box:
+ * function of which copies are still in the box, less the ones eBay has
+ * already sold that nobody has pulled yet (`allocateUnits()`):
  *
- *     quantity   = how many copies are sellable right now
- *     picture    = the head copy's scan
+ *     quantity   = copies in the box − copies owed to unshipped orders
+ *     picture    = the scan of the first copy that is owed to nobody
+ *
+ * The picture follows the SALE, not the pull. Between the two, the sold copy
+ * belongs to its buyer; showing it would sell the next buyer a photograph of
+ * someone else's card.
  *
  * Compare that with what eBay currently shows, revise the difference. Running
  * it twice does nothing the second time, a missed run costs nothing but
@@ -180,19 +185,40 @@ export function pictureUrlsFor(head, extras = []) {
 }
 
 /**
- * What one listing SHOULD look like, given the cards still in the box.
+ * What one listing SHOULD look like, given the cards still in the box and —
+ * when they are known — the orders not yet shipped.
  *
  * Pure, and derived entirely from present state — that is what makes running
  * it twice a no-op and a missed run merely stale.
+ *
+ * `lines` are the unshipped order lines (`fetchPendingOrders`). With them, a
+ * copy eBay has sold but nobody has pulled is RESERVED: it is not counted as
+ * sellable and it is not the picture, because it belongs to that buyer.
+ * Without them (`lines` null) the old reading stands — copies in the box — and
+ * `ordersKnown` is false, which `reconcile()` reads as "never raise the
+ * quantity": eBay has already taken one off for every sale, and putting it
+ * back on the strength of copies we cannot see are owed sells them twice.
  */
-export function desiredStateFor(itemId, cards, { extras = [] } = {}) {
+export function desiredStateFor(itemId, cards, { extras = [], lines = null } = {}) {
   const queue = queueFor(itemId, cards);
-  const head = queue[0] || null;
+  const ordersKnown = Array.isArray(lines);
+  const owed = new Set();
+  if (ordersKnown) {
+    for (const u of allocateUnits(cards, lines)) {
+      if (u.state === "reserved" && String(u.copy?.ebay_item_id || "") === String(itemId || "")) owed.add(u.copy.id);
+    }
+  }
+  const reserved = queue.filter((c) => owed.has(c.id));
+  const available = queue.filter((c) => !owed.has(c.id));
+  const head = available[0] || null;
   return {
     itemId: String(itemId || ""),
     queue,
+    reserved,
+    available,
     head,
-    quantity: queue.length,
+    ordersKnown,
+    quantity: available.length,
     pictureUrls: pictureUrlsFor(head, extras)
   };
 }
@@ -221,12 +247,23 @@ export function reconcile(desired, listing, state = null) {
   const qNow = listing?.quantity;
   const qKnown = qNow != null && qNow !== "" && Number.isFinite(Number(qNow));
   const qNowNum = qKnown ? Number(qNow) : null;
-  if (!qKnown) {
+  if (!qKnown && desired.ordersKnown === false) {
+    blocked.push(`quantity not set: eBay sent none and unshipped orders were not read`);
+  } else if (!qKnown) {
     changes.quantity = desired.quantity;
     reasons.push(`quantity → ${desired.quantity} (eBay sent no quantity, so we cannot tell what it is now)`);
   } else if (qNowNum !== desired.quantity) {
-    changes.quantity = desired.quantity;
-    reasons.push(`quantity ${qNowNum} → ${desired.quantity} (${desired.quantity} ${desired.quantity === 1 ? "copy" : "copies"} still in the box)`);
+    if (desired.ordersKnown === false && desired.quantity > qNowNum) {
+      // eBay takes one off on every sale, before anybody pulls the card. With
+      // the unshipped orders unknown, "more in the box than eBay offers" is
+      // exactly what a sold-but-unpulled copy looks like — and raising it
+      // back sells that copy a second time. Lowering is always safe.
+      blocked.push(`quantity left at ${qNowNum}: ${desired.quantity} in the box, but unshipped orders were not read, so some may already be sold`);
+    } else {
+      changes.quantity = desired.quantity;
+      const owed = desired.reserved?.length || 0;
+      reasons.push(`quantity ${qNowNum} → ${desired.quantity} (${desired.queue?.length ?? desired.quantity} in the box${owed ? `, ${owed} sold and waiting to be pulled` : ""})`);
+    }
   }
 
   // --- picture --------------------------------------------------------------
@@ -260,37 +297,64 @@ export function reconcile(desired, listing, state = null) {
 }
 
 /**
- * Which physical copy answers each unit of each order line.
+ * The name of ONE unit of one order line, as stored on the copy that was pulled
+ * for it (`stack_cards.pulled_for`, migration 035).
  *
- * **A line item carries a quantity, and one line item at quantity 2 is two
- * cards to pull.** `fetchPendingOrders` has always returned that number and
- * the pull sheet has always ignored it, which was invisible while every
- * listing was a single card and is a card short the first time one isn't.
- *
- * `lines` are pending order lines ({ lineItemId, sku, title, quantity }).
- * Returns one entry per UNIT, in queue order, each with the copy it maps to —
- * or `copy: null` with a reason when there is nothing to map it to.
+ * Always `<lineItemId>#<unit>`, even for a quantity-1 line, so it never depends
+ * on how a screen chose to key its rows. The pull sheet's row keys drop the
+ * `#1` on a single unit; this does not, because a stored value that changed
+ * shape with a UI decision would stop matching the day the UI changed.
  */
-export function pullPlanFor(cards, lines, stackNames = new Map()) {
-  const queues = queuesBySku(cards);
-  const taken = new Map(); // sku -> how many units of that queue are spoken for
+export function unitRef(lineItemId, unit = 1) {
+  const id = lineItemId == null ? "" : String(lineItemId).trim();
+  return id ? `${id}#${Math.max(1, Number(unit) || 1)}` : null;
+}
 
-  // Where each COPY is, not where its SKU is. `locationsBySku` keeps one label
-  // per SKU — right everywhere else, because a SKU has always named one card —
-  // and here it would send you to the same card twice for a quantity-2 order.
-  // The rule itself is still stackpos.js's: a live rank among the cards
-  // actually present, with pulled and away copies closed up behind them.
-  const ranks = liveRanks(cards);
-  const depths = stackDepths(cards);
-  const names = stackNames instanceof Map ? stackNames : new Map(Object.entries(stackNames || {}));
-  const whereIs = (c) => {
-    const rank = ranks.get(c?.id);
-    return rank == null ? null : positionLabel(names.get(c.stack_id), rank, depths.get(c.stack_id), c.position);
-  };
+/** Every copy that was pulled FOR a named order unit. Map<unitRef, copy>. */
+export function pulledForIndex(cards) {
+  const out = new Map();
+  for (const c of cards || []) {
+    const ref = c?.pulled_for ? String(c.pulled_for).trim() : "";
+    if (ref && c.pulled_at && !out.has(ref)) out.set(ref, c);
+  }
+  return out;
+}
 
-  // Away and already-pulled copies answer a different question — "we own one,
-  // it just isn't here" — and the pull sheet already distinguishes those, so
-  // they are reported rather than silently missing.
+/**
+ * Which copy each unit of each unshipped order is OWED.
+ *
+ * **This is what makes the picture follow the sale rather than the pull.** A
+ * copy is spoken for the moment eBay sells it, not the moment somebody walks
+ * to the stack — and in between, the old reading still had it at the head of
+ * the queue, so the listing went on showing a card that already belonged to
+ * someone else, and the next buyer was looking at it.
+ *
+ * Each unit is one of three things:
+ *
+ *   - **pulled**   — a copy was pulled for exactly this unit (`pulled_for`).
+ *                    Out of the box, owed to nobody else.
+ *   - **reserved** — still in the box, next in the queue, and owed to this
+ *                    buyer. Not sellable, not the picture.
+ *   - **unfilled** — nothing to give them; `reason` says why.
+ *
+ * Queue first by the line's ITEM ID when it carries one and copies are filed
+ * against it, else by SKU — so it works whether copies share the listing's SKU
+ * (today) or keep their own and are tied to the listing by item id (the merge
+ * we plan later). A copy is taken once across both, by id.
+ *
+ * **Without `pulled_for` (before 035, or a pull made some other way) a pulled
+ * copy cannot be tied to its order**, so the order reserves another copy until
+ * it ships. That errs LOW — one copy too few offered, the picture one copy
+ * early — which is the safe direction: the other way sells a card twice.
+ * No date heuristic: "pulled after this order was placed" also matches a copy
+ * pulled for an earlier order, and that error runs the dangerous way.
+ */
+export function allocateUnits(cards, lines) {
+  const bySku = queuesBySku(cards);
+  const byItem = queuesByListing(cards);
+  const pulledFor = pulledForIndex(cards);
+  const taken = new Set(); // copy ids already owed to a unit
+
   const awaySkus = new Set();
   const pulledSkus = new Set();
   for (const c of cards || []) {
@@ -303,35 +367,78 @@ export function pullPlanFor(cards, lines, stackNames = new Map()) {
   const units = [];
   for (const l of lines || []) {
     const k = skuKey(l?.sku);
+    const item = l?.itemId != null && String(l.itemId).trim() ? String(l.itemId).trim() : null;
+    const queue = item && byItem.has(item) ? byItem.get(item) : k ? bySku.get(k) || [] : [];
     const qty = Math.max(1, Number(l?.quantity) || 1);
-    for (let n = 0; n < qty; n++) {
-      const seen = taken.get(k) || 0;
-      const queue = k ? queues.get(k) || [] : [];
-      const copy = queue[seen] || null;
-      if (copy) taken.set(k, seen + 1);
+    for (let n = 1; n <= qty; n++) {
+      const ref = unitRef(l?.lineItemId, n);
+      const base = {
+        ref, lineItemId: l?.lineItemId || null, orderId: l?.orderId || null,
+        unit: n, ofUnits: qty, sku: l?.sku || null, itemId: item,
+        title: l?.title || "", buyer: l?.buyer || null
+      };
+      const already = ref ? pulledFor.get(ref) : null;
+      if (already) {
+        units.push({ ...base, state: "pulled", copy: already, reason: "already pulled" });
+        continue;
+      }
+      const copy = queue.find((c) => !taken.has(c.id)) || null;
+      if (copy) {
+        taken.add(copy.id);
+        units.push({ ...base, state: "reserved", copy, reason: null });
+        continue;
+      }
       units.push({
-        // Unique per UNIT: two units of one line item are two rows, two ticks
-        // and two cards, and a shared key would collapse them back into one.
-        key: `${l?.lineItemId || "?"}#${n + 1}`,
-        lineItemId: l?.lineItemId || null,
-        orderId: l?.orderId || null,
-        unit: n + 1,
-        ofUnits: qty,
-        sku: l?.sku || null,
-        title: l?.title || "",
-        buyer: l?.buyer || null,
-        copy,
-        stackId: copy?.stack_id || null,
-        where: copy ? whereIs(copy) : null,
-        reason: copy ? null
-          : !k ? "no SKU on the order line"
-          : awaySkus.has(k) ? "checked out to a show"
-          : pulledSkus.has(k) ? "already pulled"
+        ...base, state: "unfilled", copy: null,
+        reason: !k && !item ? "no SKU on the order line"
+          : k && awaySkus.has(k) ? "checked out to a show"
+          : k && pulledSkus.has(k) ? "already pulled"
           : "no copy left in the stack"
       });
     }
   }
   return units;
+}
+
+/**
+ * Which physical copy answers each unit of each order line — the pull sheet's
+ * question. `allocateUnits()` with a location on each copy to walk to.
+ *
+ * **A line item carries a quantity, and one line item at quantity 2 is two
+ * cards to pull.** A unit already pulled for comes back with `copy: null` and
+ * the pulled card on `pulled`: there is nothing left to pick for it.
+ */
+export function pullPlanFor(cards, lines, stackNames = new Map()) {
+  // Where each COPY is, not where its SKU is — the stackpos.js rule, a live
+  // rank among the cards actually present, per copy rather than per SKU.
+  const ranks = liveRanks(cards);
+  const depths = stackDepths(cards);
+  const names = stackNames instanceof Map ? stackNames : new Map(Object.entries(stackNames || {}));
+  const whereIs = (c) => {
+    const rank = ranks.get(c?.id);
+    return rank == null ? null : positionLabel(names.get(c.stack_id), rank, depths.get(c.stack_id), c.position);
+  };
+  return allocateUnits(cards, lines).map((u) => {
+    const copy = u.state === "reserved" ? u.copy : null;
+    return {
+      // Unique per UNIT: two units of one line item are two rows, two ticks
+      // and two cards, and a shared key would collapse them back into one.
+      key: `${u.lineItemId || "?"}#${u.unit}`,
+      ref: u.ref,
+      lineItemId: u.lineItemId,
+      orderId: u.orderId,
+      unit: u.unit,
+      ofUnits: u.ofUnits,
+      sku: u.sku,
+      title: u.title,
+      buyer: u.buyer,
+      copy,
+      pulled: u.state === "pulled" ? u.copy : null,
+      stackId: copy?.stack_id || null,
+      where: copy ? whereIs(copy) : null,
+      reason: u.reason
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------

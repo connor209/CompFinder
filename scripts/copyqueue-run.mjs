@@ -13,9 +13,10 @@
  * this, it can offer one; a script run from a terminal at the end of a long
  * day should not.
  *
- * WHAT IT DOES. Reads which copies of each card are still in the box, works
- * out what each listing should therefore say (quantity = copies left, picture
- * = the head copy's scan), and prints the difference. Every rule comes from
+ * WHAT IT DOES. Reads which copies of each card are still in the box and
+ * which of them eBay has already sold to an unshipped order, works out what
+ * each listing should therefore say (quantity = copies owed to nobody,
+ * picture = the first of those), and prints the difference. Every rule comes from
  * apps/app/lib/copyqueue.js, so what this prints is what the app would do.
  *
  * It is a RECONCILIATION, so running it twice does nothing the second time and
@@ -32,7 +33,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   queuesByListing, desiredStateFor, reconcile, loadCopyState, recordPictured
 } from "../apps/app/lib/copyqueue.js";
-import { getValidUserAccessToken, reviseFixedPriceListing } from "../apps/app/lib/ebay.js";
+import { getValidUserAccessToken, reviseFixedPriceListing, fetchPendingOrders } from "../apps/app/lib/ebay.js";
 
 const args = process.argv.slice(2);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -67,6 +68,13 @@ async function all(table, select = "*") {
   }
 }
 
+/** The account to act as: --user, else the most recently connected one. */
+async function resolveUser() {
+  if (USER) return USER;
+  const { data } = await sb.from("ebay_accounts").select("user_id").order("connected_at", { ascending: false }).limit(1);
+  return data?.[0]?.user_id || null;
+}
+
 const money = (l) => (l?.price_value != null ? `£${Number(l.price_value).toFixed(2)}` : "—");
 
 async function main() {
@@ -82,6 +90,25 @@ async function main() {
       console.error("Copies are stack_cards rows sharing an ebay_item_id, not pulled and not checked out.");
       process.exit(1);
     }
+  }
+
+  // The unshipped orders, so a copy eBay has sold but nobody has pulled is
+  // owed to its buyer rather than offered and pictured. Needs the eBay keys
+  // even for a dry run; without them the run is BLIND, says so, and never
+  // proposes raising a quantity (copyqueue.js reconcile()).
+  let lines = null;
+  const userId = await resolveUser();
+  if (userId && process.env.EBAY_CLIENT_ID && process.env.EBAY_CLIENT_SECRET) {
+    try {
+      const token = await getValidUserAccessToken(sb, userId);
+      if (token) lines = (await fetchPendingOrders(token, { labelledWithinDays: 7 })).lines;
+    } catch (err) {
+      console.log(`· could not read unshipped orders: ${err?.message || err}`);
+    }
+  }
+  if (!lines) {
+    console.log("· unshipped orders not read (set EBAY_CLIENT_ID and EBAY_CLIENT_SECRET) — sold-but-unpulled copies");
+    console.log("  can't be seen, so no quantity will be raised and the picture may still show a sold copy.\n");
   }
 
   const state = await loadCopyState(sb, [...queues.keys()]);
@@ -105,14 +132,17 @@ async function main() {
   let toChange = 0;
   for (const [itemId, queue] of interesting) {
     const listing = byItem.get(itemId) || null;
-    const desired = desiredStateFor(itemId, cards);
+    const desired = desiredStateFor(itemId, cards, { lines });
     const plan = reconcile(desired, listing || {}, state.state.get(itemId) || null);
 
     const head = desired.head;
     console.log(`${itemId}  ${listing?.title || queue[0]?.title || "(not in ebay_listings)"}`);
     console.log(`  ${queue.length} ${queue.length === 1 ? "copy" : "copies"} in the box · listed at ${money(listing)} · eBay says quantity ${listing?.quantity ?? "—"}`);
+    const owedIds = new Set(desired.reserved.map((c) => c.id));
     queue.forEach((c, i) => {
-      console.log(`    ${i === 0 ? "→" : " "} ${i + 1}. ${c.sku || c.id}${i === 0 ? "  (pictured, pull this one next)" : ""}${c.scan_url ? "" : "  [no scan]"}`);
+      const tag = owedIds.has(c.id) ? "  (sold — owed to an unshipped order, pull this one)"
+        : c.id === head?.id ? "  (pictured, next to sell)" : "";
+      console.log(`    ${c.id === head?.id ? "→" : " "} ${i + 1}. ${c.sku || c.id}${tag}${c.scan_url ? "" : "  [no scan]"}`);
     });
     if (plan.empty) {
       console.log("  ✓ already says the right thing\n");
@@ -123,13 +153,12 @@ async function main() {
     for (const b of plan.blocked) console.log(`  ! ${b}`);
 
     if (!APPLY) { console.log("  (dry run — nothing sent)\n"); continue; }
+    if (!lines) {
+      console.error("  ✗ not applying blind: without the unshipped orders the picture could be a copy that has already sold.\n");
+      process.exit(1);
+    }
 
     // --- apply, one listing, on purpose ------------------------------------
-    let userId = USER;
-    if (!userId) {
-      const { data } = await sb.from("ebay_accounts").select("user_id").order("connected_at", { ascending: false }).limit(1);
-      userId = data?.[0]?.user_id || null;
-    }
     if (!userId) { console.error("  ✗ no connected eBay account — nothing to authenticate as.\n"); process.exit(1); }
 
     const token = await getValidUserAccessToken(sb, userId);
