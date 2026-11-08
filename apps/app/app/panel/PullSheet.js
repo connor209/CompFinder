@@ -224,12 +224,16 @@ export default function PullSheet() {
       if (!allocByLine.has(k)) allocByLine.set(k, []);
       allocByLine.get(k).push(u);
     }
-    // SKUs held as more than one stack row: the only cards whose pull needs
+    // Cards held as more than one stack row: the only ones whose pull needs
     // to be tied to its order, so Commit writes `pulled_for` for these alone.
+    // Pooled copies may keep their own SKUs (lib/copypool.js) and share only
+    // the item id, so a card is multi-copy if EITHER is shared.
     const skuRows = new Map();
+    const itemRows = new Map();
     for (const c of cards) {
       const skl = c.sku ? String(c.sku).trim().toLowerCase() || null : null;
       if (skl) skuRows.set(skl, (skuRows.get(skl) || 0) + 1);
+      if (c.ebay_item_id) itemRows.set(String(c.ebay_item_id), (itemRows.get(String(c.ebay_item_id)) || 0) + 1);
     }
     const pulledSkus = new Set();
     const awaySkus = new Set(); // checked out to a show — physically not here
@@ -278,7 +282,8 @@ export default function PullSheet() {
           (!card && !(skl && awaySkus.has(skl)) && ((skl && pulledSkus.has(skl)) || looseDone.has(String(key))));
         units.push({ lineItemId: l.lineItemId, pulled });
         if (card) {
-          const ref = skl && (skuRows.get(skl) || 0) > 1 ? unitRef(l.lineItemId, n + 1) : null;
+          const multi = (skl && (skuRows.get(skl) || 0) > 1) || (card.ebay_item_id && (itemRows.get(String(card.ebay_item_id)) || 0) > 1);
+          const ref = multi ? unitRef(l.lineItemId, n + 1) : null;
           active.push({ key, ref, itemId: card.ebay_item_id || null, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
         } else if (skl && awaySkus.has(skl)) {
           // Ordered on eBay while the card is checked out to a show — it can't

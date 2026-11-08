@@ -213,6 +213,12 @@ stream` (the relay, only while streaming).
   only off a number read that minute, a notification believed only on
   eBay's signature, and every picture uploaded to eBay before a revision —
   all or nothing, so a listing never loses half its photos.
+- `scripts/check-copypool.mjs` — folding single listings into one: only the
+  same card, printing, grade, edition, language and condition pool (1st
+  Edition and Unlimited, Japanese and English, a reverse and a plain copy are
+  each refused), a copy owed to an order or at quantity 0 is somebody's card,
+  a pool already holding copies must be named whole, and the script ends the
+  other listings BEFORE it raises the kept one's quantity.
 - `scripts/check-desksetup.mjs` — what the Show Desk says is still to run, and
   mostly what it refuses to say: a probe that fails on venue wifi is never
   reported as a missing migration.
@@ -2770,6 +2776,21 @@ copies pulled one card and the sheet looked complete; each unit is its own row
 and its own tick now. And **which of several same-SKU copies got pulled was
 arbitrary**, first-wins over an unordered `select *`, when the whole point is
 that the copy that goes is the copy in the photograph.
+
+**Pooling the listings you already have** is `scripts/copyqueue-pool.mjs
+--skus FN22,FN28,FM11 [--keep <item id>] [--apply]`, with the rules in
+`apps/app/lib/copypool.js`. One listing is kept (the first copy's, or
+`--keep`'s — keep the one with the watchers), the others are ENDED first so a
+copy is never on its own listing and in the pool's quantity at once, every
+copy's stack row is tied to the kept listing with its own scans from the
+imports (`scansBySku()` in `import-store.js`), and the kept listing goes to
+quantity N. **Each copy keeps its own SKU**, so sleeve labels stay true; the
+pool is tied together by item id, which `allocateUnits()`, the copy sync and
+the pull sheet's `pulled_for` all read. What it costs: SKU-based screens
+(Stacks → Reconcile, the stock picker's sold/unlisted reading) see the other
+copies' SKUs as no longer listed, because their own listings ended — noise,
+not damage, and worth teaching those readers the item id before pooling at
+scale.
 
 ```
 node scripts/copyqueue-run.mjs                      # what would change, dry

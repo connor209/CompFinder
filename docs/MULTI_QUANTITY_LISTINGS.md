@@ -166,9 +166,11 @@ the same `stackpos.js` rule.
 below still runs: the queue orders itself by when each copy was added, quantity
 reconciliation works, and no picture change is ever proposed.
 
-**2. Get three copies of one card behind one listing.** Three `stack_cards`
-rows sharing an `ebay_item_id` and the listing's SKU. Nothing new is needed —
-that was always allowed.
+**2. Get three copies of one card behind one listing.** If they are three
+single listings today, `scripts/copyqueue-pool.mjs --skus A,B,C` does it: dry
+first, then `--apply`. It keeps one listing, ends the other two, ties all
+three stack rows to the kept one with their own scans from the imports, and
+sets the quantity. Each copy keeps its own SKU.
 
 **3. Give each copy its scans.** Put that copy's photos, front first, on the
 row's `scan_urls` (or a single one on `scan_url`) — its CardUploader PicURL

@@ -215,6 +215,42 @@ export async function listImports(supabase, userId, limit = IMPORT_LIMIT) {
   }
 }
 
+/**
+ * The scans of each named SKU, from whichever import last carried it with
+ * pictures. Map<lowercased sku, string[]>, front first as the file listed
+ * them. For pooling single listings into one (lib/copypool.js): a copy's
+ * own photographs are in the CardUploader file it came from.
+ *
+ * `user_id` named by hand — the caller may be holding the service-role key.
+ */
+export async function scansBySku(supabase, userId, skus = []) {
+  const out = new Map();
+  const list = [...new Set((skus || []).map((s) => String(s || "").trim()).filter(Boolean))];
+  try {
+    for (let i = 0; i < list.length; i += 200) {
+      const { data, error } = await supabase
+        .from("card_import_items")
+        .select("sku,images,created_at")
+        .eq("user_id", userId)
+        .in("sku", list.slice(i, i + 200))
+        .order("created_at", { ascending: false });
+      if (error) {
+        if (isMissingTable(error)) return { ok: false, missing: true, scans: out };
+        return { ok: false, error: error.message, scans: out };
+      }
+      for (const r of data || []) {
+        const k = String(r.sku || "").trim().toLowerCase();
+        const imgs = Array.isArray(r.images) ? r.images.filter(Boolean) : [];
+        if (k && imgs.length && !out.has(k)) out.set(k, imgs);
+      }
+    }
+    return { ok: true, scans: out };
+  } catch (err) {
+    if (isMissingTable(err)) return { ok: false, missing: true, scans: out };
+    return { ok: false, error: err.message, scans: out };
+  }
+}
+
 export async function loadImport(supabase, id) {
   try {
     const { data: parent, error } = await supabase
