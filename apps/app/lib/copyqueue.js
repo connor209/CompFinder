@@ -172,16 +172,31 @@ export function queuesBySku(cards) {
  * whatever photo it was created with.
  */
 export function pictureUrlsFor(head, extras = []) {
-  const first = head?.scan_url ? String(head.scan_url).trim() : "";
-  if (!first) return null;
+  const own = scanUrlsOf(head);
+  if (!own.length) return null;
   const out = [];
-  for (const u of [first, ...(extras || [])]) {
+  for (const u of [...own, ...(extras || [])]) {
     const s = u == null ? "" : String(u).trim();
     if (!s || out.includes(s)) continue;
     out.push(s);
     if (out.length >= MAX_PICTURES) break;
   }
   return out;
+}
+
+/**
+ * Every photograph of ONE copy, front first: `scan_urls` (migration 036 —
+ * the copy's own CardUploader PicURL list, front then back), else the single
+ * `scan_url` (027). A revision REPLACES the listing's whole picture set, so
+ * sending the front alone would take the back of the card off the listing.
+ * Still one copy's photos and never several copies' — see above.
+ */
+export function scanUrlsOf(copy) {
+  const list = Array.isArray(copy?.scan_urls) ? copy.scan_urls : [];
+  const clean = list.map((u) => (u == null ? "" : String(u).trim())).filter(Boolean);
+  if (clean.length) return clean;
+  const one = copy?.scan_url ? String(copy.scan_url).trim() : "";
+  return one ? [one] : [];
 }
 
 /**
@@ -456,7 +471,7 @@ export function pullPlanFor(cards, lines, stackNames = new Map()) {
 export function isMissingSchema(err) {
   const msg = String(err?.message || err || "");
   return err?.code === "42P01" || err?.code === "42703" ||
-    /listing_copy_state|copy_seq|scan_url|does not exist|schema cache/i.test(msg);
+    /listing_copy_state|copy_seq|scan_urls?|pulled_for|does not exist|schema cache/i.test(msg);
 }
 
 /** Which copy each listing is currently showing. Map<itemId, stateRow>. */

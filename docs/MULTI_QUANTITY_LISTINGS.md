@@ -99,6 +99,33 @@ to is the copy the next buyer is not shown.
 
 ---
 
+## What eBay's documentation says about changing the picture
+
+Checked 2026-11-08 against the Trading API reference and the Media API spec:
+
+- **Revising pictures is supported**, and the set is REPLACED: "you need to
+  completely replace the original set of URLs with the revised set". The
+  first picture becomes the gallery image.
+- **After a multi-quantity listing sells, only Title, categories, duration and
+  listing type are locked** ("all other fields … are editable"), so pictures
+  should stay editable. A separate picture-hosting page says pictures change
+  "only if at least 12 hours remain … AND there have been no bids", written
+  for ReviseItem. **This is the open question the first real sale settles.**
+- **Self-hosted and eBay-hosted pictures cannot be mixed in one listing**, and
+  self-hosting needs `PictureSource=Vendor`, fixed once a listing has images.
+  So every scan is uploaded with the Media API's `createImageFromUrl`
+  (`https://apim.ebay.com/commerce/media/v1_beta/image/create_image_from_url`,
+  `{ imageUrl }`, scope `sell.inventory`) and the revision sends only the
+  returned EPS URLs. An unused EPS image expires; one in an active listing
+  stays. 50 uploads per 5 seconds per user.
+- **A listing can be revised 150 or 250 times a day** — the same page says
+  both. One revision per sale is far inside either.
+- **Pictures must be https, at least 500px on the longest side, and not
+  CMYK** — a CMYK picture is accepted and then silently not shown.
+- **A replacement photo needs a new URL**, which each copy's own scan has.
+
+---
+
 ## What got built
 
 | | Where |
@@ -135,7 +162,7 @@ the same `stackpos.js` rule.
 
 ## Running the process by hand
 
-**1. Apply migrations 027 and 035** in the Supabase SQL editor. Until you do, everything
+**1. Apply migrations 027, 035 and 036** in the Supabase SQL editor. Until you do, everything
 below still runs: the queue orders itself by when each copy was added, quantity
 reconciliation works, and no picture change is ever proposed.
 
@@ -143,8 +170,10 @@ reconciliation works, and no picture change is ever proposed.
 rows sharing an `ebay_item_id` and the listing's SKU. Nothing new is needed —
 that was always allowed.
 
-**3. Give each copy a scan.** Upload to the `listing-photos` bucket and put the
-public URL on the row's `scan_url`. **One URL per copy, never overwritten in
+**3. Give each copy its scans.** Put that copy's photos, front first, on the
+row's `scan_urls` (or a single one on `scan_url`) — its CardUploader PicURL
+list works as it is, since every picture is uploaded to eBay before the
+revision. **One URL per copy, never overwritten in
 place** — eBay caches pictures by URL, so re-uploading different bytes to a
 path it has already fetched changes nothing visible, and looks exactly like the
 revise call failing.

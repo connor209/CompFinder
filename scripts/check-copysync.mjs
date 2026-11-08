@@ -11,6 +11,7 @@
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { revisePooledListing, isEbayHosted } from "../apps/app/lib/ebay.js";
 import {
   copySyncMode, pooledItemIds, planCopySync, runCopySync, verifyNotification,
   readNotification, NOTIFICATION_MAX_AGE_MS, SALE_EVENTS
@@ -107,6 +108,59 @@ ok("the pull sheet tells the app after a Commit", /fetch\("\/api\/ebay\/copies"/
 ok("the in-app route is a box run", /trigger: "box"/.test(read("apps/app/app/api/ebay/copies/route.js")));
 const workflow = read(".github/workflows/copy-sync.yml");
 ok("the sweep runs every 15 minutes", /cron: '\*\/15 \* \* \* \*'/.test(workflow));
+
+// --- the scans go to eBay's own picture hosting first -----------------------
+// eBay: self-hosted and EPS-hosted URLs "cannot be mixed … within the same
+// listing", and self-hosting needs PictureSource=Vendor, which cannot be
+// changed once a listing has images. So the revision carries EPS URLs only.
+const realFetch = globalThis.fetch;
+const calls = [];
+const fakeFetch = (failOn = null) => async (url, opts = {}) => {
+  calls.push({ url: String(url), body: String(opts.body || "") });
+  if (String(url).includes("create_image_from_url")) {
+    const src = JSON.parse(opts.body).imageUrl;
+    if (failOn && src.includes(failOn)) return new Response(JSON.stringify({ errors: [{ longMessage: "too small" }] }), { status: 400 });
+    return new Response(JSON.stringify({ imageUrl: `https://i.ebayimg.com/images/g/${src.split("/").pop()}/s-l1600.jpg` }), { status: 201 });
+  }
+  return new Response(`<?xml version="1.0"?><ReviseFixedPriceItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack></ReviseFixedPriceItemResponse>`, { status: 200 });
+};
+try {
+  globalThis.fetch = fakeFetch();
+  const r = await revisePooledListing("tok", POOL, { imageUrls: ["https://cdn.carduploader.example/front.jpg", "https://cdn.carduploader.example/back.jpg"] });
+  const revise = calls.find((c) => c.body.includes("ReviseFixedPriceItemRequest"));
+  ok("each scan is uploaded to eBay before the revision", calls.filter((c) => c.url.includes("create_image_from_url")).length === 2);
+  ok("...and the revision carries eBay's URLs, in order, and none of ours",
+    /front\.jpg\/s-l1600[\s\S]*back\.jpg\/s-l1600/.test(revise.body) && !revise.body.includes("carduploader"));
+  ok("...front first, so the gallery shot is the front", revise.body.indexOf("front.jpg") < revise.body.indexOf("back.jpg"));
+  eq("the result says what eBay hosted", r.hosted.length, 2);
+
+  calls.length = 0;
+  globalThis.fetch = fakeFetch();
+  await revisePooledListing("tok", POOL, { imageUrls: ["https://i.ebayimg.com/images/g/abc/s-l1600.jpg"] });
+  eq("an eBay-hosted picture is not uploaded again", calls.filter((c) => c.url.includes("create_image_from_url")).length, 0);
+
+  calls.length = 0;
+  globalThis.fetch = fakeFetch("back.jpg");
+  let threw = false;
+  try { await revisePooledListing("tok", POOL, { imageUrls: ["https://cdn.carduploader.example/front.jpg", "https://cdn.carduploader.example/back.jpg"] }); } catch { threw = true; }
+  ok("one picture eBay refuses stops the whole revision", threw);
+  ok("...and the listing is never revised with half its pictures", !calls.some((c) => c.body.includes("ReviseFixedPriceItemRequest")));
+
+  calls.length = 0;
+  threw = false;
+  try { await revisePooledListing("tok", POOL, { imageUrls: ["http://insecure.example/a.jpg"] }); } catch { threw = true; }
+  ok("an http picture is refused before anything is sent", threw && calls.length === 0);
+
+  calls.length = 0;
+  globalThis.fetch = fakeFetch();
+  await revisePooledListing("tok", POOL, { quantity: 2 });
+  ok("a quantity-only revision uploads nothing", calls.length === 1 && !calls[0].body.includes("PictureDetails"));
+} finally {
+  globalThis.fetch = realFetch;
+}
+ok("eBay's own picture host is recognised", isEbayHosted("https://i.ebayimg.com/images/g/x/s-l500.jpg") && !isEbayHosted("https://ebayimg.com.evil.example/x.jpg"));
+ok("the unattended path revises through the EPS step", /revisePooledListing\(/.test(read("apps/app/lib/copysync.js")) && !/reviseFixedPriceListing\(/.test(read("apps/app/lib/copysync.js")));
+ok("...and so does the hand-run script", !/reviseFixedPriceListing\(/.test(read("scripts/copyqueue-run.mjs")));
 
 if (failures) {
   console.error(`\ncheck-copysync: ${failures} failure(s).`);

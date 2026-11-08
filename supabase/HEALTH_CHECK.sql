@@ -167,6 +167,10 @@ with schema_checks as (
     (39, 'SCHEMA · 035 copy pulled for', 'stack_cards.pulled_for column',
       case when exists (select 1 from information_schema.columns
                         where table_schema='public' and table_name='stack_cards' and column_name='pulled_for')
+        then '✅ present' else '❌ missing' end),
+    (40, 'SCHEMA · 036 copy scan urls', 'stack_cards.scan_urls column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='stack_cards' and column_name='scan_urls')
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),

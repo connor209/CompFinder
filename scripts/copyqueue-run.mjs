@@ -33,7 +33,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   queuesByListing, desiredStateFor, reconcile, loadCopyState, recordPictured
 } from "../apps/app/lib/copyqueue.js";
-import { getValidUserAccessToken, reviseFixedPriceListing, fetchPendingOrders } from "../apps/app/lib/ebay.js";
+import { getValidUserAccessToken, revisePooledListing, fetchPendingOrders } from "../apps/app/lib/ebay.js";
 
 const args = process.argv.slice(2);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -164,7 +164,7 @@ async function main() {
     const token = await getValidUserAccessToken(sb, userId);
     if (!token) { console.error("  ✗ could not get an eBay token for that account — reconnect it in the app.\n"); process.exit(1); }
 
-    const res = await reviseFixedPriceListing(token, itemId, {
+    const res = await revisePooledListing(token, itemId, {
       imageUrls: plan.changes.pictureUrls || null,
       quantity: plan.changes.quantity ?? null
     });

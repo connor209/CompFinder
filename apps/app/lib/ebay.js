@@ -561,6 +561,78 @@ export async function reviseFixedPriceListing(accessToken, itemId, { imageUrls =
 }
 
 /**
+ * eBay Picture Services, via the Commerce Media API.
+ *
+ * A pooled listing's picture is a scan of the copy that will ship — today a
+ * CardUploader CDN URL. Handing that URL straight to ReviseFixedPriceItem is
+ * the route eBay's docs warn about: "these URLs cannot be mixed between
+ * self-hosted and EPS-hosted within the same listing", and self-hosted needs
+ * PictureSource=Vendor, which "cannot be changed if a listing already has one
+ * or more images". So every scan goes to EPS first and the revision only ever
+ * carries eBay's own URLs — no mixing, no PictureSource, and nothing left
+ * depending on CardUploader keeping the file.
+ *
+ * From the Media API spec (commerce_media_v1_beta_oas3.json):
+ * `POST /image/create_image_from_url` with `{ imageUrl }` (https only),
+ * scope `sell.inventory` (already in SCOPES), 201 with an ImageResponse whose
+ * `imageUrl` "will be used in listing calls", and a Location header to
+ * getImage. 50 POSTs per 5 seconds per user. An unused image expires; one in
+ * an active listing stays.
+ */
+const MEDIA_URL = "https://apim.ebay.com/commerce/media/v1_beta";
+
+/** Is this already an eBay-hosted picture? Those need no upload. */
+export function isEbayHosted(url) {
+  return /^https:\/\/i\.ebayimg\.com\//i.test(String(url || "").trim());
+}
+
+/** Put one externally hosted picture on EPS. Returns the EPS URL, or throws. */
+export async function hostPictureOnEbay(accessToken, url) {
+  const src = String(url || "").trim();
+  if (isEbayHosted(src)) return src;
+  if (!/^https:\/\//i.test(src)) throw new Error("A picture must be an https URL for eBay to take it.");
+  const res = await fetch(`${MEDIA_URL}/image/create_image_from_url`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ imageUrl: src })
+  });
+  const text = await res.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
+  if (res.status !== 201 && res.status !== 200) {
+    const msg = body?.errors?.[0]?.longMessage || body?.errors?.[0]?.message;
+    throw new Error(`eBay would not take the picture (${res.status})${msg ? `: ${msg}` : ""}.`);
+  }
+  if (body?.imageUrl) return String(body.imageUrl);
+  // The 201 is documented to carry an ImageResponse; if it ever comes back
+  // bare, the Location header is the getImage URI that does.
+  const loc = res.headers.get("location");
+  if (loc && /^https:\/\/api[mz]?\.ebay\.com\//i.test(loc)) {
+    const r2 = await fetch(loc, { headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" } });
+    const b2 = await r2.json().catch(() => null);
+    if (r2.ok && b2?.imageUrl) return String(b2.imageUrl);
+  }
+  throw new Error("eBay took the picture but sent back no URL for it.");
+}
+
+/**
+ * Revise a pooled listing: every picture onto EPS first, then ONE revision.
+ *
+ * All or nothing. If any picture fails to upload the listing is not touched —
+ * revising with the pictures that did make it would replace the full set and
+ * quietly drop the back of the card.
+ */
+export async function revisePooledListing(accessToken, itemId, { imageUrls = null, quantity = null } = {}) {
+  let hosted = null;
+  if (imageUrls && imageUrls.length) {
+    hosted = [];
+    for (const u of imageUrls) hosted.push(await hostPictureOnEbay(accessToken, u));
+  }
+  const res = await reviseFixedPriceListing(accessToken, itemId, { imageUrls: hosted, quantity });
+  return { ...res, hosted };
+}
+
+/**
  * Platform Notifications — eBay calling us when a copy sells, so a pooled
  * listing's picture moves within seconds rather than at the next sweep
  * (lib/copysync.js). Trading API, one call to set, one to read back.

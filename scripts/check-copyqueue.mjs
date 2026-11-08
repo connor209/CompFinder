@@ -15,7 +15,7 @@
 import {
   queueFor, queuesBySku, queuesByListing, pictureUrlsFor, desiredStateFor,
   reconcile, pullPlanFor, isSellableCopy, isMissingSchema, MAX_PICTURES,
-  allocateUnits, unitRef, pulledForIndex
+  allocateUnits, unitRef, pulledForIndex, scanUrlsOf
 } from "../apps/app/lib/copyqueue.js";
 
 let failures = 0;
@@ -284,6 +284,20 @@ eq("only a PULLED copy answers a ref",
 eq("allocation says which state each unit is in",
   allocateUnits(PULLED_FOR, [{ lineItemId: "L1", sku: "UMB-215", quantity: 1 }, { lineItemId: "L2", sku: "UMB-215", quantity: 1 }]).map((u) => `${u.state}:${u.copy?.id}`),
   ["pulled:copy-1", "reserved:copy-2"]);
+
+// --- 14. the copy's whole set of photos, not just the front ---------------
+// A revision REPLACES the listing's pictures, so the front alone would take
+// the back of the card off the listing.
+const FRONT_BACK = copy(1, { scan_urls: ["https://store.example/1-front.jpg", "https://store.example/1-back.jpg"] });
+eq("a copy's photos go front then back", pictureUrlsFor(FRONT_BACK, []), ["https://store.example/1-front.jpg", "https://store.example/1-back.jpg"]);
+eq("...before any shared shot", pictureUrlsFor(FRONT_BACK, ["https://store.example/shared.jpg"]).length, 3);
+eq("before 036, the single scan still works", scanUrlsOf(copy(2)), ["https://store.example/scan-2.jpg"]);
+eq("an empty list falls back to the single scan", scanUrlsOf(copy(2, { scan_urls: [] })), ["https://store.example/scan-2.jpg"]);
+eq("blanks in the list are dropped", scanUrlsOf(copy(2, { scan_urls: [" ", null, "https://x/a.jpg"] })), ["https://x/a.jpg"]);
+eq("only the HEAD copy's photos are sent, never the next copy's",
+  desiredStateFor(ITEM, [FRONT_BACK, copy(2, { scan_urls: ["https://store.example/2-front.jpg"] })], { lines: [] }).pictureUrls,
+  ["https://store.example/1-front.jpg", "https://store.example/1-back.jpg"]);
+ok("a missing 036 column reads as a pending migration", isMissingSchema({ message: "column stack_cards.scan_urls does not exist" }));
 
 if (failures) {
   console.error(`\ncheck-copyqueue: ${failures} failure(s).`);

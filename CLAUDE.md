@@ -210,8 +210,9 @@ stream` (the relay, only while streaming).
   until `COPY_SYNC` is set, only pooled listings (two or more stack rows on
   one item id) whatever a caller names, nothing done without the unshipped
   orders, a sale moving the picture and never the quantity, a quantity set
-  only off a number read that minute, and a notification believed only on
-  eBay's signature.
+  only off a number read that minute, a notification believed only on
+  eBay's signature, and every picture uploaded to eBay before a revision —
+  all or nothing, so a listing never loses half its photos.
 - `scripts/check-desksetup.mjs` — what the Show Desk says is still to run, and
   mostly what it refuses to say: a probe that fails on venue wifi is never
   reported as a missing migration.
@@ -2676,7 +2677,8 @@ for the process to run it by hand and for the 20-card experiment that decides
 whether the method is worth having at all.
 
 `apps/app/lib/copyqueue.js` owns it, `packages/core` is untouched, migration
-027 adds `copy_seq`, `scan_url` and `listing_copy_state`, and 035 `pulled_for`.
+027 adds `copy_seq`, `scan_url` and `listing_copy_state`, 035 `pulled_for`, and 036
+`scan_urls`.
 
 - **eBay reports the LISTING's SKU on a sale, never the copy's.** A sale says
   "this item id sold two" and carries nothing that separates copy 1 from copy 2,
@@ -2702,6 +2704,17 @@ whether the method is worth having at all.
   overwritten in place — re-uploading different bytes to a path eBay has already
   fetched changes nothing visible and looks exactly like the revise call
   failing.
+- **Every scan goes onto eBay's picture hosting first** (`revisePooledListing()`
+  in `ebay.js`, through the Media API's `createImageFromUrl`, scope
+  `sell.inventory`). eBay's docs: self-hosted and EPS-hosted URLs "cannot be
+  mixed … within the same listing", and self-hosting needs
+  `PictureSource=Vendor`, which cannot change once a listing has images — so a
+  CardUploader URL sent straight to the revision is the likeliest way for it
+  to fail. All or nothing: one picture refused and the listing is not touched,
+  since a revision REPLACES the set and half of it would drop the back.
+- **A copy's whole set of photos, front first** (`scan_urls`, migration 036,
+  falling back to 027's single `scan_url`) — for the same reason: sending the
+  front alone takes the back of the card off the listing.
 - **One copy's scan on the listing, never several.** Three scans on a quantity-3
   listing tell a buyer three cards exist and nothing about which they get, which
   is worse than a stock photo because it looks like it is telling them

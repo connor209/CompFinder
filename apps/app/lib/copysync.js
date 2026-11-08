@@ -43,7 +43,7 @@
  */
 import { desiredStateFor, reconcile, loadCopyState, recordPictured } from "./copyqueue.js";
 import {
-  getValidUserAccessToken, fetchPendingOrders, fetchItemQuantity, reviseFixedPriceListing
+  getValidUserAccessToken, fetchPendingOrders, fetchItemQuantity, revisePooledListing
 } from "./ebay.js";
 
 /** The env var that switches this on. Named once. */
@@ -210,7 +210,7 @@ export async function runCopySync(sb, userId, { itemIds = null, trigger = "sale"
     const entry = { itemId: it.itemId, title: it.title, reasons: it.plan.reasons, sent: false };
     if (mode === "dry") { out.changed.push(entry); continue; }
     try {
-      const res = await reviseFixedPriceListing(token, it.itemId, {
+      const res = await revisePooledListing(token, it.itemId, {
         imageUrls: it.plan.changes.pictureUrls || null,
         quantity: it.plan.changes.quantity ?? null
       });

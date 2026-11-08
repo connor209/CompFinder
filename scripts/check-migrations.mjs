@@ -66,7 +66,8 @@ const MIGRATIONS = [
   ["032", "storefront shop links", [["column", "show_storefronts", "kind"]]],
   ["033", "packed orders (label-printed orders stay on the pull sheet)", [["table", "packed_orders"]]],
   ["034", "binder added date (newest-in-binder sort)", [["column", "stack_cards", "binder_added_at"]]],
-  ["035", "which order a pulled copy was for (multi-copy listings)", [["column", "stack_cards", "pulled_for"]]]
+  ["035", "which order a pulled copy was for (multi-copy listings)", [["column", "stack_cards", "pulled_for"]]],
+  ["036", "every photo of a copy (multi-copy listings)", [["column", "stack_cards", "scan_urls"]]]
 ];
 
 /**
