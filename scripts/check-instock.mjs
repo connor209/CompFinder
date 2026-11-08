@@ -25,7 +25,7 @@
  * - Too loose, and you drive to a show looking for cards that aren't there.
  */
 import { readFileSync } from "node:fs";
-import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, stockUnits, offSaleIndex, offSaleReason } from "../apps/app/lib/stockcheck.js";
+import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, stockUnits, offSaleIndex, offSaleReason, soldDateOf } from "../apps/app/lib/stockcheck.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -83,6 +83,27 @@ eq("empty input is empty, not a crash", [[...availableSkus(null)], [...soldOutSk
   eq("on sale is on sale", offSaleReason("LIVE1", idx), null);
   eq("a sale beside a live second copy is still on sale", offSaleReason("BOTH1", idx), null);
   eq("no index says nothing", offSaleReason("BA1", null), null);
+
+  // A pooled copy keeps its own SKU and its own listing was ended
+  // (lib/copypool.js): by SKU it is "not listed", but the listing it is filed
+  // on — another card's — is live, and that is where it is on sale.
+  const pool = offSaleIndex(
+    [{ sku: "FN22", ebay_item_id: "900", quantity: 3 }, { sku: "OLD1", ebay_item_id: "901", quantity: 0 }],
+    [{ sku: "FN22", ebay_item_id: "900", sold_date: "2026-11-01" }, { sku: "GONE1", ebay_item_id: "902", sold_date: "2026-10-20" }]
+  );
+  eq("a pooled copy is on sale through the listing it is filed on", offSaleReason("FN28", pool, "900"), null);
+  eq("...even though its own SKU has no listing", offSaleReason("FN28", pool), "notlisted");
+  eq("the kept card is on sale despite the listing's earlier sale", offSaleReason("FN22", pool, "900"), null);
+  eq("a pool sold out reads out of stock", offSaleReason("FM11", pool, "901"), "outofstock");
+  eq("a pool's last copy sold reads sold", offSaleReason("FX1", pool, "902"), "sold");
+  eq("...dated off the listing's sale", soldDateOf("FX1", pool, "902"), "2026-10-20");
+  eq("a stale item id never hides the SKU reading", offSaleReason("ba1", idx, "123456"), "sold");
+  eq("a card with neither says nothing", offSaleReason(null, pool, null), null);
+  const reconcileSrc = readFileSync(new URL("../apps/app/app/panel/Stacks.js", import.meta.url), "utf8");
+  eq("Stacks → Reconcile asks by item id as well", /offSaleReason\(c\.sku, offSale, c\.ebay_item_id\)/.test(reconcileSrc) && /ebay_item_id,sold_date/.test(reconcileSrc), true);
+  const pickerSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
+  eq("the stock picker asks by item id as well", /offSaleReason\(card\.sku, offSale, card\.ebay_item_id\)/.test(pickerSrc), true);
+  eq("the binder view asks by item id as well", /offSale: \(sku, itemId\) => offSaleReason\(sku, offSale, itemId\)/.test(pickerSrc), true);
 }
 
 // --- 2b. a zero has two causes, and they want opposite treatment -----------

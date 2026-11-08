@@ -325,11 +325,34 @@ export function awaySkus(stackCards, openIndex = null) {
   return away;
 }
 
-/** Listings minus those whose stock is all checked out — see awaySkus(). */
+/**
+ * Listings minus those whose stock is all checked out — see awaySkus().
+ *
+ * A listing's copies are the stack cards with its SKU OR filed against its
+ * item id: a pooled listing's copies keep their own SKUs (lib/copypool.js),
+ * so by SKU alone one copy at a show would hide a listing with four more at
+ * home. Kept if ANY copy found either way is home; a listing no stack card
+ * names is kept, as before.
+ */
 export function atHomeListings(listings, stackCards, openIndex = null) {
-  const away = awaySkus(stackCards, openIndex);
-  if (away.size === 0) return listings || [];
-  return (listings || []).filter((l) => !l?.sku || !away.has(String(l.sku).trim().toLowerCase()));
+  const seenSku = new Set(), homeSku = new Set(), seenItem = new Set(), homeItem = new Set();
+  for (const c of stackCards || []) {
+    if (!c || c.pulled_at) continue;
+    const k = c.sku ? String(c.sku).trim().toLowerCase() : "";
+    const id = c.ebay_item_id ? String(c.ebay_item_id) : "";
+    if (!k && !id) continue;
+    const out = c.checked_out_at || (openIndex && (openIndex.ids.has(String(c.id)) || (k && openIndex.skus.has(k))));
+    if (k) { seenSku.add(k); if (!out) homeSku.add(k); }
+    if (id) { seenItem.add(id); if (!out) homeItem.add(id); }
+  }
+  if (homeSku.size === seenSku.size && homeItem.size === seenItem.size) return listings || [];
+  return (listings || []).filter((l) => {
+    const k = l?.sku ? String(l.sku).trim().toLowerCase() : "";
+    const id = l?.ebay_item_id ? String(l.ebay_item_id) : "";
+    const known = (k && seenSku.has(k)) || (id && seenItem.has(id));
+    if (!known) return true;
+    return (k && homeSku.has(k)) || (id && homeItem.has(id));
+  });
 }
 
 /** The lowercased SKUs currently in the box, for keeping the two lists apart. */

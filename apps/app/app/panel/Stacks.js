@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
-import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
+import { offSaleIndex, offSaleReason, soldDateOf } from "@/lib/stockcheck.js";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
 import { binderSlot, comparePockets, caseKind } from "@/lib/showbinder.js";
 import Fold from "./Fold";
@@ -149,8 +149,8 @@ export default function Stacks() {
     setShowRecon(true);
     setReconLoading(true);
     const sb = supabase();
-    const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,quantity").not("sku", "is", null));
-    const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date,line_item_id").not("sku", "is", null), { orderBy: "line_item_id" });
+    const listings = await pagedSelect(() => sb.from("ebay_listings").select("id,sku,ebay_item_id,quantity").not("sku", "is", null));
+    const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,ebay_item_id,sold_date,line_item_id").not("sku", "is", null), { orderBy: "line_item_id" });
     const offSale = offSaleIndex(listings, sales);
     const cards = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));
     const nameMap = new Map(stacks.map((s) => [s.id, s.name]));
@@ -161,11 +161,11 @@ export default function Stacks() {
       // That is also what keeps the quantity rule safe: checking a card out
       // sets its listing to quantity 0 too, and those rows never reach here.
       .filter((c) => !c.checked_out_at)
-      .map((c) => ({ c, reason: offSaleReason(c.sku, offSale) }))
+      .map((c) => ({ c, reason: offSaleReason(c.sku, offSale, c.ebay_item_id) }))
       .filter(({ reason }) => reason)
       .map(({ c, reason }) => ({
         id: c.id, sku: c.sku, title: c.title, stack: nameMap.get(c.stack_id) || "",
-        soldDate: offSale.soldDate.get(String(c.sku).toLowerCase()) || null, reason
+        soldDate: soldDateOf(c.sku, offSale, c.ebay_item_id), reason
       }))
       .sort((a, b) => (a.reason === b.reason ? (a.stack || "").localeCompare(b.stack || "") : rank[a.reason] - rank[b.reason]));
     setReconRows(cand);

@@ -484,6 +484,20 @@ const ok = (what, cond) => { if (!cond) fail(what); };
   ok("the stream-box card is dropped, everything else kept",
     JSON.stringify(atHomeListings(listed, shelf).map((l) => l.sku ?? null)) === JSON.stringify(["A2", "Q3", null]));
   ok("no stack data hides nothing", atHomeListings(listed, []).length === listed.length);
+
+  // A pooled listing: five copies on one item id, each keeping its own SKU
+  // (lib/copypool.js). The listing's SKU is ONE copy's — so by SKU alone that
+  // copy at a show would hide four at home.
+  const pool = [
+    { sku: "FN22", ebay_item_id: "900", checked_out_at: "2026-11-01" },
+    { sku: "FN28", ebay_item_id: "900" }, { sku: "FM11", ebay_item_id: "900" }
+  ];
+  const poolListing = [{ sku: "FN22", ebay_item_id: "900", title: "Horsea 49/62" }];
+  ok("a pooled listing stays while any copy is at home", atHomeListings(poolListing, pool).length === 1);
+  ok("...and goes once every copy is out",
+    atHomeListings(poolListing, pool.map((c) => ({ ...c, checked_out_at: "2026-11-01" }))).length === 0);
+  ok("a card filed on the listing under another SKU still counts as its stock",
+    atHomeListings([{ sku: "TYPO", ebay_item_id: "77" }], [{ sku: "T1", ebay_item_id: "77", checked_out_at: "x" }]).length === 0);
 }
 const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
 if (!/atHomeListings\(listings, stackCards, awayIndex\)/.test(deskSrc)) {

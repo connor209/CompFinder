@@ -238,6 +238,13 @@ eq("a stack is not counted", counts.has("a"), false);
     { B6: "notlisted", B2: "away", B3: "sold", B1: "home" });
   eq("counts", got.counts, { home: 1, away: 1, sold: 1, outofstock: 0, notlisted: 1 });
   eq("value is what is still ours to sell, never a sold card", got.valuePence, 82500 + 30000);
+  // A pooled copy is read through the listing it is filed on.
+  const seen = [];
+  binderContents([{ id: "p1", stack_id: "b9", sku: "FN28", ebay_item_id: "900", title: "Horsea 49/62" }], "b9", {
+    offSale: (sku, itemId) => { seen.push(["offSale", sku, itemId]); return null; },
+    priceOf: (sku, itemId) => { seen.push(["priceOf", sku, itemId]); return 149; }
+  });
+  eq("the binder view hands the item id to both lookups", seen, [["offSale", "FN28", "900"], ["priceOf", "FN28", "900"]]);
   eq("an empty binder", binderContents(inside, "b10").rows.length, 0);
 }
 

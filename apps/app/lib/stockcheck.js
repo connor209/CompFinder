@@ -349,21 +349,59 @@ export function availableSkus(listings) {
  */
 export function offSaleIndex(listings, sales = []) {
   const soldDate = new Map();
+  const soldItems = new Map();
   for (const s of sales || []) {
-    if (!s?.sku) continue;
-    const k = String(s.sku).toLowerCase();
-    if (!soldDate.has(k)) soldDate.set(k, s.sold_date || null);
+    if (s?.sku) {
+      const k = String(s.sku).toLowerCase();
+      if (!soldDate.has(k)) soldDate.set(k, s.sold_date || null);
+    }
+    if (s?.ebay_item_id) {
+      const id = String(s.ebay_item_id);
+      if (!soldItems.has(id)) soldItems.set(id, s.sold_date || null);
+    }
   }
-  return { available: availableSkus(listings), soldOut: soldOutSkus(listings), soldDate };
+  // By item id too: a copy pooled onto another card's listing
+  // (lib/copypool.js) keeps its own SKU, and its own listing was ended — so
+  // by SKU alone every pooled copy but one reads "not listed" while the
+  // listing it is actually on sale through is live.
+  const availableItems = new Set();
+  const soldOutItems = new Set();
+  for (const l of listings || []) {
+    if (!l?.ebay_item_id) continue;
+    (isListingAvailable(l) ? availableItems : soldOutItems).add(String(l.ebay_item_id));
+  }
+  for (const id of availableItems) soldOutItems.delete(id);
+  return { available: availableSkus(listings), soldOut: soldOutSkus(listings), soldDate, availableItems, soldOutItems, soldItems };
 }
 
-export function offSaleReason(sku, idx) {
-  if (!sku || !idx) return null;
-  const k = String(sku).toLowerCase();
-  if (idx.available.has(k)) return null;
-  if (idx.soldDate.has(k)) return "sold";
-  if (idx.soldOut.has(k)) return "outofstock";
+/**
+ * `itemId` is the stack card's `ebay_item_id`. A live listing under it means
+ * on sale, whatever the SKU says — the one way a pooled copy is found. It
+ * only ever ADDS an "on sale": a card with a stale item id (its listing ended
+ * or relisted) has no live listing under it and falls through to the SKU
+ * reading exactly as before.
+ */
+export function offSaleReason(sku, idx, itemId = null) {
+  if (!idx) return null;
+  const id = itemId == null ? "" : String(itemId).trim();
+  const k = sku ? String(sku).toLowerCase() : "";
+  if (!k && !id) return null;
+  if (id && idx.availableItems?.has(id)) return null;
+  if (k && idx.available.has(k)) return null;
+  if (k && idx.soldDate.has(k)) return "sold";
+  if (id && idx.soldItems?.has(id)) return "sold";
+  if (k && idx.soldOut.has(k)) return "outofstock";
+  if (id && idx.soldOutItems?.has(id)) return "outofstock";
   return "notlisted";
+}
+
+/** When the card's sale was, by SKU then by its listing. */
+export function soldDateOf(sku, idx, itemId = null) {
+  if (!idx) return null;
+  const k = sku ? String(sku).toLowerCase() : "";
+  if (k && idx.soldDate.has(k)) return idx.soldDate.get(k);
+  const id = itemId == null ? "" : String(itemId);
+  return id && idx.soldItems?.has(id) ? idx.soldItems.get(id) : null;
 }
 
 /**

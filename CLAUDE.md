@@ -2786,11 +2786,16 @@ copy's stack row is tied to the kept listing with its own scans from the
 imports (`scansBySku()` in `import-store.js`), and the kept listing goes to
 quantity N. **Each copy keeps its own SKU**, so sleeve labels stay true; the
 pool is tied together by item id, which `allocateUnits()`, the copy sync and
-the pull sheet's `pulled_for` all read. What it costs: SKU-based screens
-(Stacks → Reconcile, the stock picker's sold/unlisted reading) see the other
-copies' SKUs as no longer listed, because their own listings ended — noise,
-not damage, and worth teaching those readers the item id before pooling at
-scale.
+the pull sheet's `pulled_for` all read. **The screens that ask "is this card
+still on sale" read the item id too**: `offSaleReason(sku, idx, itemId)` in
+`stockcheck.js` (Stacks → Reconcile, the Show Desk's stock picker, the Show
+Binder view) counts a live listing under the card's `ebay_item_id` as on sale,
+and `atHomeListings()` counts a listing's copies by SKU OR item id. Both only
+ever ADD an "on sale" or "at home" — a stale item id has no live listing
+under it and falls through to the SKU reading exactly as before.
+`check-instock.mjs` and `check-showcounter.mjs` pin both directions. Still by
+SKU: ★ Recommend show stock's price lookup, so a pooled copy reads unpriced
+there — pooled bulk doesn't go to shows.
 
 ```
 node scripts/copyqueue-run.mjs                      # what would change, dry

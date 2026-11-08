@@ -457,9 +457,11 @@ export function binderCounts(binders, cards, isAway = (c) => !!c.checked_out_at)
  * What is in a binder, one row per card, in page order (comparePockets).
  *
  * `cards` is stack_cards rows. `isAway(card)` is the desk's own reading, so a
- * card on a table says so even with its flag lost. `offSale(sku)` is
+ * card on a table says so even with its flag lost. `offSale(sku, itemId)` is
  * offSaleReason() over the listings: "sold", "outofstock", "notlisted" or
- * null for on sale. `priceOf(sku)` is what we ask on eBay, in pence, or null.
+ * null for on sale. `priceOf(sku, itemId)` is what we ask on eBay, in pence, or
+ * null. Both take the item id so a pooled copy (own SKU, another card's
+ * listing — lib/copypool.js) is read through the listing it is on.
  *
  * Away is asked FIRST: a checked-out card's listing is hidden on purpose, so
  * its listing reads as sold out, and calling a card on a table "sold on eBay"
@@ -480,10 +482,10 @@ export function binderContents(cards, binderId, { isAway = (c) => !!c.checked_ou
     let status = "home";
     if (isAway(card)) status = "away";
     else {
-      const why = offSale(card.sku);
+      const why = offSale(card.sku, card.ebay_item_id);
       if (why === "sold" || why === "outofstock" || why === "notlisted") status = why;
     }
-    const p = priceOf(card.sku);
+    const p = priceOf(card.sku, card.ebay_item_id);
     const pricePence = Number.isFinite(p) && p > 0 ? Math.round(p) : null;
     counts[status] += 1;
     if (pricePence != null && (status === "home" || status === "away")) valuePence += pricePence;

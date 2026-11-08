@@ -379,7 +379,7 @@ export default function ShowDesk() {
     // A failed read leaves it null and the picker falls back to the listings.
     try {
       setSales(await pagedSelect(
-        () => sb.from("ebay_sales").select("sku,sold_date,line_item_id").not("sku", "is", null),
+        () => sb.from("ebay_sales").select("sku,ebay_item_id,sold_date,line_item_id").not("sku", "is", null),
         { orderBy: "line_item_id" }
       ));
     } catch { setSales(null); }
@@ -855,7 +855,7 @@ export default function ShowDesk() {
     else if (!batchPrefix.trim() && batchStack && isShowBinder(stackName.get(batchStack))) picked.sort(comparePockets);
     return picked.map((card) => ({
       card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null,
-      offSale: offSaleReason(card.sku, offSale)
+      offSale: offSaleReason(card.sku, offSale, card.ebay_item_id)
     }));
   }, [stackCards, batchPrefix, batchStack, batchNameQ, awayIndex, listings, sales, stackName]);
   // Sold and sold-out cards leave the picker unless asked for, and are counted:
@@ -1127,15 +1127,21 @@ export default function ShowDesk() {
     if (!binderLook) return null;
     const offSale = listings.length > 0 ? offSaleIndex(listings, sales || []) : null;
     const price = new Map();
+    const priceByItem = new Map();
     for (const l of listings) {
-      if (!l?.sku || l.price_value == null) continue;
+      if (l?.price_value == null) continue;
+      const pence = Math.round(Number(l.price_value) * 100);
+      if (l.ebay_item_id) priceByItem.set(String(l.ebay_item_id), pence);
+      if (!l.sku) continue;
       const k = String(l.sku).toLowerCase();
-      if (!price.has(k) || isListingAvailable(l)) price.set(k, Math.round(Number(l.price_value) * 100));
+      if (!price.has(k) || isListingAvailable(l)) price.set(k, pence);
     }
     return binderContents(stackCards, binderLook, {
       isAway: (c) => isCardAway(c, awayIndex),
-      offSale: (sku) => offSaleReason(sku, offSale),
-      priceOf: (sku) => (sku ? price.get(String(sku).toLowerCase()) ?? null : null),
+      offSale: (sku, itemId) => offSaleReason(sku, offSale, itemId),
+      // By SKU, then by the listing the card is filed on — a pooled copy's own
+      // SKU has no listing of its own (lib/copypool.js).
+      priceOf: (sku, itemId) => (sku ? price.get(String(sku).toLowerCase()) : undefined) ?? (itemId ? priceByItem.get(String(itemId)) : undefined) ?? null,
       binderName: stackName.get(binderLook) || null
     });
   }, [binderLook, stackCards, listings, sales, awayIndex, stackName]);
