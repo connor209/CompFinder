@@ -754,6 +754,39 @@ html, body { overflow-x: clip; max-width: 100%; }
 .stack-pull { font-size:12px; font-weight:600; color:var(--bad-ink); background:var(--surface); border:1px solid color-mix(in srgb,var(--bad) 40%, var(--line-strong)); border-radius:8px; padding:5px 12px; cursor:pointer; }
 .stack-pull:hover { background:var(--bad-soft); }
 
+/* Stack checker — every row of controls wraps: it is used one-handed on a phone. */
+.sc-progress { height:6px; background:var(--surface-sink); border-radius:var(--radius-pill); overflow:hidden; margin:4px 0 14px; }
+.sc-progress span { display:block; height:100%; background:var(--accent); transition:width .2s; }
+.sc-current { display:flex; gap:14px; align-items:flex-start; flex-wrap:wrap; padding:14px; border:1px solid var(--line-strong); border-radius:14px; background:var(--surface-2); margin-bottom:12px; }
+.sc-current.sc-end { background:var(--surface); border-style:dashed; }
+.sc-img { width:110px; height:150px; object-fit:contain; border-radius:8px; background:var(--surface-sink); flex:none; }
+.sc-noimg { display:flex; align-items:center; justify-content:center; font-size:12px; color:var(--ink-faint); }
+.sc-cur-body { flex:1; min-width:200px; display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+.sc-cur-sku { font-family:var(--font-mono); font-weight:800; font-size:28px; color:var(--ink); line-height:1.1; }
+.sc-cur-title { font-size:15px; color:var(--ink-soft); }
+.sc-actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:6px; width:100%; }
+.sc-big { min-height:48px; padding:0 20px; font-size:15px; flex:1 1 140px; }
+.sc-instead { margin-bottom:12px; }
+.sc-chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:6px; }
+.sc-chip { display:inline-flex; gap:6px; align-items:baseline; max-width:100%; border:1px solid var(--line-strong); background:var(--surface); color:var(--ink); border-radius:10px; padding:8px 12px; font-size:13px; cursor:pointer; }
+.sc-chip b { font-family:var(--font-mono); }
+.sc-chip span { color:var(--ink-soft); max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sc-chip:hover { background:var(--surface-sink); }
+.sc-sku { margin-bottom:8px; flex-wrap:wrap; }
+.sc-answer { display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:10px 12px; border-radius:10px; background:var(--accent-soft); font-size:13.5px; margin-bottom:12px; }
+.sc-missing { padding:12px 0; border-top:1px solid var(--line); }
+.sc-bar { display:flex; gap:8px; flex-wrap:wrap; padding:12px 0; border-top:1px solid var(--line); }
+.sc-list-head { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0 4px; }
+.sc-row.sc-seen { opacity:.6; }
+.sc-row.sc-next { background:var(--accent-soft); border-radius:8px; }
+.sc-pos { background:transparent; border:0; cursor:pointer; padding:0; }
+.sc-state { width:14px; flex:none; color:var(--conf-high); font-size:13px; }
+.sc-tag { margin-left:6px; }
+.sc-arrows { display:inline-flex; gap:4px; flex:none; }
+.stack-pull.sc-mini { color:var(--ink); border-color:var(--line-strong); padding:6px 11px; font-size:14px; }
+.stack-pull.sc-mini:hover { background:var(--surface-sink); }
+.stack-pull.sc-mini:disabled { opacity:.3; cursor:default; }
+
 /* Pull sheet */
 .ps-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:0 0 16px; padding:12px 16px; background:var(--surface); border:1px solid var(--line-strong); border-radius:14px; position:sticky; top:8px; z-index:5; box-shadow:var(--shadow-1); }
 .ps-progress { font-size:14px; color:var(--ink-soft); }
