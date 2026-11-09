@@ -9,6 +9,9 @@ import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePos
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
 import { binderSlot, caseKind } from "@/lib/showbinder.js";
+import { pullImageIndex, pullImageFor } from "@/lib/pull-images.js";
+import { imageAt, largeImage } from "@/lib/showcounter.js";
+import { importScansBySku } from "@/lib/import-store.js";
 
 /**
  * A sortable card-number key from any string (variation / title / SKU): the
@@ -98,6 +101,54 @@ function writeDoneLog(log) {
 }
 
 /**
+ * The rows a picture can come from, read for just the listings and SKUs on
+ * the sheet. Pictures are a nicety: any failure here is an empty index and a
+ * sheet without them, never a sheet that won't load.
+ */
+async function loadImageIndex(sb, lines) {
+  const itemIds = [...new Set(lines.map((l) => l.itemId).filter(Boolean).map(String))];
+  const skus = [...new Set(lines.map((l) => String(l.sku || "").trim()).filter(Boolean))];
+  const listings = [];
+  const read = async (col, values) => {
+    for (let i = 0; i < values.length; i += 200) {
+      const { data, error } = await sb.from("ebay_listings").select("ebay_item_id,sku,image_url").in(col, values.slice(i, i + 200));
+      if (!error && data) listings.push(...data);
+    }
+  };
+  try {
+    const [, , scans] = await Promise.all([
+      read("ebay_item_id", itemIds),
+      read("sku", skus),
+      importScansBySku(sb, skus)
+    ]);
+    return pullImageIndex({ listings, importScans: scans?.scans });
+  } catch {
+    return pullImageIndex({ listings });
+  }
+}
+
+/** A thumbnail that opens large, or nothing. Inside a <label>, so the tap
+ *  must not also tick the card. */
+function PullThumb({ url, name, onOpen }) {
+  if (!url) return <span className="ps-art ps-art-none" aria-hidden="true" />;
+  return (
+    <button
+      type="button"
+      className="sd-counter-artbtn"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onOpen({ url: largeImage(url) || url, name });
+      }}
+      title="See the photo"
+      aria-label={`See the photo of ${name || "this card"}`}
+    >
+      <img className="sd-counter-art ps-art" src={imageAt(url, 300) || url} alt="" loading="lazy" width="44" height="62" />
+    </button>
+  );
+}
+
+/**
  * Pull sheet — the daily picking workflow. Lists unshipped eBay orders matched
  * to their stack + live position. You pick a card, tick it, and any other
  * sheet items in the same stack re-rank live (a working preview). Nothing hits
@@ -136,6 +187,7 @@ export default function PullSheet() {
   const [labelled, setLabelled] = useState([]); // order ids: label printed, not yet packed
   const [packedMissing, setPackedMissing] = useState(false); // migration 033 not run
   const [packedNote, setPackedNote] = useState(""); // a packed read/write that failed
+  const [photo, setPhoto] = useState(null); // { url, name } — the tapped card, large
 
   const supabase = () => createClient();
 
@@ -204,7 +256,11 @@ export default function PullSheet() {
     const sb = supabase();
     const { data: stacks } = await sb.from("card_stacks").select("id,name");
     const nameMap = new Map((stacks || []).map((s) => [s.id, s.name]));
-    const cards = await pagedSelect(() => sb.from("stack_cards").select("*"));
+    const [cards, imageIndex] = await Promise.all([
+      pagedSelect(() => sb.from("stack_cards").select("*")),
+      loadImageIndex(sb, lines)
+    ]);
+    const imageOf = (l, card) => pullImageFor({ card, itemId: l.itemId, sku: l.sku, variation: l.variation }, imageIndex);
 
     // A SKU maps to a QUEUE of copies, not to one card. One card per SKU is
     // still the ordinary case and behaves exactly as before — the queue is one
@@ -260,7 +316,7 @@ export default function PullSheet() {
         units.push({ lineItemId: l.lineItemId, pulled });
         if (card) {
           takenBySku.set(skl, seen + 1);
-          active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
+          active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, image: imageOf(l, card), ...unitOf });
         } else if (skl && awaySkus.has(skl)) {
           // Ordered on eBay while the card is checked out to a show — it can't
           // be picked from a stack. Needs a human call (it's in the show case).
@@ -270,7 +326,7 @@ export default function PullSheet() {
         } else {
           // Loose / variation pick — no stack match. Sort these by card number so
           // they're a single pass through numbered storage (2, 4, 17, 101…).
-          unm.push({ key, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku), ...setInfo(l.title), ...unitOf });
+          unm.push({ key, sku: l.sku, title: l.title, variation: l.variation, image: imageOf(l, null), orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku), ...setInfo(l.title), ...unitOf });
         }
       }
     }
@@ -322,6 +378,7 @@ export default function PullSheet() {
         // Splitting it here would have you dealing two piles to one address.
         qty: Math.max(1, Number(l.quantity) || 1),
         labelPrinted: !!l.labelPrinted,
+        image: imageOf(l, card),
         ...setInfo(l.title)
       };
     });
@@ -658,6 +715,7 @@ export default function PullSheet() {
                 <label className={`ps-row${isPicked ? " done" : ""}`} key={r.key}>
                   <input type="checkbox" checked={isPicked} onChange={() => togglePick(r.cardId)} />
                   <span className="stack-pos">{isPicked ? "✓" : rank}</span>
+                  <PullThumb url={r.image} name={r.title || r.sku} onOpen={setPhoto} />
                   <span className="stack-sku">{r.sku}</span>
                   <span className="stack-title">
                     {r.title || <em>—</em>}
@@ -697,6 +755,7 @@ export default function PullSheet() {
                     <label className={`ps-row loose-row${isPicked ? " done" : ""}`} key={u.key}>
                       <input type="checkbox" checked={isPicked} onChange={() => toggleLoose(u.key)} />
                       <span className="stack-pos">{u.nk !== Number.MAX_SAFE_INTEGER ? u.nk : "—"}</span>
+                      <PullThumb url={u.image} name={u.variation || u.title || u.sku} onOpen={setPhoto} />
                       <span className="loose-card">
                         <span className="loose-card-name">{u.variation || u.sku || "no SKU"}</span>
                         {u.deliveryName || u.buyer ? <span className="loose-card-buyer">for {u.deliveryName || u.buyer}</span> : null}
@@ -787,6 +846,7 @@ export default function PullSheet() {
                   <span className="stack-pos" title="Position in your hand, counting from the top">
                     {done ? "✓" : at.from === at.to ? at.from : `${at.from}–${at.to}`}
                   </span>
+                  <PullThumb url={it.image} name={it.variation || it.title || it.sku} onOpen={setPhoto} />
                   <span className="pack-card">
                     <span className="stack-sku">
                       {it.variation || it.sku || "no SKU"}
@@ -813,6 +873,12 @@ export default function PullSheet() {
       )}
       </>
       )}
+      {photo ? (
+        <div className="sd-photo" role="dialog" aria-label={photo.name || "Card photo"} onClick={() => setPhoto(null)}>
+          <img className="sd-photo-img" src={photo.url} alt={photo.name || ""} />
+          {photo.name ? <p className="sd-photo-cap">{photo.name}</p> : null}
+        </div>
+      ) : null}
     </>
   );
 }

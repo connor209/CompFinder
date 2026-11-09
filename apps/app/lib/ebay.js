@@ -1028,6 +1028,9 @@ export async function fetchPendingOrders(accessToken, { labelledWithinDays = 0 }
       lines.push({
         orderId: String(order.orderId || ""),
         lineItemId: String(li.lineItemId || ""),
+        // The listing this line sold from — what the pull sheet looks the
+        // gallery photo up by, since an order carries no picture of its own.
+        itemId: li.legacyItemId != null ? String(li.legacyItemId) : null,
         sku: li.sku != null ? String(li.sku) : null,
         title: li.title != null ? String(li.title) : "",
         variation,

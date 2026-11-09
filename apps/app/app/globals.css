@@ -797,6 +797,11 @@ html, body { overflow-x: clip; max-width: 100%; }
 .ps-row input[type="checkbox"] { width:20px; height:20px; accent-color:var(--accent); flex:none; cursor:pointer; }
 .ps-row.done { opacity:.5; }
 .ps-row.done .stack-title, .ps-row.done .stack-sku { text-decoration:line-through; }
+/* The card's photo on the pull sheet. `contain`, not the counter's `cover`:
+   cropping a scan cuts off the edges, and the corner is where a number is.
+   A row with no photo keeps the gap so the SKUs still line up. */
+.ps-row .ps-art { object-fit:contain; }
+.ps-art-none { width:44px; flex:none; }
 
 /* Browse — card table */
 .brw-tbl { font-size:13.5px; }

@@ -190,6 +190,10 @@ stream` (the relay, only while streaming).
   calls them dispatched: a printed label is not a packed parcel, a failed read
   never puts a week of sent orders back, and a pile completed this deal stays
   on Pack so nothing renumbers.
+- `scripts/check-pullimages.mjs` — the photo beside a pull-sheet card: this
+  copy's scan, then the listing the order sold from, then an import scan
+  (which outlives an ended listing), then any listing with the SKU; and that a
+  variation pick never borrows the "choose your card" listing's one picture.
 - `scripts/check-labels.mjs` — the printer's file: the two columns in the
   printer's order, names cut to real label widths, and a workbook built for
   real and read back out of its own bytes.

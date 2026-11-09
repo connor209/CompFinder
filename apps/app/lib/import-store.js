@@ -243,6 +243,52 @@ export async function loadImport(supabase, id) {
 }
 
 /**
+ * The scans of each SKU's copy, newest import first — for the pull sheet,
+ * which has an order's SKU and no picture. A scan is a photograph of THAT
+ * copy, so it outlives the listing: a single card's listing ends when it
+ * sells, and the next sync sweeps its gallery shot with it.
+ *
+ * Returns `{ ok, scans: Map<lowercased sku, url> }`, the first image of the
+ * newest row carrying any. Degrades like everything else here.
+ */
+export async function importScansBySku(supabase, skus = []) {
+  const want = [...new Set(skus.map((s) => String(s || "").trim()).filter(Boolean))];
+  const scans = new Map();
+  if (!want.length) return { ok: true, scans };
+  // `in` is exact, and a SKU is typed in either case; ask for both spellings.
+  const ask = [...new Set(want.flatMap((s) => [s, s.toUpperCase(), s.toLowerCase()]))];
+  const newest = new Map(); // sku -> created_at of the row its scan came from
+  try {
+    for (let i = 0; i < ask.length; i += 200) {
+      const { data, error } = await supabase
+        .from("card_import_items")
+        .select("sku,images,created_at")
+        .in("sku", ask.slice(i, i + 200))
+        .order("created_at", { ascending: false });
+      if (error) {
+        if (isMissingTable(error)) return { ok: false, missing: true, scans };
+        return { ok: false, error: error.message, scans };
+      }
+      for (const r of data || []) {
+        const key = String(r.sku || "").trim().toLowerCase();
+        const first = (Array.isArray(r.images) ? r.images : []).map((u) => String(u || "").trim()).find(Boolean);
+        // Newest wins across chunks too: two spellings of one SKU can land
+        // in different chunks, each ordered only within itself.
+        const at = String(r.created_at || "");
+        if (key && first && (!newest.has(key) || at > newest.get(key))) {
+          newest.set(key, at);
+          scans.set(key, first);
+        }
+      }
+    }
+    return { ok: true, scans };
+  } catch (err) {
+    if (isMissingTable(err)) return { ok: false, missing: true, scans };
+    return { ok: false, error: err.message, scans };
+  }
+}
+
+/**
  * One row, changed by hand.
  *
  * Only the fields a person can actually type are writable, built key by key —
