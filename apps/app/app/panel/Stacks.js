@@ -9,6 +9,8 @@ import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
 import { binderSlot, comparePockets, caseKind } from "@/lib/showbinder.js";
 import Fold from "./Fold";
+import StackCheck from "./StackCheck";
+import { loadCheck } from "@/lib/stackcheck.js";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
 
@@ -41,6 +43,7 @@ export default function Stacks() {
   const [reconLoading, setReconLoading] = useState(false);
   const [reconRows, setReconRows] = useState([]);
   const [reconSel, setReconSel] = useState(new Set());
+  const [checking, setChecking] = useState(false);
 
   const supabase = () => createClient();
 
@@ -93,6 +96,7 @@ export default function Stacks() {
   useEffect(() => {
     loadCards(selId);
     loadPulled(selId);
+    setChecking(false);
   }, [selId]);
 
   // Auto-create stacks from eBay listing SKUs (prefix = stack, number =
@@ -492,10 +496,29 @@ export default function Stacks() {
             )}
           </Fold>
 
+          {checking && !selBox ? (
+            <StackCheck
+              stack={sel}
+              stackNames={new Map(stacks.map((s) => [s.id, s.name]))}
+              onClose={() => setChecking(false)}
+              onSaved={async (note) => {
+                setChecking(false);
+                setMsg(note);
+                await loadStacks();
+                await loadCards(selId);
+                await loadPulled(selId);
+              }}
+            />
+          ) : (
           <div className="panel">
             <div className="panel-head">
               <h3>{selBox ? `${boxIcon} ${sel.name}` : sel.name}</h3>
               <span className="badge2">{cards.length} {selBox ? (selTl ? "in the box" : "in the binder") : "in stack"}</span>
+              {!selBox && cards.length > 0 ? (
+                <button className="btn btn-ghost" onClick={() => setChecking(true)} disabled={busy} title="Go through the stack in your hand against this list, and fix the order">
+                  {loadCheck(sel.id) ? "✓ Resume check" : "✓ Check stack"}
+                </button>
+              ) : null}
             </div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>
               {selBox && !selTl
@@ -525,6 +548,7 @@ export default function Stacks() {
               </div>
             )}
           </div>
+          )}
 
           {pulled.length > 0 ? (
             <Fold

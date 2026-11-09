@@ -161,6 +161,11 @@ stream` (the relay, only while streaming).
 - `scripts/check-stackpos.mjs` — where a card physically is: that pulled and
   checked-out cards close the numbering up behind them, and a grep against a
   fourth copy of the rule.
+- `scripts/check-stackcheck.mjs` — the stack checker: the walk (✓, not here,
+  a later card brought up, ↑ ↓), that a typed SKU is exact ("AB1" never moves
+  AB11), that a save writes the slots the stack already held so a card at a
+  show keeps its place in the count, that only moved rows are written, and
+  that a resumed draft drops what has gone and adds what has arrived.
 - `scripts/check-toploader.mjs` — the toploader box: that it never shows a
   position, that no filing plan (Reallocate, Pick a stack, the stream box's
   return) can choose it, that a card's sticker comes out of the box with it —
@@ -2657,6 +2662,29 @@ The rule had been written out three times — the finder and the stack list in
 fourth. That is why it now lives in one file with a grep behind it: two screens
 each showing a confident number that differ by one is invisible on screen and
 sends you to the wrong card.
+
+## Checking a stack in your hand
+
+**✓ Check stack** on Stacks (`app/panel/StackCheck.js`, rules in
+`lib/stackcheck.js`) walks the stack as the app has it, one card at a time,
+against the stack in your hand: ✓ Matches, ✗ Not in my hand, tap one of the
+next four cards when that is what you are holding, or type the SKU on the card.
+A card the app has in another stack is moved in, and one it has never seen is
+added. ↑ ↓ on any row move a card by hand. Not offered on the toploader box or
+a Show Binder, which have no order to check.
+
+- **Nothing is written until Save order.** The check is a draft in
+  localStorage, resumed on return, and saved through `restoreCheck()`
+  against a FRESH read. A card pulled or checked out since then drops out,
+  and one added since goes at the back. Same rule as a binder check-in.
+- **A save writes `position`, never a SKU**, and only on rows that move. The
+  new order takes the slots the stack's present cards already held, so a card
+  at a show keeps its place in the count. A card brought in takes a slot past
+  every unpulled card, away ones included, so it never ties with one.
+- **Not found is decided at the end.** Ticked: pulled. Unticked: the back of
+  the stack, which is the least wrong place for a card that was not where the
+  app said.
+- **A card checked out to a show is refused**, not filed. Check it in first.
 
 ## One listing, several copies of the card
 
