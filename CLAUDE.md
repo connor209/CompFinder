@@ -2793,9 +2793,9 @@ Binder view) counts a live listing under the card's `ebay_item_id` as on sale,
 and `atHomeListings()` counts a listing's copies by SKU OR item id. Both only
 ever ADD an "on sale" or "at home" — a stale item id has no live listing
 under it and falls through to the SKU reading exactly as before.
-`check-instock.mjs` and `check-showcounter.mjs` pin both directions. Still by
-SKU: ★ Recommend show stock's price lookup, so a pooled copy reads unpriced
-there — pooled bulk doesn't go to shows.
+★ Recommend show stock prices the same way, through `listingLookup()`: by
+SKU, then by the listing the card is filed on, available listings only.
+`check-instock.mjs` and `check-showcounter.mjs` pin both directions.
 
 ```
 node scripts/copyqueue-run.mjs                      # what would change, dry

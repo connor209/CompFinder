@@ -25,7 +25,7 @@
  * - Too loose, and you drive to a show looking for cards that aren't there.
  */
 import { readFileSync } from "node:fs";
-import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, stockUnits, offSaleIndex, offSaleReason, soldDateOf } from "../apps/app/lib/stockcheck.js";
+import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, stockUnits, offSaleIndex, offSaleReason, soldDateOf, listingLookup } from "../apps/app/lib/stockcheck.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -100,6 +100,21 @@ eq("empty input is empty, not a crash", [[...availableSkus(null)], [...soldOutSk
   eq("a stale item id never hides the SKU reading", offSaleReason("ba1", idx, "123456"), "sold");
   eq("a card with neither says nothing", offSaleReason(null, pool, null), null);
   const reconcileSrc = readFileSync(new URL("../apps/app/app/panel/Stacks.js", import.meta.url), "utf8");
+  // ★ Recommend show stock ranks on our eBay price, so a pooled copy with no
+  // listing of its own under its SKU was dropped as unpriced.
+  const look = listingLookup([
+    { sku: "FN22", ebay_item_id: "900", quantity: 3, price_value: 1.49, extra: { category: "Trading Card Singles" } },
+    { sku: "ZZ1", ebay_item_id: "901", quantity: 0, price_value: 40 },
+    { sku: "A50", ebay_item_id: "902", quantity: 1, price_value: 12.5 }
+  ]);
+  eq("a pooled copy is priced through the listing it is filed on", look.priceOf({ sku: "FN28", ebay_item_id: "900" }), 149);
+  eq("...and gets that listing's category for the game chips", look.categoryOf({ sku: "FN28", ebay_item_id: "900" }), "Trading Card Singles");
+  eq("an ordinary card is still priced by its SKU", look.priceOf({ sku: "a50", ebay_item_id: "stale" }), 1250);
+  eq("a sold shell prices nothing, by SKU or item id", [look.priceOf({ sku: "ZZ1" }), look.priceOf({ sku: "Q", ebay_item_id: "901" })], [null, null]);
+  eq("a sold shell is counted gone", look.gone({ sku: "ZZ1", ebay_item_id: "901" }), true);
+  eq("...but not a card still on sale through its item id", look.gone({ sku: "ZZ1", ebay_item_id: "900" }), false);
+  eq("a card with nothing to go on is unpriced, not a crash", [look.priceOf({}), look.gone(null)], [null, false]);
+  eq("the recommendations price through it", /lookup\.priceOf\(c\)/.test(readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8")), true);
   eq("Stacks → Reconcile asks by item id as well", /offSaleReason\(c\.sku, offSale, c\.ebay_item_id\)/.test(reconcileSrc) && /ebay_item_id,sold_date/.test(reconcileSrc), true);
   const pickerSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
   eq("the stock picker asks by item id as well", /offSaleReason\(card\.sku, offSale, card\.ebay_item_id\)/.test(pickerSrc), true);
@@ -199,7 +214,7 @@ for (const [file, fn, what] of SCREENS) {
   if (!/ebay_listings"\)\.select\("[^"]*quantity/.test(body)) {
     fail(`${fn}() does not select quantity — ${what} cannot tell a sold card from a live one`);
   }
-  if (!/isListingAvailable|availableSkus|soldOutSkus|offSaleIndex/.test(body)) {
+  if (!/isListingAvailable|availableSkus|soldOutSkus|offSaleIndex|listingLookup/.test(body)) {
     fail(`${fn}() does not go through stockcheck.js — ${what} is deciding availability on its own`);
   }
   if (/quantity\s*(>|>=|===|!==|==|<|<=)/.test(body) || /\.quantity\s*\?\?/.test(body)) {

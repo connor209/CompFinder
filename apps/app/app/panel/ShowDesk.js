@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/stackpos.js";
-import { isListingAvailable, soldOutSkus, offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
+import { isListingAvailable, offSaleIndex, offSaleReason, listingLookup } from "@/lib/stockcheck.js";
 import { gameOf, gameFacets, filterByGames, gameName, UNKNOWN_GAME, GAMES } from "@/lib/games.js";
 import { getSetIndex } from "@/lib/set-index.js";
 import {
@@ -580,7 +580,7 @@ export default function ShowDesk() {
     const sb = supabase();
     const [cards, listings, sets] = await Promise.all([
       pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null)),
-      pagedSelect(() => sb.from("ebay_listings").select("sku,price_value,price_currency,quantity,extra").not("sku", "is", null)),
+      pagedSelect(() => sb.from("ebay_listings").select("sku,ebay_item_id,price_value,price_currency,quantity,extra").not("sku", "is", null)),
       // The catalogue's set names are the last way to tell one game from
       // another. A failed read costs that fallback, never the list.
       getSetIndex(sb).catch(() => ({ gameIndex: null }))
@@ -591,17 +591,9 @@ export default function ShowDesk() {
     // ago — and they came out at the TOP of a list ranked by value, because
     // the expensive cards are the ones that sell. isListingAvailable() in
     // stockcheck.js is the one definition of the difference.
-    const gone = soldOutSkus(listings);
-    const priceBySku = new Map();
-    const categoryBySku = new Map();
-    for (const l of listings) {
-      if (!isListingAvailable(l)) continue;
-      const k = String(l.sku).toLowerCase();
-      if (l.price_value != null && !priceBySku.has(k)) {
-        priceBySku.set(k, Math.round(Number(l.price_value) * 100));
-        categoryBySku.set(k, l.extra?.category || null);
-      }
-    }
+    // By SKU, then by the listing the card is filed on, so a pooled copy
+    // (own SKU, another card's listing — lib/copypool.js) is priced too.
+    const lookup = listingLookup(listings);
     // Where each card physically is, right now. Computed over EVERY unpulled
     // card, not just the recommended ones — a rank is a count within its whole
     // stack, so narrowing the list first would number the shortlist instead of
@@ -612,7 +604,7 @@ export default function ShowDesk() {
     // looks exactly like a card we never had, and this one needs reconciling
     // rather than ignoring.
     setRecSkipped(
-      cards.filter((c) => !isCardAway(c, awayIndex) && c.sku && gone.has(String(c.sku).toLowerCase())).length
+      cards.filter((c) => !isCardAway(c, awayIndex) && lookup.gone(c)).length
     );
     // A card in a Show Binder goes to a show WITH the binder, never on its
     // own: recommending it would split the binder, and a binder card checked
@@ -621,15 +613,15 @@ export default function ShowDesk() {
     const inBinder = (c) => isShowBinder(stackName.get(c.stack_id));
     setRecInBinder(cards.filter((c) => !isCardAway(c, awayIndex) && inBinder(c)).length);
     const ranked = cards
-      .filter((c) => !isCardAway(c, awayIndex) && !inBinder(c) && c.sku && priceBySku.has(String(c.sku).toLowerCase()))
+      .filter((c) => !isCardAway(c, awayIndex) && !inBinder(c) && lookup.priceOf(c) != null)
       .map((c) => ({
         card: c,
-        pricePence: priceBySku.get(String(c.sku).toLowerCase()),
+        pricePence: lookup.priceOf(c),
         rank: ranks.get(c.id) ?? null,
         depth: depths.get(c.stack_id) ?? null,
         graded: isSlabTitle(c.title),
         toploaded: isToploaderStack(stackName.get(c.stack_id)),
-        game: gameOf({ category: categoryBySku.get(String(c.sku).toLowerCase()), title: c.title }, sets.gameIndex)
+        game: gameOf({ category: lookup.categoryOf(c), title: c.title }, sets.gameIndex)
       }))
       // Toploaded cards first: already priced, stickered and sleeved.
       .sort(compareRecs);

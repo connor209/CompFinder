@@ -395,6 +395,42 @@ export function offSaleReason(sku, idx, itemId = null) {
   return "notlisted";
 }
 
+/**
+ * What a stack card is on sale for, read the way offSaleReason() reads it:
+ * by SKU, then by the listing the card is filed on (`ebay_item_id`). A pooled
+ * copy (lib/copypool.js) keeps its own SKU while its own listing is ended,
+ * so by SKU alone it has no price at all — and ★ Recommend show stock, which
+ * ranks on that price, would leave it out as unpriced.
+ *
+ * Only AVAILABLE listings count, as before: a sold shell at quantity 0 is
+ * still a row with a price on it. `gone(card)` is the old "sold on eBay"
+ * count — a SKU whose listing is at zero — except that a card still on sale
+ * through its item id is not gone.
+ *
+ * Returns { priceOf(card) → pence|null, categoryOf(card), gone(card) }.
+ */
+export function listingLookup(listings) {
+  const bySku = new Map();
+  const byItem = new Map();
+  for (const l of listings || []) {
+    if (!isListingAvailable(l) || l.price_value == null) continue;
+    const hit = { pence: Math.round(Number(l.price_value) * 100), category: l.extra?.category || null };
+    const k = l.sku ? String(l.sku).toLowerCase() : "";
+    if (k && !bySku.has(k)) bySku.set(k, hit);
+    if (l.ebay_item_id && !byItem.has(String(l.ebay_item_id))) byItem.set(String(l.ebay_item_id), hit);
+  }
+  const zero = soldOutSkus(listings);
+  const hitFor = (c) => {
+    const k = c?.sku ? String(c.sku).toLowerCase() : "";
+    return (k && bySku.get(k)) || (c?.ebay_item_id && byItem.get(String(c.ebay_item_id))) || null;
+  };
+  return {
+    priceOf: (c) => hitFor(c)?.pence ?? null,
+    categoryOf: (c) => hitFor(c)?.category ?? null,
+    gone: (c) => !!(c?.sku && zero.has(String(c.sku).toLowerCase())) && !hitFor(c)
+  };
+}
+
 /** When the card's sale was, by SKU then by its listing. */
 export function soldDateOf(sku, idx, itemId = null) {
   if (!idx) return null;
