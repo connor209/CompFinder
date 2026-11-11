@@ -6,7 +6,7 @@ import { liveRanks } from "@/lib/stackpos.js";
 import {
   parseCardUploaderMtg, planLoad, nextDivider, fileFingerprint, compareDividers,
   parsePaidOrders, matchOrders, walkOrder, pilesOf, pulledCm,
-  parseTcgptExport, checkListings, DIVIDER_SIZE, CARDMARKET_PREFIX, PLACEHOLDER_PRICE
+  parseTcgptExport, checkListings, tcgptImportCsv, tcgptImportName, cmCondition, CU_TO_CM, HOUSE_GRADES, DIVIDER_SIZE, CARDMARKET_PREFIX, PLACEHOLDER_PRICE
 } from "@/lib/cardmarket.js";
 import { loadCardmarket, alreadyLoaded, writeLoad, commitPicks } from "@/lib/cardmarket-store.js";
 import Fold from "./Fold";
@@ -105,7 +105,13 @@ export default function CardmarketStock() {
     const r = await writeLoad(supabase(), userId, plan, fingerprint);
     setBusy(false);
     if (r.error) { setMsg(r.error); return; }
-    setLastLoad(plan.dividers.filter((d) => !r.failed.includes(d.name)).map((d) => ({ name: d.name, count: d.cards.length })));
+    // The listing file is only offered for a load that landed whole: a file
+    // carrying cards the app does not hold would list cards no pick can find.
+    const tcgpt = r.failed.length ? null : tcgptImportCsv(loadFile.text);
+    setLastLoad({
+      dividers: plan.dividers.filter((d) => !r.failed.includes(d.name)).map((d) => ({ name: d.name, count: d.cards.length })),
+      file: tcgpt && !tcgpt.error ? { name: tcgptImportName(loadFile.name), csv: tcgpt.csv, unknown: tcgpt.unknown } : null
+    });
     setMsg(r.failed.length
       ? `Loaded ${plural(r.loaded, "card")}. ${r.failed.join(", ")} failed and ${r.failed.length === 1 ? "was" : "were"} not kept — load again from that divider.`
       : `Loaded ${plural(r.loaded, "card")}.`);
@@ -122,8 +128,18 @@ export default function CardmarketStock() {
   }, [parsedOrders, cards, stacks]);
   const walk = useMemo(() => (matched ? walkOrder(matched.picks, stacks, ranks) : []), [matched, stacks, ranks]);
   const piles = useMemo(() => (matched ? pilesOf(matched.picks) : []), [matched]);
-  const regradedPicks = matched ? matched.picks.filter((p) => p.warn).length : 0;
   const pileNo = useMemo(() => new Map(piles.map((p, i) => [p.orderId, p.seq ?? i + 1])), [piles]);
+
+  function downloadImport() {
+    const f = lastLoad?.file;
+    if (!f) return;
+    const url = URL.createObjectURL(new Blob([f.csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = f.name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   async function onOrderFile(e) {
     const f = await readFile(e);
@@ -191,6 +207,9 @@ export default function CardmarketStock() {
           divider. A position is counted from the divider, so it closes up as cards are pulled. These dividers never appear in
           eBay&apos;s Reconcile or in any filing plan.
         </p>
+        <p className="hint hint-small">
+          Grades, ours → Cardmarket: {HOUSE_GRADES.map((g) => `${g} → ${CU_TO_CM[g]}`).join(" · ")}. Our LP and Cardmarket&apos;s LP are different grades.
+        </p>
         {setupError ? <p className="hint" style={{ color: "var(--warn-ink)" }}>{setupError}</p> : null}
         {msg ? <p className="hint">{msg}</p> : null}
       </div>
@@ -241,9 +260,20 @@ export default function CardmarketStock() {
           </>
         ) : null}
         {lastLoad ? (
-          <p className="hint">
-            Write these on the dividers, in order: <b>{lastLoad.map((d) => `${d.name} (${d.count})`).join(" · ")}</b>
-          </p>
+          <>
+            <p className="hint">
+              Write these on the dividers, in order: <b>{lastLoad.dividers.map((d) => `${d.name} (${d.count})`).join(" · ")}</b>
+            </p>
+            {lastLoad.file ? (
+              <div className="sd-opts">
+                <button className="btn btn-primary" onClick={downloadImport}>⬇ File for TCG PowerTools</button>
+                <span className="hint-small">
+                  The same file with the grades already in Cardmarket&apos;s terms — import this one, not the CardUploader original.
+                  {lastLoad.file.unknown ? ` ${plural(lastLoad.file.unknown, "row")} had a grade the table does not know and went through unchanged.` : ""}
+                </span>
+              </div>
+            ) : null}
+          </>
         ) : null}
       </Fold>
 
@@ -254,18 +284,13 @@ export default function CardmarketStock() {
         summary={matched
           ? `${plural(piles.length, "order")} · ${pulled.size} of ${matched.picks.length} in hand${matched.done ? ` · ${matched.done} already pulled` : ""}`
           : "Upload Cardmarket's paid-orders export (ArticlesInPaidOrders.csv)."}
-        alert={matched && (matched.unmatched.length || regradedPicks) ? (
+        alert={matched && matched.unmatched.length ? (
           <div>
             {matched.unmatched.length ? (
               <p className="hint hint-small" style={{ color: "var(--warn-ink)" }}>
                 ⚠ {plural(matched.unmatched.length, "card")} sold that are not in the box:{" "}
-                {matched.unmatched.slice(0, 4).map((u) => `${u.line.name} ${u.line.condition}${u.line.foil ? " foil" : ""} (order ${u.line.orderId})`).join("; ")}
+                {matched.unmatched.slice(0, 4).map((u) => `${u.line.name} ${u.line.condition}${u.line.foil ? " foil" : ""} (order ${u.line.orderId})${u.boxGrades.length ? ` — the box has it as ${u.boxGrades.join("/")} (ours) — check the grade on that listing` : ""}`).join("; ")}
                 {matched.unmatched.length > 4 ? ` and ${matched.unmatched.length - 4} more` : ""}.
-              </p>
-            ) : null}
-            {regradedPicks ? (
-              <p className="hint hint-small" style={{ color: "var(--warn-ink)" }}>
-                ⚠ {plural(regradedPicks, "pick")} sold in a different grade from the one the box has — marked on the row. Check those listings.
               </p>
             ) : null}
           </div>
@@ -301,8 +326,7 @@ export default function CardmarketStock() {
                       <span className="stack-pos" title="Count this many from the divider">{r.rank ?? "?"}</span>
                       <span className="stack-sku">pile {pileNo.get(r.line.orderId)}</span>
                       <span className="stack-title">
-                        {r.line.name} · {r.line.expansion} · {r.line.condition}{r.line.foil ? " · foil" : ""}{r.line.language !== "English" ? ` · ${r.line.language}` : ""}
-                        {r.warn ? <span className="hint-small" style={{ color: "var(--warn-ink)", display: "block" }}>{r.warn}</span> : null}
+                        {r.line.name} · {r.line.expansion} · {r.line.condition} on Cardmarket ({r.card.cm?.condition} ours){r.line.foil ? " · foil" : ""}{r.line.language !== "English" ? ` · ${r.line.language}` : ""}
                       </span>
                     </div>
                   ))}
@@ -349,7 +373,7 @@ export default function CardmarketStock() {
                   {check.regraded.map((r, i) => (
                     <div className="ps-row" key={`g${i}`}>
                       <span className="stack-sku">{r.skus.slice(0, 2).join(", ")}</span>
-                      <span className="stack-title">{r.name} — {r.boxCondition} in the box, listed as <b>{r.listedAs}</b>{r.count > 1 ? ` ×${r.count}` : ""}</span>
+                      <span className="stack-title">{r.name} — {r.boxCondition} (ours) should be {cmCondition(r.boxCondition)} on Cardmarket, listed as <b>{r.listedAs}</b>{r.count > 1 ? ` ×${r.count}` : ""}</span>
                     </div>
                   ))}
                 </div>
@@ -362,11 +386,17 @@ export default function CardmarketStock() {
                   {check.unlisted.map((r, i) => (
                     <div className="ps-row" key={`u${i}`}>
                       <span className="stack-sku">{r.skus.slice(0, 2).join(", ")}</span>
-                      <span className="stack-title">{r.name} · {r.condition}{r.count > 1 ? ` ×${r.count}` : ""}</span>
+                      <span className="stack-title">{r.name} · {r.condition} (ours) / {cmCondition(r.condition)} on Cardmarket{r.count > 1 ? ` ×${r.count}` : ""}</span>
                     </div>
                   ))}
                 </div>
               </>
+            ) : null}
+            {check.damaged.length ? (
+              <p className="hint hint-small">
+                {plural(check.damaged.reduce((n, d) => n + d.count, 0), "DMG card")} not listed: {check.damaged.slice(0, 6).map((d) => d.name).join(", ")}
+                {check.damaged.length > 6 ? "…" : ""}. A DMG card goes up only when it is worth it, so this is the floor price deciding, not a fault.
+              </p>
             ) : null}
             {check.placeholder.length ? (
               <>

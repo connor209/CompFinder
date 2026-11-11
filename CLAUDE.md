@@ -281,11 +281,13 @@ stream` (the relay, only while streaming).
 
 - `scripts/check-cardmarket.mjs` — the Magic chaos sort, on rows from the
   real files: dividers run A … Z, AA like spreadsheet columns and every load
-  starts fresh, a card with no product id still holds its place, a sale is
-  matched on product + grade + finish + language and never answers an NM or
-  LP sale with another grade, the same order file twice picks nothing new,
-  the walk is divider order and deepest first, the TCG PowerTools check finds
-  the dropped DMG cards, the MP→GD listings and the 1000 placeholder, and no
+  starts fresh, a card with no product id still holds its place, the house
+  grade table (LP→EX, MP→GD, HP→LP, DMG→PO) and that it is applied from OUR
+  grade every time, a sale is matched on product + grade + finish + language
+  with no near miss, the same order file twice picks nothing new, the walk is
+  divider order and deepest first, the TCG PowerTools import file changes
+  only the condition column, the check flags our LP listed as Cardmarket LP
+  and the 1000 placeholder and keeps DMG apart, and no
   eBay screen (Reconcile, a filing plan, the nightly import) touches an MTG
   divider.
 
@@ -2680,12 +2682,29 @@ pricing here.
 - **The order export's header row is not a header** — its first, fourth and
   seventh cells change every file — so columns are read by position and the
   two fixed ones are checked. A file that has moved is refused, never matched.
-- **A grade near miss is narrow on purpose.** CardUploader's MP, HP and DMG
-  have no Cardmarket twin, so a listing tool chose one (the first import put
-  MP up as **GD, which ranks above LP**). A GD/PL/PO sale with no exact card
-  is answered by the same product in one of those grades, flagged. An NM or
-  LP sale never is: those words mean the same on both scales, and the first
-  draft sent an NM buyer the LP copy until the check caught it.
+- **The grade table is read off the house conditioning guide**, not a US-to-EU
+  chart (decided 2026-11-11): NM→NM, LP→**EX**, MP→**GD** (ours forbids any
+  crease, Cardmarket's Light Played allows one), HP→**LP** (a bend or a short
+  crease — what Cardmarket means by Light Played), DMG→**PO** ("not a
+  playable copy"). Never MT. So "LP" means two grades here, and every screen
+  that shows one says whose it is. `CU_TO_CM` in `cardmarket.js` is the only
+  copy.
+- **The conversion happens once, in the app.** A load hands back the
+  CardUploader file with the condition column rewritten into Cardmarket's
+  grades (`tcgptImportCsv`), and THAT is what goes into TCG PowerTools, so the
+  listing tool converts nothing and cannot disagree with the pick list. Its
+  own default had been LP→LP, which put our LP cards up three Cardmarket
+  grades below what our guide says they are. A card's Cardmarket grade is
+  worked out from OUR grade every time, never read back from a stored copy, so
+  a change to the table never strands a card loaded under the old one.
+- **There is no grade near miss.** With one conversion, a sale in a grade the
+  box does not hold is a listing changed by hand, and the card in the box is
+  not what that buyer paid for. It is reported unmatched, naming the grades
+  the box does hold. (A first draft allowed near misses and sent an NM buyer
+  the LP copy until the check caught it.)
+- **DMG goes up only when it is worth it**, which is TCG PowerTools' floor
+  price deciding. An unlisted DMG card is reported on its own line in the
+  check, never as a fault.
 - **A committed pick records its order on the card** (`cm.order_id`), and the
   match counts those as done, so the same file uploaded twice picks nothing
   new while a new order for the same card still gets the next copy.
@@ -2697,8 +2716,9 @@ pricing here.
   lost), and the nightly import counts an eBay SKU shaped `MTG-C37` as
   non-standard rather than filing it into the box.
 - **The listing check is the TCG PowerTools export against the box**: cards
-  not listed (the import dropped DMG without a word), listed in another
-  grade, or left at the 1000 placeholder autoprice leaves behind. Listed
+  not listed, listed in a grade the table does not give them (matched to the
+  most likely cause first — the same letters, then the nearest grade), or
+  left at the 1000 placeholder autoprice leaves behind. Listed
   copies the box does not hold are counted, not itemised — the export covers
   the whole account.
 - **CSV only for now.** Cardmarket's xlsx export carries the same rows; the

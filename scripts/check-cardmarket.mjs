@@ -26,7 +26,7 @@ import {
   isCardmarketStack, dividerLetters, letterIndex, lettersOf, nextDivider, compareDividers,
   parseCsvText, parsePrice, parseCardUploaderMtg, planLoad, fileFingerprint, cmFields, cmCondition,
   parsePaidOrders, matchOrders, walkOrder, pilesOf, pulledCm,
-  parseTcgptExport, checkListings
+  parseTcgptExport, checkListings, tcgptImportCsv, tcgptImportName
 } from "../apps/app/lib/cardmarket.js";
 import { liveRanks } from "../apps/app/lib/stackpos.js";
 import { fileableStacks } from "../apps/app/lib/toploader.js";
@@ -58,9 +58,9 @@ const CU = `"quantity","name","set","rarity","cn","condition","language","isFirs
 "1","Plated Seastrider","Conspiracy","Common","103","LP","English","","","","","","","267071","83277"`;
 
 const ORDERS = `Magic the Gathering Singles;Product ID;-;3 Articles;Localized Article Name;Expansion;4.81;Comments;Condition;Rarity;Collector Number;Language;Order ID;isFoil;isSigned;isAltered
-1;54;1;Thoughtcast;Thoughtcast;Mirrodin;1;;LP;Common;54;English;1313779150;false;false;false
-1;286;1;Vault of Whispers;Vault of Whispers;Mirrodin;1.9;;LP;Common;286;English;1313779150;false;false;false
-2;254240;1;Ghostly Flicker;Ghostly Flicker;Avacyn Restored;1.91;;LP;Common;57;English;1313921932;false;false;false
+1;54;1;Thoughtcast;Thoughtcast;Mirrodin;1;;EX;Common;54;English;1313779150;false;false;false
+1;286;1;Vault of Whispers;Vault of Whispers;Mirrodin;1.9;;EX;Common;286;English;1313779150;false;false;false
+2;254240;1;Ghostly Flicker;Ghostly Flicker;Avacyn Restored;1.91;;EX;Common;57;English;1313921932;false;false;false
 `;
 
 const TCGPT = `﻿"cardmarketId","quantity","name","set","setCode","cn","condition","language","isFoil","isPlayset","isSigned","oldPrice","price","comment","nameDE","nameES","nameFR","nameIT","rarity","listedAt"
@@ -103,8 +103,9 @@ const cu = parseCardUploaderMtg(CU);
 check("parses", !cu.error, cu.error);
 check("a quantity-2 row is two cards in the box", cu.cards.length === 13, `${cu.cards.length}`);
 check("a card with no product id is KEPT, so the cards after it keep their place", cu.cards[6].name === "Mystery card" && cu.noProduct === 1);
-check("MP is Played on Cardmarket, not Good — GD ranks above LP", cmCondition("MP") === "PL" && cmCondition("DMG") === "PO" && cmCondition("LP") === "LP");
-check("a Cardmarket grade passes through", cmCondition("GD") === "GD" && cmCondition("EX") === "EX");
+check("the house guide's table: NM→NM, LP→EX, MP→GD, HP→LP, DMG→PO",
+  cmCondition("NM") === "NM" && cmCondition("LP") === "EX" && cmCondition("MP") === "GD" && cmCondition("HP") === "LP" && cmCondition("DMG") === "PO");
+check("a grade that isn't ours is not guessed at", cmCondition("GD") === null && cmCondition("EX") === null && cmCondition("") === null);
 check("foil is read", cu.cards[0].foil === true && cu.cards[12].foil === false);
 check("the eBay-format export is refused", !!parseCardUploaderMtg('"*Action(SiteID=UK|Country=GB|Currency=GBP|Version=1193)","*Title"\n"Add","x"').error);
 
@@ -134,7 +135,7 @@ const bySku = (sku) => box.find((c) => c.sku === sku);
 console.log("\nMatching Cardmarket's paid-orders file");
 const po = parsePaidOrders(ORDERS);
 check("parses by position, past a header that changes every file", !po.error && po.lines.length === 3, po.error);
-check("order id, product, grade and price", po.lines[1].orderId === "1313779150" && po.lines[1].productId === 286 && po.lines[1].condition === "LP" && po.lines[1].price === 1.9);
+check("order id, product, grade and price", po.lines[1].orderId === "1313779150" && po.lines[1].productId === 286 && po.lines[1].condition === "EX" && po.lines[1].price === 1.9);
 check("Cardmarket's own order number is kept for the pile", po.lines[0].seq === 1 && po.lines[2].seq === 2);
 check("a file whose columns moved is refused", !!parsePaidOrders(ORDERS.replace("Product ID", "Produkt-ID")).error);
 check("a comma-decimal file reads the same", parsePaidOrders(ORDERS.replace(";1.9;", ";1,9;")).lines[1].price === 1.9);
@@ -155,9 +156,14 @@ check("an NM sale is never sent the LP or DMG copy", mg.picks.length === 0 && mg
 
 const gdSale = { ...po.lines[0], productId: 10640, condition: "GD", orderId: "12" };
 const mm = matchOrders([gdSale], box, stacks);
-check("a card listed MP→GD still finds its card, flagged", mm.picks.length === 1 && mm.picks[0].card.sku === "MTG-A4" && /GD/.test(mm.picks[0].warn || "") && /MP/.test(mm.picks[0].warn || ""));
-
-check("an LP sale is never answered by the MP card", matchOrders([{ ...gdSale, condition: "LP", orderId: "13" }], box, stacks).picks.length === 0);
+check("a GD sale is our MP card", mm.picks.length === 1 && mm.picks[0].card.sku === "MTG-A4");
+const lpSale = matchOrders([{ ...gdSale, condition: "LP", orderId: "13" }], box, stacks);
+check("a Cardmarket LP sale is never sent our MP card — their LP is our HP", lpSale.picks.length === 0);
+check("…it is unmatched, naming the grade the box does hold", lpSale.unmatched[0]?.boxGrades.join() === "MP");
+const oldListing = matchOrders([{ ...po.lines[0], condition: "LP", orderId: "14" }], box, stacks);
+check("a sale off an old listing (our LP put up as Cardmarket LP) is not picked", oldListing.picks.length === 0 && oldListing.unmatched[0]?.boxGrades.join() === "LP");
+const stale = box.map((c) => (c.sku === "MTG-A5" ? { ...c, cm: { ...c.cm, cm_condition: "LP" } } : c));
+check("the grade is worked out from OURS every time, never read off a stored copy", matchOrders([po.lines[0]], stale, stacks).picks[0]?.card.sku === "MTG-A5");
 
 const two = matchOrders([{ ...po.lines[2], quantity: 2 }], box, stacks);
 check("quantity 2 is two cards from two places", two.picks.length === 2 && new Set(two.picks.map((p) => p.card.id)).size === 2);
@@ -191,13 +197,26 @@ console.log("\nChecking a TCG PowerTools export against the box");
 const tp = parseTcgptExport(TCGPT);
 check("parses through the byte-order mark", !tp.error && tp.rows.length === 10, tp.error);
 const ck = checkListings(box, tp.rows);
-check("the DMG Predatory Sliver is in the box and not listed", ck.unlisted.some((u) => u.name === "Predatory Sliver" && u.condition === "DMG"));
-check("Last-Ditch Effort is listed as GD while the box says MP", ck.regraded.some((r) => r.name === "Last-Ditch Effort" && r.listedAs === "GD" && r.boxCondition === "MP"));
-check("…and is not ALSO called unlisted", !ck.unlisted.some((u) => u.name === "Last-Ditch Effort"));
+check("the DMG Predatory Sliver is not listed, and kept apart as the floor deciding", ck.damaged.some((u) => u.name === "Predatory Sliver") && !ck.unlisted.some((u) => u.condition === "DMG"));
+check("Last-Ditch Effort listed as GD is right: our MP is GD", !ck.regraded.some((r) => r.name === "Last-Ditch Effort") && !ck.unlisted.some((u) => u.name === "Last-Ditch Effort"));
+check("our LP cards listed as Cardmarket LP are flagged — they should be EX", ck.regraded.some((r) => r.name === "Thoughtcast" && r.listedAs === "LP" && r.boxCondition === "LP"));
+check("…and are not ALSO called unlisted", !ck.unlisted.some((u) => u.name === "Thoughtcast"));
 check("Arcane Denial at 1000 is flagged", ck.placeholder.some((r) => r.name === "Arcane Denial"));
 check("the card with no product id is not reported as anything", !ck.unlisted.some((u) => /Mystery/.test(u.name)));
-check("both Seastriders are listed, foil and plain apart", !ck.unlisted.some((u) => u.name === "Plated Seastrider"));
+check("both Seastriders are listed, foil and plain apart", !ck.unlisted.some((u) => u.name === "Plated Seastrider") && ck.regraded.filter((r) => r.name === "Plated Seastrider").length === 2);
 check("a listing the box doesn't hold is counted, not listed", ck.elsewhere === 1, `${ck.elsewhere}`);
+
+console.log("\nThe file TCG PowerTools imports");
+const imp1 = tcgptImportCsv(CU);
+const back = parseCsvText(imp1.csv);
+const orig = parseCsvText(CU);
+const ci = orig[0].indexOf("condition");
+const pi = orig[0].indexOf("cardmarketId");
+check("same header, same rows, same order", back.length === orig.length && back[0].join() === orig[0].join() && back.every((r, i) => r[pi] === orig[i][pi]));
+check("grades rewritten into Cardmarket's", back.slice(1).map((r) => r[ci]).join() === orig.slice(1).map((r) => cmCondition(r[ci])).join());
+check("…NM stays NM, DMG is PO, LP is EX, MP is GD", back[1][ci] === "NM" && back[2][ci] === "PO" && back[3][ci] === "EX" && back[4][ci] === "GD");
+check("every other column is untouched", back.every((r, i) => r.every((v, j) => j === ci || v === orig[i][j])));
+check("named after the CardUploader file", tcgptImportName("magic101.csv") === "magic101-cardmarket-grades.csv");
 
 // ── the eBay screens leave the boxes alone ──────────────────────────────────
 

@@ -43,26 +43,33 @@ export const DIVIDER_SIZE = 50;
 export const CM_GRADES = ["MT", "NM", "EX", "GD", "LP", "PL", "PO"];
 
 /**
- * CardUploader grades on the NM/LP/MP/HP/DMG scale; Cardmarket sells on
- * MT/NM/EX/GD/LP/PL/PO. The sale arrives in Cardmarket's grade, so the box is
- * matched in it.
+ * Our grade to Cardmarket's, from the house conditioning guide (Granite City
+ * Collectables, Part A + B, decided 2026-11-11). Read off what each of OUR
+ * grades allows, not off a US-to-EU conversion chart:
  *
- * MP is PL, not GD. GD ("Good") ranks ABOVE Light Played on Cardmarket, and
- * the first TCG PowerTools import mapped MP to it — advertising a moderately
- * played card as better than the LP ones. A sale of one of those still finds
- * its card (see `matchOrders`, the condition near miss), and says so.
+ *   NM  → NM  fewer than three wear points, close look only. Never MT: our NM
+ *             is "not pack-fresh" by its own wording.
+ *   LP  → EX  light flaws, none severe, no crease, bend or dent.
+ *   MP  → GD  all-round or corner wear, NO crease of any kind (B1). Cardmarket's
+ *             "Light Played" allows bends and minor creases, so ours is better.
+ *   HP  → LP  a bend, dent or short crease, still intact (B1). Cardmarket's
+ *             "Light Played" is this, whatever the name suggests.
+ *   DMG → PO  "not a playable copy". Cardmarket's PL implies it still plays.
+ *
+ * So "LP" means two different things in this workflow, and every screen that
+ * shows a grade says whose it is.
+ *
+ * This is the ONLY conversion. The app writes the file TCG PowerTools imports
+ * with the grades already in Cardmarket's terms (`tcgptImportCsv`), so the
+ * listing tool converts nothing and cannot disagree with the pick list. A
+ * card's Cardmarket grade is worked out from OUR grade every time it is
+ * needed, never read back from a stored copy, so changing this table can
+ * never strand the cards already loaded under the old one.
  */
-export const CU_TO_CM = { NM: "NM", LP: "LP", MP: "PL", HP: "PL", DMG: "PO", MT: "MT", EX: "EX", GD: "GD", PL: "PL", PO: "PO" };
+export const CU_TO_CM = { NM: "NM", LP: "EX", MP: "GD", HP: "LP", DMG: "PO" };
 
-/** CardUploader grades that Cardmarket has no word for, so a listing tool chose one. */
-export const CONVERTED_GRADES = new Set(["MP", "HP", "DMG"]);
-
-/**
- * Where a converted grade can have landed. Never NM, MT, EX or LP: a sale in
- * one of those wants that card, and a tool that had put an MP card up as NM
- * would be a bigger problem than a pick list can paper over.
- */
-export const LANDING_GRADES = new Set(["GD", "PL", "PO"]);
+/** Our grades, best first. */
+export const HOUSE_GRADES = ["NM", "LP", "MP", "HP", "DMG"];
 
 export function cmCondition(code) {
   return CU_TO_CM[String(code || "").trim().toUpperCase()] || null;
@@ -275,6 +282,36 @@ export function cmTitle(card) {
     .filter(Boolean).join(" ");
 }
 
+/**
+ * The file TCG PowerTools imports: the CardUploader export exactly as it came,
+ * with the condition column rewritten into Cardmarket's grades. Every other
+ * column and the row order are untouched, so it imports as the original did.
+ * A grade the table does not know is left as it was and counted — TCG
+ * PowerTools will then convert it itself, which the listing check reports.
+ */
+export function tcgptImportCsv(text) {
+  const rows = parseCsvText(text, ",");
+  const ci = (rows[0] || []).map(norm).indexOf("condition");
+  if (ci < 0) return { csv: "", unknown: 0, error: "No condition column." };
+  let unknown = 0;
+  const out = rows.map((r, i) => {
+    if (i === 0) return r;
+    const g = cmCondition(r[ci]);
+    if (!g) { unknown += 1; return r; }
+    const copy = r.slice();
+    copy[ci] = g;
+    return copy;
+  });
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  return { csv: out.map((r) => r.map(q).join(",")).join("\n") + "\n", unknown, error: null };
+}
+
+/** The import file's name: the CardUploader one, marked. */
+export function tcgptImportName(name) {
+  const base = String(name || "carduploader.csv").replace(/\.csv$/i, "");
+  return `${base}-cardmarket-grades.csv`;
+}
+
 // ── the article key ──────────────────────────────────────────────────────────
 
 /** Same article to the buyer: product, grade, finish, language, signed, altered. */
@@ -293,7 +330,7 @@ export function articleOfCard(card) {
   if (!cm || !cm.product_id) return null;
   return {
     productId: cm.product_id,
-    condition: cm.cm_condition || cmCondition(cm.condition),
+    condition: cmCondition(cm.condition),
     foil: !!cm.foil, signed: !!cm.signed, altered: !!cm.altered,
     language: cm.language || "English"
   };
@@ -355,11 +392,11 @@ export function parsePaidOrders(text) {
  * Copies are taken front first (lowest divider, lowest position): any copy is
  * correct, and the front is the least counting.
  *
- * A unit with no exact match is answered by a card of the same product whose
- * CardUploader grade is MP, HP or DMG, flagged: Cardmarket has no such grade,
- * so the listing tool picked one (the first import put MP up as GD), and the
- * card in the box is the card that was sold. Never for NM or LP, which mean
- * the same on both scales — an NM buyer is never sent an LP card.
+ * There is no near miss. The grade is converted in one place, so a sale in a
+ * grade the box does not hold is a listing somebody changed by hand, and the
+ * card in the box is not the card that buyer paid for. It is reported as
+ * unmatched, with the grades the box DOES hold that product in, so the
+ * listing can be found and put right.
  */
 export function matchOrders(lines, cards, stacks) {
   const stackOrder = new Map((stacks || []).map((s) => [s.id, letterIndex(dividerLetters(s))]));
@@ -385,15 +422,11 @@ export function matchOrders(lines, cards, stacks) {
     const k = articleKey(art);
     if (!exact.has(k)) exact.set(k, []);
     exact.get(k).push(c);
-    // Only a grade with no Cardmarket twin can have been converted on the
-    // way there. NM and LP are the same word on both scales, so an NM sale
-    // is never answered by an LP card.
-    if (!CONVERTED_GRADES.has(String(c.cm?.condition || "").toUpperCase())) continue;
     const lk = looseKey(art);
     if (!loose.has(lk)) loose.set(lk, []);
     loose.get(lk).push(c);
   }
-  for (const list of [...exact.values(), ...loose.values()]) list.sort(front);
+  for (const list of exact.values()) list.sort(front);
 
   const used = new Set();
   const take = (list) => {
@@ -416,14 +449,13 @@ export function matchOrders(lines, cards, stacks) {
       units -= already;
     }
     for (let u = 0; u < units; u++) {
-      let card = take(exact.get(articleKey(art)));
-      let warn = null;
-      if (!card && LANDING_GRADES.has(l.condition)) {
-        card = take(loose.get(looseKey(art)));
-        if (card) warn = `Sold as ${l.condition}; the box has it as ${card.cm?.condition || "?"}. Check the listing's grade.`;
+      const card = take(exact.get(articleKey(art)));
+      if (card) picks.push({ line: l, card });
+      else {
+        const others = (loose.get(looseKey(art)) || []).filter((x) => !used.has(x.id));
+        const grades = [...new Set(others.map((x) => x.cm?.condition).filter(Boolean))];
+        unmatched.push({ line: l, boxGrades: grades });
       }
-      if (card) picks.push({ line: l, card, warn });
-      else unmatched.push({ line: l });
     }
   }
   return { picks, unmatched, done };
@@ -500,9 +532,12 @@ export function parseTcgptExport(text) {
 /**
  * Is every card in the box for sale, as the card it is?
  *
- * - `unlisted`: in the box, not in the export at all — the two DMG cards the
- *   first import dropped without a word.
- * - `regraded`: listed, but in another grade — MP listed as GD.
+ * - `unlisted`: in the box, not in the export at all.
+ * - `damaged`: the same, for our DMG cards. Kept apart and not called a
+ *   problem: a DMG card is listed only when it is worth enough (decided
+ *   2026-11-11), which is TCG PowerTools' floor price deciding, not a fault.
+ * - `regraded`: listed in a grade other than the one the table gives it —
+ *   TCG PowerTools converted it again, or it was edited by hand.
  * - `placeholder`: listed at TCG PowerTools' 1000, or with no price — autoprice
  *   found nothing and the listing kept the import's stand-in.
  * - `elsewhere`: listed copies the box does not hold. Counted, not listed: the
@@ -537,6 +572,7 @@ export function checkListings(cards, rows) {
     g.set(r.condition, (g.get(r.condition) || 0) + r.quantity);
   }
   const unlisted = [];
+  const damaged = [];
   const regraded = [];
   // A grade listed beyond what the box holds in that grade is where a moved
   // grade went; spend it once.
@@ -547,26 +583,39 @@ export function checkListings(cards, rows) {
       if (n > inBox) spare.set(`${lk}|${g}`, n - inBox);
     }
   }
+  // Shortfalls are matched to spare listings most-likely-cause first. Within
+  // one product, a box grade whose LETTERS are the listed grade wins (our LP
+  // put up as Cardmarket LP is the conversion a tool makes by default), then
+  // the nearest grade on Cardmarket's scale. First-come would hand a spare LP
+  // listing to the DMG copy as readily as to the LP one.
+  const shorts = [];
   for (const [k, b] of box) {
     const short = b.count - (listed.get(k) || 0);
-    if (short <= 0) continue;
-    let left = short;
-    const grades = listedLoose.get(looseKey(b.art));
-    if (grades) {
-      for (const g of grades.keys()) {
-        const sk = `${looseKey(b.art)}|${g}`;
-        const n = Math.min(left, spare.get(sk) || 0);
-        if (n > 0) {
-          regraded.push({ name: b.name, boxCondition: b.condition, listedAs: g, count: n, skus: b.skus });
-          spare.set(sk, (spare.get(sk) || 0) - n);
-          left -= n;
-        }
-      }
+    if (short > 0) shorts.push({ b, left: short });
+  }
+  const rank = (g) => CM_GRADES.indexOf(g);
+  const pairs = [];
+  for (const sh of shorts) {
+    const lk = looseKey(sh.b.art);
+    for (const g of (listedLoose.get(lk) || new Map()).keys()) {
+      if (!(spare.get(`${lk}|${g}`) > 0)) continue;
+      const sameLetters = sh.b.condition === g ? 0 : 1;
+      pairs.push({ sh, g, sk: `${lk}|${g}`, cost: sameLetters * 100 + Math.abs(rank(g) - rank(sh.b.art.condition)) });
     }
-    if (left > 0) unlisted.push({ name: b.name, condition: b.condition, count: left, skus: b.skus });
+  }
+  pairs.sort((x, y) => x.cost - y.cost);
+  for (const p of pairs) {
+    const n = Math.min(p.sh.left, spare.get(p.sk) || 0);
+    if (n <= 0) continue;
+    regraded.push({ name: p.sh.b.name, boxCondition: p.sh.b.condition, listedAs: p.g, count: n, skus: p.sh.b.skus });
+    spare.set(p.sk, spare.get(p.sk) - n);
+    p.sh.left -= n;
+  }
+  for (const { b, left } of shorts) {
+    if (left > 0) (b.condition === "DMG" ? damaged : unlisted).push({ name: b.name, condition: b.condition, count: left, skus: b.skus });
   }
   let elsewhere = 0;
   for (const [k, n] of listed) elsewhere += Math.max(0, n - (box.get(k)?.count || 0));
   elsewhere -= regraded.reduce((s, r) => s + r.count, 0);
-  return { unlisted, regraded, placeholder, elsewhere: Math.max(0, elsewhere) };
+  return { unlisted, damaged, regraded, placeholder, elsewhere: Math.max(0, elsewhere) };
 }
