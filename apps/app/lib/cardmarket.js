@@ -1,0 +1,572 @@
+/**
+ * Cardmarket stock — Magic singles kept in a chaos sort, sold only on
+ * Cardmarket, picked from a daily order file.
+ *
+ * The physical system, as it is run (decided 2026-11-11):
+ *
+ * - Cards are scanned in CardUploader 50 at a time and stored in SCAN ORDER
+ *   behind a divider. Dividers run A, B … Z, AA, AB … like spreadsheet
+ *   columns, and every load starts on a fresh divider — a part-filled one is
+ *   never topped up.
+ * - In the app a divider is a stack named `MTG-<letters>` (the Yu-Gi-Oh
+ *   stacks are `YGO-A`; same convention, `stackFromSku()` already reads
+ *   `MTG-C37`). The boxes are in their own part of the office, and the prefix
+ *   keeps them apart in the app the same way.
+ * - A card's SKU (`MTG-C37`) is a NAME, assigned at load and never changed. Its
+ *   position is a LIVE count: these are unsleeved, unlabelled cards, so when
+ *   card 12 goes the card that was 37th is physically the 36th you count to.
+ *   That is `liveRanks()` in stackpos.js, the same rule every stack follows.
+ *
+ * Nothing here is listed on eBay, so a Cardmarket stack is not a stack an
+ * eBay screen may reason about: Reconcile would call every card in it "not
+ * listed", and a filing plan would put a returned Pokémon card behind an MTG
+ * divider. `isCardmarketStack()` is the one test, and those screens ask it.
+ *
+ * Matching is on Cardmarket's PRODUCT ID, the one field all three files carry
+ * (`cardmarketId` in CardUploader and TCG PowerTools, `Product ID` in the
+ * order export). Nothing else survives the trip: names grow a back face
+ * ("Emeritus of Ideation // Ancestral Recall"), sets are renamed ("Magic 2015
+ * (M15)" / "Magic 2015"), collector numbers change (the timeshifted Spined
+ * Sliver is 101 in one file and 0 in the other). Two copies that agree on
+ * product, condition, finish, language, signed and altered are the same
+ * article to the buyer, so either may be sent — the pick list sends you to
+ * the one nearest the front.
+ *
+ * Framework-free and import-free, so check-cardmarket.mjs loads it under bare
+ * node and toploader.js can import it without a cycle.
+ */
+
+export const CARDMARKET_PREFIX = "MTG-";
+export const DIVIDER_SIZE = 50;
+
+/** Cardmarket's grades, best first. */
+export const CM_GRADES = ["MT", "NM", "EX", "GD", "LP", "PL", "PO"];
+
+/**
+ * CardUploader grades on the NM/LP/MP/HP/DMG scale; Cardmarket sells on
+ * MT/NM/EX/GD/LP/PL/PO. The sale arrives in Cardmarket's grade, so the box is
+ * matched in it.
+ *
+ * MP is PL, not GD. GD ("Good") ranks ABOVE Light Played on Cardmarket, and
+ * the first TCG PowerTools import mapped MP to it — advertising a moderately
+ * played card as better than the LP ones. A sale of one of those still finds
+ * its card (see `matchOrders`, the condition near miss), and says so.
+ */
+export const CU_TO_CM = { NM: "NM", LP: "LP", MP: "PL", HP: "PL", DMG: "PO", MT: "MT", EX: "EX", GD: "GD", PL: "PL", PO: "PO" };
+
+/** CardUploader grades that Cardmarket has no word for, so a listing tool chose one. */
+export const CONVERTED_GRADES = new Set(["MP", "HP", "DMG"]);
+
+/**
+ * Where a converted grade can have landed. Never NM, MT, EX or LP: a sale in
+ * one of those wants that card, and a tool that had put an MP card up as NM
+ * would be a bigger problem than a pick list can paper over.
+ */
+export const LANDING_GRADES = new Set(["GD", "PL", "PO"]);
+
+export function cmCondition(code) {
+  return CU_TO_CM[String(code || "").trim().toUpperCase()] || null;
+}
+
+const norm = (s) => String(s ?? "").trim();
+const truthy = (v) => /^(true|1|yes|x)$/i.test(norm(v));
+
+// ── dividers ─────────────────────────────────────────────────────────────────
+
+/** Is this a Cardmarket divider? Takes a stack row ({ name }) or a bare name. */
+export function isCardmarketStack(stackOrName) {
+  const name = stackOrName && typeof stackOrName === "object" ? stackOrName.name : stackOrName;
+  return /^MTG-[A-Z]+$/i.test(norm(name));
+}
+
+/** "MTG-AC" → "AC". Null for anything that is not a divider. */
+export function dividerLetters(stackOrName) {
+  const name = stackOrName && typeof stackOrName === "object" ? stackOrName.name : stackOrName;
+  const m = norm(name).match(/^MTG-([A-Z]+)$/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/** A=1 … Z=26, AA=27 — spreadsheet columns. 0 for anything else. */
+export function letterIndex(letters) {
+  const s = norm(letters).toUpperCase();
+  if (!/^[A-Z]+$/.test(s)) return 0;
+  let n = 0;
+  for (const ch of s) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n;
+}
+
+/** 1 → A, 26 → Z, 27 → AA. */
+export function lettersOf(n) {
+  let s = "";
+  let k = Math.floor(n);
+  while (k > 0) {
+    const r = (k - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    k = Math.floor((k - 1) / 26);
+  }
+  return s;
+}
+
+/** The divider after the last one in use, or A. Every load starts fresh. */
+export function nextDivider(stacks) {
+  let max = 0;
+  for (const s of stacks || []) max = Math.max(max, letterIndex(dividerLetters(s)));
+  return lettersOf(max + 1);
+}
+
+/** Walking order: A before B before Z before AA. */
+export function compareDividers(a, b) {
+  return letterIndex(dividerLetters(a)) - letterIndex(dividerLetters(b));
+}
+
+// ── CSV ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Rows of cells. Quotes, doubled quotes, CRLF and a byte-order mark — the TCG
+ * PowerTools export starts with one, and a header read through it names its
+ * first column "﻿cardmarketId", which is a column that never matches.
+ */
+export function parseCsvText(text, delimiter = ",") {
+  const s = String(text || "").replace(/^﻿/, "");
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (s[i + 1] === '"') { cell += '"'; i++; } else quoted = false;
+      } else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === delimiter) { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && s[i + 1] === "\n") i++;
+      row.push(cell); cell = "";
+      if (row.some((c) => c !== "")) rows.push(row);
+      row = [];
+    } else cell += ch;
+  }
+  row.push(cell);
+  if (row.some((c) => c !== "")) rows.push(row);
+  return rows;
+}
+
+function byHeader(rows) {
+  const head = (rows[0] || []).map((h) => norm(h));
+  const at = (name) => head.indexOf(name);
+  return { head, at };
+}
+
+/** A price as Cardmarket writes it in either locale: "1.9" or "1,9". */
+export function parsePrice(raw) {
+  const t = norm(raw).replace(/[€£\s]/g, "").replace(",", ".");
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+// ── 1. the load: a CardUploader Magic export ─────────────────────────────────
+
+const CU_REQUIRED = ["quantity", "name", "set", "condition", "language", "cardmarketId"];
+
+/**
+ * A CardUploader Magic export, one physical card per entry, in scan order.
+ *
+ * A row's quantity is expanded into that many cards, since each is a card in
+ * the box. A row with no product id is KEPT, unmatchable and counted: it is
+ * still a card behind the divider, and dropping it would shift every card
+ * after it by one.
+ */
+export function parseCardUploaderMtg(text) {
+  const rows = parseCsvText(text, ",");
+  const { head, at } = byHeader(rows);
+  const missing = CU_REQUIRED.filter((c) => at(c) < 0);
+  if (rows.length === 0) return { cards: [], error: "The file is empty." };
+  if (missing.length) {
+    return { cards: [], error: `This doesn't look like a CardUploader Cardmarket export — no ${missing.join(", ")} column. Export with the Cardmarket format.` };
+  }
+  const cell = (r, name) => (at(name) >= 0 ? norm(r[at(name)]) : "");
+  const cards = [];
+  let noProduct = 0;
+  let oddCondition = 0;
+  for (const r of rows.slice(1)) {
+    if (r.length < head.length / 2) continue;
+    const qty = Math.max(1, parseInt(cell(r, "quantity"), 10) || 1);
+    const productId = parseInt(cell(r, "cardmarketId"), 10) || null;
+    const condition = cell(r, "condition").toUpperCase();
+    const card = {
+      productId,
+      name: cell(r, "name"),
+      set: cell(r, "set"),
+      cn: cell(r, "cn"),
+      rarity: cell(r, "rarity"),
+      condition,
+      cmCondition: cmCondition(condition),
+      language: cell(r, "language") || "English",
+      foil: truthy(cell(r, "isFoil")),
+      signed: truthy(cell(r, "isSigned")),
+      altered: false,
+      firstEd: truthy(cell(r, "isFirstEd"))
+    };
+    if (!productId) noProduct += qty;
+    if (!card.cmCondition) oddCondition += qty;
+    for (let i = 0; i < qty; i++) cards.push(card);
+  }
+  return { cards, noProduct, oddCondition, error: null };
+}
+
+/**
+ * Deal the cards behind fresh dividers, 50 each, starting at `start`.
+ * Refused, rather than merged, if any divider it needs already exists.
+ */
+export function planLoad(cards, { start, stacks = [], size = DIVIDER_SIZE } = {}) {
+  const first = letterIndex(start);
+  if (!first) return { dividers: [], error: "The starting divider must be letters only — A, B … AA." };
+  const n = Math.ceil((cards || []).length / size);
+  const taken = new Set((stacks || []).map((s) => dividerLetters(s)).filter(Boolean));
+  const dividers = [];
+  for (let d = 0; d < n; d++) {
+    const letters = lettersOf(first + d);
+    if (taken.has(letters)) {
+      return { dividers: [], error: `Divider MTG-${letters} already has cards in the app. Every load starts on a fresh divider — start at MTG-${nextDivider(stacks)} or later.` };
+    }
+    const slice = cards.slice(d * size, (d + 1) * size);
+    dividers.push({
+      letters,
+      name: `${CARDMARKET_PREFIX}${letters}`,
+      cards: slice.map((card, i) => ({ ...card, position: i + 1, sku: `${CARDMARKET_PREFIX}${letters}${i + 1}` }))
+    });
+  }
+  return { dividers, error: null };
+}
+
+/** FNV-1a over the file, so the same export is never loaded twice. */
+export function fileFingerprint(text) {
+  const s = String(text || "").replace(/^﻿/, "").replace(/\r\n?/g, "\n").trim();
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/** The `stack_cards.cm` object for a loaded card. One shape, written here. */
+export function cmFields(card, fingerprint) {
+  return {
+    product_id: card.productId,
+    name: card.name,
+    set: card.set,
+    cn: card.cn || null,
+    condition: card.condition,
+    cm_condition: card.cmCondition,
+    language: card.language,
+    foil: !!card.foil,
+    signed: !!card.signed,
+    altered: !!card.altered,
+    file: fingerprint || null
+  };
+}
+
+/** What the app calls the card — read on Stacks and the stack checker. */
+export function cmTitle(card) {
+  return [card.name, card.set ? `(${card.set})` : "", card.condition, card.foil ? "Foil" : "", card.language && card.language !== "English" ? card.language : ""]
+    .filter(Boolean).join(" ");
+}
+
+// ── the article key ──────────────────────────────────────────────────────────
+
+/** Same article to the buyer: product, grade, finish, language, signed, altered. */
+export function articleKey({ productId, condition, foil, signed, altered, language }) {
+  return [productId || "?", condition || "?", foil ? "F" : "-", signed ? "S" : "-", altered ? "A" : "-", norm(language).toLowerCase() || "?"].join("|");
+}
+
+/** Everything but the grade — the near miss when a listing's grade was moved. */
+export function looseKey({ productId, foil, signed, altered, language }) {
+  return [productId || "?", foil ? "F" : "-", signed ? "S" : "-", altered ? "A" : "-", norm(language).toLowerCase() || "?"].join("|");
+}
+
+/** A stack card as an article, from its `cm` column. Null without one. */
+export function articleOfCard(card) {
+  const cm = card?.cm;
+  if (!cm || !cm.product_id) return null;
+  return {
+    productId: cm.product_id,
+    condition: cm.cm_condition || cmCondition(cm.condition),
+    foil: !!cm.foil, signed: !!cm.signed, altered: !!cm.altered,
+    language: cm.language || "English"
+  };
+}
+
+// ── 2. the day's orders: Cardmarket's "ArticlesInPaidOrders" ─────────────────
+
+/**
+ * The export's header row is not a header. Its first cell is the category,
+ * the fourth a count ("3 Articles") and the seventh the total ("4.81") — all
+ * three change with every file. So columns are read by POSITION, and the two
+ * cells that do not change are checked, so a Cardmarket redesign is refused
+ * loudly instead of picking the wrong card quietly.
+ */
+const PO = { seq: 0, productId: 1, qty: 2, name: 3, localized: 4, expansion: 5, price: 6, comment: 7, condition: 8, rarity: 9, cn: 10, language: 11, orderId: 12, foil: 13, signed: 14, altered: 15 };
+
+export function parsePaidOrders(text) {
+  const raw = String(text || "");
+  const delimiter = (raw.split(/\r?\n/)[0] || "").includes(";") ? ";" : ",";
+  const rows = parseCsvText(raw, delimiter);
+  if (rows.length === 0) return { lines: [], error: "The file is empty." };
+  const head = rows[0].map(norm);
+  if (head[PO.productId] !== "Product ID" || head[PO.orderId] !== "Order ID" || head.length < 16) {
+    return { lines: [], error: "This isn't Cardmarket's paid-orders export (ArticlesInPaidOrders) — its columns aren't where they should be. If Cardmarket has changed the file, nothing has been matched." };
+  }
+  const lines = [];
+  for (const r of rows.slice(1)) {
+    const productId = parseInt(norm(r[PO.productId]), 10) || null;
+    const orderId = norm(r[PO.orderId]);
+    if (!productId || !orderId) continue;
+    lines.push({
+      seq: parseInt(norm(r[PO.seq]), 10) || null,
+      productId,
+      quantity: Math.max(1, parseInt(norm(r[PO.qty]), 10) || 1),
+      name: norm(r[PO.name]),
+      expansion: norm(r[PO.expansion]),
+      price: parsePrice(r[PO.price]),
+      comment: norm(r[PO.comment]),
+      condition: norm(r[PO.condition]).toUpperCase(),
+      cn: norm(r[PO.cn]),
+      language: norm(r[PO.language]) || "English",
+      orderId,
+      foil: truthy(r[PO.foil]),
+      signed: truthy(r[PO.signed]),
+      altered: truthy(r[PO.altered])
+    });
+  }
+  return { lines, error: null };
+}
+
+/**
+ * Which card in the box answers each unit sold.
+ *
+ * `cards` is every card in the Cardmarket dividers, PULLED ONES INCLUDED:
+ * a card committed from an earlier upload carries the order it went to
+ * (`cm.order_id`), and those units are counted as done. Without that, the
+ * same file uploaded twice would send you for a second copy of every card.
+ *
+ * Copies are taken front first (lowest divider, lowest position): any copy is
+ * correct, and the front is the least counting.
+ *
+ * A unit with no exact match is answered by a card of the same product whose
+ * CardUploader grade is MP, HP or DMG, flagged: Cardmarket has no such grade,
+ * so the listing tool picked one (the first import put MP up as GD), and the
+ * card in the box is the card that was sold. Never for NM or LP, which mean
+ * the same on both scales — an NM buyer is never sent an LP card.
+ */
+export function matchOrders(lines, cards, stacks) {
+  const stackOrder = new Map((stacks || []).map((s) => [s.id, letterIndex(dividerLetters(s))]));
+  const front = (a, b) =>
+    (stackOrder.get(a.stack_id) || 0) - (stackOrder.get(b.stack_id) || 0) ||
+    (a.position ?? 0) - (b.position ?? 0) ||
+    String(a.id).localeCompare(String(b.id));
+
+  const exact = new Map();
+  const loose = new Map();
+  const committed = new Map();
+  for (const c of cards || []) {
+    const art = articleOfCard(c);
+    if (!art) continue;
+    if (c.pulled_at) {
+      if (c.cm?.order_id) {
+        const k = `${c.cm.order_id}|${looseKey(art)}`;
+        committed.set(k, (committed.get(k) || 0) + 1);
+      }
+      continue;
+    }
+    if (c.checked_out_at) continue;
+    const k = articleKey(art);
+    if (!exact.has(k)) exact.set(k, []);
+    exact.get(k).push(c);
+    // Only a grade with no Cardmarket twin can have been converted on the
+    // way there. NM and LP are the same word on both scales, so an NM sale
+    // is never answered by an LP card.
+    if (!CONVERTED_GRADES.has(String(c.cm?.condition || "").toUpperCase())) continue;
+    const lk = looseKey(art);
+    if (!loose.has(lk)) loose.set(lk, []);
+    loose.get(lk).push(c);
+  }
+  for (const list of [...exact.values(), ...loose.values()]) list.sort(front);
+
+  const used = new Set();
+  const take = (list) => {
+    const c = (list || []).find((x) => !used.has(x.id));
+    if (c) used.add(c.id);
+    return c || null;
+  };
+
+  const picks = [];
+  const unmatched = [];
+  let done = 0;
+  for (const l of lines || []) {
+    const art = { productId: l.productId, condition: l.condition, foil: l.foil, signed: l.signed, altered: l.altered, language: l.language };
+    const ck = `${l.orderId}|${looseKey(art)}`;
+    let units = l.quantity;
+    const already = Math.min(units, committed.get(ck) || 0);
+    if (already) {
+      committed.set(ck, (committed.get(ck) || 0) - already);
+      done += already;
+      units -= already;
+    }
+    for (let u = 0; u < units; u++) {
+      let card = take(exact.get(articleKey(art)));
+      let warn = null;
+      if (!card && LANDING_GRADES.has(l.condition)) {
+        card = take(loose.get(looseKey(art)));
+        if (card) warn = `Sold as ${l.condition}; the box has it as ${card.cm?.condition || "?"}. Check the listing's grade.`;
+      }
+      if (card) picks.push({ line: l, card, warn });
+      else unmatched.push({ line: l });
+    }
+  }
+  return { picks, unmatched, done };
+}
+
+/**
+ * The walk. Divider by divider in letter order, each one DEEPEST FIRST, with
+ * the number each card is at right now: pull from the back and every number
+ * above stays true while you work. `ranks` is `liveRanks()` over the same
+ * cards (passed in, so this file imports nothing).
+ */
+export function walkOrder(picks, stacks, ranks) {
+  const byStack = new Map();
+  for (const p of picks || []) {
+    const id = p.card.stack_id;
+    if (!byStack.has(id)) byStack.set(id, []);
+    byStack.get(id).push({ ...p, rank: ranks?.get(p.card.id) ?? null });
+  }
+  const named = new Map((stacks || []).map((s) => [s.id, s]));
+  return [...byStack.entries()]
+    .map(([id, rows]) => ({ stackId: id, name: named.get(id)?.name || "?", rows: rows.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0)) }))
+    .sort((a, b) => compareDividers(a.name, b.name));
+}
+
+/** One pile per Cardmarket order, numbered as Cardmarket numbers them. */
+export function pilesOf(picks) {
+  const map = new Map();
+  for (const p of picks || []) {
+    const id = p.line.orderId;
+    if (!map.has(id)) map.set(id, { orderId: id, seq: p.line.seq, picks: [] });
+    map.get(id).picks.push(p);
+  }
+  return [...map.values()].sort((a, b) => (a.seq ?? 1e9) - (b.seq ?? 1e9) || a.orderId.localeCompare(b.orderId));
+}
+
+/** What a committed pick writes back onto the card's `cm`. */
+export function pulledCm(card, line) {
+  return { ...(card.cm || {}), order_id: line.orderId, sold_price: line.price ?? null, sold_condition: line.condition };
+}
+
+// ── 3. the check: a TCG PowerTools stock export ──────────────────────────────
+
+/** TCG PowerTools leaves this where autoprice found nothing. */
+export const PLACEHOLDER_PRICE = 1000;
+
+export function parseTcgptExport(text) {
+  const rows = parseCsvText(text, ",");
+  const { at } = byHeader(rows);
+  if (rows.length === 0) return { rows: [], error: "The file is empty." };
+  if (at("cardmarketId") < 0 || at("condition") < 0 || at("price") < 0) {
+    return { rows: [], error: "This doesn't look like a TCG PowerTools stock export — no cardmarketId, condition or price column." };
+  }
+  const cell = (r, name) => (at(name) >= 0 ? norm(r[at(name)]) : "");
+  const out = [];
+  for (const r of rows.slice(1)) {
+    const productId = parseInt(cell(r, "cardmarketId"), 10) || null;
+    if (!productId) continue;
+    out.push({
+      productId,
+      quantity: Math.max(1, parseInt(cell(r, "quantity"), 10) || 1),
+      name: cell(r, "name"),
+      set: cell(r, "set"),
+      condition: cell(r, "condition").toUpperCase(),
+      language: cell(r, "language") || "English",
+      foil: truthy(cell(r, "isFoil")),
+      signed: truthy(cell(r, "isSigned")),
+      altered: false,
+      price: parsePrice(cell(r, "price"))
+    });
+  }
+  return { rows: out, error: null };
+}
+
+/**
+ * Is every card in the box for sale, as the card it is?
+ *
+ * - `unlisted`: in the box, not in the export at all — the two DMG cards the
+ *   first import dropped without a word.
+ * - `regraded`: listed, but in another grade — MP listed as GD.
+ * - `placeholder`: listed at TCG PowerTools' 1000, or with no price — autoprice
+ *   found nothing and the listing kept the import's stand-in.
+ * - `elsewhere`: listed copies the box does not hold. Counted, not listed: the
+ *   export covers the whole Cardmarket account, which may hold stock that was
+ *   never loaded here.
+ */
+export function checkListings(cards, rows) {
+  const box = new Map();
+  const boxLoose = new Map();
+  for (const c of cards || []) {
+    if (c.pulled_at || c.checked_out_at) continue;
+    const art = articleOfCard(c);
+    if (!art) continue;
+    const k = articleKey(art);
+    if (!box.has(k)) box.set(k, { art, name: c.cm?.name || c.title, condition: c.cm?.condition, count: 0, skus: [] });
+    const b = box.get(k);
+    b.count += 1;
+    if (c.sku) b.skus.push(c.sku);
+    const lk = looseKey(art);
+    boxLoose.set(lk, (boxLoose.get(lk) || 0) + 1);
+  }
+  const listed = new Map();
+  const listedLoose = new Map();
+  const placeholder = [];
+  for (const r of rows || []) {
+    const k = articleKey(r);
+    listed.set(k, (listed.get(k) || 0) + r.quantity);
+    if (box.has(k) && (r.price == null || r.price >= PLACEHOLDER_PRICE)) placeholder.push(r);
+    const lk = looseKey(r);
+    if (!listedLoose.has(lk)) listedLoose.set(lk, new Map());
+    const g = listedLoose.get(lk);
+    g.set(r.condition, (g.get(r.condition) || 0) + r.quantity);
+  }
+  const unlisted = [];
+  const regraded = [];
+  // A grade listed beyond what the box holds in that grade is where a moved
+  // grade went; spend it once.
+  const spare = new Map();
+  for (const [lk, grades] of listedLoose) {
+    for (const [g, n] of grades) {
+      const inBox = [...box.values()].filter((b) => looseKey(b.art) === lk && b.art.condition === g).reduce((s, b) => s + b.count, 0);
+      if (n > inBox) spare.set(`${lk}|${g}`, n - inBox);
+    }
+  }
+  for (const [k, b] of box) {
+    const short = b.count - (listed.get(k) || 0);
+    if (short <= 0) continue;
+    let left = short;
+    const grades = listedLoose.get(looseKey(b.art));
+    if (grades) {
+      for (const g of grades.keys()) {
+        const sk = `${looseKey(b.art)}|${g}`;
+        const n = Math.min(left, spare.get(sk) || 0);
+        if (n > 0) {
+          regraded.push({ name: b.name, boxCondition: b.condition, listedAs: g, count: n, skus: b.skus });
+          spare.set(sk, (spare.get(sk) || 0) - n);
+          left -= n;
+        }
+      }
+    }
+    if (left > 0) unlisted.push({ name: b.name, condition: b.condition, count: left, skus: b.skus });
+  }
+  let elsewhere = 0;
+  for (const [k, n] of listed) elsewhere += Math.max(0, n - (box.get(k)?.count || 0));
+  elsewhere -= regraded.reduce((s, r) => s + r.count, 0);
+  return { unlisted, regraded, placeholder, elsewhere: Math.max(0, elsewhere) };
+}

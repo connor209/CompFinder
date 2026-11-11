@@ -279,6 +279,16 @@ stream` (the relay, only while streaming).
   read names `user_id` because the cron has no RLS behind it, running it twice
   adds nothing, and both callers go through `runStackImport()`.
 
+- `scripts/check-cardmarket.mjs` — the Magic chaos sort, on rows from the
+  real files: dividers run A … Z, AA like spreadsheet columns and every load
+  starts fresh, a card with no product id still holds its place, a sale is
+  matched on product + grade + finish + language and never answers an NM or
+  LP sale with another grade, the same order file twice picks nothing new,
+  the walk is divider order and deepest first, the TCG PowerTools check finds
+  the dropped DMG cards, the MP→GD listings and the 1000 placeholder, and no
+  eBay screen (Reconcile, a filing plan, the nightly import) touches an MTG
+  divider.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -2643,6 +2653,56 @@ digital binder the desk turns round to a customer.
   card sold at the desk since drops out and the next trip starts clean; a sale
   that fails to record stays marked not there, because reopened as "here" it
   would go back on eBay.
+
+## Cardmarket stock: Magic in a chaos sort, picked from a daily file
+
+Magic singles are sold on **Cardmarket only**, listed through TCG PowerTools,
+never cross-listed (decided 2026-11-11). They are scanned in CardUploader 50
+at a time and stored in **scan order** behind dividers that run A … Z, AA,
+AB like spreadsheet columns, and every load starts on a fresh divider.
+**Cardmarket stock** (`/panel/cardmarket`, under the Cardmarket module) is the
+screen, `lib/cardmarket.js` the rules, `lib/cardmarket-store.js` the only file
+naming `stack_cards.cm`, migration 035 the column. `packages/core` is
+untouched: the engine does not price Magic well and TCG PowerTools does the
+pricing here.
+
+- **A divider is a stack named `MTG-<letters>`**, the same convention as
+  `YGO-A`, so Stacks, the stack checker and `liveRanks()` work on it as they
+  are. The SKU (`MTG-C37`) is a name given at load; the position is a live
+  count, because these are unsleeved and unlabelled — a card behind a pulled
+  one IS one closer to the divider. Fixed slots were proposed and were wrong:
+  a binder pocket shows its gap, a stack does not.
+- **The product id is the only key that survives the three files.** Names
+  grow a back face, sets are renamed, a timeshifted card's number is 101 in
+  one file and 0 in the next. A sale is matched on product, grade, finish,
+  language, signed and altered; copies agreeing on all of those are the same
+  article to the buyer, so the pick takes the one nearest the front.
+- **The order export's header row is not a header** — its first, fourth and
+  seventh cells change every file — so columns are read by position and the
+  two fixed ones are checked. A file that has moved is refused, never matched.
+- **A grade near miss is narrow on purpose.** CardUploader's MP, HP and DMG
+  have no Cardmarket twin, so a listing tool chose one (the first import put
+  MP up as **GD, which ranks above LP**). A GD/PL/PO sale with no exact card
+  is answered by the same product in one of those grades, flagged. An NM or
+  LP sale never is: those words mean the same on both scales, and the first
+  draft sent an NM buyer the LP copy until the check caught it.
+- **A committed pick records its order on the card** (`cm.order_id`), and the
+  match counts those as done, so the same file uploaded twice picks nothing
+  new while a new order for the same card still gets the next copy.
+- **A card with no product id is kept**, unmatchable and counted. It is still
+  behind the divider, and dropping it would put every card after it one off.
+- **The eBay side never reasons about a divider.** `isCardmarketStack()` is
+  the one test: Reconcile skips them (every card would read "not listed"),
+  `fileableStacks()` refuses them (a returned show card filed behind MTG-C is
+  lost), and the nightly import counts an eBay SKU shaped `MTG-C37` as
+  non-standard rather than filing it into the box.
+- **The listing check is the TCG PowerTools export against the box**: cards
+  not listed (the import dropped DMG without a word), listed in another
+  grade, or left at the 1000 placeholder autoprice leaves behind. Listed
+  copies the box does not hold are counted, not itemised — the export covers
+  the whole account.
+- **CSV only for now.** Cardmarket's xlsx export carries the same rows; the
+  CSV follows the account's locale, so prices are read as `1.9` or `1,9`.
 
 ## A SKU is a name; a position is an address
 

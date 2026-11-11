@@ -24,6 +24,7 @@
  */
 
 import { isShowBinder } from "./showbinder.js";
+import { isCardmarketStack } from "./cardmarket.js";
 
 /** The one spelling of the box's name. Never written out anywhere else. */
 export const TOPLOADER_STACK_NAME = "Toploaders";
@@ -66,7 +67,9 @@ export function isUnorderedStack(stackOrName) {
  * place without positions.
  */
 export function fileableStacks(stacks) {
-  return (stacks || []).filter((s) => !isUnorderedStack(s));
+  // A Cardmarket divider (MTG-C) is a box in another room holding cards that
+  // are not on eBay at all; a returned show card filed behind one is lost.
+  return (stacks || []).filter((s) => !isUnorderedStack(s) && !isCardmarketStack(s));
 }
 
 /**
