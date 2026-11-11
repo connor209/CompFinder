@@ -7,6 +7,7 @@ import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
 import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
+import { isCardmarketStack } from "@/lib/cardmarket.js";
 import { binderSlot, comparePockets, caseKind } from "@/lib/showbinder.js";
 import Fold from "./Fold";
 import StackCheck from "./StackCheck";
@@ -158,6 +159,7 @@ export default function Stacks() {
     const offSale = offSaleIndex(listings, sales);
     const cards = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));
     const nameMap = new Map(stacks.map((s) => [s.id, s.name]));
+    const cmStackIds = new Set(stacks.filter(isCardmarketStack).map((s) => s.id));
     // Most-certain first, so the pre-ticked rows are the ones at the top.
     const rank = { sold: 0, outofstock: 1, notlisted: 2 };
     const cand = cards
@@ -165,6 +167,9 @@ export default function Stacks() {
       // That is also what keeps the quantity rule safe: checking a card out
       // sets its listing to quantity 0 too, and those rows never reach here.
       .filter((c) => !c.checked_out_at)
+      // Cardmarket dividers hold cards that were never on eBay, so "not
+      // listed" is true of every one of them and means nothing.
+      .filter((c) => !cmStackIds.has(c.stack_id))
       .map((c) => ({ c, reason: offSaleReason(c.sku, offSale) }))
       .filter(({ reason }) => reason)
       .map(({ c, reason }) => ({

@@ -1,5 +1,6 @@
 import { stackFromSku } from "./stackpos.js";
 import { isListingAvailable } from "./stockcheck.js";
+import { isCardmarketStack } from "./cardmarket.js";
 
 /**
  * Auto-import: turn eBay listing SKUs into stack cards. A SKU like A50 becomes
@@ -37,6 +38,10 @@ export function planStackImport({ listings, existingSkus, stacks }) {
     const sku = String(l.sku).trim();
     const at = stackFromSku(sku);
     if (!at) { unparseable += 1; continue; }
+    // MTG-<letters> is a Cardmarket divider. An eBay listing under that SKU
+    // is not a card in that box, and filing it there would put it on the
+    // Cardmarket pick list. Counted as non-standard rather than guessed at.
+    if (isCardmarketStack(at.prefix)) { unparseable += 1; continue; }
     const key = sku.toLowerCase();
     if (have.has(key)) { already += 1; continue; }
     if (!isListingAvailable(l)) { soldOut += 1; continue; }

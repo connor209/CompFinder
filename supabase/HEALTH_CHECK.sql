@@ -163,6 +163,10 @@ with schema_checks as (
     (38, 'SCHEMA · 034 binder added date', 'stack_cards.binder_added_at column',
       case when exists (select 1 from information_schema.columns
                         where table_schema='public' and table_name='stack_cards' and column_name='binder_added_at')
+        then '✅ present' else '❌ missing' end),
+    (39, 'SCHEMA · 035 Cardmarket stock', 'stack_cards.cm column',
+      case when exists (select 1 from information_schema.columns
+                        where table_schema='public' and table_name='stack_cards' and column_name='cm')
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),

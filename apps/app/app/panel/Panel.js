@@ -38,6 +38,7 @@ import Stacks from "./Stacks";
 import PullSheet from "./PullSheet";
 import ShowDesk from "./ShowDesk";
 import StreamStock from "./StreamStock";
+import CardmarketStock from "./CardmarketStock";
 import { withPool, showOnly } from "@/lib/streamstock.js";
 import ShowHistory from "./ShowHistory";
 import SellSheet from "./SellSheet";
@@ -84,6 +85,7 @@ const STREAM_SLUG = {
   showhistory: "show-history",
   streamstock: "stream-stock",
   sheets: "sheets",
+  cardmarket: "cardmarket",
   accounts: "accounts"
 };
 const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) => [v, k]));
@@ -122,7 +124,16 @@ const MODULES = [
       { key: "streamstock", label: "Stream stock", desc: "Pick, pull and rotate the eBay Live box" }
     ]
   },
-  { key: "sheets", label: "Sell sheets", icon: "sheet", desc: "Build CSV imports for Cardmarket listing tools", sections: [{ key: "sheets", label: "Sell sheets" }] },
+  {
+    key: "sheets",
+    label: "Cardmarket",
+    icon: "sheet",
+    desc: "Sell sheets and the Magic chaos sort",
+    sections: [
+      { key: "sheets", label: "Sell sheets", desc: "Build CSV imports for Cardmarket listing tools" },
+      { key: "cardmarket", label: "Cardmarket stock", desc: "Load the MTG boxes and pick the day's orders" }
+    ]
+  },
   { key: "accounts", label: "Accounts", icon: "chart", desc: "Profit & loss and tax-ready reports", sections: [{ key: "accounts", label: "P&L" }] },
   { key: "arbitrage", label: "Arbitrage", icon: "trend", desc: "Spot underpriced buying opportunities", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
 ];
@@ -2221,6 +2232,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       {stream === "showhistory" && <ShowHistory />}
       {stream === "streamstock" && <StreamStock />}
       {stream === "sheets" && <SellSheet />}
+      {stream === "cardmarket" && <CardmarketStock />}
       {stream === "buy" && <Buy />}
       {stream === "browse" && <Browse onDeepDive={deepDiveCard} />}
       {stream === "accounts" && <Accounts />}
