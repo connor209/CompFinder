@@ -26,11 +26,28 @@ import {
   isCardmarketStack, dividerLetters, letterIndex, lettersOf, nextDivider, compareDividers,
   parseCsvText, parsePrice, parseCardUploaderMtg, planLoad, fileFingerprint, cmFields, cmCondition,
   parsePaidOrders, matchOrders, walkOrder, pilesOf, pulledCm,
-  parseTcgptExport, checkListings, tcgptImportCsv, tcgptImportName
+  parseTcgptExport, checkListings, tcgptImportCsv, tcgptImportName,
+  pricesFromExport, stockRows, filterStock, sortStock, stockTotals, dividerTotals, soldRows, locationText, articleKey
 } from "../apps/app/lib/cardmarket.js";
 import { liveRanks } from "../apps/app/lib/stackpos.js";
 import { fileableStacks } from "../apps/app/lib/toploader.js";
 import { planStackImport } from "../apps/app/lib/stack-import.js";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+const read = (p) => readFileSync(join(root, p), "utf8");
+
+// `stack_cards.cm` is written in one place.
+const files = [];
+const walkDir = (d) => {
+  for (const f of readdirSync(join(root, d))) {
+    const p = join(d, f);
+    if (f === "node_modules" || f.startsWith(".")) continue;
+    if (statSync(join(root, p)).isDirectory()) walkDir(p);
+    else if (/\.(js|mjs)$/.test(f)) files.push(p);
+  }
+};
+walkDir("apps/app/app");
+walkDir("apps/app/lib");
 
 let failures = 0;
 function check(name, cond, detail) {
@@ -218,32 +235,66 @@ check("…NM stays NM, DMG is PO, LP is EX, MP is GD", back[1][ci] === "NM" && b
 check("every other column is untouched", back.every((r, i) => r.every((v, j) => j === ci || v === orig[i][j])));
 check("named after the CardUploader file", tcgptImportName("magic101.csv") === "magic101-cardmarket-grades.csv");
 
+// ── the stock list ──────────────────────────────────────────────────────────
+
+console.log("\nThe stock list");
+const saved = pricesFromExport(tp.rows);
+check("the 1000 placeholder is not saved as a price", !saved.some((r) => r.price >= 1000));
+check("two listings of one article keep the LOWER price",
+  pricesFromExport([{ ...tp.rows[3], price: 2 }, { ...tp.rows[3], price: 1.5 }])[0]?.price === 1.5);
+// The fixture's listings are the OLD ones (our LP put up as Cardmarket LP), so
+// the Flicker is priced here as it will be listed from now on: EX.
+const savedNow = [...saved, ...pricesFromExport([{ ...tp.rows.find((r) => r.name === "Ghostly Flicker"), condition: "EX" }])];
+const priceMap = new Map(savedNow.map((r) => [r.article_key, { price: r.price, priced_at: "2026-11-12T10:00:00Z" }]));
+const sranks = liveRanks(box);
+const srows = stockRows(box, stacks, sranks, priceMap);
+const flick = srows.find((r) => r.name === "Ghostly Flicker");
+check("three identical Flickers are one row of three", flick?.count === 3 && srows.filter((r) => r.name === "Ghostly Flicker").length === 1);
+check("…with where each copy is, as the pick list counts it", locationText(flick) === "MTG-B 1, 2, 3", locationText(flick));
+check("a foil and a plain copy are two rows", srows.filter((r) => r.name === "Plated Seastrider").length === 2);
+check("each row carries both grades", flick.grade === "LP" && flick.cmGrade === "EX");
+check("the card with no product id is still in the stock, keyless", srows.some((r) => r.name === "Mystery card" && !r.hasKey));
+check("a price is the article's, and the value is price × copies", flick.price === 2.35 && flick.value === 7.05);
+check("a price saved for another grade is not this card's", srows.find((r) => r.name === "Predatory Sliver" && r.grade === "LP")?.price === null);
+const tot = stockTotals(srows);
+check("totals count every card", tot.cards === box.length, `${tot.cards}`);
+check("unpriced cards are counted, never valued at zero", tot.unpriced > 0 && tot.priced + tot.unpriced === tot.cards);
+check("a pulled card is not stock", stockRows(afterCommit, stacks, liveRanks(afterCommit), priceMap).find((r) => r.name === "Ghostly Flicker")?.count === 2);
+
+check("search is every word, either order", filterStock(srows, { q: "flicker avacyn" }).length === 1 && filterStock(srows, { q: "avacyn flicker" }).length === 1);
+check("search ignores accents and case", filterStock([{ ...flick, name: "Ghöstly Flicker" }], { q: "GHOSTLY" }).length === 1);
+check("divider filter", filterStock(srows, { divider: "MTG-A" }).every((r) => r.dividers.includes("MTG-A")) && filterStock(srows, { divider: "MTG-A" }).length > 0);
+check("grade filter is OUR grade", filterStock(srows, { grade: "MP" }).map((r) => r.name).join() === "Last-Ditch Effort");
+check("foil filter", filterStock(srows, { foil: "foil" }).every((r) => r.foil) && filterStock(srows, { foil: "plain" }).every((r) => !r.foil));
+const asc = sortStock(srows, "value-asc");
+const desc = sortStock(srows, "value-desc");
+check("an unpriced card sorts LAST cheapest-first", asc[asc.length - 1].value === null && asc[0].value !== null);
+check("…and last dearest-first too", desc[desc.length - 1].value === null && desc[0].value >= desc[1].value);
+const dt = dividerTotals(srows);
+check("per divider: every card counted once", dt.reduce((n, d) => n + d.cards, 0) === box.length && dt.map((d) => d.divider).join() === "MTG-A,MTG-B");
+
+const sold = soldRows(afterCommit, stacks);
+check("sold lists what was pulled, with its order and price",
+  sold.length === 3 && sold.every((r) => r.orderId) && sold.some((r) => r.name === "Vault of Whispers" && r.price === 1.9));
+
+const ui = read("apps/app/app/panel/CardmarketStock.js");
+check("Tick all ticks the pick list and nothing else", /function tickAll\(\)[\s\S]{0,120}matched\.picks\.map\(\(p\) => p\.card\.id\)/.test(ui));
+check("nothing is pulled until Mark pulled is confirmed", /if \(!confirm\(`Mark /.test(ui));
+const priceUsers = files.filter((f) => /from\(\s*["']cardmarket_prices/.test(read(f)) && !/cardmarket-store\.js$/.test(f));
+check("only cardmarket-store.js names cardmarket_prices", priceUsers.length === 0, priceUsers.join(", "));
+
 // ── the eBay screens leave the boxes alone ──────────────────────────────────
 
 console.log("\nThe eBay side never reasons about an MTG divider");
+const stacksSrc = read("apps/app/app/panel/Stacks.js");
+const recon = stacksSrc.slice(stacksSrc.indexOf("async function runReconcile"), stacksSrc.indexOf("function toggleRecon"));
+check("Reconcile skips the Cardmarket dividers", /isCardmarketStack/.test(recon) && /cmStackIds\.has/.test(recon));
 check("no filing plan can choose MTG-C", fileableStacks([{ name: "A" }, { name: "MTG-C" }, { name: "YGO-A" }]).map((s) => s.name).join() === "A,YGO-A");
 const imp = planStackImport({ listings: [{ sku: "MTG-C37", title: "x", quantity: 1 }, { sku: "YGO-A12", title: "y", quantity: 1 }], existingSkus: [], stacks: [] });
 check("the nightly import never files an eBay SKU behind a Cardmarket divider", !imp.newStacks.includes("MTG-C") && !imp.cards.some((c) => c.sku === "MTG-C37"));
 check("…and still imports YGO-A12", imp.cards.some((c) => c.sku === "YGO-A12"));
 
-const root = fileURLToPath(new URL("../", import.meta.url));
-const read = (p) => readFileSync(join(root, p), "utf8");
-const stacksSrc = read("apps/app/app/panel/Stacks.js");
-const recon = stacksSrc.slice(stacksSrc.indexOf("async function runReconcile"), stacksSrc.indexOf("function toggleRecon"));
-check("Reconcile skips the Cardmarket dividers", /isCardmarketStack/.test(recon) && /cmStackIds\.has/.test(recon));
 
-// `stack_cards.cm` is written in one place.
-const files = [];
-const walkDir = (d) => {
-  for (const f of readdirSync(join(root, d))) {
-    const p = join(d, f);
-    if (f === "node_modules" || f.startsWith(".")) continue;
-    if (statSync(join(root, p)).isDirectory()) walkDir(p);
-    else if (/\.(js|mjs)$/.test(f)) files.push(p);
-  }
-};
-walkDir("apps/app/app");
-walkDir("apps/app/lib");
 const writers = files.filter((f) => !/cardmarket-store\.js$/.test(f)).filter((f) => {
   const s = read(f);
   return /stack_cards/.test(s) && /\bcm\s*:\s*(cmFields|w\.cm|pulledCm)/.test(s);

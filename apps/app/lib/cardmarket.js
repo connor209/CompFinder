@@ -619,3 +619,184 @@ export function checkListings(cards, rows) {
   elsewhere -= regraded.reduce((s, r) => s + r.count, 0);
   return { unlisted, damaged, regraded, placeholder, elsewhere: Math.max(0, elsewhere) };
 }
+
+// ── 4. the stock list ────────────────────────────────────────────────────────
+
+/**
+ * Prices to save from a TCG PowerTools export, one per article. A listing is
+ * one article at one price, but the export can carry the same article twice
+ * (two listings of one card); the LOWER price is kept, so a stock value is
+ * never flattered by the dearer of two asks. Placeholder and missing prices
+ * are not prices and are left out. Returns [{ article_key, price }].
+ */
+export function pricesFromExport(rows) {
+  const best = new Map();
+  for (const r of rows || []) {
+    if (r.price == null || r.price <= 0 || r.price >= PLACEHOLDER_PRICE) continue;
+    const k = articleKey(r);
+    if (!best.has(k) || r.price < best.get(k)) best.set(k, r.price);
+  }
+  return [...best.entries()].map(([article_key, price]) => ({ article_key, price }));
+}
+
+/**
+ * The stock list: cards still in the box, identical copies folded into one
+ * row. A row is one ARTICLE (the key a sale is matched on), so the count on it
+ * is how many a buyer could order and the price is the listing's.
+ *
+ * `ranks` is liveRanks() over the same cards, so a location reads the same as
+ * the pick list's. `prices` is Map<article_key, { price, priced_at }>. A card
+ * with no product id still has a row — it is in the box — and no key.
+ */
+export function stockRows(cards, stacks, ranks, prices) {
+  const named = new Map((stacks || []).map((s) => [s.id, s.name]));
+  const groups = new Map();
+  for (const c of cards || []) {
+    if (c.pulled_at) continue;
+    const cm = c.cm || {};
+    const art = articleOfCard(c);
+    const key = art ? articleKey(art) : `card:${c.id}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        hasKey: !!art,
+        name: cm.name || c.title || "",
+        set: cm.set || "",
+        cn: cm.cn || "",
+        grade: cm.condition || "",
+        cmGrade: art?.condition || null,
+        foil: !!cm.foil,
+        language: cm.language || "English",
+        copies: []
+      });
+    }
+    groups.get(key).copies.push({
+      id: c.id,
+      sku: c.sku,
+      divider: named.get(c.stack_id) || "?",
+      rank: c.checked_out_at ? null : ranks?.get(c.id) ?? null,
+      away: !!c.checked_out_at
+    });
+  }
+  const out = [];
+  for (const g of groups.values()) {
+    g.copies.sort((a, b) => compareDividers(a.divider, b.divider) || (a.rank ?? 1e9) - (b.rank ?? 1e9));
+    const p = g.hasKey ? prices?.get(g.key) : null;
+    out.push({
+      ...g,
+      count: g.copies.length,
+      dividers: [...new Set(g.copies.map((x) => x.divider))],
+      price: p ? Number(p.price) : null,
+      pricedAt: p?.priced_at || null,
+      value: p ? Math.round(Number(p.price) * g.copies.length * 100) / 100 : null
+    });
+  }
+  return out;
+}
+
+/** "MTG-B 2, 9 · MTG-D 31" — where each copy is right now. */
+export function locationText(row) {
+  const by = new Map();
+  for (const c of row.copies) {
+    if (!by.has(c.divider)) by.set(c.divider, []);
+    by.get(c.divider).push(c.away ? "away" : c.rank ?? "?");
+  }
+  return [...by.entries()].map(([d, ns]) => `${d} ${ns.join(", ")}`).join(" · ");
+}
+
+const fold = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+
+/** Search (every word must appear in the name or set) and the filters, AND-ed. */
+export function filterStock(rows, { q = "", divider = "", grade = "", foil = "" } = {}) {
+  const words = fold(q).split(/\s+/).filter(Boolean);
+  return (rows || []).filter((r) => {
+    if (divider && !r.dividers.includes(divider)) return false;
+    if (grade && r.grade !== grade) return false;
+    if (foil === "foil" && !r.foil) return false;
+    if (foil === "plain" && r.foil) return false;
+    if (!words.length) return true;
+    const hay = fold(`${r.name} ${r.set} ${r.cn}`);
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+/**
+ * Sorts. A row with no price sorts LAST in both value directions: treating it
+ * as zero would head the cheapest-first view with the cards nobody has priced,
+ * the same rule the Show Desk's away list follows.
+ */
+export function sortStock(rows, sort = "name") {
+  const list = (rows || []).slice();
+  const byName = (a, b) => a.name.localeCompare(b.name) || a.set.localeCompare(b.set) || HOUSE_GRADES.indexOf(a.grade) - HOUSE_GRADES.indexOf(b.grade);
+  const priced = (dir) => (a, b) => {
+    if (a.value == null && b.value == null) return byName(a, b);
+    if (a.value == null) return 1;
+    if (b.value == null) return -1;
+    return dir * (a.value - b.value) || byName(a, b);
+  };
+  if (sort === "value-desc") return list.sort(priced(-1));
+  if (sort === "value-asc") return list.sort(priced(1));
+  if (sort === "location") {
+    return list.sort((a, b) => compareDividers(a.copies[0].divider, b.copies[0].divider) || (a.copies[0].rank ?? 1e9) - (b.copies[0].rank ?? 1e9));
+  }
+  if (sort === "count") return list.sort((a, b) => b.count - a.count || byName(a, b));
+  return list.sort(byName);
+}
+
+/**
+ * Totals over rows. Unpriced copies are COUNTED, never valued at zero — a
+ * total that silently treats them as worthless is the flattering-by-omission
+ * kind of wrong.
+ */
+export function stockTotals(rows) {
+  let cards = 0;
+  let priced = 0;
+  let unpriced = 0;
+  let value = 0;
+  let oldest = null;
+  for (const r of rows || []) {
+    cards += r.count;
+    if (r.value == null) unpriced += r.count;
+    else {
+      priced += r.count;
+      value += r.value;
+      if (r.pricedAt && (!oldest || r.pricedAt < oldest)) oldest = r.pricedAt;
+    }
+  }
+  return { cards, priced, unpriced, value: Math.round(value * 100) / 100, oldestPrice: oldest };
+}
+
+/** Per divider: cards in it now and what the priced ones come to. */
+export function dividerTotals(rows) {
+  const by = new Map();
+  for (const r of rows || []) {
+    for (const c of r.copies) {
+      if (!by.has(c.divider)) by.set(c.divider, { divider: c.divider, cards: 0, value: 0, unpriced: 0 });
+      const d = by.get(c.divider);
+      d.cards += 1;
+      if (r.price == null) d.unpriced += 1;
+      else d.value = Math.round((d.value + r.price) * 100) / 100;
+    }
+  }
+  return [...by.values()].sort((a, b) => compareDividers(a.divider, b.divider));
+}
+
+/** What went: pulled cards, newest first, with the order and price they carry. */
+export function soldRows(cards, stacks) {
+  const named = new Map((stacks || []).map((s) => [s.id, s.name]));
+  return (cards || [])
+    .filter((c) => c.pulled_at)
+    .map((c) => ({
+      id: c.id,
+      sku: c.sku,
+      divider: named.get(c.stack_id) || "?",
+      name: c.cm?.name || c.title || "",
+      set: c.cm?.set || "",
+      grade: c.cm?.condition || "",
+      soldGrade: c.cm?.sold_condition || null,
+      orderId: c.cm?.order_id || null,
+      price: c.cm?.sold_price ?? null,
+      pulledAt: c.pulled_at
+    }))
+    .sort((a, b) => String(b.pulledAt).localeCompare(String(a.pulledAt)));
+}

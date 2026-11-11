@@ -167,6 +167,9 @@ with schema_checks as (
     (39, 'SCHEMA · 035 Cardmarket stock', 'stack_cards.cm column',
       case when exists (select 1 from information_schema.columns
                         where table_schema='public' and table_name='stack_cards' and column_name='cm')
+        then '✅ present' else '❌ missing' end),
+    (40, 'SCHEMA · 036 Cardmarket prices', 'cardmarket_prices table',
+      case when to_regclass('public.cardmarket_prices') is not null
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),
