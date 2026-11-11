@@ -6,9 +6,10 @@ import { liveRanks } from "@/lib/stackpos.js";
 import {
   parseCardUploaderMtg, planLoad, nextDivider, fileFingerprint, compareDividers,
   parsePaidOrders, matchOrders, walkOrder, pilesOf, pulledCm,
-  parseTcgptExport, checkListings, tcgptImportCsv, tcgptImportName, cmCondition, CU_TO_CM, HOUSE_GRADES, DIVIDER_SIZE, CARDMARKET_PREFIX, PLACEHOLDER_PRICE
+  parseTcgptExport, checkListings, tcgptImportCsv, tcgptImportName, cmCondition, CU_TO_CM, HOUSE_GRADES, DIVIDER_SIZE, CARDMARKET_PREFIX, PLACEHOLDER_PRICE,
+  pricesFromExport, stockRows, filterStock, sortStock, stockTotals, dividerTotals, soldRows, locationText
 } from "@/lib/cardmarket.js";
-import { loadCardmarket, alreadyLoaded, writeLoad, commitPicks } from "@/lib/cardmarket-store.js";
+import { loadCardmarket, alreadyLoaded, writeLoad, commitPicks, loadPrices, savePrices } from "@/lib/cardmarket-store.js";
 import Fold from "./Fold";
 
 /**
@@ -25,6 +26,11 @@ import Fold from "./Fold";
  *    and records the order on each, so the same file twice picks nothing new.
  * 3. **Check the listings.** A TCG PowerTools stock export against the box:
  *    cards not listed, listed in another grade, or left at the placeholder.
+ *    The same upload saves each article's price for the stock list.
+ *
+ * Above all three, **Stock**: every card in the box, identical copies folded
+ * into one row with where each copy is, searchable, valued off the last saved
+ * TCG PowerTools prices — and a Sold view of what has been pulled for orders.
  *
  * The rules are in lib/cardmarket.js; the reasons are in CLAUDE.md under
  * "Cardmarket stock".
@@ -38,6 +44,11 @@ async function readFile(e) {
 }
 
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const money = (n) => (n == null ? "—" : Number(n).toFixed(2));
+const day = (iso) => (iso ? String(iso).slice(0, 10) : "");
+// A rendering cap, like My listings: nothing on this list spends anything, so
+// "Show more" is only about not drawing two thousand rows on a tablet.
+const PAGE = 200;
 
 export default function CardmarketStock() {
   const [loading, setLoading] = useState(true);
@@ -57,6 +68,16 @@ export default function CardmarketStock() {
 
   const [stockFile, setStockFile] = useState(null);
 
+  const [prices, setPrices] = useState(new Map());
+  const [pricesNote, setPricesNote] = useState("");
+  const [view, setView] = useState("stock");        // stock | sold
+  const [q, setQ] = useState("");
+  const [divider, setDivider] = useState("");
+  const [grade, setGrade] = useState("");
+  const [foil, setFoil] = useState("");
+  const [sort, setSort] = useState("name");
+  const [shown, setShown] = useState(PAGE);
+
   const supabase = () => createClient();
 
   async function load() {
@@ -70,6 +91,11 @@ export default function CardmarketStock() {
     else setSetupError("");
     setStacks(r.stacks.slice().sort(compareDividers));
     setCards(r.cards);
+    const pr = await loadPrices(sb, user.id);
+    setPrices(pr.prices);
+    setPricesNote(pr.missing
+      ? "Prices need migration 036_cardmarket_prices.sql — until it is run every card shows unpriced."
+      : pr.error ? `Couldn't read saved prices: ${pr.error}` : "");
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
@@ -149,6 +175,15 @@ export default function CardmarketStock() {
     setMsg("");
   }
 
+  // Tick all is for the day you pulled the lot: everything on the list is
+  // ticked, and a card you could not find is unticked before Mark pulled.
+  function tickAll() {
+    if (matched) setPulled(new Set(matched.picks.map((p) => p.card.id)));
+  }
+  function untickAll() {
+    setPulled(new Set());
+  }
+
   function toggle(id) {
     setPulled((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
@@ -175,6 +210,28 @@ export default function CardmarketStock() {
     const f = await readFile(e);
     if (f) setStockFile(f);
   }
+
+  const exportPrices = useMemo(() => (parsedStock && !parsedStock.error ? pricesFromExport(parsedStock.rows) : []), [parsedStock]);
+
+  async function doSavePrices() {
+    if (!exportPrices.length || !userId) return;
+    setBusy(true);
+    const r = await savePrices(supabase(), userId, exportPrices);
+    setBusy(false);
+    setMsg(r.error ? `Saved ${r.saved} prices, then: ${r.error}` : `Saved ${plural(r.saved, "price")} from ${stockFile?.name || "the export"}.`);
+    const pr = await loadPrices(supabase(), userId);
+    setPrices(pr.prices);
+  }
+
+  // ---- stock -----------------------------------------------------------------
+
+  const allRows = useMemo(() => stockRows(cards, stacks, ranks, prices), [cards, stacks, ranks, prices]);
+  const totals = useMemo(() => stockTotals(allRows), [allRows]);
+  const perDivider = useMemo(() => dividerTotals(allRows), [allRows]);
+  const rows = useMemo(() => sortStock(filterStock(allRows, { q, divider, grade, foil }), sort), [allRows, q, divider, grade, foil, sort]);
+  const rowTotals = useMemo(() => stockTotals(rows), [rows]);
+  const sold = useMemo(() => soldRows(cards, stacks), [cards, stacks]);
+  useEffect(() => { setShown(PAGE); }, [q, divider, grade, foil, sort, view]);
 
   if (loading) return <div className="panel"><span className="spinner" /> Loading Cardmarket stock…</div>;
 
@@ -213,6 +270,92 @@ export default function CardmarketStock() {
         {setupError ? <p className="hint" style={{ color: "var(--warn-ink)" }}>{setupError}</p> : null}
         {msg ? <p className="hint">{msg}</p> : null}
       </div>
+
+      <Fold
+        id="cm-stock"
+        title={view === "sold" ? "Sold" : "Stock"}
+        count={view === "sold" ? sold.length : totals.cards}
+        summary={view === "sold"
+          ? `${plural(sold.length, "card")} pulled for Cardmarket orders`
+          : `${plural(totals.cards, "card")} · ${plural(allRows.length, "line")} · value ${money(totals.value)}${totals.unpriced ? ` with ${totals.unpriced} unpriced` : ""}${totals.oldestPrice ? ` · prices from ${day(totals.oldestPrice)}` : ""}`}
+        alert={pricesNote ? <p className="hint hint-small" style={{ color: "var(--warn-ink)" }}>{pricesNote}</p> : null}
+        actions={(
+          <select className="sd-select" value={view} onChange={(e) => setView(e.target.value)} aria-label="Stock or sold">
+            <option value="stock">In stock</option>
+            <option value="sold">Sold</option>
+          </select>
+        )}
+      >
+        {view === "stock" ? (
+          <>
+            <div className="sd-opts">
+              <input className="stack-title-inp" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name or set" aria-label="Search stock" />
+              <select className="sd-select" value={divider} onChange={(e) => setDivider(e.target.value)} aria-label="Divider">
+                <option value="">All dividers</option>
+                {perDivider.map((d) => (
+                  <option key={d.divider} value={d.divider}>{d.divider} · {d.cards} · {money(d.value)}{d.unpriced ? ` (+${d.unpriced} unpriced)` : ""}</option>
+                ))}
+              </select>
+              <select className="sd-select" value={grade} onChange={(e) => setGrade(e.target.value)} aria-label="Grade">
+                <option value="">Any grade</option>
+                {HOUSE_GRADES.map((g) => <option key={g} value={g}>{g} (ours) = {CU_TO_CM[g]}</option>)}
+              </select>
+              <select className="sd-select" value={foil} onChange={(e) => setFoil(e.target.value)} aria-label="Finish">
+                <option value="">Foil and plain</option>
+                <option value="foil">Foil only</option>
+                <option value="plain">Plain only</option>
+              </select>
+              <select className="sd-select" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
+                <option value="name">Name</option>
+                <option value="value-desc">Value, highest first</option>
+                <option value="value-asc">Value, lowest first</option>
+                <option value="location">Where it is</option>
+                <option value="count">Most copies</option>
+              </select>
+            </div>
+            {rows.length !== allRows.length ? (
+              <p className="hint hint-small">Showing {plural(rowTotals.cards, "card")} · value {money(rowTotals.value)}{rowTotals.unpriced ? ` with ${rowTotals.unpriced} unpriced` : ""}</p>
+            ) : null}
+            {rows.length === 0 ? <p className="hint">{allRows.length ? "Nothing matches." : "Nothing loaded yet."}</p> : null}
+            <div className="stack-list">
+              {rows.slice(0, shown).map((r) => (
+                <div className="ps-row" key={r.key}>
+                  <span className="stack-pos" title="Copies in the box">×{r.count}</span>
+                  <span className="stack-title">
+                    {r.name} · {r.set}{r.cn ? ` ${r.cn}` : ""} · {r.grade} ours / {r.cmGrade || "?"} on Cardmarket{r.foil ? " · foil" : ""}{r.language !== "English" ? ` · ${r.language}` : ""}
+                    <span className="hint-small" style={{ display: "block" }}>{locationText(r)}{r.hasKey ? "" : " · no product id, cannot be matched to a sale"}</span>
+                  </span>
+                  <span className="stack-sku" title={r.pricedAt ? `Priced ${day(r.pricedAt)}` : "No saved price"}>
+                    {r.price == null ? "unpriced" : r.count > 1 ? `${money(r.price)} · ${money(r.value)}` : money(r.price)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {rows.length > shown ? (
+              <button className="btn btn-ghost" onClick={() => setShown((n) => n + PAGE)}>Show more ({rows.length - shown} left)</button>
+            ) : null}
+          </>
+        ) : (
+          <>
+            {sold.length === 0 ? <p className="hint">Nothing pulled for an order yet.</p> : null}
+            <div className="stack-list">
+              {sold.slice(0, shown).map((r) => (
+                <div className="ps-row" key={r.id}>
+                  <span className="stack-pos">{day(r.pulledAt).slice(5)}</span>
+                  <span className="stack-title">
+                    {r.name} · {r.set} · {r.grade} ours{r.soldGrade ? ` / sold as ${r.soldGrade}` : ""}
+                    <span className="hint-small" style={{ display: "block" }}>{r.sku} · {r.orderId ? `order ${r.orderId}` : "pulled by hand"}</span>
+                  </span>
+                  <span className="stack-sku">{money(r.price)}</span>
+                </div>
+              ))}
+            </div>
+            {sold.length > shown ? (
+              <button className="btn btn-ghost" onClick={() => setShown((n) => n + PAGE)}>Show more ({sold.length - shown} left)</button>
+            ) : null}
+          </>
+        )}
+      </Fold>
 
       <Fold
         id="cm-load"
@@ -312,6 +455,10 @@ export default function CardmarketStock() {
         ) : null}
         {walk.length ? (
           <>
+            <div className="sd-opts">
+              <button className="btn btn-ghost" onClick={tickAll} disabled={pulled.size === matched.picks.length}>☑ Tick all</button>
+              <button className="btn btn-ghost" onClick={untickAll} disabled={pulled.size === 0}>Untick all</button>
+            </div>
             <p className="hint hint-small">
               Counted from the divider <b>as it is now</b>, deepest first: pull from the back and every number above stays true. Tick a card as it
               comes out; the pile number is Cardmarket&apos;s order number in the file.
@@ -364,6 +511,12 @@ export default function CardmarketStock() {
           {stockFile ? <span className="hint-small">{stockFile.name}</span> : null}
         </div>
         {parsedStock?.error ? <p className="hint" style={{ color: "var(--warn-ink)" }}>{parsedStock.error}</p> : null}
+        {exportPrices.length ? (
+          <div className="sd-opts">
+            <button className="btn btn-primary" onClick={doSavePrices} disabled={busy}>💾 Save these {plural(exportPrices.length, "price")}</button>
+            <span className="hint-small">For the stock list and its value. The 1000 placeholder and blank prices are not saved.</span>
+          </div>
+        ) : null}
         {check ? (
           <>
             {check.regraded.length ? (

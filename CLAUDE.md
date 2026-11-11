@@ -287,7 +287,9 @@ stream` (the relay, only while streaming).
   with no near miss, the same order file twice picks nothing new, the walk is
   divider order and deepest first, the TCG PowerTools import file changes
   only the condition column, the check flags our LP listed as Cardmarket LP
-  and the 1000 placeholder and keeps DMG apart, and no
+  and the 1000 placeholder and keeps DMG apart, the stock list (copies
+  folded, locations, both grades, value only from saved prices, unpriced
+  counted and sorted last, the filters, the sold view), Tick all, and no
   eBay screen (Reconcile, a filing plan, the nightly import) touches an MTG
   divider.
 
@@ -2721,6 +2723,24 @@ pricing here.
   left at the 1000 placeholder autoprice leaves behind. Listed
   copies the box does not hold are counted, not itemised — the export covers
   the whole account.
+- **The stock list is the box, one row per ARTICLE** — identical copies
+  folded ("×4 · MTG-B 2, 9, 31, 44"), counted where the pick list counts them,
+  searchable by name or set (every word, either order, accents ignored) and
+  filtered by divider, OUR grade and finish. A card with no product id is
+  still a row: it is in the box. **Sold** is the pulled cards with the order
+  and price `cm` recorded at Mark pulled.
+- **Prices are TCG PowerTools', saved on purpose.** The engine does not price
+  Magic, so the listing check's upload offers **Save these prices** into
+  `cardmarket_prices` (migration 036, named only in the store), one per
+  article — the lower of two asks for one article, never the 1000 placeholder.
+  A value is only as fresh as the last save, and the list says from when.
+  Unpriced cards are counted, never valued at zero, and sort last in both
+  value directions.
+- **Nothing leaves stock until Mark pulled.** Uploading the order file changes
+  nothing: positions on the pick list count the cards still in the box, a paid
+  order can be cancelled before it ships, and a card that cannot be found must
+  stay. **Tick all** ticks the whole pick list for the day it was all pulled;
+  untick what was not there, then Mark pulled confirms.
 - **CSV only for now.** Cardmarket's xlsx export carries the same rows; the
   CSV follows the account's locale, so prices are read as `1.9` or `1,9`.
 

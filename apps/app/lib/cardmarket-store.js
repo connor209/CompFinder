@@ -98,3 +98,42 @@ export async function commitPicks(sb, userId, writes) {
   }
   return { done, failed };
 }
+
+// ── prices (migration 036) ───────────────────────────────────────────────────
+
+const pricesMissing = (error) => /cardmarket_prices|does not exist|schema cache/i.test(error?.message || "");
+
+/**
+ * Every saved price, as Map<article_key, { price, priced_at }>.
+ * Returns { prices, missing, error }: a pending migration is `missing`, and
+ * the stock list then shows every card unpriced and says why — never an empty
+ * box.
+ */
+export async function loadPrices(sb, userId) {
+  const prices = new Map();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from("cardmarket_prices")
+      .select("article_key,price,priced_at")
+      .eq("user_id", userId)
+      .order("article_key", { ascending: true })
+      .range(from, from + 999);
+    if (error) return { prices: new Map(), missing: pricesMissing(error), error: error.message };
+    for (const r of data || []) prices.set(r.article_key, { price: Number(r.price), priced_at: r.priced_at });
+    if (!data || data.length < 1000) break;
+  }
+  return { prices, missing: false, error: null };
+}
+
+/** Upsert prices from a TCG PowerTools export. Returns { saved, error }. */
+export async function savePrices(sb, userId, rows) {
+  const at = new Date().toISOString();
+  const all = (rows || []).map((r) => ({ user_id: userId, article_key: r.article_key, price: r.price, priced_at: at }));
+  let saved = 0;
+  for (let i = 0; i < all.length; i += 500) {
+    const { error } = await sb.from("cardmarket_prices").upsert(all.slice(i, i + 500), { onConflict: "user_id,article_key" });
+    if (error) return { saved, error: pricesMissing(error) ? "Run migration 036_cardmarket_prices.sql first." : error.message };
+    saved += Math.min(500, all.length - i);
+  }
+  return { saved, error: null };
+}
