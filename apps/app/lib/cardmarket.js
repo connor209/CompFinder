@@ -462,10 +462,15 @@ export function matchOrders(lines, cards, stacks) {
 }
 
 /**
- * The walk. Divider by divider in letter order, each one DEEPEST FIRST, with
- * the number each card is at right now: pull from the back and every number
- * above stays true while you work. `ranks` is `liveRanks()` over the same
- * cards (passed in, so this file imports nothing).
+ * The walk. Divider by divider in letter order, each one FRONT TO BACK, with
+ * the number each card is at right now — the way the eBay pull sheet reads.
+ * The divider's whole stack comes out and is counted through in the hand, so
+ * a card taken out on the way is still counted past; the numbers only close
+ * up when the picks are ticked and Mark pulled saves them. (Deepest first was
+ * tried, for pulling one card at a time off a stack left standing, and it is
+ * not how this stock is picked — decided 2026-11-12.) `ranks` is
+ * `liveRanks()` over the same cards (passed in, so this file imports
+ * nothing).
  */
 export function walkOrder(picks, stacks, ranks) {
   const byStack = new Map();
@@ -476,7 +481,7 @@ export function walkOrder(picks, stacks, ranks) {
   }
   const named = new Map((stacks || []).map((s) => [s.id, s]));
   return [...byStack.entries()]
-    .map(([id, rows]) => ({ stackId: id, name: named.get(id)?.name || "?", rows: rows.sort((a, b) => (b.rank ?? 0) - (a.rank ?? 0)) }))
+    .map(([id, rows]) => ({ stackId: id, name: named.get(id)?.name || "?", rows: rows.sort((a, b) => (a.rank ?? 1e9) - (b.rank ?? 1e9)) }))
     .sort((a, b) => compareDividers(a.name, b.name));
 }
 

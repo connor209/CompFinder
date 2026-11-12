@@ -285,7 +285,7 @@ stream` (the relay, only while streaming).
   grade table (LP→EX, MP→GD, HP→LP, DMG→PO) and that it is applied from OUR
   grade every time, a sale is matched on product + grade + finish + language
   with no near miss, the same order file twice picks nothing new, the walk is
-  divider order and deepest first, the TCG PowerTools import file changes
+  divider order and front to back, the TCG PowerTools import file changes
   only the condition column, the check flags our LP listed as Cardmarket LP
   and the 1000 placeholder and keeps DMG apart, the stock list (copies
   folded, locations, both grades, value only from saved prices, unpriced
@@ -2736,6 +2736,11 @@ pricing here.
   A value is only as fresh as the last save, and the list says from when.
   Unpriced cards are counted, never valued at zero, and sort last in both
   value directions.
+- **The pick list reads front to back at the positions as they are now**,
+  like the eBay pull sheet (decided 2026-11-12): the divider's stack comes out
+  whole and is counted through in the hand, a card pulled on the way still
+  counted past, and the numbers close up only once the picks are marked
+  pulled. Deepest first was tried and is not how this stock is picked.
 - **Nothing leaves stock until Mark pulled.** Uploading the order file changes
   nothing: positions on the pick list count the cards still in the box, a paid
   order can be cancelled before it ships, and a card that cannot be found must
