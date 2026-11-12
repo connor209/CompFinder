@@ -21,7 +21,7 @@ import Fold from "./Fold";
  *    a time behind fresh dividers (MTG-C, MTG-D …). The screen says which
  *    dividers to write before the cards go in the box.
  * 2. **Today's picks.** Cardmarket's paid-orders export, matched on product,
- *    grade, finish and language, walked divider by divider and deepest first,
+ *    grade, finish and language, walked divider by divider, front to back,
  *    then dealt into one pile per order. Commit marks the ticked cards pulled
  *    and records the order on each, so the same file twice picks nothing new.
  * 3. **Check the listings.** A TCG PowerTools stock export against the box:
@@ -460,8 +460,8 @@ export default function CardmarketStock() {
               <button className="btn btn-ghost" onClick={untickAll} disabled={pulled.size === 0}>Untick all</button>
             </div>
             <p className="hint hint-small">
-              Counted from the divider <b>as it is now</b>, deepest first: pull from the back and every number above stays true. Tick a card as it
-              comes out; the pile number is Cardmarket&apos;s order number in the file.
+              Positions as they are now, front to back: take the divider&apos;s stack out and count through it, cards you pull included.
+              The count closes up once the picks are ticked and marked pulled. The pile number is Cardmarket&apos;s order number in the file.
             </p>
             {walk.map((g) => (
               <div key={g.stackId}>

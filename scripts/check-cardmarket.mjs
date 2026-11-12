@@ -204,7 +204,7 @@ const ranks = liveRanks(box.map((c) => (c.sku === "MTG-A1" ? { ...c, pulled_at: 
 check("a pulled card closes the count up behind it", ranks.get(bySku("MTG-A5").id) === 4);
 const walk = walkOrder(m.picks, stacks, ranks);
 check("dividers in letter order", walk.map((g) => g.name).join() === "MTG-A,MTG-B");
-check("deepest first within a divider", walk[0].rows.map((r) => r.card.sku).join() === "MTG-A6,MTG-A5");
+check("front to back within a divider, at the positions as they are now", walk[0].rows.map((r) => `${r.card.sku}@${r.rank}`).join() === "MTG-A5@4,MTG-A6@5");
 const piles = pilesOf(m.picks);
 check("one pile per order, in Cardmarket's numbering", piles.length === 2 && piles[0].seq === 1 && piles[0].picks.length === 2 && piles[1].orderId === "1313921932");
 
