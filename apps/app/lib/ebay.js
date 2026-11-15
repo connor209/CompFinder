@@ -1032,6 +1032,10 @@ export async function fetchPendingOrders(accessToken, { labelledWithinDays = 0 }
         title: li.title != null ? String(li.title) : "",
         variation,
         quantity: li.quantity != null ? Number(li.quantity) : 1,
+        // What the line sold for (before postage), for the sale alert. The
+        // pull sheet ignores it.
+        price: li.lineItemCost?.value != null ? Number(li.lineItemCost.value) : null,
+        currency: li.lineItemCost?.currency || null,
         buyer: order.buyer?.username || null,
         deliveryName,
         deliveryCity,

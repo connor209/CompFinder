@@ -302,6 +302,13 @@ stream` (the relay, only while streaming).
   on reload instead of taking the next copy, and that Reconcile never calls
   a CardUploader copy "not listed" off its stack SKU.
 
+- `scripts/check-salealerts.mjs` — Discord sale alerts: turning them on with
+  orders open announces none of them, an order is announced once, a post that
+  fails is not recorded so the next run sends it, nothing posts at all before
+  migration 038, the buyer is a username and never a name or town, a title is
+  neither markdown nor a ping, the card's place is the pull sheet's answer,
+  and the route refuses to run without CRON_SECRET.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -2796,6 +2803,26 @@ untouched.
   listed", and Reconcile would pre-tick a whole load. `cardOffSaleReason()`
   answers null for a card with a `listing_sku`; the pull sheet is where one
   leaves stock.
+
+## A Discord ping for each sale, saying where the card is
+
+`/api/cron/sale-alerts` posts each NEW eBay order to a Discord webhook
+(`DISCORD_SALES_WEBHOOK_URL`), with the stack and position of every card in
+it. `.github/workflows/sale-alerts.yml` calls it every ten minutes with
+`CRON_SECRET` — Vercel's free plan only schedules once a day. `lib/sale-alerts.js`
+owns it, and is the only file naming `sale_alerts` (migration 038).
+
+- **The place is the pull sheet's answer.** `assignPulls()` runs over every
+  open order, not just the new one, so a variation's "front-most copy" is the
+  copy the sheet will name rather than one an older order already holds.
+- **Posted, then recorded.** A failed post goes out on the next run; a missed
+  sale is worse than a repeated one. Before 038 it posts nothing at all.
+- **Switched on, it announces nothing old** — the open orders are recorded
+  silently and one line says how many.
+- **Username only, mentions off.** A channel is one invite link from somebody
+  it was not meant for, and a card title is not a ping.
+- **The route REQUIRES `CRON_SECRET`**, unlike `/api/cron/sync`: it is called
+  from outside Vercel every ten minutes.
 
 ## A SKU is a name; a position is an address
 

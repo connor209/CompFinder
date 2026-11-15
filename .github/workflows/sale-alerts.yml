@@ -1,0 +1,50 @@
+# Discord alerts for new eBay orders, every ten minutes.
+#
+# Vercel's free plan runs its own crons once a day (that is /api/cron/sync at
+# 3am), so the ten-minute tick comes from here. This holds no database or eBay
+# key: it calls one route on the app with a shared secret, and the app does
+# the rest (apps/app/lib/sale-alerts.js).
+#
+# GitHub runs scheduled workflows late when it is busy, often by 5–15 minutes,
+# and sometimes skips one. Nothing is lost when it does: the next run posts
+# every order not yet announced.
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   CRON_SECRET    the same value as CRON_SECRET in Vercel (comp-finder)
+#   APP_URL        the app's address, e.g. https://comp-finder-alpha.vercel.app
+#
+# Until both are set this does nothing and says so, rather than failing every
+# ten minutes.
+name: Sale alerts
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sale-alerts
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Post new orders to Discord
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          if [ -z "$CRON_SECRET" ] || [ -z "$APP_URL" ]; then
+            echo "::notice::Set the CRON_SECRET and APP_URL repository secrets to turn sale alerts on."
+            exit 0
+          fi
+          code=$(curl -sS -o body.json -w '%{http_code}' --max-time 90 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "${APP_URL%/}/api/cron/sale-alerts")
+          cat body.json; echo
+          [ "$code" = "200" ] || { echo "::error::sale-alerts answered $code"; exit 1; }

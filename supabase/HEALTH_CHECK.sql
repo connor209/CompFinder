@@ -175,6 +175,9 @@ with schema_checks as (
       case when (select count(*) from information_schema.columns
                  where table_schema='public' and table_name='stack_cards'
                    and column_name in ('listing_sku','pulled_line')) = 2
+        then '✅ present' else '❌ missing' end),
+    (42, 'SCHEMA · 038 sale alerts', 'sale_alerts table',
+      case when to_regclass('public.sale_alerts') is not null
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),
