@@ -293,6 +293,15 @@ stream` (the relay, only while streaming).
   eBay screen (Reconcile, a filing plan, the nightly import) touches an MTG
   divider.
 
+- `scripts/check-cuinventory.mjs` — CardUploader's variation listings: that
+  a CS- SKU names a card and condition (both spellings, with and without the
+  `_suffix`, are one key), that the inventory file stacks a card at its User
+  SKU and never resurrects a pulled one, that each file refuses the other,
+  that an order line takes the copy CardUploader chose before any default
+  can, that two lines never share a copy, that a committed line stays done
+  on reload instead of taking the next copy, and that Reconcile never calls
+  a CardUploader copy "not listed" off its stack SKU.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -2748,6 +2757,45 @@ pricing here.
   untick what was not there, then Mark pulled confirms.
 - **CSV only for now.** Cardmarket's xlsx export carries the same rows; the
   CSV follows the account's locale, so prices are read as `1.9` or `1,9`.
+
+## CardUploader's variation listings: one eBay SKU, many copies
+
+From November 2026 new stock is scanned, priced and listed straight from
+CardUploader, as "pick your card" variation listings. Each card still has a
+location SKU (IR19, stack IR, card 19), but eBay is never told it: the
+variation sells under CardUploader's SKU (`CS-P3NSJY_982a1be2`), which names a
+card AND condition and is shared by every copy of it — fourteen copies of one
+common in the first export. The nightly import cannot read a CS- SKU, so these
+cards were on no stack, and every order line for one was a loose pick.
+
+`lib/cu-files.js` reads CardUploader's two exports; `lib/pullmatch.js` decides
+which physical card each order line takes. Migration 037 adds
+`stack_cards.listing_sku` and `stack_cards.pulled_line`. `packages/core` is
+untouched.
+
+- **Stacks → ⤓ CardUploader inventory** stacks every row at its `User SKU`
+  and keeps its `eBay SKU`. A SKU already on a stack — pulled included — is
+  never added again, so the next export adds only the next load. Nothing is
+  ever pulled from a file; a card on those stacks the file no longer lists is
+  named. Refuses to run before 037, because a card with no eBay SKU on it is a
+  card no order can find.
+- **The copy CardUploader marks picked must be the copy we pull.** Two systems
+  disagreeing about which of N identical commons went is invisible until the
+  next export lists a card that is not there. So **⤒ CardUploader pick list**
+  on the pull sheet (its Orders export, kept on the device for the deal's 12
+  hours) is followed FIRST, before any default can take a copy it chose for
+  another order. With no file a line takes the front-most copy in walk order,
+  and the row says so. Press Pick in CardUploader on the copy you pulled.
+- **A committed line records the card it took** (`pulled_line`). With one card
+  per SKU, "the SKU is pulled" meant "the line is done"; with several copies it
+  doesn't, and a reload would hand the same line the next copy and Commit would
+  pull that too. Before 037 the old reading stands.
+- **Reconcile and the Show Desk never call these cards off sale.**
+  `ebay_listings` has one row per listing, never per variation, and a variation
+  sale never says which copy — so read by its stack SKU every copy is "not
+  listed", and Reconcile would pre-tick a whole load. `cardOffSaleReason()`
+  answers null for a card with a `listing_sku`; the pull sheet is where one
+  leaves stock.
 
 ## A SKU is a name; a position is an address
 

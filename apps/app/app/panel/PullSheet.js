@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
-import { queuesBySku } from "@/lib/copyqueue";
+import { assignPulls, cuChoiceReport } from "@/lib/pullmatch";
+import { cuChoiceIndex, isMissingListingSku, parsePickListCsv } from "@/lib/cu-files";
 import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
@@ -88,6 +89,31 @@ function writeLooseCommitted(keys) {
   }
 }
 
+// CardUploader's pick list export, as uploaded this morning: its choice of
+// copy for each variation line. Kept for the deal's lifetime so a reload
+// keeps following it, and gone by tomorrow — yesterday's choices are about
+// yesterday's shelf.
+const CU_KEY = "cf-pullsheet-cu";
+
+function readCuPicks() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CU_KEY) || "null");
+    if (!raw || !Array.isArray(raw.rows) || Date.now() - (raw.at || 0) > DEAL_TTL_MS) return null;
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
+function writeCuPicks(v) {
+  try {
+    if (v) localStorage.setItem(CU_KEY, JSON.stringify(v));
+    else localStorage.removeItem(CU_KEY);
+  } catch {
+    /* private window — the file is followed until the next reload */
+  }
+}
+
 function writeDoneLog(log) {
   try {
     if (log.length) localStorage.setItem(DONE_KEY, JSON.stringify({ at: Date.now(), log }));
@@ -136,6 +162,11 @@ export default function PullSheet() {
   const [labelled, setLabelled] = useState([]); // order ids: label printed, not yet packed
   const [packedMissing, setPackedMissing] = useState(false); // migration 033 not run
   const [packedNote, setPackedNote] = useState(""); // a packed read/write that failed
+  // CardUploader's pick list file, if one was uploaded this sitting, and how
+  // its choices landed on the sheet.
+  const [cuFile, setCuFile] = useState(null); // { name, at, rows }
+  const [cuReport, setCuReport] = useState(null);
+  const [cuError, setCuError] = useState("");
 
   const supabase = () => createClient();
 
@@ -209,11 +240,13 @@ export default function PullSheet() {
     // A SKU maps to a QUEUE of copies, not to one card. One card per SKU is
     // still the ordinary case and behaves exactly as before — the queue is one
     // long. A multi-quantity listing is several copies sharing the listing's
-    // SKU, and then WHICH copy goes matters: it is the one in the listing's
-    // photograph. copyqueue.js owns that order; this used to keep the first row
-    // an unordered `select *` happened to return.
-    const copyQueues = queuesBySku(cards);
-    const takenBySku = new Map(); // sku -> units of its queue already spoken for
+    // SKU, and a CardUploader variation is several copies sharing ITS SKU
+    // (CS-…), and then WHICH copy goes matters. lib/pullmatch.js is the one
+    // reading of that, and it remembers which card each line took, so a
+    // reload never hands a committed line the next copy.
+    const cu = readCuPicks();
+    setCuFile(cu);
+    const cuChoice = cu ? cuChoiceIndex(cu.rows) : null;
     const pulledSkus = new Set();
     const awaySkus = new Set(); // checked out to a show — physically not here
     const order = new Map();
@@ -240,38 +273,43 @@ export default function PullSheet() {
     const units = []; // one per card: { lineItemId, pulled } — what Pack may deal
     const looseDone = readLooseCommitted();
     let done = 0;
-    for (const l of lines) {
+    // ONE LINE ITEM CAN BE SEVERAL CARDS: assignPulls() gives each unit its
+    // own row, its own tick and its own card — `commit()` keys on card id, so
+    // two units of one order commit as the two cards they are.
+    const { units: assigned, pulledFor } = assignPulls(lines, cards, {
+      walkCompare: stackWalkCompare,
+      stackNameOf: (id) => nameMap.get(id) || "",
+      cuChoice
+    });
+    setCuReport(cuChoiceReport(assigned, cuChoice, cards));
+    for (const u of assigned) {
+      const l = u.line;
       const skl = l.sku ? l.sku.trim().toLowerCase() || null : null;
-      // ONE LINE ITEM CAN BE SEVERAL CARDS. fetchPendingOrders has always
-      // returned the quantity and this loop always ignored it, which is
-      // invisible while every listing is a single card and is a card short the
-      // first time one isn't. Each unit is its own row, its own tick and its
-      // own card — `commit()` keys on card id, so two units of one order commit
-      // as the two cards they are.
-      const count = Math.max(1, Number(l.quantity) || 1);
-      for (let n = 0; n < count; n++) {
-        const seen = takenBySku.get(skl) || 0;
-        const card = skl ? (copyQueues.get(skl) || [])[seen] || null : null;
-        // A key per UNIT. Sharing the line item id would collapse two cards
-        // back into one row and pull half the order.
-        const key = count > 1 ? `${l.lineItemId}#${n + 1}` : l.lineItemId;
-        const unitOf = count > 1 ? { unit: n + 1, ofUnits: count } : null;
-        const pulled = !card && !(skl && awaySkus.has(skl)) && ((skl && pulledSkus.has(skl)) || looseDone.has(String(key)));
-        units.push({ lineItemId: l.lineItemId, pulled });
-        if (card) {
-          takenBySku.set(skl, seen + 1);
-          active.push({ key, orderId: l.orderId, sku: l.sku, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf });
-        } else if (skl && awaySkus.has(skl)) {
-          // Ordered on eBay while the card is checked out to a show — it can't
-          // be picked from a stack. Needs a human call (it's in the show case).
-          awayLines.push({ key, sku: l.sku, title: l.title });
-        } else if (pulled) {
-          done += 1;
-        } else {
-          // Loose / variation pick — no stack match. Sort these by card number so
-          // they're a single pass through numbered storage (2, 4, 17, 101…).
-          unm.push({ key, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku), ...setInfo(l.title), ...unitOf });
-        }
+      const key = u.key;
+      const unitOf = u.unitOf;
+      const card = u.done ? null : u.card;
+      // Before migration 037 nothing records which card a line took, so the
+      // old reading stands: the line's SKU is pulled, so the line is done.
+      const pulled = u.done || (!card && !(skl && awaySkus.has(skl)) && ((skl && pulledSkus.has(skl)) || looseDone.has(String(key))));
+      units.push({ lineItemId: l.lineItemId, pulled });
+      if (card) {
+        active.push({
+          key, lineItemId: l.lineItemId, orderId: l.orderId,
+          // The card's own SKU is what is written on it. A variation line's
+          // SKU (CS-…) names the card and condition, never this copy.
+          sku: card.sku || l.sku, listingSku: card.sku && l.sku && card.sku !== l.sku ? l.sku : null,
+          via: u.via, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf
+        });
+      } else if (skl && awaySkus.has(skl)) {
+        // Ordered on eBay while the card is checked out to a show — it can't
+        // be picked from a stack. Needs a human call (it's in the show case).
+        awayLines.push({ key, sku: l.sku, title: l.title });
+      } else if (pulled) {
+        done += 1;
+      } else {
+        // Loose / variation pick — no stack match. Sort these by card number so
+        // they're a single pass through numbered storage (2, 4, 17, 101…).
+        unm.push({ key, sku: l.sku, title: l.title, variation: l.variation, orderId: l.orderId, buyer: l.buyer, deliveryName: l.deliveryName, nk: numKey(l.variation || l.title || l.sku), reason: u.reason || null, ...setInfo(l.title), ...unitOf });
       }
     }
     active.sort((a, b) => {
@@ -303,7 +341,9 @@ export default function PullSheet() {
     }
     const pack = lines.filter((l) => committed.has(String(l.lineItemId))).map((l) => {
       const skl = l.sku ? l.sku.trim().toLowerCase() || null : null;
-      const card = skl ? anyBySku.get(skl) : null;
+      // The card pulled FOR this line where that is recorded (037) — a
+      // variation line's SKU is shared by every copy and finds none of them.
+      const card = pulledFor.get(String(l.lineItemId))?.[0] || (skl ? anyBySku.get(skl) : null);
       return {
         key: l.lineItemId,
         orderId: l.orderId,
@@ -379,6 +419,28 @@ export default function PullSheet() {
     });
   }
 
+  // CardUploader's pick list export: its choice of copy for each variation
+  // line. Read and kept on this device; nothing is written anywhere.
+  async function onCuFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setCuError("");
+    try {
+      const rows = parsePickListCsv(await f.text());
+      writeCuPicks({ name: f.name, at: Date.now(), rows });
+    } catch (err) {
+      setCuError(err.message || "Couldn't read that file.");
+      return;
+    }
+    await load();
+  }
+
+  async function clearCuFile() {
+    writeCuPicks(null);
+    await load();
+  }
+
   function togglePlaced(key) {
     setPlaced((prev) => {
       const n = new Set(prev);
@@ -397,8 +459,27 @@ export default function PullSheet() {
     setCommitting(true);
     setNote("");
     const sb = supabase();
-    for (let i = 0; i < ids.length; i += 200) {
-      await sb.from("stack_cards").update({ pulled_at: new Date().toISOString() }).in("id", ids.slice(i, i + 200));
+    const at = new Date().toISOString();
+    // Each card records the order line it was pulled for (migration 037), so
+    // a reload knows the line is done even when another copy of the same
+    // card is still on the shelf. Before 037, pulled_at alone, as always.
+    const byLine = new Map();
+    for (const r of rows) {
+      if (!picked.has(r.cardId)) continue;
+      const k = String(r.lineItemId || "");
+      if (!byLine.has(k)) byLine.set(k, []);
+      byLine.get(k).push(r.cardId);
+    }
+    let lineCol = true;
+    for (const [line, cardIds] of byLine) {
+      if (!lineCol) break;
+      const { error: e } = await sb.from("stack_cards").update({ pulled_at: at, pulled_line: line || null }).in("id", cardIds);
+      if (e && isMissingListingSku(e)) lineCol = false;
+    }
+    if (!lineCol) {
+      for (let i = 0; i < ids.length; i += 200) {
+        await sb.from("stack_cards").update({ pulled_at: at }).in("id", ids.slice(i, i + 200));
+      }
     }
     if (loose.length) writeLooseCommitted(new Set([...readLooseCommitted(), ...loose]));
     setCommitting(false);
@@ -572,6 +653,12 @@ export default function PullSheet() {
               ☰ {showAllPiles ? "Hide piles" : `All piles (${packView.piles.length})`}
             </button>
           ) : null}
+          {mode === "pick" ? (
+            <label className="btn btn-ghost" title="CardUploader → Orders → export the pick list. Variation lines then go to the copy CardUploader chose.">
+              ⤒ CardUploader pick list
+              <input type="file" accept=".csv,text/csv" onChange={onCuFile} style={{ display: "none" }} />
+            </label>
+          ) : null}
           <button className="btn btn-ghost" onClick={() => window.print()}>🖨 Print</button>
           <button className="btn btn-ghost" onClick={load} disabled={committing}>↻ Refresh</button>
           {mode === "pick" ? (
@@ -616,6 +703,20 @@ export default function PullSheet() {
       <div className="print-title">Pull sheet — {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })} · {total} to pick</div>
       {note ? <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>{note}</p> : null}
       {error ? <p className="compfinder-error">{error}</p> : null}
+      {cuError ? <p className="compfinder-error">{cuError}</p> : null}
+      {cuFile ? (
+        <p className="hint hint-small">
+          Following CardUploader&apos;s pick list ({cuFile.name}, {cuFile.rows.length} rows)
+          {cuReport ? ` — ${cuReport.followed} variation card(s) go to its choice${cuReport.defaulted ? `, ${cuReport.defaulted} to the front-most copy because it chose none on your shelf` : ""}` : ""}.
+          {cuReport?.unknown?.length ? ` It names ${cuReport.unknown.length} SKU(s) not on your stacks (${cuReport.unknown.slice(0, 5).join(", ")}${cuReport.unknown.length > 5 ? ", …" : ""}) — upload CardUploader's inventory on Stacks.` : ""}
+          {" "}<button className="btn btn-ghost" onClick={clearCuFile}>Stop following it</button>
+        </p>
+      ) : rows.some((r) => r.via === "variation") ? (
+        <p className="hint hint-small">
+          {rows.filter((r) => r.via === "variation").length} CardUploader variation card(s) go to the front-most copy on the shelf.
+          CardUploader may choose a different copy — upload its pick list (⤒ above) to follow its choice, or press Pick there on the copy you pulled.
+        </p>
+      ) : null}
 
       {away.length > 0 ? (
         <div className="mine-banner">
@@ -666,6 +767,10 @@ export default function PullSheet() {
                         twice by mistake — which is exactly what someone would
                         "fix" by picking one. */}
                     {r.ofUnits ? <span className="badge2"> copy {r.unit} of {r.ofUnits}</span> : null}
+                    {/* A CardUploader variation: say which copy rule chose it,
+                        since CardUploader is told separately (its own Pick). */}
+                    {r.via === "cardUploader" ? <span className="badge2" title={r.listingSku || ""}> CardUploader&apos;s pick</span> : null}
+                    {r.via === "variation" ? <span className="badge2" title={r.listingSku || ""}> front-most copy</span> : null}
                   </span>
                 </label>
               );
@@ -700,6 +805,8 @@ export default function PullSheet() {
                       <span className="loose-card">
                         <span className="loose-card-name">{u.variation || u.sku || "no SKU"}</span>
                         {u.deliveryName || u.buyer ? <span className="loose-card-buyer">for {u.deliveryName || u.buyer}</span> : null}
+                        {u.reason === "notstacked" ? <span className="loose-card-buyer">CardUploader card not on your stacks — upload its inventory on Stacks</span> : null}
+                        {u.reason === "nocopyleft" ? <span className="loose-card-buyer">every copy is already pulled or away</span> : null}
                       </span>
                     </label>
                   );

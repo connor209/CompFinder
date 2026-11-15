@@ -170,6 +170,11 @@ with schema_checks as (
         then '✅ present' else '❌ missing' end),
     (40, 'SCHEMA · 036 Cardmarket prices', 'cardmarket_prices table',
       case when to_regclass('public.cardmarket_prices') is not null
+        then '✅ present' else '❌ missing' end),
+    (41, 'SCHEMA · 037 CardUploader inventory', 'stack_cards.listing_sku + pulled_line columns',
+      case when (select count(*) from information_schema.columns
+                 where table_schema='public' and table_name='stack_cards'
+                   and column_name in ('listing_sku','pulled_line')) = 2
         then '✅ present' else '❌ missing' end)
   ) as v(sort, area, item, detail)
 ),
