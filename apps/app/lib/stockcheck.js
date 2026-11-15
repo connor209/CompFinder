@@ -367,6 +367,27 @@ export function offSaleReason(sku, idx) {
 }
 
 /**
+ * offSaleReason() for a stack CARD rather than a SKU.
+ *
+ * A card CardUploader lists (`listing_sku`, migration 037) is sold as one
+ * copy of a variation whose SKU it shares with every other copy of that card
+ * in that condition. Nothing we hold says per COPY whether it is still for
+ * sale: `ebay_listings` keeps one row per listing, never per variation, and a
+ * sale of the variation SKU says a copy went, never which. Read by its stack
+ * SKU, every one of these cards is "not listed", and Reconcile would pre-tick
+ * a whole load to pull.
+ *
+ * So the answer for those is null — on sale — and the pull sheet is where one
+ * leaves stock: Commit pulls the copy the order was matched to. A copy sold
+ * but not yet pulled is still offered at a show, which is the same window a
+ * single listing had before the nightly sync caught it.
+ */
+export function cardOffSaleReason(card, idx) {
+  if (card?.listing_sku) return null;
+  return offSaleReason(card?.sku, idx);
+}
+
+/**
  * Index the checkouts that are still OUT, for the question below.
  * `checkouts` are `stock_checkouts` rows; resolved ones are ignored, because
  * a card that came home or was sold at the table is not away any more.

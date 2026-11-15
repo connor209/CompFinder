@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/stackpos.js";
-import { isListingAvailable, soldOutSkus, offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
+import { isListingAvailable, soldOutSkus, offSaleIndex, offSaleReason, cardOffSaleReason } from "@/lib/stockcheck.js";
 import { gameOf, gameFacets, filterByGames, gameName, UNKNOWN_GAME, GAMES } from "@/lib/games.js";
 import { getSetIndex } from "@/lib/set-index.js";
 import {
@@ -855,7 +855,7 @@ export default function ShowDesk() {
     else if (!batchPrefix.trim() && batchStack && isShowBinder(stackName.get(batchStack))) picked.sort(comparePockets);
     return picked.map((card) => ({
       card, rank: ranks.get(card.id) ?? null, depth: depths.get(card.stack_id) ?? null,
-      offSale: offSaleReason(card.sku, offSale)
+      offSale: cardOffSaleReason(card, offSale)
     }));
   }, [stackCards, batchPrefix, batchStack, batchNameQ, awayIndex, listings, sales, stackName]);
   // Sold and sold-out cards leave the picker unless asked for, and are counted:

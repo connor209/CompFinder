@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
-import { offSaleIndex, offSaleReason } from "@/lib/stockcheck.js";
+import { offSaleIndex, cardOffSaleReason } from "@/lib/stockcheck.js";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
 import { isCardmarketStack } from "@/lib/cardmarket.js";
 import { binderSlot, comparePockets, caseKind } from "@/lib/showbinder.js";
@@ -14,6 +14,7 @@ import StackCheck from "./StackCheck";
 import { loadCheck } from "@/lib/stackcheck.js";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
+import { inventoryImportNote, parseInventoryCsv, runInventoryImport } from "@/lib/cu-files.js";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -135,6 +136,37 @@ export default function Stacks() {
     await loadCards(selId);
   }
 
+  // CardUploader's inventory export: the cards it lists as variations, which
+  // eBay knows only by CardUploader's SKU (CS-…) and the auto-import above
+  // therefore never stacks. Each row's User SKU (IR19) is its stack and
+  // position; its eBay SKU is kept so an order can find it. lib/cu-files.js.
+  async function onInventoryFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    const sb = supabase();
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return;
+    let rows;
+    try {
+      rows = parseInventoryCsv(await f.text());
+    } catch (err) {
+      setMsg(err.message || "Couldn't read that file.");
+      return;
+    }
+    if (!confirm(`Add the cards in ${f.name} (${rows.length} rows) to your stacks?\n\nEach User SKU like IR19 becomes Stack IR, position 19. SKUs already on a stack — pulled ones included — are skipped, and nothing is ever pulled.`)) return;
+    setBusy(true);
+    setMsg("Importing CardUploader inventory…");
+    try {
+      setMsg(inventoryImportNote(await runInventoryImport(sb, user.id, rows)));
+    } catch (err) {
+      setMsg(`Import stopped — ${err.message || "couldn't read your stacks"}. No cards were added.`);
+    }
+    setBusy(false);
+    await loadStacks();
+    await loadCards(selId);
+  }
+
   // Reconciliation: cards still in a stack that we can no longer sell. Three
   // reasons, and the middle one is the one this screen used to miss entirely:
   //
@@ -170,7 +202,7 @@ export default function Stacks() {
       // Cardmarket dividers hold cards that were never on eBay, so "not
       // listed" is true of every one of them and means nothing.
       .filter((c) => !cmStackIds.has(c.stack_id))
-      .map((c) => ({ c, reason: offSaleReason(c.sku, offSale) }))
+      .map((c) => ({ c, reason: cardOffSaleReason(c, offSale) }))
       .filter(({ reason }) => reason)
       .map(({ c, reason }) => ({
         id: c.id, sku: c.sku, title: c.title, stack: nameMap.get(c.stack_id) || "",
@@ -425,6 +457,10 @@ export default function Stacks() {
         )}
         <button className="stack-tab stack-new" onClick={createStack}>+ New stack</button>
         <button className="stack-tab stack-new" onClick={autoImport} disabled={busy}>⤓ Auto-import from listings</button>
+        <label className={`stack-tab stack-new${busy ? " disabled" : ""}`} title="CardUploader → Inventory → export. Adds the cards it lists as variations (CS- SKUs) at their User SKU.">
+          ⤓ CardUploader inventory
+          <input type="file" accept=".csv,text/csv" onChange={onInventoryFile} disabled={busy} style={{ display: "none" }} />
+        </label>
         <button className="stack-tab stack-new" onClick={runReconcile} disabled={busy}>🔄 Reconcile</button>
       </div>
       {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)", marginTop: -8 }}>{msg}</p> : null}
