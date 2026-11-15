@@ -92,6 +92,11 @@ if (checked === 0) fail("no panel component called a setter — this check is no
   if (!/\.results-actions\s*\{[^}]*flex-wrap:\s*wrap/.test(css)) {
     fail(".results-actions does not wrap — the buttons that do not fit are simply off the screen");
   }
+  // The pull sheet's bar: a CardUploader pick-list button was added beside
+  // Commit, and on a phone Commit — the last button — went off the edge.
+  if (!/\.ps-actions\s*\{[^}]*flex-wrap:\s*wrap/.test(css)) {
+    fail(".ps-actions does not wrap — on a phone the pull sheet's Commit button goes off the edge");
+  }
   if (/\.filter-grid\s*\{[^}]*grid-template-columns:\s*[^;]*fr\s+[^;]*fr\s+[^;]*fr\s+[^;]*fr\s+[^;]*fr/.test(css)) {
     fail(".filter-grid is back to fixed columns — adding a control to it then pushes the row off a narrow screen");
   }
