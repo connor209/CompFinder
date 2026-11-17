@@ -70,6 +70,21 @@ for (const f of walk("apps/app")) {
   if (/["'`]packed_orders["'`]/.test(read(f))) fail(`${f} names packed_orders — go through lib/packed-store.js`);
 }
 
+// Pack's per-pile "Already sent": records just that pile's orders, and only
+// where every order has a label — an unlabelled order is still to do to eBay
+// and would come straight back after the reload.
+{
+  const ps = read("apps/app/app/panel/PullSheet.js");
+  const fn = ps.match(/async function pileAlreadySent\(\)[\s\S]*?\n  \}/)?.[0] || "";
+  if (!fn) fail("PullSheet.js has no pileAlreadySent() — the per-pile Already sent button is gone");
+  else {
+    if (!/every\(\(c\) => c\.labelPrinted\)/.test(fn)) fail("pileAlreadySent() no longer refuses a pile with an unlabelled order");
+    if (!/markOrdersPacked\(supabase\(\), pile\.orderIds\)/.test(fn)) fail("pileAlreadySent() records something other than this pile's own orders");
+    if (!/confirm\(/.test(fn)) fail("pileAlreadySent() takes a pile off the sheet without confirming");
+    if (/setDoneLog|writeDoneLog/.test(fn)) fail("pileAlreadySent() touches the deal's completed piles — that renumbers the hand");
+  }
+}
+
 if (failures) {
   console.error(`check-packed: ${failures} failure(s)`);
   process.exit(1);
