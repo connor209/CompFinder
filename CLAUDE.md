@@ -195,7 +195,9 @@ stream` (the relay, only while streaming).
   real and read back out of its own bytes.
 - `scripts/check-instock.mjs` — whether a card is still ours to sell: that a
   listing at quantity zero is a card that has gone, that a missing quantity is
-  not a zero, and a grep over the two screens that ask.
+  not a zero, a grep over the two screens that ask, and that Reconcile never
+  offers a card on an order still to dispatch — that card is the pull sheet's
+  to pull, and pulled from Reconcile its order lands on Pack unpicked.
 - `scripts/check-stockmatch.mjs` — whether a listing of ours is THIS card: that
   the reverse holo and the plain copy are two cards and a slab and a raw copy
   two more, that a SKU match stays exact, that "last priced" is kept per
