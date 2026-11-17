@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
-import { assignPulls, cuChoiceReport } from "@/lib/pullmatch";
+import { assignPulls, cuChoiceReport, pulledOutsideSheet } from "@/lib/pullmatch";
 import { cuChoiceIndex, isMissingListingSku, parsePickListCsv } from "@/lib/cu-files";
 import { buildPiles, committedLineIds, currentPileNo, handPositions, pileLivePositions, pileOverview, pilePullOrder } from "@/lib/piles";
 import { LABELLED_WINDOW_DAYS, loadPackedOrderIds, markOrdersPacked, sheetLines, unmarkOrdersPacked } from "@/lib/packed-store";
@@ -143,6 +143,7 @@ export default function PullSheet() {
   const [loosePicked, setLoosePicked] = useState(new Set()); // ephemeral checklist for loose/variation picks (not stack cards)
   const [committing, setCommitting] = useState(false);
   const [note, setNote] = useState("");
+  const [packNote, setPackNote] = useState(""); // what ↩ Back to Pick did
   const [error, setError] = useState("");
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [mode, setMode] = useState("pick"); // pick | pack
@@ -343,7 +344,11 @@ export default function PullSheet() {
       const skl = l.sku ? l.sku.trim().toLowerCase() || null : null;
       // The card pulled FOR this line where that is recorded (037) — a
       // variation line's SKU is shared by every copy and finds none of them.
-      const card = pulledFor.get(String(l.lineItemId))?.[0] || (skl ? anyBySku.get(skl) : null);
+      const forLine = pulledFor.get(String(l.lineItemId)) || [];
+      const card = forLine[0] || (skl ? anyBySku.get(skl) : null);
+      // Pulled by Reconcile, Stacks or a stack check rather than Commit: the
+      // card may still be in its stack, so Pack offers it back to Pick.
+      const outside = (forLine.length ? forLine : card ? [card] : []).filter(pulledOutsideSheet);
       return {
         key: l.lineItemId,
         orderId: l.orderId,
@@ -357,6 +362,7 @@ export default function PullSheet() {
         position: card ? card.position : null,
         nk: numKey(l.variation || l.title || l.sku),
         matched: !!card,
+        outsideIds: outside.map((c) => c.id),
         // Pack deals ONE entry per order line — one buyer, one envelope — so a
         // quantity-2 line stays a single entry and carries the count instead.
         // Splitting it here would have you dealing two piles to one address.
@@ -541,6 +547,23 @@ export default function PullSheet() {
     });
   }
 
+  // A card marked pulled outside the pull sheet — Reconcile on a sold card
+  // whose order was still to dispatch, most often — reads here as already in
+  // your hand. If it is still in its stack, un-pull it and it goes back to
+  // Pick at its real position.
+  async function backToPick(it) {
+    const ids = it.outsideIds || [];
+    if (!ids.length) return;
+    if (!confirm(`Put ${it.sku || "this card"} back on Pick?\n\nOnly if it is still in its stack — it was marked pulled outside the pull sheet (Reconcile, Stacks or a stack check), so it reads here as already in your hand.`)) return;
+    const { error: e } = await supabase().from("stack_cards").update({ pulled_at: null }).in("id", ids);
+    if (e) {
+      setPackedNote(`Couldn't put ${it.sku || "that card"} back on Pick: ${e.message}`);
+      return;
+    }
+    setPackNote(`${it.sku || "That card"} is back on Pick — pull it from its stack and Commit as usual.`);
+    await load();
+  }
+
   function ordersOfKeys(keys) {
     const want = new Set(keys);
     return [...new Set(packItems.filter((i) => want.has(i.key)).map((i) => i.orderId))];
@@ -681,6 +704,7 @@ export default function PullSheet() {
         </div>
       ) : null}
       {packedNote ? <p className="compfinder-error">{packedNote}</p> : null}
+      {packNote ? <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>{packNote}</p> : null}
       {labelled.length > 0 ? (
         <div className="mine-banner">
           <span className="mine-ic" aria-hidden="true">🏷</span>
@@ -908,6 +932,17 @@ export default function PullSheet() {
                       </span>
                     )}
                   </span>
+                  {!done && it.outsideIds?.length ? (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ flex: "none" }}
+                      title="Marked pulled outside the pull sheet (Reconcile, Stacks or a stack check). Still in its stack? Send it back to Pick."
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); backToPick(it); }}
+                    >
+                      ↩ Back to Pick
+                    </button>
+                  ) : null}
                 </label>
               );
             })}
