@@ -488,3 +488,54 @@ export function soldOutSkus(listings) {
   }
   return set;
 }
+
+/**
+ * Which SKUs are on an eBay order the pull sheet has not finished with —
+ * sold, but the card is meant to still be in its stack.
+ *
+ * Reconcile reads "sold" and "out of stock" as "this card has left", which is
+ * true once the pull sheet has committed it and FALSE in between: the order is
+ * awaiting dispatch and the card is sitting in its stack waiting to be picked.
+ * Pulling it from Reconcile in that window marks it pulled without saying for
+ * which order, and the pull sheet then reads the line as already pulled and
+ * sends it straight to Pack — cards nobody picked, dealt into piles.
+ *
+ * `lines` are the pull sheet's own source (`/api/ebay/orders/pending`).
+ * `packedIds` drops label-printed orders we have already packed, when known.
+ *
+ * Returns null when the orders could not be read in full — the caller must
+ * then treat EVERY sold card as possibly awaiting dispatch. An unanswered read
+ * is not "no orders": that is the guess that pulls cards out from under the
+ * pull sheet.
+ */
+export function awaitingPullSkus(res, packedIds = null) {
+  if (!res || !res.ok || res.labelledError) return null;
+  const out = new Set();
+  for (const l of res.lines || []) {
+    if (!l?.sku) continue;
+    if (l.labelPrinted && packedIds && packedIds.has(String(l.orderId))) continue;
+    const k = String(l.sku).trim().toLowerCase();
+    if (k) out.add(k);
+  }
+  return out;
+}
+
+/**
+ * Split Reconcile's candidates into what it may offer to pull and what the
+ * pull sheet owns. `awaiting` is awaitingPullSkus(): a Set, or null for
+ * unknown. A row on an open order is taken OUT of the list — it is not a
+ * card that has left, it is a card about to be picked — and handed back so
+ * the screen can say so. `pretick` is what may start ticked: sold and out of
+ * stock, but none at all when the orders are unknown.
+ */
+export function reconcilePlan(rows, awaiting) {
+  const held = [];
+  const keep = [];
+  for (const r of rows || []) {
+    const k = r?.sku ? String(r.sku).trim().toLowerCase() : "";
+    if (awaiting && k && awaiting.has(k)) held.push(r);
+    else keep.push(r);
+  }
+  const pretick = awaiting ? keep.filter((r) => r.reason !== "notlisted").map((r) => r.id) : [];
+  return { rows: keep, held, ordersKnown: !!awaiting, pretick };
+}

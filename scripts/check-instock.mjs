@@ -25,7 +25,7 @@
  * - Too loose, and you drive to a show looking for cards that aren't there.
  */
 import { readFileSync } from "node:fs";
-import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, stockUnits, offSaleIndex, offSaleReason } from "../apps/app/lib/stockcheck.js";
+import { isListingAvailable, availableSkus, soldOutSkus, awayIndex, listingStock, stockUnits, offSaleIndex, offSaleReason, awaitingPullSkus, reconcilePlan } from "../apps/app/lib/stockcheck.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -218,6 +218,51 @@ if (!/outofstock/.test(read("apps/app/app/panel/Stacks.js"))) {
   // a card you are standing next to disappears from your own inventory.
   if (!/setAway\(null\)/.test(inv)) {
     fail("Inventory.js has no path that leaves the checkout lookup unanswered — a failed probe must not read as 'nothing is at a show'");
+  }
+}
+
+// --- Reconcile vs the pull sheet --------------------------------------------
+// 2026-11-17: Reconcile pre-ticked YGO-P26, YGO-Y28 and YGO-AA44 as sold —
+// they were, but the orders were still to dispatch and the cards still in
+// their stacks. Pulled there, the pull sheet read each line as already pulled
+// and dealt it onto Pack unpicked. A card on an open order is the pull
+// sheet's to pull, never Reconcile's.
+{
+  const res = { ok: true, lines: [
+    { orderId: "13-15433-28803", sku: "YGO-P26" },
+    { orderId: "17-15425-25395", sku: " ygo-y28 " },
+    { orderId: "L1", sku: "A9", labelPrinted: true },   // label printed, packed already
+    { orderId: "L2", sku: "A10", labelPrinted: true },  // label printed, not packed
+    { orderId: "X", sku: null }
+  ] };
+  const aw = awaitingPullSkus(res, new Set(["L1"]));
+  eq("open orders, packed label dropped", [...aw].sort(), ["a10", "ygo-p26", "ygo-y28"]);
+  eq("packed unknown keeps every label-printed order", [...awaitingPullSkus(res, null)].sort(), ["a10", "a9", "ygo-p26", "ygo-y28"]);
+  eq("a failed read is unknown, not empty", awaitingPullSkus({ ok: false }), null);
+  eq("a failed label read is unknown too", awaitingPullSkus({ ...res, labelledError: "boom" }), null);
+
+  const rows = [
+    { id: 1, sku: "YGO-P26", reason: "sold" },
+    { id: 2, sku: "YGO-AA44", reason: "outofstock" },
+    { id: 3, sku: "B4", reason: "sold" },
+    { id: 4, sku: "C5", reason: "notlisted" },
+    { id: 5, sku: "YGO-Y28", reason: "notlisted" }
+  ];
+  const plan = reconcilePlan(rows, new Set(["ygo-p26", "ygo-aa44", "ygo-y28"]));
+  eq("cards on an open order leave the list", plan.held.map((r) => r.id), [1, 2, 5]);
+  eq("the rest stay", plan.rows.map((r) => r.id), [3, 4]);
+  eq("sold still pre-ticks when it is not on an order", plan.pretick, [3]);
+  const blind = reconcilePlan(rows, null);
+  eq("orders unknown: nothing pre-ticked", blind.pretick, []);
+  eq("orders unknown: nothing hidden either", blind.rows.length, 5);
+  eq("orders unknown is said", blind.ordersKnown, false);
+
+  const st = readFileSync(new URL("../apps/app/app/panel/Stacks.js", import.meta.url), "utf8");
+  if (!/reconcilePlan\(/.test(st) || !/awaitingPullSkus\(/.test(st)) {
+    fail("Stacks.js Reconcile no longer asks which sold cards are on an open order — it will pull cards out from under the pull sheet");
+  }
+  if (/setReconSel\(new Set\(cand\./.test(st)) {
+    fail("Stacks.js pre-ticks Reconcile rows straight off the candidates again, past reconcilePlan()");
   }
 }
 

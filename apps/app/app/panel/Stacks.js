@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel } from "@/lib/stackpos.js";
 import { checkoutStackCard, getHideMode } from "@/lib/checkout";
-import { offSaleIndex, cardOffSaleReason } from "@/lib/stockcheck.js";
+import { offSaleIndex, cardOffSaleReason, awaitingPullSkus, reconcilePlan } from "@/lib/stockcheck.js";
+import { loadPackedOrderIds } from "@/lib/packed-store";
 import { isToploaderStack, isUnorderedStack, compareByTitle } from "@/lib/toploader.js";
 import { isCardmarketStack } from "@/lib/cardmarket.js";
 import { binderSlot, comparePockets, caseKind } from "@/lib/showbinder.js";
@@ -45,6 +46,8 @@ export default function Stacks() {
   const [reconLoading, setReconLoading] = useState(false);
   const [reconRows, setReconRows] = useState([]);
   const [reconSel, setReconSel] = useState(new Set());
+  const [reconHeld, setReconHeld] = useState([]); // sold, but on an order the pull sheet still owns
+  const [reconOrdersKnown, setReconOrdersKnown] = useState(true);
   const [checking, setChecking] = useState(false);
 
   const supabase = () => createClient();
@@ -189,6 +192,22 @@ export default function Stacks() {
     const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,quantity").not("sku", "is", null));
     const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date,line_item_id").not("sku", "is", null), { orderBy: "line_item_id" });
     const offSale = offSaleIndex(listings, sales);
+    // Orders still to pick: a card on one of those is sold but meant to be in
+    // its stack until the pull sheet commits it. Pulled here, the pull sheet
+    // reads the line as already pulled and sends it straight to Pack.
+    let awaiting = null;
+    try {
+      const res = await fetch("/api/ebay/orders/pending").then((r) => r.json());
+      let packed = null;
+      if (res?.ok) {
+        const labelledIds = [...new Set((res.lines || []).filter((l) => l.labelPrinted).map((l) => l.orderId))];
+        const p = await loadPackedOrderIds(sb, labelledIds);
+        if (p.ok) packed = p.ids;
+      }
+      awaiting = awaitingPullSkus(res, packed);
+    } catch {
+      awaiting = null; // unknown, never "no orders"
+    }
     const cards = await pagedSelect(() => sb.from("stack_cards").select("*").is("pulled_at", null));
     const nameMap = new Map(stacks.map((s) => [s.id, s.name]));
     const cmStackIds = new Set(stacks.filter(isCardmarketStack).map((s) => s.id));
@@ -209,11 +228,16 @@ export default function Stacks() {
         soldDate: offSale.soldDate.get(String(c.sku).toLowerCase()) || null, reason
       }))
       .sort((a, b) => (a.reason === b.reason ? (a.stack || "").localeCompare(b.stack || "") : rank[a.reason] - rank[b.reason]));
-    setReconRows(cand);
     // Out-of-stock is pre-ticked alongside sold: a live card is never at
     // quantity 0 unless it is away at a show, and those were filtered above.
-    // Nothing is committed until "Pull selected", and a pull can be undone.
-    setReconSel(new Set(cand.filter((c) => c.reason !== "notlisted").map((c) => c.id)));
+    // A card on an open order is left out (the pull sheet takes it), and with
+    // the orders unread nothing is pre-ticked. Nothing is committed until
+    // "Pull selected", and a pull can be undone.
+    const plan = reconcilePlan(cand, awaiting);
+    setReconRows(plan.rows);
+    setReconHeld(plan.held);
+    setReconOrdersKnown(plan.ordersKnown);
+    setReconSel(new Set(plan.pretick));
     setReconLoading(false);
   }
 
@@ -473,14 +497,29 @@ export default function Stacks() {
           </div>
           {reconLoading ? (
             <p className="hint hint-small"><span className="spinner" /> &nbsp;Checking stacks against your listings & sales…</p>
-          ) : reconRows.length === 0 ? (
+          ) : null}
+          {!reconLoading && reconHeld.length ? (
+            <p className="hint hint-small" style={{ marginTop: 0 }}>
+              <b>{reconHeld.length}</b> sold card{reconHeld.length === 1 ? " is" : "s are"} on an order still to dispatch and
+              {reconHeld.length === 1 ? " stays" : " stay"} in {reconHeld.length === 1 ? "its stack" : "their stacks"} — the pull sheet takes{" "}
+              {reconHeld.length === 1 ? "it" : "them"}: {reconHeld.slice(0, 6).map((r) => r.sku).join(", ")}
+              {reconHeld.length > 6 ? ` and ${reconHeld.length - 6} more` : ""}.
+            </p>
+          ) : null}
+          {!reconLoading && !reconOrdersKnown ? (
+            <p className="hint hint-small" style={{ marginTop: 0, color: "var(--warn-ink)" }}>
+              ⚠ Couldn&apos;t read your open eBay orders, so nothing is pre-ticked. A card sold but not yet dispatched is
+              still in its stack for the pull sheet — pulling it here sends its order straight to Pack unpicked.
+            </p>
+          ) : null}
+          {reconLoading ? null : reconRows.length === 0 ? (
             <p className="dd-empty">Everything&apos;s in sync — no sold cards sitting in stacks. 🎉</p>
           ) : (
             <>
               <p className="hint hint-small" style={{ marginTop: 0 }}>
                 In a stack but no longer sellable. <b>sold</b> = in your sales history; <b>out of stock</b> = listed
                 at quantity 0, what eBay leaves when a card sells; <b>not listed</b> = ended or delisted. The first two
-                are pre-ticked — pulling can be undone.
+                are pre-ticked — pulling can be undone. Cards on an order still to dispatch aren&apos;t listed: the pull sheet pulls those.
               </p>
               <div className="stack-list">
                 {reconRows.map((r) => (
