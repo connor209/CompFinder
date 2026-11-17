@@ -128,3 +128,20 @@ export function cuChoiceReport(units, cuChoice, cards) {
     unknown
   };
 }
+
+/**
+ * Was this card marked pulled somewhere OTHER than the pull sheet's Commit —
+ * Reconcile, Stacks' Pull, a stack check — and so possibly still sitting in
+ * its stack? Pack offers those "↩ Back to Pick".
+ *
+ * Commit writes `pulled_line` (migration 037); nothing else does. So a pulled
+ * card without one was pulled elsewhere. Before 037 the column is absent from
+ * the row altogether and there is no telling the two apart: every pulled card
+ * is offered, and the confirm says to use it only for a card still stacked.
+ * A card that is not pulled has nothing to undo.
+ */
+export function pulledOutsideSheet(card) {
+  if (!card?.pulled_at) return false;
+  if (!("pulled_line" in card)) return true;
+  return !card.pulled_line;
+}

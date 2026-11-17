@@ -25,7 +25,7 @@ import {
   isCuListingSku, listingSkuKey, parseInventoryCsv, parsePickListCsv, cuChoiceIndex,
   planInventoryImport, inventoryRowHeld, inventoryImportNote, isMissingListingSku
 } from "../apps/app/lib/cu-files.js";
-import { assignPulls, cuChoiceReport } from "../apps/app/lib/pullmatch.js";
+import { assignPulls, cuChoiceReport, pulledOutsideSheet } from "../apps/app/lib/pullmatch.js";
 import { cardOffSaleReason, offSaleIndex } from "../apps/app/lib/stockcheck.js";
 
 let failures = 0;
@@ -221,6 +221,24 @@ for (const f of ["apps/app/app/panel/Stacks.js", "apps/app/app/panel/ShowDesk.js
   check(`${f.split("/").pop()} asks a CARD whether it is off sale`, /cardOffSaleReason\(/.test(src) && !/offSaleReason\((c|card)\.sku/.test(src));
 }
 check("Stacks reads the inventory through cu-files.js", /runInventoryImport\(/.test(read("apps/app/app/panel/Stacks.js")));
+
+// ── ↩ Back to Pick ───────────────────────────────────────────────────────────
+// 2026-11-17: Reconcile pulled sold cards whose orders were still to dispatch,
+// so Pack dealt cards nobody had picked. Commit is the only writer of
+// pulled_line, so a pulled card without one was pulled elsewhere and may
+// still be stacked — Pack offers it back to Pick. A Commit pull is never
+// offered: that card IS in your hand.
+console.log("Which pulled cards Pack offers back to Pick");
+check("pulled by Commit is not offered", !pulledOutsideSheet({ pulled_at: "t", pulled_line: "L1" }));
+check("pulled by Reconcile is offered", pulledOutsideSheet({ pulled_at: "t", pulled_line: null }));
+check("before 037 there is no telling — offered", pulledOutsideSheet({ pulled_at: "t" }));
+check("a card not pulled has nothing to undo", !pulledOutsideSheet({ pulled_at: null, pulled_line: null }));
+check("no card, nothing offered", !pulledOutsideSheet(null));
+{
+  const ps = readFileSync(new URL("../apps/app/app/panel/PullSheet.js", import.meta.url), "utf8");
+  check("Pack reads pulledOutsideSheet() rather than its own test", /filter\(pulledOutsideSheet\)/.test(ps));
+  check("Back to Pick confirms before it un-pulls", /async function backToPick[\s\S]{0,400}confirm\(/.test(ps));
+}
 
 if (failures) {
   console.log(`\n${failures} check(s) failed.`);
