@@ -592,6 +592,26 @@ export default function PullSheet() {
     setPlaced(new Set());
   }
 
+  // One pile that already went out — packed by hand, or in a session that
+  // never pressed Pile complete. Recorded packed, so sheetLines() drops it
+  // like any packed label-printed order; the deal's completed piles are
+  // untouched, so nothing already dealt renumbers. Only offered when every
+  // order in the pile has a label: one without is still to do as far as
+  // eBay is concerned and would come straight back.
+  async function pileAlreadySent() {
+    if (!pile || !pileCards.length || !pileCards.every((c) => c.labelPrinted)) return;
+    const n = pile.orderIds.length;
+    if (!confirm(`Pile ${pile.pileNo} (${pile.deliveryName || pile.buyer || "this buyer"}) has already been sent?\n\nIt leaves the pull sheet and is recorded as packed. Only ${n === 1 ? "this order" : `these ${n} orders`} — nothing else moves.`)) return;
+    const res = await markOrdersPacked(supabase(), pile.orderIds);
+    if (!res.ok) {
+      if (res.missing) setPackedMissing(true);
+      else setPackedNote(`Couldn't record Pile ${pile.pileNo} as sent: ${res.error}`);
+      return;
+    }
+    setPackNote(`Pile ${pile.pileNo} recorded as already sent.`);
+    await load();
+  }
+
   // For orders that went out before this sheet kept a record — or were packed
   // some other way. Names the count, and confirms, because they leave the sheet.
   async function markLabelledSent() {
@@ -949,6 +969,11 @@ export default function PullSheet() {
           </div>
           <div className="ps-pile-nav">
             {doneLog.length ? <button className="btn btn-ghost" onClick={reopenLastPile}>‹ Reopen last pile</button> : null}
+            {pileCards.length && pileCards.every((c) => c.labelPrinted) ? (
+              <button className="btn btn-ghost" onClick={pileAlreadySent} title="This parcel has already gone — take it off the sheet without dealing it">
+                📮 Already sent
+              </button>
+            ) : null}
             <button className="btn btn-primary" onClick={completePile}>✓ Pile {pile.pileNo} complete</button>
           </div>
         </div>
