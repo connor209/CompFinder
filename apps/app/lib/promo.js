@@ -67,6 +67,12 @@ export function textLooksPromo(text) {
   return PROMO_IN_TEXT.test(t) || /\bblack\s*star\b/i.test(t) || /\bpromo\b/i.test(t);
 }
 
+/** The promo code inside free text ("Riolu BW33 Cosmos Holo" → "BW33"), or null. */
+export function promoCodeIn(text) {
+  const m = String(text || "").match(PROMO_IN_TEXT);
+  return m ? { code: `${m[1].toUpperCase()}${m[2]}`, index: m.index, length: m[0].length } : null;
+}
+
 /**
  * A pattern matching OUR promo number in a comp title, however the seller
  * spaced or padded it: "BW33", "BW 33", "BW033", "#BW33".

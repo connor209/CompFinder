@@ -311,6 +311,10 @@ stream` (the relay, only while streaming).
   not 1st Edition, the house rules (p40, postage cap, ladder, condition) as a
   table, an unpriced card written 0.00 in the CSV, and greps keeping the
   rules out of core and Quick Search on the same pre-filter.
+- `scripts/check-titlecomps.mjs` — `/api/batch-comps`'s title form ({ id,
+  title } in, evidence out): what a title parses to, that every fetched sale
+  comes back with a reason from the caller's vocabulary, that a failed lookup
+  is "timeout" with no rows and never active listings, and one search a title.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft

@@ -69,3 +69,45 @@ postage capped, `p40` is the 40th percentile of those totals (the lowest under
 four), `pricing.lp_price` is that rounded up onto .49/.99, and the condition
 multiplier is applied to `lp_price` and rounded up again. Read `excluded[]`
 before trusting a thin row — the reason is on every sale.
+
+## The title form: the evidence, no price
+
+For when the caller applies the house rules itself. Send cards as an `id` and a
+listing title, and no `name` — that is what selects this form:
+
+```js
+const res = await fetch("/api/batch-comps", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    cards: [{ id: "JO28", title: "Kingdra (Cosmos Holo) 032/182 Pokemon" }]
+  })
+}).then((r) => r.json());
+```
+
+- **Up to 50 cards; ~35 is the intended size.** `fresh: true` skips the cache.
+- **One SoldComps search per distinct title.** Titles differing only in case
+  and spacing share one; two titles that build the same query share one too.
+  No no-set retry. A 429 is retried (it returned nothing).
+- **Never active listings.** A sold lookup that fails is `status: "timeout"`
+  for that card, `sold: []`, with `error`, and the batch carries on. A refused
+  key or spent quota is `"error"` and ends the batch (`ok: false`).
+- The title is parsed into name / number / set / language (`parsed` on the
+  row — check it when a query looks wrong) and then planned and judged by the
+  same pipeline as the fields form.
+
+Each result: `id`, `title`, `query`, `parsed`, `status` (`ok` | `no_sales` |
+`timeout` | `error`), `n_sold`, `n_kept`, `from_cache`, `page_full`, and
+`sold[]` — **every** sold listing fetched, in SoldComps' order:
+`{ price, postage, date, title, itemId, url, location, excluded_reason,
+excluded_detail }`. `postage` is SoldComps' figure as sold; `location` null is
+a UK-domestic sale.
+
+`excluded_reason` is null when kept, otherwise one of `graded`, `bundle`,
+`name_mismatch` (includes a different collector number or set),
+`variant_mismatch`, `non_uk`, `foreign`, `catalog_mismatch` — plus four the
+engine has with no honest home in that list: `not_a_card` (proxy, replica),
+`price_outlier`, `high_postage`, `duplicate`. `excluded_detail` is the
+engine's own reason, unmapped. **`condition_mismatch` is never emitted**: no
+rule excludes a sale on condition (the house rules price conditions with a
+multiplier instead).

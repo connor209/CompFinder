@@ -212,7 +212,7 @@ export function planCard(card) {
 // Which comps are the card
 // ---------------------------------------------------------------------------
 
-function compKey(c) {
+export function compKey(c) {
   const s = c._source || {};
   return s.itemId ? `id:${s.itemId}` : s.url ? `url:${s.url}` : `t:${c.title}|${c.itemPricePence}|${s.endedAt || ""}`;
 }
@@ -304,15 +304,31 @@ function spreadIsWide(totals, ratio) {
  * `fetch` describes what was asked: the queries actually sent, whether a page
  * came back full, and when the data was fetched.
  */
-export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
-  const rules = resolveRules(rulesIn);
+/**
+ * Which of a card's comps are the card: the app-side prefilter, the number
+ * guards, then the engine. Every comp comes out in exactly one of `included`
+ * or `excluded`, the latter carrying `exclusionReason`. Both contracts of
+ * /api/batch-comps judge through this, so they cannot disagree about a comp.
+ *
+ * Postage on a comp the engine sees may have been zeroed by
+ * dropForeignPostage (`postageDropped` holds what it was).
+ */
+export function judgeComps(plan, comps) {
   const pre = prefilterComps(plan, comps);
   const guarded = numberGuards(plan, pre.kept);
   const forEngine = dropForeignPostage(guarded.kept).comps;
   const rec = CompFinderPricing.recommend(forEngine, plan.settings, plan.nameTokens, "sold", plan.number || null, plan.set);
+  return {
+    rec,
+    pre,
+    included: rec.included || [],
+    excluded: [...pre.excluded, ...guarded.excluded, ...(rec.excluded || [])]
+  };
+}
 
-  const included = rec.included || [];
-  const excludedAll = [...pre.excluded, ...guarded.excluded, ...(rec.excluded || [])];
+export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
+  const rules = resolveRules(rulesIn);
+  const { rec, pre, included, excluded: excludedAll } = judgeComps(plan, comps);
   const nonUk = excludedAll.filter((c) => c.exclusionReason === "nonUkLocation").length;
 
   const held = !!rec.priceHeld;

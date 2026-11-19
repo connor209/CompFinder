@@ -9,6 +9,7 @@ import {
   BATCH_FETCH_OPTIONS, MAX_CARDS, cardsFromCsv, evaluateCard, mergeComps, normaliseCard,
   planCard, priceDiffers, resultsCsv, unpricedSkus, wantsFallback
 } from "@/lib/batch-comps";
+import { REASON_CODES, TITLE_MAX_CARDS, isTitleRequest, planTitleCard, titleCardResult, titleKey } from "@/lib/title-comps";
 
 /**
  * POST /api/batch-comps — price a whole batch in one call.
@@ -21,6 +22,14 @@ import {
  * dropped), paced at SoldComps' 60 a minute, several in flight, and anything
  * asked in the last 24 hours comes back from the app's comp cache for nothing.
  * Fifty uncached cards is about a minute; a re-run the same day is seconds.
+ *
+ * Two forms, told apart by the cards themselves:
+ *
+ * - FIELDS — { sku, name, number, set, … }: the house-rule price per card.
+ * - TITLES — { id, title } and no name: the evidence, no price. Every sold
+ *   listing fetched with the reason it would be excluded, exactly one
+ *   SoldComps search per distinct title, and a failed lookup is status
+ *   "timeout" for that card — never a fall back to active listings.
  *
  * GET returns the contract, so a caller can read how to use it.
  */
@@ -51,6 +60,13 @@ export async function GET() {
       format: "\"json\" (default) or \"csv\" for sku,suggested_price"
     },
     variant_keys: VARIANTS.map((v) => ({ key: v.key, label: v.label })),
+    title_form: {
+      body: "{ cards: [{ id, title }] } — every card a title and no `name`; up to " + TITLE_MAX_CARDS + " per request (~35 is the intended size)",
+      options: "fresh: true skips the 24h cache read",
+      output: "results[]: id, title, query, parsed{name,number,set,language,condition,variant,promo}, status (ok | no_sales | timeout | error), error?, n_sold, n_kept, sold[]: { price, postage, date, title, itemId, url, location, excluded_reason, excluded_detail }",
+      excluded_reasons: [...new Set(Object.values(REASON_CODES))],
+      notes: "One SoldComps search per distinct title (identical titles share it; 429s are retried). No price is worked out and active listings are never used. excluded_detail is the engine's own reason, unmapped. condition_mismatch is never emitted: no rule excludes a sale on condition."
+    },
     output: "results[]: sku, query, matched, n_comps, last_sold, sales[], excluded[] (with reason), p40, suggested_price, confidence, flags{few_comps, variant_uncertain, wide_spread, no_uk_comps, price_held}; plus csv and summary"
   });
 }
@@ -70,15 +86,18 @@ export async function POST(request) {
     return NextResponse.json({ ok: false, error: "Request body wasn't valid JSON." }, { status: 400 });
   }
 
+  const titleForm = isTitleRequest(body);
   let cards;
-  if (typeof body.csv === "string" && body.csv.trim()) cards = cardsFromCsv(body.csv);
+  if (titleForm) cards = body.cards;
+  else if (typeof body.csv === "string" && body.csv.trim()) cards = cardsFromCsv(body.csv);
   else if (Array.isArray(body.cards)) cards = body.cards.map((c, i) => normaliseCard(c, i));
   else return NextResponse.json({ ok: false, error: "Send `cards` (an array) or `csv` (CardUploader CSV text). GET this URL for the contract." }, { status: 400 });
 
-  cards = cards.filter((c) => c.name);
+  if (!titleForm) cards = cards.filter((c) => c.name);
   if (!cards.length) return NextResponse.json({ ok: false, error: "No cards with a name in that request." }, { status: 400 });
-  if (cards.length > MAX_CARDS) {
-    return NextResponse.json({ ok: false, error: `${cards.length} cards is more than ${MAX_CARDS} per request — split the batch.` }, { status: 400 });
+  const max = titleForm ? TITLE_MAX_CARDS : MAX_CARDS;
+  if (cards.length > max) {
+    return NextResponse.json({ ok: false, error: `${cards.length} cards is more than ${max} per request — split the batch.` }, { status: 400 });
   }
 
   const { data: profile, error: profileError } = await supabase
@@ -136,6 +155,8 @@ export async function POST(request) {
       }
     }
   }
+
+  if (titleForm) return titleResponse(cards, { getComps, stats, started, options, fatalNow: () => fatal });
 
   const plans = cards.map(planCard);
   const results = new Array(plans.length);
@@ -215,5 +236,77 @@ export async function POST(request) {
     },
     results: out,
     csv
+  });
+}
+
+/**
+ * The title form: the evidence per card, no price.
+ *
+ * Cards are grouped by title first, so a title sent twice is one plan and one
+ * search; every id still gets its own row, in the order it was sent. A lookup
+ * that fails is "timeout" for the cards on it and the batch carries on. A key
+ * SoldComps refused, or a spent quota, is "error" for every card not yet
+ * fetched — there is nothing to carry on to.
+ */
+async function titleResponse(cards, { getComps, stats, started, options, fatalNow }) {
+  const groups = new Map();
+  cards.forEach((raw, i) => {
+    const title = String(raw?.title ?? "").trim();
+    const id = raw?.id ?? raw?.sku ?? null;
+    const key = titleKey(title);
+    if (!groups.has(key)) groups.set(key, { title, members: [] });
+    groups.get(key).members.push({ i, id: id == null ? null : String(id), title });
+  });
+  const list = [...groups.values()];
+  const outcomes = new Array(list.length);
+
+  await runPool(list.length, CONCURRENCY, async (g) => {
+    const group = list[g];
+    if (!group.title) {
+      outcomes[g] = { status: "error", error: "No title." };
+      return;
+    }
+    const planned = planTitleCard({ title: group.title }, g);
+    group.planned = planned;
+    if (!planned.plan.queries[0]) {
+      outcomes[g] = { status: "error", error: "Nothing searchable in that title." };
+      return;
+    }
+    try {
+      outcomes[g] = { status: "ok", ...(await getComps(planned.plan.queries[0])) };
+    } catch (err) {
+      const fatal = err.isAuthError || err.isQuotaExceeded || err === fatalNow();
+      outcomes[g] = { status: fatal ? "error" : "timeout", error: err.message || String(err) };
+    }
+  });
+
+  const results = new Array(cards.length);
+  list.forEach((group, g) => {
+    const p = group.planned || {};
+    for (const m of group.members) {
+      results[m.i] = titleCardResult({ id: m.id, title: m.title, plan: p.plan, parsed: p.parsed }, outcomes[g]);
+    }
+  });
+
+  const fatal = fatalNow();
+  const count = (st) => results.filter((r) => r.status === st).length;
+  return NextResponse.json({
+    ok: !fatal,
+    ...(fatal ? { error: fatal.message } : {}),
+    form: "titles",
+    as_of: new Date().toISOString(),
+    window_days: options.soldAfterDays,
+    summary: {
+      cards: results.length,
+      distinct_titles: list.length,
+      ok: count("ok"),
+      no_sales: count("no_sales"),
+      timeout: count("timeout"),
+      error: count("error"),
+      soldcomps_requests: stats.requests,
+      cache_hits: stats.cacheHits,
+      ms: Date.now() - started
+    },
+    results
   });
 }
