@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { detectLanguage } from "@compfinder/core/catalog.js";
+import { isPromoCard, promoNumber } from "@/lib/promo";
 
 /**
  * Canonical title resolution. Maps a messy eBay title to the best-matching
@@ -74,8 +75,12 @@ async function resolveOne(supabase, title) {
 
   const best = top.c;
   const lang = detectLanguage(best.expansion);
-  const canonNum = stripZero(best.collector_number || numerator);
-  const englishQuery = `${best.name} ${canonNum}${denominator ? `/${denominator}` : ""}`.replace(/\s+/g, " ").trim();
+  // A promo keeps its code whole ("BW33", "SWSH020" stays padded as printed)
+  // and never gets a set total: "Riolu BW33/101" finds no sales at all.
+  const promo = isPromoCard({ number: best.collector_number || numerator, set: best.expansion, rarity: best.rarity });
+  const canonNum = promo ? promoNumber(best.collector_number || numerator) : stripZero(best.collector_number || numerator);
+  const denom = promo ? "" : denominator;
+  const englishQuery = `${best.name} ${canonNum}${denom ? `/${denom}` : ""}`.replace(/\s+/g, " ").trim();
   const langQuery = `${best.name} ${canonNum} ${lang}`.replace(/\s+/g, " ").trim();
   const outQuery = lang === "English" ? englishQuery : langQuery;
   const bestTokens = best.name.toLowerCase().split(/\s+/).filter((w) => w.length >= 2).slice(0, 2);
@@ -86,7 +91,7 @@ async function resolveOne(supabase, title) {
     matched: true,
     name: best.name,
     number: canonNum,
-    denominator,
+    denominator: denom,
     expansion: best.expansion || "",
     expansionCode: best.expansion_code || "",
     language: lang,

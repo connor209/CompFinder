@@ -13,6 +13,9 @@ import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
 import PriceOverride from "./PriceOverride";
 import Fold from "./Fold";
+import { isPromoCard, promoNumber } from "@/lib/promo.js";
+import { VARIANTS, detectVariants, nameWithoutVariants, queryWordsFor, subjectTextFor, variantLabel } from "@/lib/variants.js";
+import { prefilterComps, REASON_TEXT } from "@/lib/batch-comps.js";
 
 const settings = APP_SETTINGS;
 
@@ -184,6 +187,12 @@ export default function QuickSearch({ seed }) {
   const [art, setArt] = useState(null);
   const [mine, setMine] = useState({ loading: false, configured: true, error: "", listings: [] });
   const [suggestOn, setSuggestOn] = useState(true);
+  // Which printing to price. "auto" reads it off the card's name and what was
+  // typed ("Riolu BW33 Cosmos Holo"); "base" forces the plain card; a key
+  // forces that variant. The catalogue cleans "(Cosmos Holo)" off a name, so
+  // without this a variant picked from suggestions was priced as the base card.
+  const [variantChoice, setVariantChoice] = useState("auto");
+  const typedRef = useRef("");
   const debounceRef = useRef(null);
   const cacheRef = useRef(new Map());
   const comboRef = useRef(null);
@@ -279,6 +288,7 @@ export default function QuickSearch({ seed }) {
   }
 
   function pickSug(card) {
+    typedRef.current = "";
     setQ(`${card.name} ${card.number}`.trim());
     setOpenSug(false);
     // Language auto-detection is a Pokémon catalog thing (Chinese/Korean/etc.
@@ -297,6 +307,7 @@ export default function QuickSearch({ seed }) {
   async function runQuery(text) {
     const trimmed = (text || "").trim();
     if (!trimmed) return;
+    typedRef.current = trimmed;
     setOpenSug(false);
     setSourceGame(MODE_TO_SLUG[game] ?? null);
 
@@ -329,7 +340,7 @@ export default function QuickSearch({ seed }) {
       if (rr.ok && rr.available && rr.result && rr.result.matched) {
         const r = rr.result;
         const l = r.language === "English" ? "" : r.language;
-        const number = r.denominator ? `${r.number}/${r.denominator}` : r.number;
+        const number = r.denominator && !isPromoCard({ number: r.number, set: r.expansion }) ? `${r.number}/${r.denominator}` : r.number;
         setLanguage(l);
         runDeepDive({ name: r.name, number, set: r.expansion, series: r.expansionCode, rarity: "", image: null }, l);
         return;
@@ -396,7 +407,8 @@ export default function QuickSearch({ seed }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed?.nonce]);
 
-  async function runDeepDive(card, lang = language, gameArg = game) {
+  async function runDeepDive(card, lang = language, gameArg = game, opts = {}) {
+    const choice = opts.variantChoice ?? variantChoice;
     setLoading(true);
     setError("");
     setData(null);
@@ -408,7 +420,24 @@ export default function QuickSearch({ seed }) {
     const isPokemon = gameArg === "pokemon";
     // Strip Cardmarket naming noise (Mega prefix, [format] tags, (foil/version)
     // annotations) so the eBay search + header match real listings.
-    card = { ...card, name: cleanSearchName(card.name, gameArg) };
+    // The catalogue's own name, kept across re-runs (a language or printing
+    // toggle re-prices data.card, whose name has already been cleaned).
+    const rawName = card.rawName || card.name;
+    card = { ...card, rawName, name: cleanSearchName(card.name, gameArg) };
+    // A promo's number is its code: "BW33", never the "BW33/101" the
+    // catalogue sometimes carries — nobody titles a promo that way, and the
+    // search found nothing at all.
+    if (isPokemon && isPromoCard(card)) card = { ...card, number: promoNumber(card.number) };
+    // The printing, read BEFORE the name was cleaned (cleaning is what threw
+    // "(Cosmos Holo)" away) and from what was typed.
+    const variantKeys = !isPokemon
+      ? []
+      : choice === "base"
+        ? []
+        : choice !== "auto"
+          ? [choice]
+          : detectVariants({ name: rawName, set: card.set, title: typedRef.current }).keys;
+    card = { ...card, name: nameWithoutVariants(card.name) || card.name, variantKeys };
 
     // Pokémon catalog cards carry no art — pull the English card image from
     // pokemontcg.io in the background to fill the header (non-English prints
@@ -431,7 +460,7 @@ export default function QuickSearch({ seed }) {
       // where the number is dropped and the code (e.g. SV2a) is what tells a
       // Japanese 151 card apart from the English one.
       const numberPart = lang ? "" : card.number || "";
-      query = `${card.name} ${numberPart} ${setCode} ${lang}`.replace(/\s+/g, " ").trim();
+      query = `${card.name} ${queryWordsFor(variantKeys)} ${numberPart} ${setCode} ${lang}`.replace(/\s+/g, " ").trim();
     } else if (gameArg === "mtg") {
       query = `${card.name} ${card.set || ""}`.replace(/\s+/g, " ").trim();
     } else {
@@ -455,7 +484,21 @@ export default function QuickSearch({ seed }) {
         })
       )
       .catch(() => setMine({ loading: false, configured: true, error: "eBay check failed.", listings: [] }));
-    const nameTokens = appNameTokens(CompFinderPricing.simplifyTitle(query, settings.stripWords));
+    // The words a comp MUST contain. The variant words are not among them —
+    // a variant is required through prefilterComps, which knows "Cosmos" from
+    // "cosmo" — and for an English card neither is the set code: "MEW" in the
+    // query steers the search, but demanding it in every title threw away
+    // every seller who didn't write it. A promo's code isn't either, because
+    // sellers write "BW 33" as often as "BW33"; prefilterComps checks it.
+    // Non-English prints keep the code, which is what separates them.
+    const promo = isPokemon && isPromoCard(card);
+    const tokenText = isPokemon
+      ? `${card.name} ${lang ? `${setCode} ${lang}` : promo ? "" : card.number || ""}`
+      : query;
+    const nameTokens = appNameTokens(CompFinderPricing.simplifyTitle(tokenText.replace(/\s+/g, " ").trim(), settings.stripWords));
+    const plan = { promo, number: card.number || "", variantKeys, baseName: card.name };
+    const subject = `${query} ${subjectTextFor(variantKeys)}`;
+    const cardSettings = settingsForText(subject, { promo });
     // The card database is English-first: a card's English collector number and
     // set name don't map to Japanese/Korean/Chinese prints (different numbering,
     // localised set names). When a language is selected, drop them so comp
@@ -470,15 +513,15 @@ export default function QuickSearch({ seed }) {
       fetch("/api/soldcomps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
 
     // Fire sold + active in parallel so active listings don't add to the wait.
-    const soldPromise = post({ query, options });
-    const activePromise = post({ query, options: { ...options, sold: false } });
+    const soldPromise = post({ query, options, fresh: !!opts.fresh });
+    const activePromise = post({ query, options: { ...options, sold: false }, fresh: !!opts.fresh });
 
     // Active listings fill in on their own once ready — they don't block the
     // main deep dive from rendering.
     activePromise
       .then((actRes) => {
         if (actRes && actRes.ok) {
-          const a = CompFinderPricing.recommend(dropForeignPostage(applyNumberGuards(actRes.comps || [], effNumber)).comps, settingsForText(query), nameTokens, "active", effNumber, effSet);
+          const a = CompFinderPricing.recommend(dropForeignPostage(applyNumberGuards(prefilterComps(plan, actRes.comps || []).kept, promo ? null : effNumber)).comps, cardSettings, nameTokens, "active", effNumber, promo ? null : effSet);
           setActiveState({ loading: false, rec: a });
         } else {
           setActiveState({ loading: false, rec: null });
@@ -490,11 +533,16 @@ export default function QuickSearch({ seed }) {
       const soldRes = await soldPromise;
       if (!soldRes || !soldRes.ok) throw new Error((soldRes && soldRes.error) || "Pricing request failed.");
       const comps = soldRes.comps || [];
-      const rec = CompFinderPricing.recommend(dropForeignPostage(applyNumberGuards(comps, effNumber)).comps, settingsForText(query), nameTokens, "sold", effNumber, effSet);
+      const pre = prefilterComps(plan, comps);
+      const rec = CompFinderPricing.recommend(dropForeignPostage(applyNumberGuards(pre.kept, promo ? null : effNumber)).comps, cardSettings, nameTokens, "sold", effNumber, promo ? null : effSet);
+      // The variant and promo-number exclusions happen ahead of the engine, so
+      // fold them into its list: Recent sales marks every sale with whether it
+      // was used, and a sale missing from both lists would look used.
+      rec.excluded = [...pre.excluded, ...(rec.excluded || [])];
       // `query` and `lang` are kept on the payload rather than read back out
       // of the form: by the time you correct a price the boxes may have moved
       // on, and a correction has to file itself under the card it was for.
-      setData({ card, rec, comps, query, lang });
+      setData({ card, rec, comps, query, lang, fetchedAt: soldRes.fetchedAt || null, cached: !!soldRes.cached });
       saveHistory(card, query, rec, lang);
     } catch (err) {
       setError(err.message || "Something went wrong pricing that card.");
@@ -570,8 +618,16 @@ export default function QuickSearch({ seed }) {
       .filter((p) => !Number.isNaN(p.t));
     const lastSold = chartSales.length ? chartSales.slice().sort((a, b) => b.t - a.t)[0].v : null;
 
+    // Every sale says whether the price used it and, if not, why — the headline
+    // counting one sale while eleven sit underneath it with nothing said is
+    // how a promo priced off one comp went unnoticed.
+    const compId = (c) => (c._source && (c._source.itemId || c._source.url)) || `${c.title}|${c.itemPricePence}`;
+    const usedIds = new Set(used.map(compId));
+    const whyNot = new Map((rec.excluded || []).map((c) => [compId(c), c.exclusionReason]));
     const salesAll = comps
       .map((c) => ({
+        used: usedIds.has(compId(c)),
+        why: whyNot.get(compId(c)) || null,
         price: c.itemPricePence,
         t: c._source && c._source.endedAt ? new Date(c._source.endedAt).getTime() : 0,
         date: c._source && c._source.endedAt,
@@ -603,7 +659,8 @@ export default function QuickSearch({ seed }) {
       .slice(0, 6);
     const searchCode = setCodeForSearch(card.series);
     const ebayQuery = `${card.name} ${card.number || ""} ${searchCode} ${language}`.replace(/\s+/g, " ").trim();
-    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, activePrice, active, activeLoading: activeState.loading, usedCount: used.length, graded: rec.graded || [], gradedTotal, gradedShown, activeListings, ebayQuery };
+    const newestSale = salesAll.find((s) => s.date) || null;
+    view = { card, rec, med, lo, hi, lastSold, chartSales, sales, confClass, fetchedAt: data.fetchedAt, cached: data.cached, newestSale, activePrice, active, activeLoading: activeState.loading, usedCount: used.length, graded: rec.graded || [], gradedTotal, gradedShown, activeListings, ebayQuery };
   }
 
   return (
@@ -661,6 +718,26 @@ export default function QuickSearch({ seed }) {
           {language ? (
             <span className="lang-hint">Set number ignored — {language} cards are numbered differently.</span>
           ) : null}
+        </div>
+      ) : null}
+
+      {game === "pokemon" ? (
+        <div className="lang-row">
+          <span className="lang-label">Printing</span>
+          <select
+            value={variantChoice}
+            aria-label="Which printing to price"
+            onChange={(e) => {
+              const v = e.target.value;
+              setVariantChoice(v);
+              if (data) runDeepDive(data.card, language, "pokemon", { variantChoice: v });
+            }}
+          >
+            <option value="auto">Auto — read it off the name</option>
+            <option value="base">Base card (no variant)</option>
+            {VARIANTS.map((v) => <option key={v.key} value={v.key}>{v.label}</option>)}
+          </select>
+          <span className="lang-hint">A base card excludes every variant&apos;s sales; a variant requires its own.</span>
         </div>
       ) : null}
 
@@ -790,6 +867,7 @@ export default function QuickSearch({ seed }) {
                 {view.card.number && !language ? <span className="badge2"># {view.card.number}</span> : null}
                 {view.card.number && language ? <span className="badge2 badge-muted">EN&nbsp;#{view.card.number}</span> : null}
                 {view.card.series ? <span className="badge2">{view.card.series}</span> : null}
+                {(view.card.variantKeys || []).map((k) => <span className="badge2" key={k}>{variantLabel(k)}</span>)}
               </div>
               <div className="dd-headline">
                 <div className={`dd-price${isOverridden(view.rec) ? " dd-price-mine" : ""}`}>
@@ -805,6 +883,23 @@ export default function QuickSearch({ seed }) {
                   ? `Recency-weighted from ${view.usedCount} UK sold comp(s) over the last 90 days${view.med != null ? ` · median ${pounds(view.med)}` : ""}.`
                   : "No UK sold comps in the last 90 days — try the worldwide view below, or the active-listings read."}
                 {view.activePrice != null ? ` Currently listed around ${pounds(view.activePrice)} asking.` : ""}
+              </p>
+              <p className="dd-sub hint-small">
+                {/* Sold data lags: SoldComps sees a sale some hours after it ends, and an
+                    answer from the app's cache can be up to a day old. Saying when the
+                    data is from is what makes "today's sale isn't here" explicable. */}
+                Sold data as of {view.fetchedAt ? new Date(view.fetchedAt).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "just now"}
+                {view.cached ? " (cached)" : ""}
+                {view.newestSale ? ` · newest sale ${fmtDate(view.newestSale.date)}` : ""}
+                {" · "}
+                <button
+                  type="button"
+                  style={{ background: "none", border: 0, padding: 0, color: "var(--accent)", cursor: "pointer", font: "inherit" }}
+                  onClick={() => runDeepDive(data.card, language, game, { fresh: true })}
+                  title="Ask SoldComps again instead of using the cached answer — costs one request"
+                >
+                  ↻ Refresh
+                </button>
               </p>
               <div className="dd-actions">
                 <button className="btn btn-ghost" onClick={() => setListing((v) => !v)} aria-pressed={listing}>🏷️ List on eBay</button>
@@ -933,7 +1028,13 @@ export default function QuickSearch({ seed }) {
                       {s.grade ? <span className={`sale-grade grade-${s.grade.company.toLowerCase()}`} title={`Graded ${s.grade.company} ${s.grade.grade}`}>{s.grade.company} {s.grade.grade}</span> : null}
                       {s.url ? <a href={epnLink(s.url, { customId: "sold-comp" })} target="_blank" rel={relFor(s.url, "noopener noreferrer")}>{s.title}</a> : s.title}
                     </span>
-                    <span className="loc">{s.loc ? s.loc : "🇬🇧 UK"}</span>
+                    <span className="loc">
+                      {s.loc ? s.loc : "🇬🇧 UK"}
+                      {" "}
+                      {s.used
+                        ? <span className="badge2" title="Counted in the price above">used</span>
+                        : <span className="badge2 badge-muted" title={s.why ? `Not counted: ${REASON_TEXT[s.why] || s.why}` : "Not counted"}>{s.why ? REASON_TEXT[s.why] || s.why : "not used"}</span>}
+                    </span>
                   </div>
                 ))}
               </div>

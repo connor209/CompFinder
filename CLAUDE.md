@@ -304,6 +304,14 @@ stream` (the relay, only while streaming).
   on reload instead of taking the next copy, and that Reconcile never calls
   a CardUploader copy "not listed" off its stack SKU.
 
+- `scripts/check-batchcomps.mjs` — `/api/batch-comps`, built around the £50
+  Riolu BW33 Cosmos Holo that went out at £2.49: a promo's number is its code
+  (BW33, never BW33/101), a promo's comps may say "promo", a base card drops
+  every variant's sales and a variant requires its own, "1st Class postage" is
+  not 1st Edition, the house rules (p40, postage cap, ladder, condition) as a
+  table, an unpriced card written 0.00 in the CSV, and greps keeping the
+  rules out of core and Quick Search on the same pre-filter.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -704,6 +712,48 @@ under five), and the filter kept 8 of them. **Half that run was thin because the
 search found little, not because the rules threw much away.** That is the honest
 ceiling on this population, and it matches what `wideset.json` already measured:
 commons median 5 comps against a chase card's 15+.
+
+## Batch pricing in one call: /api/batch-comps
+
+Claude prices CardUploader batches by driving the app in Chrome, and one card
+at a time through Quick Search was ~15s a card — slow enough that cheap-looking
+cards got skipped, and a £50 Riolu BW33 Cosmos Holo went out at £2.49.
+`POST /api/batch-comps` (in the **app**) takes a batch and answers for all of
+it; `docs/BATCH_COMPS.md` is the contract and the fetch snippet. GET the route
+for the same contract as JSON.
+
+- **Same-origin, session-authenticated.** Called with `fetch()` from a signed-in
+  tab; the SoldComps key is the user's own and never leaves the server.
+  `lib/soldcomps-fetch.js` is the one fetcher, shared with `/api/soldcomps`.
+- **The engine still judges the comps**; `lib/batch-comps.js` adds the two
+  app-side rules it was missing, then prices under the **house rules**
+  (`lib/house-pricing.js`, every number a setting): total = price + postage
+  capped at £1.50, p40 of UK sold in 90 days, the lowest under four comps, up
+  onto the .49/.99 ladder off a £2.49 floor, NM = LP, MP ×0.85 once LP is £5+,
+  HP ×0.6, DMG ×0.4. Not the engine's figure — that is still on the row as
+  `engine_price`, and the Batch screen is unchanged.
+- **A promo is its code, and its comps say "promo"** (`lib/promo.js`). The
+  catalogue carried "BW33/101", which finds nothing; and the engine drops any
+  comp saying "promo", so eleven UK sales showed and one counted.
+  `settingsForText()` now stands the blanket word down for a promo, which
+  fixes Quick Search and the Batch screen too — Last Comp has done the same
+  since August.
+- **Variants are symmetric** (`lib/variants.js`): a base card excludes every
+  variant's sales, a variant requires its own term. Reverse holo and stamps
+  stay the engine's subject facts; this file only writes the word core reads.
+  The comp side is tolerant, the subject side narrow, and the false positives
+  are pinned — "Free 1st Class Postage", "unstamped", Cosmog.
+- **Quick Search** gets the same pre-filter (`prefilterComps`), a Printing
+  dropdown, a "used / why not" chip on every Recent sale, and a "sold data as
+  of" line with ↻ Refresh (`fresh: true` skips the cache read, never the
+  write). For an English card the set code is no longer a REQUIRED name token
+  — it stays in the query; demanding "MEW" in every title dropped every seller
+  who didn't write it.
+- **Unpriced is 0.00 in the CSV**, per the zero-price rule, and
+  `summary.unpriced_skus` names them.
+- **Not measured against live data yet.** The fixtures in
+  `check-batchcomps.mjs` are written the way sellers write; the acceptance
+  figures (Riolu ~11 comps / ~£49.99, Numel ~29 / ~£12.49) need a real run.
 
 ## Asking the same card more than one way
 

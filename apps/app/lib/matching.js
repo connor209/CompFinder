@@ -14,6 +14,7 @@
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { dropWrongNumerator, dropWrongSetTotal } from "@compfinder/core/cardnumber.js";
 import { isOverridden } from "./price-override.js";
+import { textLooksPromo } from "./promo.js";
 
 /**
  * "No.", "No", "#" — a numbering prefix, at the front of a card NUMBER.
@@ -127,7 +128,7 @@ export const FOREIGN_LANGUAGE = [
  * throws away exactly the comps that ARE the card — see the block above
  * classifyExclusion for the £2.49 PSA 10 Umbreon that made it worth fixing.
  */
-export function settingsForText(text) {
+export function settingsForText(text, { promo } = {}) {
   const t = String(text || "");
   // Everything the title says about the COPY in hand — grade, stamp, reverse
   // holo — in one call. Three facts, three exclusions that invert on them, and
@@ -135,12 +136,19 @@ export function settingsForText(text) {
   // about the card, which is why all three are read off a title.
   const facts = CompFinderPricing.subjectFactsFrom(t);
   const namesALanguage = FOREIGN_LANGUAGE.some((l) => new RegExp(`\\b${l}\\b`, "i").test(t));
-  if (namesALanguage) return { ...APP_SETTINGS, ...facts };   // not an English card — leave the pool alone
-  return {
-    ...APP_SETTINGS,
-    ...facts,
-    excludeKeywords: { ...APP_SETTINGS.excludeKeywords, foreignPrint: FOREIGN_LANGUAGE }
-  };
+  const excludeKeywords = { ...APP_SETTINGS.excludeKeywords };
+  // A PROMO's sold listings say "promo" — "Black Star Promo" is how every
+  // honest seller titles one — and the engine drops any comp that does. Right
+  // for a main-set card, and it threw away ten of Riolu BW33 Cosmos Holo's
+  // eleven UK sales. Only the blanket word stands down: "league",
+  // "championship", "worlds" and "prerelease" are different promos from an
+  // ordinary Black Star one. Same rule Last Comp has run since August
+  // (apps/public/lib/settings.js). `promo` is passed when the caller knows;
+  // otherwise it is read off the text (a BW33/SM42/SWSH123 code, "promo").
+  const isPromo = promo ?? textLooksPromo(t);
+  if (isPromo) excludeKeywords.promoVariant = APP_SETTINGS.excludeKeywords.promoVariant.filter((w) => w !== "promo");
+  if (!namesALanguage) excludeKeywords.foreignPrint = FOREIGN_LANGUAGE; // an English card — foreign prints are other cards
+  return { ...APP_SETTINGS, ...facts, excludeKeywords };
 }
 
 /**
