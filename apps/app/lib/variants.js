@@ -130,7 +130,16 @@ export const VARIANTS = [
     label: "Peelable Ditto",
     subject: /\bpeel(?:able)?\b[\s-]*ditto\b|\bditto\b[\s-]*(?:peel|sticker)/i,
     comp: /\bditto\b/i,
-    query: "Ditto"
+    query: "Ditto",
+    // Every Peelable Ditto card is a reverse holo, so its finish is a fact
+    // about the VARIANT and not something a comp has to say. Numel 013/078
+    // found 180 Ditto sales and priced off 5: the engine read the copy as a
+    // plain card, so every title saying "Reverse Holo" (nearly all of them)
+    // went as variantMismatch. `says` makes the engine price a reverse holo;
+    // `finishFixed` stops a Ditto comp that never wrote "reverse" being
+    // dropped for leaving it out. See fixedFinishTitle().
+    says: "Reverse Holo",
+    finishFixed: true
   }
 ];
 
@@ -201,6 +210,24 @@ export function nameWithoutVariants(name) {
 export function subjectTextFor(keys) {
   return keys.map((k) => BY_KEY[k]).filter((v) => v && v.says).map((v) => v.says).join(" ");
 }
+
+/** Does any of these variants come in only one finish (a reverse holo)? */
+export function finishFixedFor(keys) {
+  return keys.some((k) => BY_KEY[k]?.finishFixed);
+}
+
+/**
+ * The title the ENGINE judges a comp by, for a variant whose finish is
+ * fixed. The comp has already been required to name the variant, so it IS
+ * that printing whether or not the seller wrote the finish; saying so in the
+ * text core reads is how its reverse-holo test agrees. Only ever handed to
+ * the engine — what a person sees is the seller's own title (`_title`).
+ */
+export function fixedFinishTitle(comp) {
+  if (REVERSE_WORD.test(comp.title || "")) return comp;
+  return { ...comp, _title: comp.title, title: `${comp.title || ""} Reverse Holo` };
+}
+const REVERSE_WORD = /\brev(?:erse)?\b/i;
 
 /** Query words for a card that is these variants. */
 export function queryWordsFor(keys) {

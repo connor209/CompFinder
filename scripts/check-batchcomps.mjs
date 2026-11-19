@@ -178,6 +178,28 @@ const nr = evaluateCard(numel, [
 ]);
 eq("Numel keeps the Ditto copies", nr.n_comps, 4);
 
+// Measured live, 2026-11-19: every Peelable Ditto is a reverse holo, and the
+// engine read Numel as a plain card — 175 Ditto sales went as variantMismatch
+// and it priced off the 5 that never wrote "reverse". Real titles from that run.
+const live = evaluateCard(numel, [
+  comp("Numel (Peelable Ditto) 013/078 Pokémon GO Reverse Holo", 16.71),
+  comp("Pokemon GO Numel Peelable Ditto Reverse Holo NM 013/078", 15.54),
+  comp("Numel 013/078 Pokémon GO Ditto Reverse Foil", 14.44),
+  comp("Pokémon TCG - Numel (Peelable Ditto) Rev Holo  - pokemon go - #013/078 2022", 11.8),
+  comp("The Pokémon Company Numel 013/078 Common Regular - Pokémon Go Ditto Variant", 8.59),
+  comp("Pokemon TCG Numel 013/078 Pokemon GO Reverse Holo NM", 2.24),           // not the Ditto
+  comp("Numel (Peelable Ditto) 013/078 Pokémon GO Reverse Holo PSA 10", 1215.28) // a slab
+]);
+eq("a Ditto reverse holo is the Ditto card, however it's written", live.n_comps, 5);
+ok("…and none of them went as variantMismatch", !live.excluded.some((e) => e.reason === "variantMismatch"));
+ok("the plain reverse still goes", live.excluded.some((e) => e.reason === "missingVariant"));
+ok("the slab still goes", live.excluded.some((e) => e.reason === "graded"));
+ok("a sale shows the seller's title, not the engine's", live.sales.every((x) => !/Variant Reverse Holo$/.test(x.title)));
+
+// A card the caller SAID is the base card is not "uncertain" about it.
+const explicitBase = planCard(normaliseCard({ name: "Riolu", number: "BW33", variant_keys: [] }));
+ok("variant_keys: [] answers the question", !evaluateCard(explicitBase, rioluComps).flags.variant_uncertain);
+
 // --- 5. output ---------------------------------------------------------------
 
 eq("check mode: within £1 and 30% is not a difference", priceDiffers({ suggested_price: 10.49, current_price: 9.99 }).differs, false);

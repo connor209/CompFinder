@@ -24,7 +24,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import CardUploaderCsv from "./carduploader.js";
 import { appNameTokens, applyNumberGuards, dropForeignPostage, settingsForText, stripNumberingPrefix } from "./matching.js";
 import { isPromoCard, promoNumber, promoNumberPattern, anyPromoOfPrefix } from "./promo.js";
-import { detectVariants, nameWithoutVariants, queryWordsFor, subjectTextFor, variantExclusion, variantLabel } from "./variants.js";
+import { detectVariants, finishFixedFor, fixedFinishTitle, nameWithoutVariants, queryWordsFor, subjectTextFor, variantExclusion, variantLabel } from "./variants.js";
 import { housePrice, houseTotal, resolveRules, conditionCode } from "./house-pricing.js";
 import { UNPRICED_PENCE } from "./zero-price.js";
 
@@ -199,6 +199,7 @@ export function planCard(card) {
     number,
     baseName,
     variantKeys: keys,
+    variantExplicit: Array.isArray(card.variantKeys),
     unrecognisedVariant: unrecognised,
     set: setUsable ? card.set : null,
     queries,
@@ -242,6 +243,7 @@ export function prefilterComps(plan, comps) {
   const excluded = [];
   const ours = plan.promo ? promoNumberPattern(plan.number) : null;
   const anyCode = plan.promo ? anyPromoOfPrefix(plan.number) : null;
+  const fixed = finishFixedFor(plan.variantKeys || []);
   for (const c of comps || []) {
     const t = c.title || "";
     if (ours) {
@@ -262,7 +264,7 @@ export function prefilterComps(plan, comps) {
       excluded.push({ ...c, exclusionReason: v.reason, exclusionDetail: variantLabel(v.variant) });
       continue;
     }
-    kept.push(c);
+    kept.push(fixed ? fixedFinishTitle(c) : c);
   }
   return { kept, excluded };
 }
@@ -283,7 +285,7 @@ function saleOut(c, rules) {
     postage: pounds(c.postagePence || 0),
     total: pounds(houseTotal(c, rules)),
     date: s.endedAt || null,
-    title: c.title,
+    title: c._title ?? c.title,
     item_id: s.itemId || null,
     url: s.url || null
   };
@@ -328,7 +330,9 @@ export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
   const missingVariant = pre.excluded.filter((c) => c.exclusionReason === "missingVariant").length;
   const variantUncertain =
     plan.unrecognisedVariant.length > 0 ||
-    (plan.variantKeys.length === 0 && wrongVariant > 0 && wrongVariant >= included.length) ||
+    // Only when the variant was GUESSED: a card the caller said is the base
+    // card (variant_keys: []) has answered the question this flag asks.
+    (!plan.variantExplicit && plan.variantKeys.length === 0 && wrongVariant > 0 && wrongVariant >= included.length) ||
     (plan.variantKeys.length > 0 && included.length === 0 && missingVariant > 0);
 
   const n = included.length;
