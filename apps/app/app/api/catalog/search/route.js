@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isPromoCard, promoNumber } from "@/lib/promo";
 
 /**
  * Catalog-backed typeahead over the card_catalog table (CardMarket export).
@@ -63,7 +64,9 @@ export async function GET(request) {
     .map(({ c }) => ({
       id: `cm-${c.cardmarket_id}`,
       name: c.name,
-      number: c.collector_number || "",
+      // A promo is "BW33", never "BW33/101": the catalogue sometimes carries a
+      // set total on one, and the search built from it finds nothing.
+      number: isPromoCard({ number: c.collector_number, set: c.expansion, rarity: c.rarity }) ? promoNumber(c.collector_number) : c.collector_number || "",
       set: c.expansion || "",
       series: c.expansion_code || "",
       rarity: c.rarity || "",
