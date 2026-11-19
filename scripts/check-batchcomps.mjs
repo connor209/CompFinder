@@ -22,6 +22,7 @@ import { compVariants, detectVariants, nameWithoutVariants, variantExclusion } f
 import { housePrice, percentileOf, resolveRules, roundUpToLadder, HOUSE_RULES } from "../apps/app/lib/house-pricing.js";
 import { cardsFromCsv, evaluateCard, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
 import { settingsForText } from "../apps/app/lib/matching.js";
+import { guardVerdict, matchCatalog, numberForms, referenceGbp, setsAgree } from "../apps/app/lib/price-guard.js";
 
 let failed = 0;
 const fail = (m) => { failed++; console.error("FAIL", m); };
@@ -199,6 +200,55 @@ ok("a sale shows the seller's title, not the engine's", live.sales.every((x) => 
 // A card the caller SAID is the base card is not "uncertain" about it.
 const explicitBase = planCard(normaliseCard({ name: "Riolu", number: "BW33", variant_keys: [] }));
 ok("variant_keys: [] answers the question", !evaluateCard(explicitBase, rioluComps).flags.variant_uncertain);
+
+// --- 4b. the guard: a £40 card must never go out at £2.49 ---------------------
+
+// The Riolu that shipped: the file said the plain promo, so the plain promo's
+// honest comps priced it. Only evidence from OUTSIDE those comps can catch it.
+const shipped = { suggested_price: 2.49, suggested_pence: 249, n_comps: 2, sales: [{ total: 2.5 }, { total: 3 }], excluded: [], engine_price: 2.49, flags: {} };
+eq("Cardmarket at £45 holds a £2.49 card", guardVerdict(shipped, { reference: { gbp: 45, product: "Riolu" } }).verdict, "hold");
+eq("…and only review at 50% of it", guardVerdict({ ...shipped, suggested_price: 25 }, { reference: { gbp: 45 } }).verdict, "review");
+eq("…and fine at 70%", guardVerdict({ ...shipped, suggested_price: 32, n_comps: 8 }, { reference: { gbp: 45 } }).verdict, "ok");
+eq("a reference under £5 says nothing", guardVerdict({ ...shipped, n_comps: 8 }, { reference: { gbp: 4 } }).verdict, "ok");
+eq("a pricey sibling printing is a review, never a hold", guardVerdict({ ...shipped, n_comps: 8 }, { siblings: [{ name: "Riolu (Cosmos Holo)", gbp: 45 }] }).verdict, "review");
+eq("thin comps alone are a review", guardVerdict(shipped, {}).verdict, "review");
+eq("no price is a hold", guardVerdict({ ...shipped, suggested_price: null }, {}).verdict, "hold");
+ok("the cheap stray is named", guardVerdict({ ...shipped, sales: [{ total: 2.5 }, { total: 30 }] }, {}).reasons.some((r) => /lowest sale/.test(r.why)));
+eq("live asking at 3x+ is a review", guardVerdict({ ...shipped, n_comps: 8 }, { asking: { medianGbp: 20, n: 5 } }).verdict, "review");
+// The plain Riolu run: honest at £13.99, but the Cosmos sales it threw out ran
+// ~£50 — exactly the moment to ask "is yours the Cosmos one?".
+const plainLive = { ...shipped, suggested_price: 13.99, n_comps: 4, sales: [{ total: 13 }, { total: 13.5 }, { total: 13.91 }, { total: 17.65 }],
+  excluded: [48.74, 52.65, 54.2, 76.49, 85].map((t) => ({ reason: "wrongVariant", detail: "Cosmos Holo", total: t })) };
+eq("variant sales at 3x+ make the base card a review", guardVerdict(plainLive, {}).verdict, "review");
+
+eq("Cardmarket euros to pounds", referenceGbp({ trend: 10 }), 8.5);
+eq("a reverse reads the premium column…", referenceGbp({ trend: 1, p_trend: 4, p_low: 2 }, { reverse: true }), 3.4);
+eq("…only where the premium is really listed", referenceGbp({ trend: 1, p_trend: 40, p_low: 0 }, { reverse: true }), 0.85);
+ok("number forms cover padding", ["013/078", "013", "13"].every((f) => numberForms("013/078").includes(f)));
+
+ok("CardUploader's promo set is Cardmarket's", setsAgree("Black and White Promos", "BW Black Star Promos", { promo: true }));
+ok("accents and case", setsAgree("Pokémon GO", "Pokemon Go"));
+ok("SWSH promos", setsAgree("Sword and Shield Promos", "SWSH Black Star Promos", { promo: true }));
+ok("BW promos are not SM promos", !setsAgree("Black and White Promos", "SM Black Star Promos", { promo: true }));
+ok("Base Set is not Base Set 2", !setsAgree("Base Set", "Base Set 2"));
+ok("Team Rocket is not Team Rocket Returns", !setsAgree("Team Rocket", "Team Rocket Returns"));
+ok("a promo set never matches a main set", !setsAgree("Black and White Promos", "Black & White", { promo: true }));
+const cat = [
+  { cardmarket_id: 1, name: "Riolu", collector_number: "BW33", expansion: "BW Black Star Promos" },
+  { cardmarket_id: 2, name: "Riolu (Cosmos Holo)", collector_number: "BW33", expansion: "BW Black Star Promos" },
+  { cardmarket_id: 3, name: "Riolu", collector_number: "BW33", expansion: "Some Other Set" }
+];
+const vOf = (name) => detectVariants({ name }).keys;
+const asPlan = (o) => ({ card: { set: "Black and White Promos" }, promo: true, baseName: "Riolu", variantKeys: [], ...o });
+eq("the plain card matches the plain product", matchCatalog(asPlan({}), cat, vOf).product.cardmarket_id, 1);
+eq("…and the Cosmos is its sibling", matchCatalog(asPlan({}), cat, vOf).siblings.map((r) => r.cardmarket_id), [2]);
+eq("the Cosmos card matches the Cosmos product", matchCatalog(asPlan({ variantKeys: ["cosmos"] }), cat, vOf).product.cardmarket_id, 2);
+eq("another set's Riolu is neither", matchCatalog(asPlan({}), cat, vOf).siblings.some((r) => r.cardmarket_id === 3), false);
+eq("no set, no match — a wrong reference could hold a card", matchCatalog(asPlan({ card: { set: "" } }), cat, vOf).product, null);
+
+// A held card leaves the CSV at 0.00, whatever it was priced at.
+eq("held → 0.00 in the CSV", resultsCsv([{ sku: "H1", suggested_pence: 249, listable_pence: null }]), "sku,suggested_price\nH1,0.00\n");
+eq("held cards are named", unpricedSkus([{ sku: "H1", suggested_pence: 249, listable_pence: null }]), ["H1"]);
 
 // --- 5. output ---------------------------------------------------------------
 

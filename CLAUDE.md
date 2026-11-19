@@ -751,6 +751,16 @@ for the same contract as JSON.
   who didn't write it.
 - **Unpriced is 0.00 in the CSV**, per the zero-price rule, and
   `summary.unpriced_skus` names them.
+- **Every card gets a verdict — ok, review or hold** (`lib/price-guard.js`),
+  because the costly mistake is one-sided: a £40 card at £2.49 sells in
+  minutes. Only an INDEPENDENT reference may hold a card: Cardmarket's price
+  for the matched catalogue product (`cm_price_latest`), when we are under
+  40% of it. Siblings (Cosmos and the like), excluded variant sales, thin
+  comps, a cheap stray, non-UK sales, live asking prices and the engine's own
+  figure all raise a review instead. A hold writes 0.00. Catalogue set
+  matching is strict on purpose (`setsAgree`): a wrong match hands a card
+  another card's reference, and a reference can hold. With no reference the
+  guard degrades to reviews and says so in `reference_status`.
 - **Not measured against live data yet.** The fixtures in
   `check-batchcomps.mjs` are written the way sellers write; the acceptance
   figures (Riolu ~11 comps / ~£49.99, Numel ~29 / ~£12.49) need a real run.

@@ -62,6 +62,33 @@ of its own sales — no price, never a fall back to the ordinary copies).
 card is `0.00`, not blank** — eBay refuses it, which is the point; type a price
 before uploading. `summary.unpriced_skus` names them.
 
+## The guard: verdicts
+
+Every card gets a `verdict` and `reasons`, because the costly failure is
+one-sided: a £40 card at £2.49 sells in minutes, an overpriced one just sits.
+
+| verdict | meaning | in the CSV |
+|---|---|---|
+| `ok` | list it | `listable_price` |
+| `review` | listable, but read `reasons` first | `listable_price` |
+| `hold` | independent evidence says it's worth far more | **0.00** — type a price |
+
+- **Hold** needs evidence from OUTSIDE the comps that built the price:
+  Cardmarket's price for the matched catalogue product (`reference`, from the
+  nightly price guide, converted at `guard.eurToGbp`) says it's worth
+  ≥ £5 and we're under 40% of it. A card with no price, or one that errored,
+  is also a hold.
+- **Review** is everything read from our own search or a sibling: another
+  printing of the card (`siblings`, e.g. Riolu (Cosmos Holo)) or variant sales
+  this search excluded worth 3× ours; under 4 UK comps; the lowest of a few
+  being under half the next; non-UK sales, live UK asking prices (checked
+  automatically for thin cards — `check_asking: false` to skip) or the engine's
+  own figure well above ours; a wide spread; an uncertain printing.
+- `summary.hold_skus` and `summary.review_skus` list them. `reference_status`
+  says if Cardmarket prices weren't available, in which case nothing can hold
+  on a reference — read the reviews more carefully.
+- Every threshold is a setting under `guard` (GET the route for defaults).
+
 ## Auditing
 
 Every number can be redone by hand from the row: `sales[].total` is price +

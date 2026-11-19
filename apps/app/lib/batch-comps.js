@@ -401,9 +401,35 @@ export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
   };
 }
 
+/**
+ * What this card is LISTED at in the UK right now, judged by the same rules as
+ * the sold comps (variant, promo number, graded, lots, foreign…). Evidence for
+ * the guard only — an asking price never sets a price here.
+ */
+export function askingEvidence(plan, activeComps, rulesIn) {
+  const rules = resolveRules(rulesIn);
+  const pre = prefilterComps(plan, activeComps);
+  const guarded = numberGuards(plan, pre.kept);
+  const rec = CompFinderPricing.recommend(dropForeignPostage(guarded.kept).comps, plan.settings, plan.nameTokens, "active", plan.number || null, plan.set);
+  const totals = (rec.included || []).map((c) => houseTotal(c, rules)).sort((a, b) => a - b);
+  if (!totals.length) return { medianGbp: null, n: 0 };
+  const m = Math.floor(totals.length / 2);
+  const med = totals.length % 2 ? totals[m] : (totals[m - 1] + totals[m]) / 2;
+  return { medianGbp: Math.round(med) / 100, n: totals.length };
+}
+
 // ---------------------------------------------------------------------------
 // Output
 // ---------------------------------------------------------------------------
+
+/**
+ * The price a card may be LISTED at: the suggestion, unless the guard held it.
+ * A result the guard never saw (an error row, a direct evaluateCard call) falls
+ * back to the suggestion.
+ */
+export function listablePence(r) {
+  return "listable_pence" in r ? r.listable_pence : r.suggested_pence;
+}
 
 /** Should another search be asked for this card? */
 export function wantsFallback(result, rules) {
@@ -431,7 +457,8 @@ const csvCell = (v) => {
 };
 
 /**
- * sku,suggested_price — the two columns CardUploader needs.
+ * sku,suggested_price — the two columns CardUploader needs. The price is the
+ * LISTABLE one: a card the guard held (price-guard.js) is written 0.00 too.
  *
  * A card with no price is written as 0.00, never blank and never left out —
  * the app's zero-price rule (lib/zero-price.js): a blank is what the eye skips,
@@ -442,7 +469,8 @@ const csvCell = (v) => {
 export function resultsCsv(results) {
   const lines = ["sku,suggested_price"];
   for (const r of results) {
-    const pence = r.suggested_pence == null ? UNPRICED_PENCE : r.suggested_pence;
+    const lp = listablePence(r);
+    const pence = lp == null ? UNPRICED_PENCE : lp;
     lines.push(`${csvCell(r.sku)},${(pence / 100).toFixed(2)}`);
   }
   return lines.join("\n") + "\n";
@@ -450,5 +478,5 @@ export function resultsCsv(results) {
 
 /** The SKUs written at 0.00, so a caller can refuse to upload until they're priced. */
 export function unpricedSkus(results) {
-  return results.filter((r) => r.suggested_pence == null).map((r) => r.sku || `#${r.index + 1}`);
+  return results.filter((r) => listablePence(r) == null).map((r) => r.sku || `#${r.index + 1}`);
 }
