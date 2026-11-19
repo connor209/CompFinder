@@ -12,7 +12,7 @@
 import { readFileSync } from "node:fs";
 import { REASON_TEXT } from "../apps/app/lib/batch-comps.js";
 import {
-  REASON_CODES, isTitleRequest, parseCardTitle, planTitleCard, reasonCode, titleCardResult, titleKey
+  REASON_CODES, cardConditionTier, compCondition, conditionMismatch, isTitleRequest, parseCardTitle, planTitleCard, reasonCode, titleCardResult, titleKey
 } from "../apps/app/lib/title-comps.js";
 
 let failed = 0;
@@ -32,6 +32,7 @@ eq("rarity off the set", parse("Umbreon VMAX 215/203 Evolving Skies Secret Rare"
 eq("language", parse("Pikachu Japanese 025/165 SV2a"), ["Pikachu", "025/165", "SV2a", "Japanese", ""]);
 eq("gallery number", parse("Lugia V TG05/TG30 Silver Tempest").slice(0, 3), ["Lugia V", "TG05/TG30", "Silver Tempest"]);
 eq("abbreviation dot survives", parse("Mr. Mime 97/162 BREAKthrough LP"), ["Mr. Mime", "97/162", "BREAKthrough", "English", "LP"]);
+eq("a card's ex is not a grade", parse("Charizard ex Obsidian Flames").slice(0, 1).concat(parseCardTitle("Charizard ex Obsidian Flames").condition), ["Charizard ex Obsidian Flames", ""]);
 eq("no number: the whole title is the name", parse("Charizard Base Set").slice(0, 2), ["Charizard Base Set", ""]);
 
 const kingdra = planTitleCard({ id: "JO28", title: "Kingdra (Cosmos Holo) 032/182 Pokemon" });
@@ -80,6 +81,42 @@ for (const r of res.sold) {
   ok(`reason in the vocabulary: ${r.excluded_reason}`, r.excluded_reason == null || Object.values(REASON_CODES).includes(r.excluded_reason));
 }
 
+
+// --- condition ---------------------------------------------------------------
+eq("NM and LP are one tier", [cardConditionTier("NM").tier, cardConditionTier("LP").tier], ["NM/LP", "NM/LP"]);
+eq("played grades stand alone", ["MP", "Heavily Played", "DMG"].map((c) => cardConditionTier(c).tier), ["MP", "HP", "DMG"]);
+eq("no condition is NM/LP, and says it was assumed", cardConditionTier(""), { tier: "NM/LP", assumed: true });
+eq("comp grade off the title", compCondition({ title: "Kingdra 032/182 MP" }), "MP");
+eq("60 HP is a stat", compCondition({ title: "Kingdra 60 HP 032/182" }), null);
+eq("eBay's Ungraded says nothing", compCondition({ title: "Kingdra 032/182", condition: "Ungraded" }), null);
+eq("a field that IS a grade is read", compCondition({ title: "Kingdra 032/182", condition: "LP" }), "LP");
+ok("an NM comp suits an LP card", !conditionMismatch({ title: "Kingdra 032/182 NM" }, "NM/LP"));
+ok("a played comp does not suit an NM card", conditionMismatch({ title: "Kingdra 032/182 Moderately Played" }, "NM/LP"));
+ok("an NM comp does not suit an HP card", conditionMismatch({ title: "Kingdra 032/182 Near Mint" }, "HP"));
+ok("a comp stating no grade is never a mismatch", !conditionMismatch({ title: "Kingdra 032/182" }, "HP"));
+
+{
+  const c = [
+    comp("Kingdra Cosmos Holo 032/182 Paradox Rift NM", 3.2, 0.85),
+    comp("Kingdra Cosmos Holo 032/182 Paradox Rift", 3.0, 0.85),
+    comp("Kingdra Cosmos Holo 032/182 Paradox Rift MP", 2.0, 0.85),
+    comp("Kingdra Cosmos Holo 032/182 Paradox Rift Heavily Played", 1.2, 0.85),
+    comp("PSA 9 Kingdra Cosmos Holo 032/182 Paradox Rift MP", 30, 3)
+  ];
+  const nm = planTitleCard({ title: "Kingdra (Cosmos Holo) 032/182 Paradox Rift NM" });
+  eq("condition read off the card's title", nm.condition, { tier: "NM/LP", assumed: false });
+  const r = titleCardResult({ id: "A", title: nm.title, plan: nm.plan, parsed: nm.parsed, condition: nm.condition }, { status: "ok", comps: c });
+  eq("NM card: the played sales are condition mismatches", r.sold.map((x) => x.excluded_reason), [null, null, "condition_mismatch", "condition_mismatch", "graded"]);
+  eq("a slab stays graded, not condition", r.sold[4].excluded_reason, "graded");
+  eq("each row says the grade it read", r.sold.map((x) => x.condition), ["NM", null, "MP", "HP", "MP"]);
+  eq("n_kept counts condition out", r.n_kept, 2);
+  eq("the card's tier is on the row", r.card_condition, { tier: "NM/LP", assumed: false });
+
+  const mp = planTitleCard({ title: "Kingdra (Cosmos Holo) 032/182 Paradox Rift NM", condition: "MP" });
+  const r2 = titleCardResult({ id: "B", title: mp.title, plan: mp.plan, parsed: mp.parsed, condition: mp.condition }, { status: "ok", comps: c });
+  eq("an explicit condition beats the title", r2.sold.map((x) => x.excluded_reason), ["condition_mismatch", null, null, "condition_mismatch", "graded"]);
+}
+
 // --- status ----------------------------------------------------------------
 const none = titleCardResult({ id: "A", title: "x", plan: kingdra.plan, parsed: kingdra.parsed }, { status: "ok", comps: [] });
 eq("nothing sold", [none.status, none.sold.length], ["no_sales", 0]);
@@ -97,6 +134,7 @@ const titlePath = route.slice(route.indexOf("async function titleResponse"));
 ok("the title path never asks for active listings", !/sold:\s*false|\/api\/active|"active"/.test(titlePath));
 ok("the title path sends only the first query", (titlePath.match(/getComps\(/g) || []).length === 1 && !/queries\[1\]/.test(titlePath));
 ok("the title path is grouped by title", /titleKey\(/.test(titlePath));
+ok("and by the condition asked, which changes the answer but not the search", /group\.condition/.test(titlePath));
 
 if (failed) { console.error(`\n${failed} check(s) failed`); process.exit(1); }
 console.log("check-titlecomps: ok");

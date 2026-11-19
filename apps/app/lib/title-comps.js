@@ -14,7 +14,9 @@
  * No price is worked out, and nothing ever falls back to ACTIVE listings: a
  * sold lookup that fails is status "timeout" for that card, with no rows.
  */
-import { compKey, judgeComps, normaliseCard, planCard } from "./batch-comps.js";
+import SoldCompsApi from "@compfinder/core/soldcomps.js";
+import { judgeComps, normaliseCard, planCard } from "./batch-comps.js";
+import { conditionCode } from "./house-pricing.js";
 import { promoCodeIn } from "./promo.js";
 
 /** Most cards one title-form request will take. ~35 is the intended size. */
@@ -45,6 +47,7 @@ export const REASON_CODES = Object.freeze({
   foreignPrint: "foreign",
   catalogMismatch: "catalog_mismatch",
   categoryMismatch: "catalog_mismatch",
+  conditionMismatch: "condition_mismatch",
   // Outside the requested list — no honest mapping into it.
   notACard: "not_a_card",
   priceOutlier: "price_outlier",
@@ -68,8 +71,9 @@ const LANGUAGES = ["Japanese", "Korean", "Chinese", "German", "French", "Italian
 const LANGUAGE = new RegExp(`\\b(${LANGUAGES.join("|")})\\b`, "i");
 
 const CONDITION =
-  /\b(near mint|mint|lightly played|light play|moderately played|heavily played|damaged|nm|lp|mp|hp|dmg|ex)\b(?=[\s/|-]*$)/i;
-const CONDITION_CODE = { "near mint": "NM", mint: "NM", nm: "NM", ex: "LP", "lightly played": "LP", "light play": "LP", lp: "LP", "moderately played": "MP", mp: "MP", "heavily played": "HP", hp: "HP", damaged: "DMG", dmg: "DMG" };
+  /\b(near mint|mint|lightly played|light play|moderately played|heavily played|damaged|nm|lp|mp|hp|dmg)\b(?=[\s/|-]*$)/i;
+// No bare "ex": it is a card suffix (Charizard ex) far more often than a grade.
+const CONDITION_CODE = { "near mint": "NM", mint: "NM", nm: "NM", "lightly played": "LP", "light play": "LP", lp: "LP", "moderately played": "MP", mp: "MP", "heavily played": "HP", hp: "HP", damaged: "DMG", dmg: "DMG" };
 
 /** Words in a listing title that say nothing about which card it is. */
 const FILLER = /\b(pok[eé]mon|tcg|trading\s+card(?:\s+game)?|card|english|eng)\b/gi;
@@ -134,8 +138,53 @@ export const titleKey = (title) => String(title || "").trim().replace(/\s+/g, " 
 export function planTitleCard(raw, index = 0) {
   const title = String(raw?.title ?? "").trim();
   const parsed = parseCardTitle(title);
-  const card = normaliseCard({ sku: raw?.id ?? raw?.sku ?? "", ...parsed, title }, index);
-  return { plan: planCard(card), parsed, title };
+  const given = String(raw?.condition ?? "").trim();
+  const card = normaliseCard({ sku: raw?.id ?? raw?.sku ?? "", ...parsed, condition: given || parsed.condition, title }, index);
+  return { plan: planCard(card), parsed, title, condition: cardConditionTier(given || parsed.condition) };
+}
+
+// ---------------------------------------------------------------------------
+// Condition
+// ---------------------------------------------------------------------------
+
+/**
+ * The house rules price NM and LP as one grade (NM = LP) and the played
+ * grades off that LP figure with a multiplier, so the tiers a comp is judged
+ * against are NM/LP, MP, HP and DMG.
+ */
+const TIER = { NM: "NM/LP", LP: "NM/LP", MP: "MP", HP: "HP", DMG: "DMG" };
+
+/**
+ * The card's tier, and whether we were told it. A card with no condition in
+ * its title or its request is judged as NM/LP — the basis the house rules
+ * price from before any multiplier — and says it was assumed.
+ */
+export function cardConditionTier(condition) {
+  const t = String(condition || "").trim();
+  return t ? { tier: TIER[conditionCode(t)], assumed: false } : { tier: "NM/LP", assumed: true };
+}
+
+/**
+ * The grade a sold listing claims, or null when it claims none. Read off the
+ * TITLE with core's own inferCondition (the reading the engine and the Show
+ * Desk already share), then off SoldComps' condition field only when that is
+ * a grade — eBay's "Used" / "Ungraded" say nothing.
+ */
+export function compCondition(comp) {
+  const fromTitle = SoldCompsApi.inferCondition(comp?.title || "");
+  if (TIER[fromTitle]) return fromTitle;
+  const field = String(comp?.condition || "").trim().toUpperCase();
+  return TIER[field] ? field : null;
+}
+
+/**
+ * Does this comp state a grade in a different tier from the card? A comp that
+ * states none is never a mismatch — it cannot be ruled out, and most honest
+ * titles say nothing (the same principle as a title with no number).
+ */
+export function conditionMismatch(comp, cardTier) {
+  const c = compCondition(comp);
+  return !!c && TIER[c] !== cardTier;
 }
 
 // ---------------------------------------------------------------------------
@@ -149,17 +198,20 @@ const pounds = (pence) => (pence == null ? null : Math.round(pence) / 100);
  * the reason it would be excluded (null when kept). Prices are as sold:
  * postage is SoldComps' figure, never the zeroed one the engine priced from.
  */
-export function judgeTitleCard(plan, comps) {
+export function judgeTitleCard(plan, comps, condition = cardConditionTier("")) {
   const tagged = (comps || []).map((c, i) => ({ ...c, _i: i }));
   const { included, excluded } = judgeComps(plan, tagged);
   const reasonOf = new Map();
-  for (const c of included) reasonOf.set(c._i, null);
+  // Condition is asked last, of what the engine kept: a lot or a slab is that
+  // first, and a reason should answer why the comp is not this card.
+  for (const c of included) reasonOf.set(c._i, conditionMismatch(c, condition.tier) ? "conditionMismatch" : null);
   for (const c of excluded) reasonOf.set(c._i, c.exclusionReason || "unknown");
 
   const sold = tagged.map((c) => {
     const s = c._source || {};
     const engine = reasonOf.has(c._i) ? reasonOf.get(c._i) : "unknown";
     return {
+      condition: compCondition(c),
       price: pounds(c.itemPricePence),
       postage: pounds(c.postagePence || 0),
       date: s.endedAt || null,
@@ -171,23 +223,24 @@ export function judgeTitleCard(plan, comps) {
       excluded_detail: engine
     };
   });
-  return { sold, kept: included.length };
+  return { sold, kept: sold.filter((r) => r.excluded_reason == null).length };
 }
 
 /** One card's row of the response. */
-export function titleCardResult({ id, title, plan, parsed }, outcome) {
+export function titleCardResult({ id, title, plan, parsed, condition }, outcome) {
   const base = {
     id,
     title,
     query: plan ? plan.queries[0] : null,
     parsed: parsed
       ? { ...parsed, variant: plan && plan.variantKeys.length ? plan.variantKeys : [], promo: !!plan?.promo }
-      : null
+      : null,
+    card_condition: condition ? { tier: condition.tier, assumed: condition.assumed } : null
   };
   if (outcome.status !== "ok" && outcome.status !== "no_sales") {
     return { ...base, status: outcome.status, error: outcome.error || null, sold: [] };
   }
-  const { sold, kept } = judgeTitleCard(plan, outcome.comps);
+  const { sold, kept } = judgeTitleCard(plan, outcome.comps, condition);
   return {
     ...base,
     status: sold.length ? "ok" : "no_sales",

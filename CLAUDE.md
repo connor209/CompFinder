@@ -315,6 +315,9 @@ stream` (the relay, only while streaming).
   title } in, evidence out): what a title parses to, that every fetched sale
   comes back with a reason from the caller's vocabulary, that a failed lookup
   is "timeout" with no rows and never active listings, and one search a title.
+  And condition: NM and LP are one tier (the house rule), a sale stating no
+  grade is never a mismatch, "60 HP" is a stat, a card's "ex" is not a grade,
+  and a slab stays `graded` rather than becoming a condition mismatch.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft

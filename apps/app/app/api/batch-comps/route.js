@@ -61,11 +61,11 @@ export async function GET() {
     },
     variant_keys: VARIANTS.map((v) => ({ key: v.key, label: v.label })),
     title_form: {
-      body: "{ cards: [{ id, title }] } — every card a title and no `name`; up to " + TITLE_MAX_CARDS + " per request (~35 is the intended size)",
+      body: "{ cards: [{ id, title, condition? }] } — every card a title and no `name`; up to " + TITLE_MAX_CARDS + " per request (~35 is the intended size)",
       options: "fresh: true skips the 24h cache read",
-      output: "results[]: id, title, query, parsed{name,number,set,language,condition,variant,promo}, status (ok | no_sales | timeout | error), error?, n_sold, n_kept, sold[]: { price, postage, date, title, itemId, url, location, excluded_reason, excluded_detail }",
+      output: "results[]: id, title, query, parsed{name,number,set,language,condition,variant,promo}, card_condition{tier,assumed}, status (ok | no_sales | timeout | error), error?, n_sold, n_kept, sold[]: { condition, price, postage, date, title, itemId, url, location, excluded_reason, excluded_detail }",
       excluded_reasons: [...new Set(Object.values(REASON_CODES))],
-      notes: "One SoldComps search per distinct title (identical titles share it; 429s are retried). No price is worked out and active listings are never used. excluded_detail is the engine's own reason, unmapped. condition_mismatch is never emitted: no rule excludes a sale on condition."
+      notes: "One SoldComps search per distinct title (identical titles share it; 429s are retried). No price is worked out and active listings are never used. excluded_detail is the engine's own reason, unmapped. condition_mismatch: the sale's title states a grade in a different tier from the card (NM/LP, MP, HP, DMG — NM and LP are one tier, as in the house rules). The card's condition is `condition` if sent, else read off the title, else assumed NM/LP (card_condition.assumed). A sale stating no grade is never a mismatch. Asked only of sales nothing else excluded."
     },
     output: "results[]: sku, query, matched, n_comps, last_sold, sales[], excluded[] (with reason), p40, suggested_price, confidence, flags{few_comps, variant_uncertain, wide_spread, no_uk_comps, price_held}; plus csv and summary"
   });
@@ -254,8 +254,12 @@ async function titleResponse(cards, { getComps, stats, started, options, fatalNo
     const title = String(raw?.title ?? "").trim();
     const id = raw?.id ?? raw?.sku ?? null;
     const key = titleKey(title);
-    if (!groups.has(key)) groups.set(key, { title, members: [] });
-    groups.get(key).members.push({ i, id: id == null ? null : String(id), title });
+    // The condition is part of the group: the same title asked as NM and as
+    // MP is one search but two different answers about which sales fit.
+    const condition = String(raw?.condition ?? "").trim();
+    const gkey = `${key}\u0000${condition.toLowerCase()}`;
+    if (!groups.has(gkey)) groups.set(gkey, { title, condition, members: [] });
+    groups.get(gkey).members.push({ i, id: id == null ? null : String(id), title });
   });
   const list = [...groups.values()];
   const outcomes = new Array(list.length);
@@ -266,7 +270,7 @@ async function titleResponse(cards, { getComps, stats, started, options, fatalNo
       outcomes[g] = { status: "error", error: "No title." };
       return;
     }
-    const planned = planTitleCard({ title: group.title }, g);
+    const planned = planTitleCard({ title: group.title, condition: group.condition }, g);
     group.planned = planned;
     if (!planned.plan.queries[0]) {
       outcomes[g] = { status: "error", error: "Nothing searchable in that title." };
@@ -284,7 +288,7 @@ async function titleResponse(cards, { getComps, stats, started, options, fatalNo
   list.forEach((group, g) => {
     const p = group.planned || {};
     for (const m of group.members) {
-      results[m.i] = titleCardResult({ id: m.id, title: m.title, plan: p.plan, parsed: p.parsed }, outcomes[g]);
+      results[m.i] = titleCardResult({ id: m.id, title: m.title, plan: p.plan, parsed: p.parsed, condition: p.condition }, outcomes[g]);
     }
   });
 

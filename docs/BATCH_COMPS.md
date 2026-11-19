@@ -80,7 +80,7 @@ const res = await fetch("/api/batch-comps", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
-    cards: [{ id: "JO28", title: "Kingdra (Cosmos Holo) 032/182 Pokemon" }]
+    cards: [{ id: "JO28", title: "Kingdra (Cosmos Holo) 032/182 Pokemon", condition: "NM" }] // condition optional
   })
 }).then((r) => r.json());
 ```
@@ -96,18 +96,27 @@ const res = await fetch("/api/batch-comps", {
   row — check it when a query looks wrong) and then planned and judged by the
   same pipeline as the fields form.
 
-Each result: `id`, `title`, `query`, `parsed`, `status` (`ok` | `no_sales` |
+Each result: `id`, `title`, `query`, `parsed`, `card_condition`, `status` (`ok` | `no_sales` |
 `timeout` | `error`), `n_sold`, `n_kept`, `from_cache`, `page_full`, and
 `sold[]` — **every** sold listing fetched, in SoldComps' order:
-`{ price, postage, date, title, itemId, url, location, excluded_reason,
+`{ condition, price, postage, date, title, itemId, url, location, excluded_reason,
 excluded_detail }`. `postage` is SoldComps' figure as sold; `location` null is
 a UK-domestic sale.
 
 `excluded_reason` is null when kept, otherwise one of `graded`, `bundle`,
 `name_mismatch` (includes a different collector number or set),
-`variant_mismatch`, `non_uk`, `foreign`, `catalog_mismatch` — plus four the
-engine has with no honest home in that list: `not_a_card` (proxy, replica),
-`price_outlier`, `high_postage`, `duplicate`. `excluded_detail` is the
-engine's own reason, unmapped. **`condition_mismatch` is never emitted**: no
-rule excludes a sale on condition (the house rules price conditions with a
-multiplier instead).
+`condition_mismatch`, `variant_mismatch`, `non_uk`, `foreign`,
+`catalog_mismatch` — plus four the engine has with no honest home in that
+list: `not_a_card` (proxy, replica), `price_outlier`, `high_postage`,
+`duplicate`. `excluded_detail` is the engine's own reason, unmapped.
+
+**`condition_mismatch`** is a sale whose title states a grade in a different
+tier from the card. The tiers follow the house rules: **NM/LP** (one tier, as
+NM = LP), MP, HP, DMG. The card's condition is the `condition` you send, else
+whatever the title ends with (NM, LP, "Near Mint" …), else assumed NM/LP —
+`card_condition: { tier, assumed }` says which. A sale's grade (`condition`
+on the row, null if none) is read off its title with the engine's own reader
+("60 HP" is a stat), then off SoldComps' field only when that is a grade. A
+sale stating no grade is never a mismatch, and condition is only asked of
+sales nothing else excluded — a played slab is `graded`. The same title sent
+with two conditions is still one search.
