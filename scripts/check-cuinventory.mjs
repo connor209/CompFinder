@@ -120,6 +120,47 @@ console.log("What an inventory upload adds");
   const again = planInventoryImport({ rows, existing: [...existing.filter((c) => c.id !== "h4"), ...p.cards.map((c, i) => ({ id: `n${i}`, sku: c.sku, listing_sku: c.listing_sku, pulled_at: null })), { id: "h4", sku: "IR4", listing_sku: "CS-BBBBBB_1", pulled_at: null }], stacks: [] });
   check("the same file twice adds nothing", again.cards.length === 0 && again.updates.length === 0, JSON.stringify(again.cards.map((c) => c.sku)));
 }
+
+console.log("A location SKU is not identity (E42, 2026-11-21)");
+{
+  const rows = [
+    { userSku: "E42", listingSku: "CS-VNUGZ5_9c3c595c", title: "Sableye 63/132 Uncommon Secret Wonders Pokemon LP", qty: "1", status: "listed" },
+    { userSku: "J25", listingSku: "CS-BJ7JWT_bc585700", title: "Meowth 4/12 EX Trainer Kit 2 Plusle Pokemon LP", qty: "1", status: "listed" },
+    { userSku: "F45", listingSku: "CS-VNUGZ5_9c3c595c", title: "Sableye 63/132 Uncommon Secret Wonders Pokemon LP", qty: "1", status: "listed" },
+    { userSku: "K7", listingSku: "CS-QQQQQQ_1", title: "Pikachu 58/102 Base Set", qty: "1", status: "listed" }
+  ];
+  const existing = [
+    // linked by the old import to Sableye, but it is not Sableye
+    { id: "e42", sku: "E42", title: "Pokemon TCG Gengar 94/165 Expedition Rare", pulled_at: null, listing_sku: "CS-VNUGZ5_9c3c595c" },
+    // never linked, and not Meowth
+    { id: "j25", sku: "J25", title: "Machop 52/102 Base Set", pulled_at: null, listing_sku: null },
+    // really the same card, under a different spelling
+    { id: "f45", sku: "F45", title: "Pokemon Sableye 063/132 Secret Wonders NM", pulled_at: null, listing_sku: null },
+    // stacked by hand with no title: can't tell, so linked as before
+    { id: "k7", sku: "K7", title: "", pulled_at: null, listing_sku: null }
+  ];
+  const p = planInventoryImport({ rows, existing, stacks: [] });
+  check("a SKU naming another card here is a clash, not a link", !p.updates.some((u) => u.id === "e42" || u.id === "j25") && p.clashes.map((c) => c.sku).sort().join() === "E42,J25", JSON.stringify(p.clashes));
+  check("a wrong link from an earlier upload is taken off", p.unlink.length === 1 && p.unlink[0].id === "e42");
+  check("a clash never stacks CardUploader's card on top of ours", !p.cards.some((c) => c.sku === "E42" || c.sku === "J25"));
+  check("the same card spelt differently is still linked", p.updates.some((u) => u.id === "f45"));
+  check("a card with no title to compare is linked as before", p.updates.some((u) => u.id === "k7"));
+  check("the note names a clash", /E42 is Sableye/.test(inventoryImportNote({ ok: true, imported: 0, stacks: 0, already: 0, clashes: p.clashes, unlinked: 1 })));
+
+  const sheet = [
+    { id: "e42", sku: "E42", stack_id: "sE", position: 42, title: "Pokemon TCG Gengar 94/165 Expedition Rare", listing_sku: "CS-VNUGZ5_9c3c595c", pulled_at: null },
+    { id: "jr39", sku: "JR39", stack_id: "sJR", position: 39, title: "Sableye 63/132 Uncommon Secret Wonders Pokemon LP", listing_sku: "CS-VNUGZ5_9c3c595c", pulled_at: null }
+  ];
+  const names = { sE: "E", sJR: "JR" };
+  const line = { lineItemId: "L1", orderId: "O1", sku: "CS-VNUGZ5_9c3c595c", title: "Sableye 63/132 Uncommon Secret Wonders Pokemon LP", quantity: 1 };
+  const { units } = assignPulls([line], sheet, { walkCompare: (a, b) => a.localeCompare(b), stackNameOf: (id) => names[id] });
+  check("a variation order skips a front-most copy that is another card", units[0].card?.id === "jr39", units[0].card?.id);
+  const cu = new Map([["O1", ["e42"]]]);
+  const viaFile = assignPulls([line], sheet, { walkCompare: (a, b) => a.localeCompare(b), stackNameOf: (id) => names[id], cuChoice: cu }).units[0];
+  check("CardUploader's choice of a SKU holding another card is not followed", viaFile.card?.id === "jr39" && viaFile.via === "variation");
+  const only = assignPulls([line], [sheet[0]], { walkCompare: (a, b) => a.localeCompare(b), stackNameOf: (id) => names[id] }).units[0];
+  check("with only the wrong card linked, the line is loose and says why", only.card === null && only.reason === "wrongcard");
+}
 check("a pending migration reads as pending", isMissingListingSku({ message: 'column stack_cards.listing_sku does not exist' }) && !isMissingListingSku({ message: "network error" }));
 check("the note says nothing was added when 037 is pending", /037/.test(inventoryImportNote({ ok: false, missing: true })));
 

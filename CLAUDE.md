@@ -2846,6 +2846,15 @@ untouched.
   per SKU, "the SKU is pulled" meant "the line is done"; with several copies it
   doesn't, and a reload would hand the same line the next copy and Commit would
   pull that too. Before 037 the old reading stands.
+- **A location SKU is not identity.** CardUploader numbers its own
+  locations, and its older ones were never ours: on 2026-11-21 its file put
+  a Sableye 63/132 at E42 and a Meowth 4/12 at J25, where our E42 and J25 are
+  other cards. Matched on the SKU alone, the import linked our E42 to
+  Sableye's CS- SKU and the pull sheet sent the Sableye order there.
+  `titlesDisagree()` (number + first name word, both titles readable) now
+  makes that a CLASH — reported, nothing written, and a wrong link from an
+  earlier upload taken off — and `assignPulls()` never gives a variation line
+  a copy that is plainly another card.
 - **Reconcile and the Show Desk never call these cards off sale.**
   `ebay_listings` has one row per listing, never per variation, and a variation
   sale never says which copy — so read by its stack SKU every copy is "not

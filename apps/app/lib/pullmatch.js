@@ -1,5 +1,5 @@
 import { queuesBySku, isSellableCopy } from "./copyqueue.js";
-import { isCuListingSku, listingSkuKey } from "./cu-files.js";
+import { isCuListingSku, listingSkuKey, titlesDisagree } from "./cu-files.js";
 
 /**
  * Which physical card each unit of each order line is — the pull sheet's one
@@ -27,6 +27,11 @@ import { isCuListingSku, listingSkuKey } from "./cu-files.js";
  * as well. Before 037 there is no such record and the caller's old reading
  * (the SKU is pulled ⇒ the line is done) still applies, which is right for
  * the one-card-per-SKU case it was written for.
+ *
+ * **A copy whose title is plainly another card is never taken** for a
+ * variation line (titlesDisagree). The link from a CS- SKU to a stack card
+ * comes from CardUploader's location SKU, and its older locations were never
+ * ours: a Sableye order went to our E42, which is a different card.
  *
  * A card is given to at most one unit. Units with no card come back with
  * `card: null` and a `reason` the caller can show.
@@ -86,7 +91,7 @@ export function assignPulls(lines, cards, { walkCompare, stackNameOf = () => "",
       const want = listingSkuKey(u.line.sku);
       for (const s of cuChoice.get(String(u.line.orderId)) || []) {
         const c = bySkuExact.get(s);
-        if (c && !claimed.has(c.id) && listingSkuKey(c.listing_sku) === want) { take(u, c, "cardUploader"); break; }
+        if (c && !claimed.has(c.id) && listingSkuKey(c.listing_sku) === want && !titlesDisagree(c.title, u.line.title)) { take(u, c, "cardUploader"); break; }
       }
     }
   }
@@ -97,10 +102,10 @@ export function assignPulls(lines, cards, { walkCompare, stackNameOf = () => "",
     const q = (bySku.get(k) || []).find((c) => !claimed.has(c.id));
     if (q) { take(u, q, "sku"); continue; }
     if (isCuListingSku(k)) {
-      const list = byListing.get(listingSkuKey(k));
-      const c = (list || []).find((x) => !claimed.has(x.id));
+      const list = (byListing.get(listingSkuKey(k)) || []).filter((x) => !claimed.has(x.id));
+      const c = list.find((x) => !titlesDisagree(x.title, u.line.title));
       if (c) take(u, c, "variation");
-      else u.reason = stacked.has(listingSkuKey(k)) ? "nocopyleft" : "notstacked";
+      else u.reason = list.length ? "wrongcard" : stacked.has(listingSkuKey(k)) ? "nocopyleft" : "notstacked";
     }
   }
   return { units, pulledFor };

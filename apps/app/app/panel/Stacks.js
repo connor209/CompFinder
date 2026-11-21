@@ -157,7 +157,7 @@ export default function Stacks() {
       setMsg(err.message || "Couldn't read that file.");
       return;
     }
-    if (!confirm(`Add the cards in ${f.name} (${rows.length} rows) to your stacks?\n\nEach User SKU like IR19 becomes Stack IR, position 19. SKUs already on a stack — pulled ones included — are skipped, and nothing is ever pulled.`)) return;
+    if (!confirm(`Add the cards in ${f.name} (${rows.length} rows) to your stacks?\n\nEach User SKU like IR19 becomes Stack IR, position 19. SKUs already on a stack — pulled ones included — are skipped, and nothing is ever pulled. A SKU that is a DIFFERENT card here than in CardUploader is left alone and listed, and a link an earlier upload made to the wrong card is taken off.`)) return;
     setBusy(true);
     setMsg("Importing CardUploader inventory…");
     try {

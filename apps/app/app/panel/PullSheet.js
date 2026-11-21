@@ -851,6 +851,7 @@ export default function PullSheet() {
                         {u.deliveryName || u.buyer ? <span className="loose-card-buyer">for {u.deliveryName || u.buyer}</span> : null}
                         {u.reason === "notstacked" ? <span className="loose-card-buyer">CardUploader card not on your stacks — upload its inventory on Stacks</span> : null}
                         {u.reason === "nocopyleft" ? <span className="loose-card-buyer">every copy is already pulled or away</span> : null}
+                        {u.reason === "wrongcard" ? <span className="loose-card-buyer">the stack SKUs CardUploader gave this card hold other cards — re-upload its inventory on Stacks to unlink them</span> : null}
                       </span>
                     </label>
                   );

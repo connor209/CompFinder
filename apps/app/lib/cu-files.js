@@ -1,5 +1,6 @@
 import { parseCsvText, isCardmarketStack } from "./cardmarket.js";
 import { stackFromSku } from "./stackpos.js";
+import { keyFromTitle } from "./stockcheck.js";
 
 /**
  * CardUploader's two exports, and the one fact that ties them to a stack.
@@ -121,6 +122,25 @@ export function cuChoiceIndex(rows) {
 }
 
 /**
+ * Are two titles plainly two different cards? Only when both can be read —
+ * collector number plus the first word of the name, `keyFromTitle()` — and
+ * the readings differ. A title that can't be read (a card stacked by hand
+ * with no title) proves nothing either way.
+ *
+ * A LOCATION SKU IS NOT IDENTITY. CardUploader numbers its own locations,
+ * and its older ones were never ours: on 2026-11-21 its inventory file put a
+ * Sableye 63/132 at E42 and a Meowth 4/12 at J25, while our E42 and J25 are
+ * other cards entirely. Matched on the SKU alone, the import stamped
+ * Sableye's variation SKU onto our E42 and the pull sheet sent the next
+ * Sableye order to it.
+ */
+export function titlesDisagree(a, b) {
+  const ka = keyFromTitle(a || "");
+  const kb = keyFromTitle(b || "");
+  return Boolean(ka && kb && ka !== kb);
+}
+
+/**
  * What an inventory upload would do. Pure; no I/O.
  *
  * - A new location SKU becomes a stack card at that position, carrying the
@@ -133,6 +153,10 @@ export function cuChoiceIndex(rows) {
  * - A card already stacked that is still on the shelf and is MISSING its eBay
  *   SKU (or has a different one) has it set, which is how a card stacked by
  *   hand becomes matchable.
+ * - A SKU that is ours but a DIFFERENT CARD (titlesDisagree) is a clash: it
+ *   is reported and nothing is written. If an earlier upload already linked
+ *   that card to this row's eBay SKU, the link is taken off (`unlink`) — it
+ *   is how a Sableye order came to be sent to somebody else's card.
  * - A card gone from CardUploader is never added, and nothing is ever pulled
  *   from a file: a card in our stacks that the file no longer lists is
  *   counted, for somebody to look at.
@@ -148,6 +172,8 @@ export function planInventoryImport({ rows, existing, stacks }) {
   const stackByName = new Map((stacks || []).map((s) => [String(s.name).toUpperCase(), s.id]));
   const cards = [];
   const updates = [];
+  const unlink = []; // { id, sku } — wrongly linked by an earlier upload
+  const clashes = []; // { sku, ours, theirs }
   const seen = new Set();
   const inFile = new Set();
   let already = 0, gone = 0, unparseable = 0, noLocation = 0, noListingSku = 0, repeated = 0;
@@ -166,6 +192,11 @@ export function planInventoryImport({ rows, existing, stacks }) {
     const listingSku = String(r?.listingSku || "").trim() || null;
     const have = bySku.get(key);
     if (have) {
+      if (titlesDisagree(have.title, r.title)) {
+        clashes.push({ sku, ours: have.title || "", theirs: r.title || "" });
+        if (listingSku && have.listing_sku && listingSkuKey(have.listing_sku) === listingSkuKey(listingSku)) unlink.push({ id: have.id, sku });
+        continue;
+      }
       if (held && listingSku && !have.pulled_at && have.listing_sku !== listingSku) updates.push({ id: have.id, sku, listing_sku: listingSku });
       else already += 1;
       continue;
@@ -183,7 +214,7 @@ export function planInventoryImport({ rows, existing, stacks }) {
     return at && filePrefixes.has(at.prefix) && !inFile.has(String(c.sku).trim().toLowerCase());
   }).map((c) => c.sku);
   const newStacks = [...new Set(cards.map((c) => c.prefix))].filter((p) => !stackByName.has(p));
-  return { cards, updates, newStacks, stackByName, already, gone, unparseable, noLocation, noListingSku, repeated, notInFile };
+  return { cards, updates, unlink, clashes, newStacks, stackByName, already, gone, unparseable, noLocation, noListingSku, repeated, notInFile };
 }
 
 /** Migration 037 not applied: Postgres names the missing column. */
@@ -219,7 +250,7 @@ export async function runInventoryImport(sb, userId, rows) {
   if (!userId) throw new Error("No user.");
   let existing;
   try {
-    existing = await readAll(() => sb.from("stack_cards").select("id,sku,listing_sku,pulled_at").eq("user_id", userId).not("sku", "is", null));
+    existing = await readAll(() => sb.from("stack_cards").select("id,sku,title,listing_sku,pulled_at").eq("user_id", userId).not("sku", "is", null));
   } catch (e) {
     if (isMissingListingSku(e)) return { ok: false, missing: true };
     throw new Error(e?.message || "Couldn't read your stacks.");
@@ -251,8 +282,14 @@ export async function runInventoryImport(sb, userId, rows) {
     if (error) failed += 1;
     else updated += 1;
   }
+  let unlinked = 0;
+  for (const u of plan.unlink) {
+    const { error } = await sb.from("stack_cards").update({ listing_sku: null }).eq("id", u.id).eq("user_id", userId);
+    if (error) failed += 1;
+    else unlinked += 1;
+  }
   return {
-    ok: true, imported, updated, failed, created,
+    ok: true, imported, updated, failed, created, unlinked, clashes: plan.clashes,
     stacks: new Set(plan.cards.map((c) => c.prefix)).size,
     already: plan.already, gone: plan.gone, unparseable: plan.unparseable,
     noLocation: plan.noLocation, noListingSku: plan.noListingSku, repeated: plan.repeated,
@@ -277,6 +314,11 @@ export function inventoryImportNote(r) {
     const names = r.notInFile.slice(0, 5).join(", ");
     s += ` ${r.notInFile.length} card(s) on those stacks aren't in this file (${names}${r.notInFile.length > 5 ? ", …" : ""}) — sold or removed in CardUploader? Nothing was pulled.`;
   }
+  if (r.clashes?.length) {
+    const eg = r.clashes.slice(0, 3).map((c) => `${c.sku} is ${c.theirs || "?"} in CardUploader but ${c.ours || "?"} here`).join("; ");
+    s += ` ${r.clashes.length} SKU(s) name a different card in CardUploader than on your stacks (${eg}${r.clashes.length > 3 ? "; …" : ""}) — left alone, not stacked.`;
+  }
+  if (r.unlinked) s += ` Took the CardUploader SKU off ${r.unlinked} card(s) an earlier upload had linked to the wrong card.`;
   if (r.failed) s += ` ${r.failed} couldn't be saved — upload it again.`;
   return s;
 }
