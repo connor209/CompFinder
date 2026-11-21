@@ -23,7 +23,8 @@
 import { readFileSync } from "node:fs";
 import {
   isCuListingSku, listingSkuKey, parseInventoryCsv, parsePickListCsv, cuChoiceIndex,
-  planInventoryImport, inventoryRowHeld, inventoryImportNote, isMissingListingSku
+  planInventoryImport, inventoryRowHeld, inventoryImportNote, isMissingListingSku,
+  parseEbayOrdersCsv, csvKind, purgeCsv
 } from "../apps/app/lib/cu-files.js";
 import { assignPulls, cuChoiceReport, pulledOutsideSheet } from "../apps/app/lib/pullmatch.js";
 import { cardOffSaleReason, offSaleIndex } from "../apps/app/lib/stockcheck.js";
@@ -160,6 +161,59 @@ console.log("A location SKU is not identity (E42, 2026-11-21)");
   check("CardUploader's choice of a SKU holding another card is not followed", viaFile.card?.id === "jr39" && viaFile.via === "variation");
   const only = assignPulls([line], [sheet[0]], { walkCompare: (a, b) => a.localeCompare(b), stackNameOf: (id) => names[id] }).units[0];
   check("with only the wrong card linked, the line is loose and says why", only.card === null && only.reason === "wrongcard");
+}
+
+console.log("Stock CardUploader still calls Listed that already went (Sableye, 2026-11-21)");
+{
+  const sable = "Sableye 63/132 Uncommon Secret Wonders Pokemon LP";
+  const report = [
+    "",
+    '"Sales record number","Order number","Buyer username","Item number","Item title","Custom label","Quantity","Sale date"',
+    '"1","17-14744-15989","snowys","406970685903","Sableye 63/132 Uncommon Secret Wonders Pokemon LP","E41","1","11-Jun-26"',
+    '"2","14-14815-26909","oneplayer","406977550207","Sableye 63/132 Uncommon Secret Wonders Pokemon LP","F45","1","29-Jun-26"',
+    '"3","11-11111-11111","someone","400000000000","Gengar 94/165 Expedition Rare","H3","1","01-Jul-26"',
+    '"4","11-11111-11112","someone","400000000001","Postage upgrade","","1","01-Jul-26"',
+    "",
+    '"4 record(s) downloaded"'
+  ].join("\n");
+  const sales = parseEbayOrdersCsv(report);
+  check("an eBay orders report is read past its blank lines and footer", sales.length === 3 && sales[1].sku === "F45" && sales[1].title === sable, JSON.stringify(sales));
+  check("each file is told apart by its columns", csvKind(report) === "ebayOrders" && csvKind("User SKU,eBay SKU,Title\nIR1,CS-A_1,x") === "inventory" && csvKind("a,b\n1,2") === null);
+  let threw = false;
+  try { parseEbayOrdersCsv("User SKU,eBay SKU,Title\n"); } catch { threw = true; }
+  check("an inventory file is refused as an orders report", threw);
+
+  const rows = [
+    { userSku: "F45", listingSku: "CS-VNUGZ5_9c3c595c", title: sable, qty: "1", status: "listed" },
+    { userSku: "G16", listingSku: "CS-VNUGZ5_9c3c595c", title: sable, qty: "1", status: "listed" },
+    { userSku: "B9", listingSku: "CS-VNUGZ5_9c3c595c", title: sable, qty: "1", status: "listed" },
+    { userSku: "H3", listingSku: "CS-NEWNEW_1", title: "Pikachu 58/102 Base Set", qty: "1", status: "listed" },
+    { userSku: "JR39", listingSku: "CS-VNUGZ5_9c3c595c", title: sable, qty: "1", status: "listed" }
+  ];
+  const existing = [
+    // G16: the old Sableye, sold 2 Sep, never pulled here, linked by the old import
+    { id: "g16", sku: "G16", title: sable, pulled_at: null, listing_sku: "CS-VNUGZ5_9c3c595c" },
+    // B9: a Sableye pulled here on an old order
+    { id: "b9", sku: "B9", title: "Pokemon Sableye 63/132 Secret Wonders", pulled_at: "2026-07-01", listing_sku: null }
+  ];
+  const synced = [{ sku: "G16", title: sable, sold_date: "2026-09-02" }];
+  const p = planInventoryImport({ rows, existing, stacks: [], sales: [...synced, ...sales] });
+  const st = Object.fromEntries(p.stale.map((r) => [r.sku, r.why]));
+  check("sold under its own SKU as the same card, from an uploaded report: stale", st.F45 === "sold" && !p.cards.some((c) => c.sku === "F45"));
+  check("sold under its own SKU as the same card, from synced sales: stale", st.G16 === "sold");
+  check("pulled here as the same card: stale", st.B9 === "pulled");
+  check("a stale copy linked by an earlier upload is unlinked", p.unlink.some((u) => u.id === "g16") && !p.updates.some((u) => u.id === "g16"));
+  check("an old sale of ANOTHER card under the SKU is not this card going", !st.H3 && p.cards.some((c) => c.sku === "H3"));
+  check("the copy that is really there is still stacked", p.cards.some((c) => c.sku === "JR39") && !st.JR39);
+  const csv = purgeCsv(p.stale);
+  check("the purge list leads with CardUploader's own columns", csv.startsWith('"User SKU","eBay SKU","Title"') && /"G16","CS-VNUGZ5_9c3c595c"/.test(csv));
+  check("the note counts what is already gone", /3 CardUploader still calls Listed/.test(inventoryImportNote({ ok: true, imported: 1, stacks: 1, already: 0, stale: p.stale })));
+
+  const idx = offSaleIndex([], [{ sku: "G16", title: sable, sold_date: "2026-09-02" }, { sku: "E42", title: "Gengar 94/165 Expedition Rare", sold_date: "2026-08-01" }]);
+  check("Reconcile: a CardUploader copy whose own SKU sold as this card is sold",
+    cardOffSaleReason({ sku: "G16", title: sable, listing_sku: "CS-VNUGZ5_9c3c595c" }, idx) === "sold");
+  check("Reconcile: a sale of another card under the same SKU says nothing",
+    cardOffSaleReason({ sku: "E42", title: sable, listing_sku: "CS-VNUGZ5_9c3c595c" }, idx) === null);
 }
 check("a pending migration reads as pending", isMissingListingSku({ message: 'column stack_cards.listing_sku does not exist' }) && !isMissingListingSku({ message: "network error" }));
 check("the note says nothing was added when 037 is pending", /037/.test(inventoryImportNote({ ok: false, missing: true })));

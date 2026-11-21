@@ -1,6 +1,8 @@
 import { parseCsvText, isCardmarketStack } from "./cardmarket.js";
 import { stackFromSku } from "./stackpos.js";
-import { keyFromTitle } from "./stockcheck.js";
+import { titlesDisagree } from "./stockcheck.js";
+
+export { titlesDisagree };
 
 /**
  * CardUploader's two exports, and the one fact that ties them to a stack.
@@ -105,6 +107,53 @@ export function parsePickListCsv(text) {
 }
 
 /**
+ * eBay Seller Hub's orders report (Orders → Download report), read for the
+ * two things it can prove: which stack SKU (`Custom label`) sold, as which
+ * card (`Item title`). eBay puts a blank line or two above the header and a
+ * "records downloaded" line under the data, so the header is FOUND rather
+ * than assumed, and a row with no SKU is skipped. Seller Hub exports a
+ * limited date range at a time, so several reports can be read together.
+ *
+ * Returns [{ sku, title, soldDate, orderId }] — the shape of `ebay_sales`.
+ */
+export function parseEbayOrdersCsv(text) {
+  const rows = parseCsvText(text, ",");
+  const lc = (v) => String(v || "").trim().toLowerCase();
+  const h = rows.slice(0, 10).findIndex((r) => r.some((c) => lc(c) === "custom label") && r.some((c) => lc(c) === "item title"));
+  if (h < 0) throw new Error("That isn't an eBay orders report — no \"Custom label\" and \"Item title\" columns. In Seller Hub: Orders → Download report.");
+  const head = rows[h].map(lc);
+  const col = (name) => head.indexOf(name);
+  const sku = col("custom label"), title = col("item title"), date = col("sale date"), order = col("order number");
+  const out = [];
+  for (const r of rows.slice(h + 1)) {
+    const k = String(r[sku] ?? "").trim();
+    if (!k) continue;
+    out.push({ sku: k, title: String(r[title] ?? "").trim(), soldDate: date >= 0 ? String(r[date] ?? "").trim() || null : null, orderId: order >= 0 ? String(r[order] ?? "").trim() || null : null });
+  }
+  return out;
+}
+
+/** Which of the files this screen reads a CSV is: "inventory", "ebayOrders" or null. */
+export function csvKind(text) {
+  const head = parseCsvText(String(text || "").split(/\r?\n/).slice(0, 10).join("\n"), ",").map((r) => r.map((c) => String(c || "").trim().toLowerCase()));
+  if (head.some((r) => r.includes("user sku") && r.includes("ebay sku"))) return "inventory";
+  if (head.some((r) => r.includes("custom label") && r.includes("item title"))) return "ebayOrders";
+  return null;
+}
+
+/**
+ * The CardUploader rows that are stock it still calls Listed but we know is
+ * gone, as a file to work through in CardUploader: its own columns first so
+ * a row can be found there, then why we think so.
+ */
+export function purgeCsv(stale) {
+  const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [["User SKU", "eBay SKU", "Title", "Why it is gone", "Sold on"].map(q).join(",")];
+  for (const r of stale || []) lines.push([r.sku, r.listingSku, r.title, r.why === "pulled" ? "Pulled here" : "Sold on eBay under this SKU", r.soldDate || ""].map(q).join(","));
+  return lines.join("\r\n") + "\r\n";
+}
+
+/**
  * CardUploader's choices, by order: orderId → [location SKU, lowercased], in
  * the file's order. A row CardUploader could not match ("no inventory") has no
  * SKU and chooses nothing — that line stays a loose pick here too.
@@ -121,24 +170,6 @@ export function cuChoiceIndex(rows) {
   return out;
 }
 
-/**
- * Are two titles plainly two different cards? Only when both can be read —
- * collector number plus the first word of the name, `keyFromTitle()` — and
- * the readings differ. A title that can't be read (a card stacked by hand
- * with no title) proves nothing either way.
- *
- * A LOCATION SKU IS NOT IDENTITY. CardUploader numbers its own locations,
- * and its older ones were never ours: on 2026-11-21 its inventory file put a
- * Sableye 63/132 at E42 and a Meowth 4/12 at J25, while our E42 and J25 are
- * other cards entirely. Matched on the SKU alone, the import stamped
- * Sableye's variation SKU onto our E42 and the pull sheet sent the next
- * Sableye order to it.
- */
-export function titlesDisagree(a, b) {
-  const ka = keyFromTitle(a || "");
-  const kb = keyFromTitle(b || "");
-  return Boolean(ka && kb && ka !== kb);
-}
 
 /**
  * What an inventory upload would do. Pure; no I/O.
@@ -157,15 +188,28 @@ export function titlesDisagree(a, b) {
  *   is reported and nothing is written. If an earlier upload already linked
  *   that card to this row's eBay SKU, the link is taken off (`unlink`) — it
  *   is how a Sableye order came to be sent to somebody else's card.
+ * - A row whose location SKU already SOLD on eBay as the same card (`sales`,
+ *   from ebay_sales and any orders report uploaded with it), or is already
+ *   PULLED here as the same card, is STALE: CardUploader calls it Listed only
+ *   because nobody pressed Pick there (the Sableye at G16, sold 2 Sep). It is
+ *   not stacked or linked, an earlier link is taken off, and it goes on the
+ *   purge list. Stack SKU sales only: a variation sale reports the CS- SKU,
+ *   so a sale under the stack SKU was the card's old single listing.
  * - A card gone from CardUploader is never added, and nothing is ever pulled
  *   from a file: a card in our stacks that the file no longer lists is
  *   counted, for somebody to look at.
  */
-export function planInventoryImport({ rows, existing, stacks }) {
+export function planInventoryImport({ rows, existing, stacks, sales = [] }) {
   const bySku = new Map();
+  const soldAs = new Map(); // sku -> [{ title, date, why }]: evidence the copy at that SKU has gone
+  const evidence = (k, e) => { if (!soldAs.has(k)) soldAs.set(k, []); soldAs.get(k).push(e); };
+  for (const sl of sales || []) {
+    if (sl?.sku) evidence(String(sl.sku).trim().toLowerCase(), { title: sl.title || "", date: sl.soldDate || sl.sold_date || null, why: "sold" });
+  }
   for (const c of existing || []) {
     if (!c?.sku) continue;
     const k = String(c.sku).trim().toLowerCase();
+    if (c.pulled_at) evidence(k, { title: c.title || "", date: null, why: "pulled" });
     // An unpulled copy is the one a listing SKU belongs on.
     if (!bySku.has(k) || (!c.pulled_at && bySku.get(k).pulled_at)) bySku.set(k, c);
   }
@@ -173,6 +217,7 @@ export function planInventoryImport({ rows, existing, stacks }) {
   const cards = [];
   const updates = [];
   const unlink = []; // { id, sku } — wrongly linked by an earlier upload
+  const stale = []; // { sku, listingSku, title, why, soldDate } — CardUploader says Listed, we know it went
   const clashes = []; // { sku, ours, theirs }
   const seen = new Set();
   const inFile = new Set();
@@ -191,6 +236,12 @@ export function planInventoryImport({ rows, existing, stacks }) {
     if (held) inFile.add(key);
     const listingSku = String(r?.listingSku || "").trim() || null;
     const have = bySku.get(key);
+    const wentAs = held ? (soldAs.get(key) || []).find((e) => !titlesDisagree(e.title, r.title)) : null;
+    if (wentAs) {
+      stale.push({ sku, listingSku: listingSku || "", title: r.title || "", why: wentAs.why, soldDate: wentAs.date || null });
+      if (have && !have.pulled_at && listingSku && have.listing_sku && listingSkuKey(have.listing_sku) === listingSkuKey(listingSku)) unlink.push({ id: have.id, sku });
+      continue;
+    }
     if (have) {
       if (titlesDisagree(have.title, r.title)) {
         clashes.push({ sku, ours: have.title || "", theirs: r.title || "" });
@@ -214,7 +265,7 @@ export function planInventoryImport({ rows, existing, stacks }) {
     return at && filePrefixes.has(at.prefix) && !inFile.has(String(c.sku).trim().toLowerCase());
   }).map((c) => c.sku);
   const newStacks = [...new Set(cards.map((c) => c.prefix))].filter((p) => !stackByName.has(p));
-  return { cards, updates, unlink, clashes, newStacks, stackByName, already, gone, unparseable, noLocation, noListingSku, repeated, notInFile };
+  return { cards, updates, unlink, clashes, stale, newStacks, stackByName, already, gone, unparseable, noLocation, noListingSku, repeated, notInFile };
 }
 
 /** Migration 037 not applied: Postgres names the missing column. */
@@ -223,11 +274,11 @@ export function isMissingListingSku(err) {
   return /listing_sku|pulled_line/.test(m) && /column|schema cache|does not exist/i.test(m);
 }
 
-async function readAll(makeQuery, pageSize = 1000) {
+async function readAll(makeQuery, { key = "id", pageSize = 1000 } = {}) {
   let from = 0;
   let all = [];
   for (;;) {
-    const { data, error } = await makeQuery().order("id", { ascending: true }).range(from, from + pageSize - 1);
+    const { data, error } = await makeQuery().order(key, { ascending: true }).range(from, from + pageSize - 1);
     if (error) throw error;
     all = all.concat(data || []);
     if (!data || data.length < pageSize) break;
@@ -246,7 +297,7 @@ async function readAll(makeQuery, pageSize = 1000) {
  * eBay SKU column these cards would be stacked and unmatchable, and Reconcile
  * would call every one "not listed", so it refuses rather than half-works.
  */
-export async function runInventoryImport(sb, userId, rows) {
+export async function runInventoryImport(sb, userId, rows, { extraSales = [] } = {}) {
   if (!userId) throw new Error("No user.");
   let existing;
   try {
@@ -258,7 +309,16 @@ export async function runInventoryImport(sb, userId, rows) {
   const { data: stacks, error: stErr } = await sb.from("card_stacks").select("id,name").eq("user_id", userId);
   if (stErr) throw new Error(stErr.message || "Couldn't read stacks.");
 
-  const plan = planInventoryImport({ rows, existing, stacks });
+  // eBay's own record of what sold, ~90 days of it. A failed read is not "no
+  // sales": the import goes ahead on what was uploaded and says so.
+  let synced = [];
+  let salesRead = true;
+  try {
+    synced = await readAll(() => sb.from("ebay_sales").select("sku,title,sold_date,line_item_id").eq("user_id", userId).not("sku", "is", null), { key: "line_item_id" });
+  } catch {
+    salesRead = false;
+  }
+  const plan = planInventoryImport({ rows, existing, stacks, sales: [...synced, ...(extraSales || [])] });
   let created = 0;
   for (const prefix of plan.newStacks) {
     const { data, error } = await sb.from("card_stacks").insert({ user_id: userId, name: prefix }).select("id,name").single();
@@ -289,7 +349,8 @@ export async function runInventoryImport(sb, userId, rows) {
     else unlinked += 1;
   }
   return {
-    ok: true, imported, updated, failed, created, unlinked, clashes: plan.clashes,
+    ok: true, imported, updated, failed, created, unlinked, clashes: plan.clashes, stale: plan.stale, salesRead,
+    reports: (extraSales || []).length,
     stacks: new Set(plan.cards.map((c) => c.prefix)).size,
     already: plan.already, gone: plan.gone, unparseable: plan.unparseable,
     noLocation: plan.noLocation, noListingSku: plan.noListingSku, repeated: plan.repeated,
@@ -318,6 +379,8 @@ export function inventoryImportNote(r) {
     const eg = r.clashes.slice(0, 3).map((c) => `${c.sku} is ${c.theirs || "?"} in CardUploader but ${c.ours || "?"} here`).join("; ");
     s += ` ${r.clashes.length} SKU(s) name a different card in CardUploader than on your stacks (${eg}${r.clashes.length > 3 ? "; …" : ""}) — left alone, not stacked.`;
   }
+  if (r.stale?.length) s += ` ${r.stale.length} CardUploader still calls Listed had already sold or been pulled — not stacked; download the purge list to clear them out of CardUploader.`;
+  if (r.salesRead === false) s += " Couldn't read your synced eBay sales, so only an uploaded orders report was checked for cards that already sold.";
   if (r.unlinked) s += ` Took the CardUploader SKU off ${r.unlinked} card(s) an earlier upload had linked to the wrong card.`;
   if (r.failed) s += ` ${r.failed} couldn't be saved — upload it again.`;
   return s;

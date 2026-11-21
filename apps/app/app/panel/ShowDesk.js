@@ -379,7 +379,7 @@ export default function ShowDesk() {
     // A failed read leaves it null and the picker falls back to the listings.
     try {
       setSales(await pagedSelect(
-        () => sb.from("ebay_sales").select("sku,sold_date,line_item_id").not("sku", "is", null),
+        () => sb.from("ebay_sales").select("sku,title,sold_date,line_item_id").not("sku", "is", null),
         { orderBy: "line_item_id" }
       ));
     } catch { setSales(null); }

@@ -15,7 +15,7 @@ import StackCheck from "./StackCheck";
 import { loadCheck } from "@/lib/stackcheck.js";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
-import { inventoryImportNote, parseInventoryCsv, runInventoryImport } from "@/lib/cu-files.js";
+import { csvKind, inventoryImportNote, parseEbayOrdersCsv, parseInventoryCsv, purgeCsv, runInventoryImport } from "@/lib/cu-files.js";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -28,6 +28,9 @@ export default function Stacks() {
   const [counts, setCounts] = useState(new Map());
   const [selId, setSelId] = useState(null);
   const [cards, setCards] = useState([]);
+  // CardUploader rows that had already sold or been pulled, from the last
+  // inventory upload — the list to clear out of CardUploader.
+  const [purge, setPurge] = useState(null);
   const [loading, setLoading] = useState(true);
   const [skuTitle, setSkuTitle] = useState(new Map()); // sku -> title from eBay listings
   const [addSku, setAddSku] = useState("");
@@ -143,31 +146,66 @@ export default function Stacks() {
   // eBay knows only by CardUploader's SKU (CS-…) and the auto-import above
   // therefore never stacks. Each row's User SKU (IR19) is its stack and
   // position; its eBay SKU is kept so an order can find it. lib/cu-files.js.
+  //
+  // eBay order reports can be picked WITH it (Seller Hub → Orders → Download
+  // report): a stack SKU in one that sold as the same card is a copy
+  // CardUploader still calls Listed only because nobody pressed Pick there,
+  // and it goes on the purge list rather than the stacks.
   async function onInventoryFile(e) {
-    const f = e.target.files?.[0];
+    const files = [...(e.target.files || [])];
     e.target.value = "";
-    if (!f) return;
+    if (!files.length) return;
     const sb = supabase();
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return;
-    let rows;
+    let rows = null;
+    let invName = "";
+    const extraSales = [];
+    const reports = [];
     try {
-      rows = parseInventoryCsv(await f.text());
+      for (const f of files) {
+        const text = await f.text();
+        const kind = csvKind(text);
+        if (kind === "inventory") {
+          if (rows) throw new Error("That's two CardUploader inventory files — pick one, plus any eBay order reports.");
+          rows = parseInventoryCsv(text);
+          invName = f.name;
+        } else if (kind === "ebayOrders") {
+          extraSales.push(...parseEbayOrdersCsv(text));
+          reports.push(f.name);
+        } else {
+          throw new Error(`${f.name} is neither CardUploader's inventory export nor an eBay orders report.`);
+        }
+      }
+      if (!rows) throw new Error("No CardUploader inventory file in that selection — it's the one with User SKU and eBay SKU columns.");
     } catch (err) {
       setMsg(err.message || "Couldn't read that file.");
       return;
     }
-    if (!confirm(`Add the cards in ${f.name} (${rows.length} rows) to your stacks?\n\nEach User SKU like IR19 becomes Stack IR, position 19. SKUs already on a stack — pulled ones included — are skipped, and nothing is ever pulled. A SKU that is a DIFFERENT card here than in CardUploader is left alone and listed, and a link an earlier upload made to the wrong card is taken off.`)) return;
+    const withReports = reports.length ? `\n\nChecked against ${reports.length} eBay orders report(s) (${extraSales.length} sales) as well as your synced sales.` : "";
+    if (!confirm(`Add the cards in ${invName} (${rows.length} rows) to your stacks?\n\nEach User SKU like IR19 becomes Stack IR, position 19. SKUs already on a stack — pulled ones included — are skipped, and nothing is ever pulled. A SKU that is a DIFFERENT card here than in CardUploader is left alone and listed, a card whose SKU already sold or was pulled as that card goes on a purge list instead, and a link an earlier upload made to either is taken off.${withReports}`)) return;
     setBusy(true);
     setMsg("Importing CardUploader inventory…");
+    setPurge(null);
     try {
-      setMsg(inventoryImportNote(await runInventoryImport(sb, user.id, rows)));
+      const r = await runInventoryImport(sb, user.id, rows, { extraSales });
+      setMsg(inventoryImportNote(r));
+      if (r?.stale?.length) setPurge(r.stale);
     } catch (err) {
       setMsg(`Import stopped — ${err.message || "couldn't read your stacks"}. No cards were added.`);
     }
     setBusy(false);
     await loadStacks();
     await loadCards(selId);
+  }
+
+  function downloadPurge() {
+    const blob = new Blob([purgeCsv(purge)], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `carduploader-already-gone-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
 
   // Reconciliation: cards still in a stack that we can no longer sell. Three
@@ -190,7 +228,7 @@ export default function Stacks() {
     setReconLoading(true);
     const sb = supabase();
     const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,quantity").not("sku", "is", null));
-    const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,sold_date,line_item_id").not("sku", "is", null), { orderBy: "line_item_id" });
+    const sales = await pagedSelect(() => sb.from("ebay_sales").select("sku,title,sold_date,line_item_id").not("sku", "is", null), { orderBy: "line_item_id" });
     const offSale = offSaleIndex(listings, sales);
     // Orders still to pick: a card on one of those is sold but meant to be in
     // its stack until the pull sheet commits it. Pulled here, the pull sheet
@@ -481,13 +519,38 @@ export default function Stacks() {
         )}
         <button className="stack-tab stack-new" onClick={createStack}>+ New stack</button>
         <button className="stack-tab stack-new" onClick={autoImport} disabled={busy}>⤓ Auto-import from listings</button>
-        <label className={`stack-tab stack-new${busy ? " disabled" : ""}`} title="CardUploader → Inventory → export. Adds the cards it lists as variations (CS- SKUs) at their User SKU.">
+        <label className={`stack-tab stack-new${busy ? " disabled" : ""}`} title="CardUploader → Inventory → export. Adds the cards it lists as variations (CS- SKUs) at their User SKU. Pick eBay orders reports (Seller Hub → Orders → Download report) with it to catch copies that already sold.">
           ⤓ CardUploader inventory
-          <input type="file" accept=".csv,text/csv" onChange={onInventoryFile} disabled={busy} style={{ display: "none" }} />
+          <input type="file" accept=".csv,text/csv" multiple onChange={onInventoryFile} disabled={busy} style={{ display: "none" }} />
         </label>
         <button className="stack-tab stack-new" onClick={runReconcile} disabled={busy}>🔄 Reconcile</button>
       </div>
       {msg ? <p className="hint hint-small" style={{ color: "var(--accent-2)", marginTop: -8 }}>{msg}</p> : null}
+      {purge?.length ? (
+        <div className="panel">
+          <div className="panel-head">
+            <span className="eyebrow">Already gone, still Listed in CardUploader ({purge.length})</span>
+            <span>
+              <button className="btn btn-ghost" onClick={downloadPurge}>⤓ Download list</button>
+              <button className="btn btn-ghost" onClick={() => setPurge(null)}>Close</button>
+            </span>
+          </div>
+          <p className="hint hint-small" style={{ marginTop: 0 }}>
+            These sold on eBay under their own SKU, or are already pulled here, so they were not stacked. Mark them
+            picked or delete them in CardUploader, or its pick list and next export will keep naming them.
+          </p>
+          <div className="stack-list">
+            {purge.slice(0, 200).map((r) => (
+              <div className="stack-row" key={r.sku}>
+                <span className="stack-sku">{r.sku}</span>
+                <span className="stack-title">{r.title}</span>
+                <span className="hint hint-small">{r.why === "pulled" ? "pulled here" : `sold${r.soldDate ? ` ${String(r.soldDate).slice(0, 10)}` : ""}`}</span>
+              </div>
+            ))}
+            {purge.length > 200 ? <p className="hint hint-small">…and {purge.length - 200} more in the download.</p> : null}
+          </div>
+        </div>
+      ) : null}
 
       {showRecon ? (
         <div className="panel">

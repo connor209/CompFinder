@@ -2855,12 +2855,22 @@ untouched.
   makes that a CLASH — reported, nothing written, and a wrong link from an
   earlier upload taken off — and `assignPulls()` never gives a variation line
   a copy that is plainly another card.
-- **Reconcile and the Show Desk never call these cards off sale.**
+- **CardUploader's "Listed" is not proof a card is here.** It marks a card
+  gone only when Pick is pressed THERE, so stock that sold on its old
+  single-card listing stays Listed for ever — four Sableyes listed on
+  2026-11-21, one of them real. A row whose stack SKU already sold on eBay
+  as the same card (`ebay_sales`, ~90 days, plus any Seller Hub orders
+  report picked with the inventory file) or is pulled here as the same card
+  is STALE: not stacked, an earlier link taken off, and listed with a
+  ⤓ purge file for CardUploader. A sale under a STACK SKU can only be the
+  old listing — variation sales report the CS- SKU.
+- **Reconcile and the Show Desk never call these cards "not listed".**
   `ebay_listings` has one row per listing, never per variation, and a variation
   sale never says which copy — so read by its stack SKU every copy is "not
   listed", and Reconcile would pre-tick a whole load. `cardOffSaleReason()`
-  answers null for a card with a `listing_sku`; the pull sheet is where one
-  leaves stock.
+  answers "sold" for a card with a `listing_sku` only when its own stack SKU
+  sold as this card (`soldUnderOwnSku()`), and null otherwise; the pull sheet
+  is where one normally leaves stock.
 
 ## A SKU is a name; a position is an address
 

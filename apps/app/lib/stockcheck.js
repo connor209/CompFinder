@@ -56,6 +56,23 @@ export function keyFromTitle(title) {
 }
 
 /**
+ * Are two titles plainly two different cards? Only when both can be read —
+ * collector number plus the first word of the name — and the readings
+ * differ. A title that can't be read proves nothing either way.
+ *
+ * A LOCATION SKU IS NOT IDENTITY. CardUploader numbers its own locations,
+ * and its older ones were never ours: on 2026-11-21 its inventory file put a
+ * Sableye 63/132 at E42 while our E42 is another card, and the pull sheet
+ * sent a Sableye order to it. Anything that joins two records on a stack SKU
+ * alone asks this before trusting the join.
+ */
+export function titlesDisagree(a, b) {
+  const ka = keyFromTitle(a || "");
+  const kb = keyFromTitle(b || "");
+  return Boolean(ka && kb && ka !== kb);
+}
+
+/**
  * WHICH PRINTING of a card a title is talking about.
  *
  * `cardKey()` above stops at the collector number and one word of the name,
@@ -349,12 +366,15 @@ export function availableSkus(listings) {
  */
 export function offSaleIndex(listings, sales = []) {
   const soldDate = new Map();
+  const soldTitles = new Map(); // sku -> [title], for a card whose SKU alone isn't proof
   for (const s of sales || []) {
     if (!s?.sku) continue;
     const k = String(s.sku).toLowerCase();
     if (!soldDate.has(k)) soldDate.set(k, s.sold_date || null);
+    if (!soldTitles.has(k)) soldTitles.set(k, []);
+    soldTitles.get(k).push(s.title || "");
   }
-  return { available: availableSkus(listings), soldOut: soldOutSkus(listings), soldDate };
+  return { available: availableSkus(listings), soldOut: soldOutSkus(listings), soldDate, soldTitles };
 }
 
 export function offSaleReason(sku, idx) {
@@ -383,8 +403,23 @@ export function offSaleReason(sku, idx) {
  * single listing had before the nightly sync caught it.
  */
 export function cardOffSaleReason(card, idx) {
-  if (card?.listing_sku) return null;
+  if (card?.listing_sku) return soldUnderOwnSku(card, idx) ? "sold" : null;
   return offSaleReason(card?.sku, idx);
+}
+
+/**
+ * The one thing that IS evidence about a CardUploader copy: its own stack
+ * SKU (G16) sold on eBay as THIS card. Variation sales report the CS- SKU,
+ * so a sale under the stack SKU was the card's old single listing — the copy
+ * CardUploader still calls Listed because nobody pressed Pick there
+ * (Sableye G16, sold 2 Sep 2026). Asked of the sale's title, because a
+ * location SKU is not identity: CardUploader reuses its own numbering, and a
+ * sale of another card under the same SKU says nothing about this one.
+ */
+export function soldUnderOwnSku(card, idx) {
+  if (!card?.sku || !idx?.soldTitles) return false;
+  const titles = idx.soldTitles.get(String(card.sku).toLowerCase());
+  return Boolean(titles && titles.some((t) => !titlesDisagree(t, card.title)));
 }
 
 /**
