@@ -316,6 +316,12 @@ stream` (the relay, only while streaming).
   comes back with a reason from the caller's vocabulary, that a failed lookup
   is "timeout" with no rows and never active listings, and one search a title.
 
+- `scripts/check-stackdelete.mjs` — deleting a stack: a stack holding a card
+  that is away (its flag, or an open checkout of any pool) is refused and the
+  card named, a failed read deletes nothing, every delete names `user_id`,
+  nothing but `lib/stack-delete.js` deletes a stack, and a stack's game area
+  is its name prefix (MTG- Magic, YGO- Yu-Gi-Oh, everything else Pokémon).
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -2852,6 +2858,26 @@ untouched.
   listed", and Reconcile would pre-tick a whole load. `cardOffSaleReason()`
   answers null for a card with a `listing_sku`; the pull sheet is where one
   leaves stock.
+
+## Stacks are split by game, and a stack can be deleted
+
+Asked for 2026-11-21, to rebuild the MTG dividers from scratch. Stacks has
+**Pokémon | Yu-Gi-Oh | MTG** tabs, decided by the stack's NAME
+(`lib/stack-areas.js`): `MTG-…` is Magic, `YGO-…` Yu-Gi-Oh, everything else —
+the toploader box and Show Binders included — Pokémon. By prefix rather than
+by the cards inside, so a stack never changes tab because of what was filed
+into it. **+ New stack** adds the tab's prefix, and a name carrying another
+game's prefix is refused rather than created onto a tab you are not on. The
+SKU finder still searches every stack.
+
+**🗑 Delete stack** (Stacks, one at a time, confirmed by typing its name) and
+**Dividers** on Cardmarket stock (tick several, confirmed by typing DELETE)
+both go through `deleteStacks()` in `lib/stack-delete.js`. The stack's cards go
+with it, pulled ones too, so a divider's Sold history goes; saved Cardmarket
+prices stay, being keyed on the article. **A stack holding a card that is
+away is refused**, naming the card: the card would come back through a
+check-in to a stack that no longer exists, its listing still hidden. Every
+pool blocks, the stream box included, and a failed read deletes nothing.
 
 ## A SKU is a name; a position is an address
 

@@ -2507,3 +2507,6 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .dcp-detail { color:var(--ink-faint); }
 .dcp-blocked { font-size:12px; color:var(--ink-faint); white-space:nowrap; }
 @media (min-width:700px) { .dcp-back { align-items:center; } }
+/* Stacks: the game tabs above the stack tabs (stack-areas.js). */
+.stack-areas { margin-bottom: 10px; }
+.stack-areas .stack-tab { font-weight: 600; }

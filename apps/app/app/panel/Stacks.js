@@ -16,6 +16,8 @@ import { loadCheck } from "@/lib/stackcheck.js";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
 import { inventoryImportNote, parseInventoryCsv, runInventoryImport } from "@/lib/cu-files.js";
+import { STACK_AREAS, stackArea, areaOf, newStackName } from "@/lib/stack-areas.js";
+import { deleteStacks, planDelete, deleteSummary, nameCards } from "@/lib/stack-delete.js";
 
 /**
  * Rolling stack inventory. Cards live unsleeved in entry order inside batches
@@ -49,6 +51,9 @@ export default function Stacks() {
   const [reconHeld, setReconHeld] = useState([]); // sold, but on an order the pull sheet still owns
   const [reconOrdersKnown, setReconOrdersKnown] = useState(true);
   const [checking, setChecking] = useState(false);
+  // Pokémon | Yu-Gi-Oh | MTG — which game's stacks are on screen. Read off the
+  // stack NAME (stack-areas.js), remembered per device.
+  const [area, setArea] = useState("pokemon");
 
   const supabase = () => createClient();
 
@@ -97,6 +102,10 @@ export default function Stacks() {
 
   useEffect(() => {
     loadStacks();
+    try {
+      const saved = globalThis.localStorage?.getItem("cf-stacks-area");
+      if (STACK_AREAS.some((a) => a.key === saved)) setArea(saved);
+    } catch {}
   }, []);
   useEffect(() => {
     loadCards(selId);
@@ -275,11 +284,56 @@ export default function Stacks() {
     const sb = supabase();
     const { data: { user } } = await sb.auth.getUser();
     if (!user) return;
-    const name = `Stack ${stacks.length + 1}`;
+    const here = areaOf(area);
+    const suggested = area === "pokemon" ? `Stack ${stacks.length + 1}` : "";
+    const typed = prompt(
+      area === "pokemon"
+        ? "Name the new Pokémon stack:"
+        : `Name the new ${here.label} stack. ${here.prefix} is added for you, so "C" makes ${here.prefix}C.`,
+      suggested
+    );
+    if (typed == null) return;
+    const made = newStackName(typed, area);
+    if (made.error) { setMsg(made.error); return; }
+    const name = made.name;
+    if (stacks.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) { setMsg(`There is already a stack called ${name}.`); return; }
     const { data } = await sb.from("card_stacks").insert({ user_id: user.id, name }).select("id,name,created_at").single();
     if (data) {
       setStacks((p) => [...p, data]);
       setSelId(data.id);
+    }
+  }
+
+  // Delete a stack and every card in it. Refused while any of its cards is
+  // away (show, binder checkout, stream box) — see stack-delete.js — and
+  // confirmed by typing the stack's name, since it can't be undone.
+  async function deleteStack() {
+    if (!sel) return;
+    const sb = supabase();
+    const { data: { user } } = await sb.auth.getUser();
+    if (!user) return;
+    setBusy(true);
+    setMsg("");
+    try {
+      const plan = await planDelete(sb, user.id, [sel.id]);
+      if (plan.error) { setMsg(`Couldn't read ${sel.name}, so nothing was deleted: ${plan.error}`); return; }
+      if (plan.blockers.length) {
+        setMsg(`${sel.name} can't be deleted: ${nameCards(plan.blockers)} ${plan.blockers.length === 1 ? "is" : "are"} checked out. Check ${plan.blockers.length === 1 ? "it" : "them"} back in on the Show desk or Stream stock first.`);
+        return;
+      }
+      const typed = prompt(`${deleteSummary([sel], plan.cards)}\n\nType ${sel.name} to confirm.`);
+      if (typed == null) return;
+      if (typed.trim().toLowerCase() !== sel.name.trim().toLowerCase()) { setMsg("The name didn't match, so nothing was deleted."); return; }
+      const res = await deleteStacks(sb, user.id, [sel.id]);
+      if (res.error) { setMsg(`Delete failed: ${res.error}`); }
+      else if (res.blockers.length) { setMsg(`${sel.name} can't be deleted: ${nameCards(res.blockers)} went out to a show meanwhile.`); }
+      else {
+        setMsg(`Deleted ${sel.name} and its ${res.cards} card${res.cards === 1 ? "" : "s"}.`);
+        setSelId(null);
+        await loadStacks();
+      }
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -419,11 +473,32 @@ export default function Stacks() {
     () => [...stacks].sort((a, b) => (a.name.length - b.name.length) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" })),
     [stacks]
   );
+  // Only the chosen game's stacks are offered. The finder above still
+  // searches every stack, since a SKU names one card whatever its game.
+  const areaStacks = useMemo(() => sortedStacks.filter((s) => stackArea(s) === area), [sortedStacks, area]);
+  const areaCounts = useMemo(() => {
+    const m = new Map(STACK_AREAS.map((a) => [a.key, 0]));
+    for (const s of stacks) m.set(stackArea(s), (m.get(stackArea(s)) || 0) + 1);
+    return m;
+  }, [stacks]);
+  // The selected stack always belongs to the tab on screen: switching tab, or
+  // deleting the selected stack, lands on the first stack of that game.
+  useEffect(() => {
+    if (loading) return;
+    if (selId && areaStacks.some((s) => s.id === selId)) return;
+    setSelId(areaStacks[0]?.id || null);
+  }, [areaStacks, selId, loading]);
+  function chooseArea(key) {
+    setArea(key);
+    setPickerOpen(false);
+    setPickerQuery("");
+    try { globalThis.localStorage?.setItem("cf-stacks-area", key); } catch {}
+  }
   const TAB_LIMIT = 12;
   const pickerList = useMemo(() => {
     const q = pickerQuery.trim().toLowerCase();
-    return q ? sortedStacks.filter((s) => s.name.toLowerCase().includes(q)) : sortedStacks;
-  }, [sortedStacks, pickerQuery]);
+    return q ? areaStacks.filter((s) => s.name.toLowerCase().includes(q)) : areaStacks;
+  }, [areaStacks, pickerQuery]);
 
   if (loading) return <div className="panel"><span className="spinner" /> &nbsp;Loading stacks…</div>;
 
@@ -443,8 +518,16 @@ export default function Stacks() {
         {finderMsg ? <p className={`hint hint-small ${finderMsg.ok ? "" : ""}`} style={{ color: finderMsg.ok ? "var(--conf-high)" : "var(--warn-ink)", marginTop: 8 }}>{finderMsg.text}</p> : null}
       </div>
 
+      <div className="stack-tabs stack-areas" role="tablist" aria-label="Game">
+        {STACK_AREAS.map((a) => (
+          <button key={a.key} role="tab" aria-selected={area === a.key} className={`stack-tab${area === a.key ? " on" : ""}`} onClick={() => chooseArea(a.key)}>
+            {a.label} <span className="stack-count">{areaCounts.get(a.key) || 0}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="stack-tabs">
-        {sortedStacks.length > TAB_LIMIT ? (
+        {areaStacks.length > TAB_LIMIT ? (
           <div className="stack-picker">
             <button className="stack-picker-btn" onClick={() => setPickerOpen((o) => !o)}>
               {sel ? sel.name : "Select stack"}
@@ -473,7 +556,7 @@ export default function Stacks() {
             ) : null}
           </div>
         ) : (
-          sortedStacks.map((s) => (
+          areaStacks.map((s) => (
             <button key={s.id} className={`stack-tab${s.id === selId ? " on" : ""}`} onClick={() => setSelId(s.id)}>
               {s.name} <span className="stack-count">{counts.get(s.id) || 0}</span>
             </button>
@@ -549,7 +632,13 @@ export default function Stacks() {
       ) : null}
 
       {!sel ? (
-        <div className="panel"><p className="dd-empty">Create a stack, or use <b>Auto-import from listings</b> to build stacks from your eBay SKUs automatically.</p></div>
+        <div className="panel"><p className="dd-empty">
+          {area === "mtg"
+            ? <>No MTG stacks. Magic dividers are made by a load on <b>Cardmarket stock</b>, or press <b>+ New stack</b>.</>
+            : area === "ygo"
+            ? <>No Yu-Gi-Oh stacks. Press <b>+ New stack</b>, or <b>Auto-import from listings</b> files YGO- SKUs here.</>
+            : <>Create a stack, or use <b>Auto-import from listings</b> to build stacks from your eBay SKUs automatically.</>}
+        </p></div>
       ) : (
         <>
           <Fold
@@ -599,6 +688,9 @@ export default function Stacks() {
                   {loadCheck(sel.id) ? "✓ Resume check" : "✓ Check stack"}
                 </button>
               ) : null}
+              <button className="btn btn-ghost" onClick={deleteStack} disabled={busy} title="Delete this stack and every card in it. Refused while any of its cards is checked out.">
+                🗑 Delete stack
+              </button>
             </div>
             <p className="hint hint-small" style={{ marginTop: 0 }}>
               {selBox && !selTl

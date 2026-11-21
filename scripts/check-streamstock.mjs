@@ -338,6 +338,7 @@ eq("stream tally", streamTally([
 const NOT_A_SHOW_SCREEN = {
   "apps/app/lib/checkout.js": "writes checkouts and restores them; decides nothing about who sees them",
   "apps/app/lib/deal.js": "sells the ONE checkout it was handed, by id",
+  "apps/app/lib/stack-delete.js": "refuses a stack delete while ANY open checkout names one of its cards: the stream box blocks exactly as a show does",
   "apps/app/app/panel/Accounts.js": "sums sold_price_pence, which a stream sale never writes (the price goes on the airing)",
   "apps/app/app/settings/AccountData.js": "the account's own data export — everything, on purpose",
   "apps/app/app/panel/Dashboard.js": "values our own stock: a card in either box is still ours, and nothing here is shown to anybody else",

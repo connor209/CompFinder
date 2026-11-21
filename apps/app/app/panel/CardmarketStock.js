@@ -11,6 +11,7 @@ import {
 } from "@/lib/cardmarket.js";
 import { loadCardmarket, alreadyLoaded, writeLoad, commitPicks, loadPrices, savePrices } from "@/lib/cardmarket-store.js";
 import Fold from "./Fold";
+import { deleteStacks, planDelete, deleteSummary, nameCards } from "@/lib/stack-delete.js";
 
 /**
  * Cardmarket stock — the Magic chaos sort.
@@ -77,6 +78,7 @@ export default function CardmarketStock() {
   const [foil, setFoil] = useState("");
   const [sort, setSort] = useState("name");
   const [shown, setShown] = useState(PAGE);
+  const [delSel, setDelSel] = useState(new Set()); // divider ids ticked for deletion
 
   const supabase = () => createClient();
 
@@ -103,6 +105,50 @@ export default function CardmarketStock() {
   const inStock = useMemo(() => cards.filter((c) => !c.pulled_at), [cards]);
   const ranks = useMemo(() => liveRanks(cards), [cards]);
   const suggested = useMemo(() => nextDivider(stacks), [stacks]);
+
+  // ---- dividers: delete ------------------------------------------------------
+
+  // Per divider: cards still in it, and pulled ones kept for the Sold view.
+  const cardsPerDivider = useMemo(() => {
+    const m = new Map();
+    for (const c of cards) {
+      const e = m.get(c.stack_id) || { live: 0, pulled: 0 };
+      if (c.pulled_at) e.pulled += 1; else e.live += 1;
+      m.set(c.stack_id, e);
+    }
+    return m;
+  }, [cards]);
+
+  function toggleDel(id) {
+    setDelSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+
+  // Deleting a divider deletes every card behind it, and its sold history with
+  // it. Refused while any of them is checked out (stack-delete.js); confirmed
+  // by typing DELETE, since it cannot be undone.
+  async function deleteDividers() {
+    const chosen = stacks.filter((st) => delSel.has(st.id));
+    if (!chosen.length || !userId) return;
+    const sb = supabase();
+    setBusy(true);
+    setMsg("");
+    try {
+      const plan = await planDelete(sb, userId, chosen.map((st) => st.id));
+      if (plan.error) { setMsg(`Couldn't read those dividers, so nothing was deleted: ${plan.error}`); return; }
+      if (plan.blockers.length) { setMsg(`Nothing deleted: ${nameCards(plan.blockers)} ${plan.blockers.length === 1 ? "is" : "are"} checked out. Check ${plan.blockers.length === 1 ? "it" : "them"} back in first.`); return; }
+      const typed = prompt(`${deleteSummary(chosen, plan.cards)} Their Sold history goes too.\n\nType DELETE to confirm.`);
+      if (typed == null) return;
+      if (typed.trim() !== "DELETE") { setMsg("Not confirmed, so nothing was deleted."); return; }
+      const r = await deleteStacks(sb, userId, chosen.map((st) => st.id));
+      if (r.error) setMsg(`Deleted ${plural(r.deleted, "divider")}, then failed: ${r.error}`);
+      else if (r.blockers.length) setMsg(`Nothing deleted: ${nameCards(r.blockers)} went out meanwhile.`);
+      else setMsg(`Deleted ${plural(r.deleted, "divider")} and ${plural(r.cards, "card")}.`);
+      setDelSel(new Set());
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // ---- 1. load ---------------------------------------------------------------
 
@@ -566,6 +612,41 @@ export default function CardmarketStock() {
             {check.elsewhere ? <p className="hint hint-small">{plural(check.elsewhere, "listed copy", "listed copies")} not loaded into these boxes — stock from elsewhere, or loaded before this screen existed.</p> : null}
           </>
         ) : null}
+      </Fold>
+
+      <Fold
+        id="cm-dividers"
+        title="Dividers"
+        defaultOpen={false}
+        count={stacks.length}
+        summary="Delete dividers and every card behind them — for rebuilding a box from scratch."
+      >
+        {stacks.length === 0 ? (
+          <p className="dd-empty">No dividers.</p>
+        ) : (
+          <>
+            <div className="sd-opts">
+              <button className="btn btn-ghost" onClick={() => setDelSel(new Set(stacks.map((st) => st.id)))} disabled={busy}>Tick all</button>
+              <button className="btn btn-ghost" onClick={() => setDelSel(new Set())} disabled={busy || delSel.size === 0}>Untick all</button>
+              <button className="btn btn-primary" onClick={deleteDividers} disabled={busy || delSel.size === 0}>🗑 Delete {plural(delSel.size, "divider")}</button>
+            </div>
+            <p className="hint hint-small" style={{ marginTop: 0 }}>
+              Deletes the cards behind each one too, pulled ones included, so their Sold history goes with them. Saved prices are kept: they belong to the card, not the divider. A divider with a card checked out is refused.
+            </p>
+            <div className="stack-list">
+              {stacks.map((st) => {
+                const n = cardsPerDivider.get(st.id) || { live: 0, pulled: 0 };
+                return (
+                  <label className="ps-row" key={st.id}>
+                    <input type="checkbox" checked={delSel.has(st.id)} onChange={() => toggleDel(st.id)} />
+                    <span className="stack-sku">{st.name}</span>
+                    <span className="stack-title">{plural(n.live, "card")} in it{n.pulled ? ` · ${n.pulled} sold` : ""}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </>
+        )}
       </Fold>
     </div>
   );
