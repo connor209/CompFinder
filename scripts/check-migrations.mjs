@@ -68,7 +68,8 @@ const MIGRATIONS = [
   ["034", "binder added date (newest-in-binder sort)", [["column", "stack_cards", "binder_added_at"]]],
   ["035", "Cardmarket stock (Magic chaos sort)", [["column", "stack_cards", "cm"]]],
   ["036", "Cardmarket stock prices", [["table", "cardmarket_prices"]]],
-  ["037", "CardUploader inventory (variation listings on the pull sheet)", [["column", "stack_cards", "listing_sku"], ["column", "stack_cards", "pulled_line"]]]
+  ["037", "CardUploader inventory (variation listings on the pull sheet)", [["column", "stack_cards", "listing_sku"], ["column", "stack_cards", "pulled_line"]]],
+  ["038", "Stack check log (who checked a stack, and when)", [["table", "stack_checks"]]]
 ];
 
 /**

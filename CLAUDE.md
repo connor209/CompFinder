@@ -2894,6 +2894,15 @@ a Show Binder, which have no order to check.
   the stack, which is the least wrong place for a card that was not where the
   app said.
 - **A card checked out to a show is refused**, not filed. Check it in first.
+- **Every saved check is logged** (migration 038, `stack_checks`, named only
+  in `lib/stack-check-store.js`): when, who (the account's name, else its
+  email), how far it got and what it changed. A check that matched is logged
+  too, since that is the one worth knowing about. Append-only, with no UPDATE
+  policy. A failed log never fails the save, and before 038 is run the screen
+  says checks aren't logged.
+- **The picture is this copy's first** (`cardPhoto()`): its own scan, then
+  the CardUploader scan it was imported under, then the listing photo by SKU,
+  then by item id. Never catalogue art.
 
 ## One listing, several copies of the card
 

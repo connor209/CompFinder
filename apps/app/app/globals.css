@@ -741,6 +741,9 @@ html, body { overflow-x: clip; max-width: 100%; }
 .stack-picker-item:hover { background:var(--surface-sink); }
 .stack-picker-item.on { background:var(--accent-soft); color:var(--accent-2); }
 .stack-picker-empty { padding:10px; font-size:13px; color:var(--ink-faint); }
+.stack-checked { font-size:11px; color:var(--conf-high); margin-left:4px; }
+.stack-tab.on .stack-checked { color:var(--surface); }
+.sc-last { margin-top:-4px; }
 .stack-count { font-family:var(--font-mono); font-size:11px; background:var(--surface-sink); color:var(--ink-soft); padding:1px 7px; border-radius:var(--radius-pill); }
 .stack-tab.on .stack-count { background:rgba(255,255,255,.2); color:var(--surface); }
 .stack-title-inp { flex:1; min-width:0; border:1px solid var(--line-strong); border-radius:12px; padding:0 14px; background:var(--surface); color:var(--ink); font-size:14px; }

@@ -13,6 +13,7 @@ import { binderSlot, comparePockets, caseKind } from "@/lib/showbinder.js";
 import Fold from "./Fold";
 import StackCheck from "./StackCheck";
 import { loadCheck } from "@/lib/stackcheck.js";
+import { loadStackChecks, loadLastChecks, checkDate, checkLine } from "@/lib/stack-check-store.js";
 import { syncListings, syncNote } from "@/lib/listing-sync.js";
 import { runStackImport, stackImportNote } from "@/lib/stack-import.js";
 import { inventoryImportNote, parseInventoryCsv, runInventoryImport } from "@/lib/cu-files.js";
@@ -49,6 +50,8 @@ export default function Stacks() {
   const [reconHeld, setReconHeld] = useState([]); // sold, but on an order the pull sheet still owns
   const [reconOrdersKnown, setReconOrdersKnown] = useState(true);
   const [checking, setChecking] = useState(false);
+  const [checkLog, setCheckLog] = useState({ ok: true, rows: [] }); // this stack's checks
+  const [lastChecks, setLastChecks] = useState(new Map()); // stack_id -> latest check
 
   const supabase = () => createClient();
 
@@ -65,6 +68,8 @@ export default function Stacks() {
     // eBay listing SKU→title for auto-fill
     const listings = await pagedSelect(() => sb.from("ebay_listings").select("sku,title").not("sku", "is", null));
     setSkuTitle(new Map(listings.filter((l) => l.sku).map((l) => [String(l.sku).toLowerCase(), l.title])));
+    const lc = await loadLastChecks(sb);
+    if (lc.ok) setLastChecks(lc.last);
     setLoading(false);
     if (!selId && st && st.length) setSelId(st[0].id);
   }
@@ -81,6 +86,10 @@ export default function Stacks() {
     const rows = data || [];
     setCards(rows.filter((c) => !c.checked_out_at));
     setAwayCount(rows.filter((c) => c.checked_out_at).length);
+  }
+
+  async function loadCheckLog(stackId) {
+    setCheckLog(await loadStackChecks(supabase(), stackId));
   }
 
   async function loadPulled(stackId) {
@@ -101,6 +110,7 @@ export default function Stacks() {
   useEffect(() => {
     loadCards(selId);
     loadPulled(selId);
+    loadCheckLog(selId);
     setChecking(false);
   }, [selId]);
 
@@ -462,7 +472,7 @@ export default function Stacks() {
                     ) : (
                       pickerList.map((s) => (
                         <button key={s.id} className={`stack-picker-item${s.id === selId ? " on" : ""}`} onClick={() => { setSelId(s.id); setPickerOpen(false); setPickerQuery(""); }}>
-                          <span>{s.name}</span>
+                          <span>{s.name}{lastChecks.get(s.id) ? <span className="stack-checked"> ✓ {checkDate(lastChecks.get(s.id).checked_at)}</span> : null}</span>
                           <span className="stack-count">{counts.get(s.id) || 0}</span>
                         </button>
                       ))
@@ -476,6 +486,7 @@ export default function Stacks() {
           sortedStacks.map((s) => (
             <button key={s.id} className={`stack-tab${s.id === selId ? " on" : ""}`} onClick={() => setSelId(s.id)}>
               {s.name} <span className="stack-count">{counts.get(s.id) || 0}</span>
+              {lastChecks.get(s.id) ? <span className="stack-checked" title={`Checked ${checkDate(lastChecks.get(s.id).checked_at)}${lastChecks.get(s.id).checked_by ? ` by ${lastChecks.get(s.id).checked_by}` : ""}`}>✓</span> : null}
             </button>
           ))
         )}
@@ -587,6 +598,7 @@ export default function Stacks() {
                 await loadStacks();
                 await loadCards(selId);
                 await loadPulled(selId);
+                await loadCheckLog(selId);
               }}
             />
           ) : (
@@ -608,6 +620,17 @@ export default function Stacks() {
                 : "Position = live count from the top; the SKU stays fixed. Pull a sold card and everything behind it moves up."}
               {awayCount > 0 ? <> &nbsp;<b>{awayCount} checked out to a show</b>{selBox ? "." : " — numbering skips them (see Show desk)."}</> : null}
             </p>
+            {!selBox ? (
+              <p className="hint hint-small sc-last">
+                {checkLog.ok && checkLog.rows[0] ? (
+                  <>✓ Last checked <b>{checkDate(checkLog.rows[0].checked_at)}</b>{checkLog.rows[0].checked_by ? <> by <b>{checkLog.rows[0].checked_by}</b></> : null}{checkLog.rows[0].complete ? "" : ` (stopped at ${checkLog.rows[0].cards_checked} of ${checkLog.rows[0].cards_total})`}.</>
+                ) : checkLog.ok ? (
+                  "Not checked in the app yet."
+                ) : checkLog.missing ? (
+                  "Checks aren't logged yet — run migration 038 in Supabase."
+                ) : null}
+              </p>
+            ) : null}
             {cards.length === 0 ? (
               <p className="dd-empty">{selBox ? (selTl ? "Nothing in the box." : "Nothing in the binder.") : "No cards in this stack yet."}</p>
             ) : (
@@ -629,6 +652,26 @@ export default function Stacks() {
             )}
           </div>
           )}
+
+          {checkLog.ok && checkLog.rows.length > 0 ? (
+            <Fold
+              id="stacks-checks"
+              title="Check history"
+              count={checkLog.rows.length}
+              defaultOpen={false}
+              lazy
+              summary="Every saved check of this stack: when, who, and what it changed."
+            >
+                <div className="stack-list">
+                  {checkLog.rows.map((r) => (
+                    <div className="stack-row" key={r.id}>
+                      <span className="stack-sku">{checkDate(r.checked_at)}</span>
+                      <span className="stack-title">{r.checked_by || <em>—</em>} · {checkLine(r)}</span>
+                    </div>
+                  ))}
+                </div>
+            </Fold>
+          ) : null}
 
           {pulled.length > 0 ? (
             <Fold

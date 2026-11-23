@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { imageAt } from "@/lib/showcounter.js";
+import { recordStackCheck } from "@/lib/stack-check-store.js";
 import {
   startCheck, confirmCurrent, notHere, bringHere, addHere, moveCard, setCursor, unmissing,
   locateSku, restoreCheck, savePlan, checkSummary, loadCheck, storeCheck, clearCheck,
@@ -129,6 +130,15 @@ export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
     skuRef.current?.focus();
   }
 
+  // The audit trail. Never a reason to fail the save: the order is already
+  // written, so a failed log is reported beside the result, not instead of it.
+  async function logCheck(args) {
+    const res = await recordStackCheck(supabase(), { stack, ...args });
+    if (res.ok) return " Logged as checked.";
+    if (res.missing) return " (Not logged: migration 038 hasn't been run yet.)";
+    return ` ⚠ Not logged: ${res.error}`;
+  }
+
   async function save() {
     if (!session || busy) return;
     setBusy(true);
@@ -161,8 +171,11 @@ export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
     if (!plan.updates.length && !plan.inserts.length && !plan.pulls.length) {
       setBusy(false);
       if (confirm(`Nothing to change. The stack in your hand matches the app.\n\nFinish this check?`)) {
+        setBusy(true);
+        const logged = await logCheck({ session: s, summary: sum, plan });
+        setBusy(false);
         clearCheck(stack.id);
-        onSaved?.("Checked — the stack matches the app.");
+        onSaved?.(`Checked — the stack matches the app.${logged}`);
       } else setMsg("");
       return;
     }
@@ -197,8 +210,9 @@ export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
       setMsg(`⚠ ${failed.length} card(s) didn't save (${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}). Your check is kept. Press Save order again.`);
       return;
     }
+    const logged = await logCheck({ session: s, summary: sum, plan });
     clearCheck(stack.id);
-    onSaved?.(`Saved ${stack.name}: ${plan.updates.length} moved, ${plan.inserts.length} added, ${plan.pulls.length} pulled.`);
+    onSaved?.(`Saved ${stack.name}: ${plan.updates.length} moved, ${plan.inserts.length} added, ${plan.pulls.length} pulled.${logged}`);
   }
 
   function discard() {

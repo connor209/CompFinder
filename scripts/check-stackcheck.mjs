@@ -19,6 +19,8 @@ import {
   unmissing, locateSku, restoreCheck, savePlan, checkSummary, liveOrder,
   photoIndex, cardPhoto
 } from "../apps/app/lib/stackcheck.js";
+import { checkRecord, checkerName, checkLine } from "../apps/app/lib/stack-check-store.js";
+import { readdirSync } from "node:fs";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -171,6 +173,41 @@ eq("liveOrder skips pulled and away", liveOrder(LATER, "A").map((c) => c.id), ["
   eq("an empty image is no image", cardPhoto(card(9, { ebay_item_id: "999" }), idx), null);
   eq("\"AB1\" never borrows AB11's picture", cardPhoto(card(1, { sku: "AB1" }), photoIndex({ listings: [{ sku: "AB11", image_url: "x" }] })), null);
   eq("no index, no picture", cardPhoto(card(1), null), null);
+}
+
+// --- 7c. the audit trail --------------------------------------------------------
+{
+  const stack = { id: "A", name: "HB" };
+  const user = { id: "u1", email: "me@example.com", user_metadata: {} };
+  const done = checkRecord({
+    stack, user, at: "2026-11-23T10:00:00Z",
+    session: { order: ["c1", "c2", "c3"], cursor: 3, missing: ["c4", "c5"] },
+    plan: { updates: [{}, {}], inserts: [{}], pulls: ["c4"] }
+  });
+  eq("a finished check is logged with who, when and what changed", done, {
+    user_id: "u1", stack_id: "A", stack_name: "HB", checked_at: "2026-11-23T10:00:00.000Z",
+    checked_by: "me@example.com", cards_total: 3, cards_checked: 3, moved: 2, added: 1,
+    pulled: 1, missing_kept: 1, complete: true
+  });
+  const part = checkRecord({ stack, user, session: { order: ["a", "b", "c", "d"], cursor: 1, missing: [] }, plan: {} });
+  eq("a check saved part-way is logged as incomplete", [part.complete, part.cards_checked, part.cards_total], [false, 1, 4]);
+  eq("a name beats an email", checkerName({ email: "x@y", user_metadata: { full_name: "Connor" } }), "Connor");
+  eq("a clean check reads as one", checkLine({ ...done, moved: 0, added: 0, pulled: 0, missing_kept: 0 }), "3 cards · matched the app");
+
+  // The trail is named in one file and never edited in place.
+  const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.name === "node_modules" || e.name === ".next" ? [] : e.isDirectory() ? walk(`${d}/${e.name}`) : /\.m?js$/.test(e.name) ? [`${d}/${e.name}`] : []);
+  const root = new URL("../apps/app", import.meta.url).pathname;
+  for (const f of walk(root)) {
+    if (f.endsWith("/lib/stack-check-store.js")) continue;
+    if (/["']stack_checks["']/.test(readFileSync(f, "utf8"))) fail(`${f.slice(root.length)} names stack_checks — it belongs to lib/stack-check-store.js alone`);
+  }
+  const store = readFileSync(new URL("../apps/app/lib/stack-check-store.js", import.meta.url), "utf8");
+  if (/\.update\(/.test(store)) fail("stack-check-store.js updates a check — the trail is append-only");
+  const mig = readFileSync(new URL("../supabase/migrations/038_stack_checks.sql", import.meta.url), "utf8");
+  if (/for update/i.test(mig)) fail("migration 038 grants UPDATE on stack_checks — the trail is append-only");
+  const screen = readFileSync(new URL("../apps/app/app/panel/StackCheck.js", import.meta.url), "utf8");
+  if ((screen.match(/logCheck\(\{/g) || []).length < 2) fail("StackCheck.js does not log both a clean check and a saved one");
 }
 
 // --- 8. the screen ------------------------------------------------------------
