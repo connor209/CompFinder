@@ -16,7 +16,8 @@
 import { readFileSync } from "node:fs";
 import {
   startCheck, confirmCurrent, notHere, bringHere, addHere, moveCard, setCursor,
-  unmissing, locateSku, restoreCheck, savePlan, checkSummary, liveOrder
+  unmissing, locateSku, restoreCheck, savePlan, checkSummary, liveOrder,
+  photoIndex, cardPhoto
 } from "../apps/app/lib/stackcheck.js";
 
 let failures = 0;
@@ -148,10 +149,35 @@ eq("one card lifted from 30 to 5 is one move", checkSummary(b, big).moved, 1);
 eq("unmissing puts a card back where it is expected", unmissing(notHere(startCheck("A", STACK)), "c1").order, ["c1", "c2", "c3", "c4", "c5"]);
 eq("liveOrder skips pulled and away", liveOrder(LATER, "A").map((c) => c.id), ["c2", "c3", "c5", "c6"]);
 
+// --- 7b. the picture beside a card ---------------------------------------------
+{
+  const idx = photoIndex({
+    listings: [
+      { sku: "A1", ebay_item_id: "111", image_url: "https://i.ebayimg.com/a1/s-l140.jpg" },
+      { sku: "CS-XYZ", ebay_item_id: "222", image_url: "https://i.ebayimg.com/cs/s-l140.jpg" },
+      { sku: "A9", ebay_item_id: "999", image_url: "" }
+    ],
+    scans: [
+      { sku: "A2", images: ["https://cdn.cu/old.jpg"], created_at: "2026-10-01T00:00:00Z" },
+      { sku: "A2", images: ["", "https://cdn.cu/new.jpg"], created_at: "2026-11-01T00:00:00Z" },
+      { sku: "A1", images: ["https://cdn.cu/a1.jpg"], created_at: "2026-11-01T00:00:00Z" }
+    ]
+  });
+  eq("this copy's own scan beats everything", cardPhoto(card(1, { scan_url: "https://store/a1.jpg" }), idx), "https://store/a1.jpg");
+  eq("the CardUploader scan of this copy beats the listing photo", cardPhoto(card(1), idx), "https://cdn.cu/a1.jpg");
+  eq("the newest import of a SKU wins", cardPhoto(card(2), idx), "https://cdn.cu/new.jpg");
+  eq("a variation card is found by its item id", cardPhoto(card(5, { ebay_item_id: "222" }), idx), "https://i.ebayimg.com/cs/s-l140.jpg");
+  eq("SKU is matched case-blind", cardPhoto(card(1, { sku: "a1" }), photoIndex({ listings: [{ sku: "A1", image_url: "x" }] })), "x");
+  eq("an empty image is no image", cardPhoto(card(9, { ebay_item_id: "999" }), idx), null);
+  eq("\"AB1\" never borrows AB11's picture", cardPhoto(card(1, { sku: "AB1" }), photoIndex({ listings: [{ sku: "AB11", image_url: "x" }] })), null);
+  eq("no index, no picture", cardPhoto(card(1), null), null);
+}
+
 // --- 8. the screen ------------------------------------------------------------
 {
   const src = readFileSync(new URL("../apps/app/app/panel/StackCheck.js", import.meta.url), "utf8");
   if (!/from\s+"@\/lib\/stackcheck\.js"/.test(src)) fail("StackCheck.js does not use lib/stackcheck.js — a second copy of the rules would drift");
+  if (!/cardPhoto\(/.test(src)) fail("StackCheck.js picks a picture without cardPhoto() — two readings of which photo is this card would drift");
   if (!/savePlan\(/.test(src)) fail("StackCheck.js saves without savePlan()");
   if (!/restoreCheck\(/.test(src)) fail("StackCheck.js resumes a draft without restoreCheck() — a stale order could be written over the stack");
   if (!/confirm\(/.test(src)) fail("Save order does not confirm — it rewrites a stack's positions in one tap");

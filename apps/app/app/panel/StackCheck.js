@@ -6,7 +6,8 @@ import { pagedSelect } from "@/lib/pagedSelect";
 import { imageAt } from "@/lib/showcounter.js";
 import {
   startCheck, confirmCurrent, notHere, bringHere, addHere, moveCard, setCursor, unmissing,
-  locateSku, restoreCheck, savePlan, checkSummary, loadCheck, storeCheck, clearCheck
+  locateSku, restoreCheck, savePlan, checkSummary, loadCheck, storeCheck, clearCheck,
+  photoIndex, cardPhoto
 } from "@/lib/stackcheck.js";
 
 /**
@@ -17,7 +18,8 @@ import {
  */
 export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
   const [all, setAll] = useState(null); // every unpulled stack_cards row
-  const [listing, setListing] = useState(new Map()); // sku -> { title, image }
+  const [listing, setListing] = useState(new Map()); // sku -> { title }
+  const [photos, setPhotos] = useState(null); // photoIndex()
   const [session, setSession] = useState(null);
   const [history, setHistory] = useState([]);
   const [resumeNote, setResumeNote] = useState("");
@@ -40,13 +42,17 @@ export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
     let live = true;
     (async () => {
       const sb = supabase();
-      const [rows, listings] = await Promise.all([
+      const [rows, listings, scans] = await Promise.all([
         readCards(),
-        pagedSelect(() => sb.from("ebay_listings").select("sku,title,image_url").not("sku", "is", null))
+        pagedSelect(() => sb.from("ebay_listings").select("id,sku,title,ebay_item_id,image_url")),
+        // CardUploader scans of each copy (migration 028). A failed read is
+        // just no scans: the listing photo still stands.
+        pagedSelect(() => sb.from("card_import_items").select("id,sku,images,created_at").not("sku", "is", null)).catch(() => [])
       ]);
       if (!live) return;
       setAll(rows);
-      setListing(new Map(listings.filter((l) => l.sku).map((l) => [String(l.sku).toLowerCase(), { title: l.title, image: l.image_url }])));
+      setListing(new Map(listings.filter((l) => l.sku).map((l) => [String(l.sku).toLowerCase(), { title: l.title }])));
+      setPhotos(photoIndex({ listings, scans }));
       const back = restoreCheck(loadCheck(stack.id), rows);
       if (back && back.session.stackId === stack.id) {
         setSession(back.session);
@@ -76,7 +82,7 @@ export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
     return {
       sku: s,
       title: e?.title || row?.title || l?.title || "",
-      image: l?.image || null,
+      image: e ? cardPhoto(null, photos, s) : cardPhoto(row, photos, s),
       tag: e ? (e.fromName ? `from ${e.fromName}` : e.fromStack ? "from another stack" : "new") : null
     };
   }
@@ -259,6 +265,7 @@ export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
               const i = info(id);
               return (
                 <button key={id} className="sc-chip" onClick={() => act(bringHere(session, id))} disabled={busy} title={i.title}>
+                  {i.image ? <img className="sc-thumb" src={imageAt(i.image, 225)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : null}
                   <b>{i.sku || "—"}</b> <span>{i.title}</span>
                 </button>
               );
@@ -305,6 +312,7 @@ export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
             return (
               <label className="ps-row" key={id}>
                 <input type="checkbox" checked={pullSel.has(id)} onChange={() => setPullSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; })} />
+                {i.image ? <img className="sc-thumb" src={imageAt(i.image, 225)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : null}
                 <span className="stack-sku">{i.sku || "—"}</span>
                 <span className="stack-title">{i.title || <em>—</em>}</span>
                 <button className="stack-pull sc-mini" onClick={(e) => { e.preventDefault(); act(unmissing(session, id)); setPullSel((p) => { const n = new Set(p); n.delete(id); return n; }); }}>↩</button>
@@ -335,6 +343,7 @@ export default function StackCheck({ stack, stackNames, onClose, onSaved }) {
             <div className={`stack-row sc-row sc-${state}`} key={id}>
               <button className="stack-pos sc-pos" onClick={() => act(setCursor(session, idx))} title="Carry on checking from this card">{idx + 1}</button>
               <span className="sc-state" aria-label={state}>{state === "seen" ? "✓" : state === "next" ? "▶" : ""}</span>
+              {i.image ? <img className="sc-thumb" src={imageAt(i.image, 225)} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="sc-thumb" aria-hidden="true" />}
               <span className="stack-sku">{i.sku || "—"}</span>
               <span className="stack-title">{i.title || <em>—</em>}{i.tag ? <span className="badge2 sc-tag">{i.tag}</span> : null}</span>
               <span className="sc-arrows">

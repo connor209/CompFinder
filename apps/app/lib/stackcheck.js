@@ -331,3 +331,57 @@ export function storeCheck(s) {
 export function clearCheck(stackId) {
   try { globalThis.localStorage?.removeItem(KEY(stackId)); } catch {}
 }
+
+// --- the picture beside a card -------------------------------------------------
+
+const lc = (v) => String(v ?? "").trim().toLowerCase();
+
+/**
+ * Lookups for `cardPhoto()`, built once per check from what the screen read:
+ * `listings` are `ebay_listings` rows (sku, ebay_item_id, image_url) and
+ * `scans` are `card_import_items` rows (sku, images, created_at). The newest
+ * import of a SKU wins, since that is the scan of the copy now carrying it.
+ */
+export function photoIndex({ listings = [], scans = [] } = {}) {
+  const bySku = new Map();
+  const byItem = new Map();
+  for (const l of listings) {
+    const img = String(l?.image_url || "").trim();
+    if (!img) continue;
+    if (l.sku && !bySku.has(lc(l.sku))) bySku.set(lc(l.sku), img);
+    if (l.ebay_item_id && !byItem.has(String(l.ebay_item_id))) byItem.set(String(l.ebay_item_id), img);
+  }
+  const scanBySku = new Map();
+  const newest = new Map();
+  for (const s of scans) {
+    const first = (Array.isArray(s?.images) ? s.images : []).map((u) => String(u || "").trim()).find(Boolean);
+    if (!s?.sku || !first) continue;
+    const k = lc(s.sku);
+    const at = Date.parse(s.created_at || "") || 0;
+    if (scanBySku.has(k) && newest.get(k) >= at) continue;
+    scanBySku.set(k, first);
+    newest.set(k, at);
+  }
+  return { bySku, byItem, scanBySku };
+}
+
+/**
+ * Which picture goes beside a card in the checker, or null.
+ *
+ * A photo of THIS copy first — its own `scan_url` (migration 027), then the
+ * CardUploader scan it was imported under — because the question being asked
+ * is "is the card in my hand this one", and two copies of a common differ in
+ * exactly the wear a photo shows. Then the listing's gallery shot, by SKU and
+ * then by item id: a CardUploader variation card is never listed under its
+ * stack SKU, but it can carry the listing's item id. Never catalogue art.
+ */
+export function cardPhoto(row, idx, sku = row?.sku) {
+  if (!idx) return null;
+  const own = String(row?.scan_url || "").trim();
+  if (own) return own;
+  const k = lc(sku);
+  if (k && idx.scanBySku.get(k)) return idx.scanBySku.get(k);
+  if (k && idx.bySku.get(k)) return idx.bySku.get(k);
+  if (row?.ebay_item_id && idx.byItem.get(String(row.ebay_item_id))) return idx.byItem.get(String(row.ebay_item_id));
+  return null;
+}
