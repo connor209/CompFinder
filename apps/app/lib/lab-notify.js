@@ -55,10 +55,25 @@ async function trading(token, call, inner) {
   return resp;
 }
 
+/**
+ * One level of preferences. eBay answers "There is no valid preference found
+ * for your request" when nothing has EVER been set at that level, which is
+ * the normal state before the first switch-on: that is "off", not a failure.
+ */
+export const NO_PREFERENCE = /no valid preference/i;
+async function preferences(token, level) {
+  try {
+    return await trading(token, "GetNotificationPreferences", `<PreferenceLevel>${level}</PreferenceLevel>`);
+  } catch (e) {
+    if (NO_PREFERENCE.test(String(e.message || ""))) return {};
+    throw e;
+  }
+}
+
 /** What eBay has now: the app's delivery URL, and whether sales notify. */
 export async function getNotificationState(token) {
-  const app = await trading(token, "GetNotificationPreferences", `<PreferenceLevel>Application</PreferenceLevel>`);
-  const user = await trading(token, "GetNotificationPreferences", `<PreferenceLevel>User</PreferenceLevel>`);
+  const app = await preferences(token, "Application");
+  const user = await preferences(token, "User");
   const ad = app.ApplicationDeliveryPreferences || {};
   const events = arr(user.UserDeliveryPreferenceArray?.NotificationEnable);
   const sale = events.find((e) => e?.EventType === SALE_EVENT);

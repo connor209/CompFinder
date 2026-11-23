@@ -155,6 +155,8 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   const now = Date.parse(ts) + 30000;
   const n1 = parseNotification(soap(ts, "abc"));
   eq("a sale notification parses", [n1.event, n1.itemId, n1.timestamp, n1.signature], ["FixedPriceTransaction", "407384047214", ts, "abc"]);
+  const { NO_PREFERENCE } = await import("../apps/app/lib/lab-notify.js");
+  eq("eBay's 'nothing ever set' reads as off, not an error", NO_PREFERENCE.test("There is no valid preference found for your request."), true);
   eq("garbage parses to nothing, never throws", parseNotification("<<not xml").event ?? null, null);
 
   const saved = { d: process.env.EBAY_DEV_ID, a: process.env.EBAY_CLIENT_ID, c: process.env.EBAY_CLIENT_SECRET };
