@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, endListing } from "@/lib/ebay";
-import { desiredFor, listingForGroup, nextCopySeqs, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
+import { desiredFor, listingForGroup, nextCopySeqs, removeBlocker, queueOf, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
 import {
-  loadLab, logEvent, insertListing, insertCopies, deleteCopies, updateListing, deleteListing, markPulled, releaseCopy
+  loadLab, logEvent, insertListing, insertCopies, deleteCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
 } from "@/lib/lab-store";
 import { addLabListing, scanLoads } from "@/lib/lab-ebay";
 import { runCheck } from "@/lib/lab-run";
@@ -22,6 +22,7 @@ import { getNotificationState, enableSaleNotifications, disableSaleNotifications
  *   release     { copyId }                       a cancelled order: copy back in its queue
  *   setQuantity { listingId }                    make eBay's count match the queue
  *   end         { listingId }                    end the listing on eBay
+ *   remove      { copyId }                       take one copy off its listing
  *
  * Every eBay change is written to lab_events with what was sent.
  */
@@ -71,6 +72,7 @@ export async function POST(request) {
         return json({ ok, error: ok ? null : "That copy has already been pulled." });
       }
       case "setQuantity": return json(await setQuantity(sb, user, lab, body.listingId));
+      case "remove": return json(await remove(sb, user, lab, body.copyId));
       case "end": return json(await end(sb, user, lab, body.listingId));
       case "notifyState":
       case "notifyOn":
@@ -195,6 +197,44 @@ async function join(sb, user, lab, listing, group) {
   }
   await logEvent(sb, user.id, listing.id, "joined", { added: rows.map((r) => r.sku), from: before.available, to });
   return { ok: true, joined: true, itemId: listing.ebay_item_id, from: before.available, to, pricePence: listing.price_pence, warnings: [] };
+}
+
+/**
+ * One copy off its listing: eBay's quantity down by one FIRST (nothing changes
+ * if eBay refuses), then our row. If it was the copy on show, the listing
+ * moves on to the next copy's photos in the same request. The card itself is
+ * still in the pile — the screen says to take it out.
+ */
+async function remove(sb, user, lab, copyId) {
+  const copy = lab.copies.find((c) => c.id === copyId);
+  const listing = copy ? lab.listings.find((l) => l.id === copy.listing_id) : null;
+  const why = removeBlocker(copy, listing, lab.copies);
+  if (why) return { ok: false, error: why };
+  const token = await tokenFor(user.id);
+  if (!token) return { ok: false, error: "eBay account not connected." };
+
+  const ours = queueOf(listing.id, lab.copies).length;
+  const before = await fetchItemQuantity(token, listing.ebay_item_id);
+  if (before.listingStatus && before.listingStatus !== "Active") return { ok: false, error: `eBay says the listing is ${before.listingStatus}.` };
+  // A sale eBay has counted but we haven't reserved yet would make the
+  // numbers disagree; removing on top of that could take the count below the
+  // copies buyers have paid for. Check first, then remove.
+  if (before.available != null && before.available !== ours) {
+    return { ok: false, error: `eBay has ${before.available} for sale and the queue has ${ours} — press Check for sales first, then remove.` };
+  }
+  await reviseItemQuantity(token, listing.ebay_item_id, ours - 1);
+  const gone = await removeCopy(sb, user.id, copy.id);
+  if (!gone) {
+    await logEvent(sb, user.id, listing.id, "error", { action: "remove", sku: copy.sku, message: "eBay quantity lowered but the copy changed meanwhile" });
+    return { ok: false, error: `${copy.sku} changed while it was being removed — press Check for sales, which will show any quantity difference.` };
+  }
+  await logEvent(sb, user.id, listing.id, "removed", { sku: copy.sku, from: ours, to: ours - 1 });
+  let moved = 0;
+  if (String(listing.pictured_copy_id || "") === String(copy.id)) {
+    const r = await runCheck(sb, user.id, token, { source: "button", itemId: listing.ebay_item_id });
+    moved = r.moved || 0;
+  }
+  return { ok: true, sku: copy.sku, from: ours, to: ours - 1, moved };
 }
 
 async function setQuantity(sb, user, lab, listingId) {

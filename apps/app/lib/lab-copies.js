@@ -306,3 +306,19 @@ export function priceFromComps(result) {
 export function listBlockers(groups, priceOf) {
   return (groups || []).filter((g) => priceOf(g.key) == null).map((g) => g.title);
 }
+
+/**
+ * Why one copy can't be taken off its listing, or null if it can. Only a copy
+ * still FOR SALE: a reserved copy belongs to a buyer (Release is for a
+ * cancelled order), and a pulled one has gone. The last copy for sale is
+ * refused too — that is ending the listing, which has its own button and its
+ * own confirmation, not a side effect of removing a copy.
+ */
+export function removeBlocker(copy, listing, copies) {
+  if (!copy) return "That copy isn't in the lab.";
+  if (copy.pulled_at) return `${copy.sku} has already been pulled.`;
+  if (copy.reserved_line) return `${copy.sku} has sold — it belongs to order ${copy.reserved_order || "?"}. Release it first if that order was cancelled.`;
+  if (!listing || listing.ended_at) return "That listing has ended.";
+  if (queueOf(listing.id, copies).length <= 1) return `${copy.sku} is the last copy for sale — use End listing instead.`;
+  return null;
+}

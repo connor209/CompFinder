@@ -142,3 +142,16 @@ export async function usersWithLiveListings(admin) {
   if (error) throw new Error(error.message);
   return [...new Set((data || []).map((r) => r.user_id))];
 }
+
+/**
+ * Take one copy out of the lab. Deleted rather than marked, so its SKU can be
+ * added again later; the log keeps the record. Guarded on it still being for
+ * sale, so a copy that sold in the meantime is never removed from its buyer.
+ */
+export async function removeCopy(sb, userId, copyId) {
+  const { data, error } = await sb.from(LAB_TABLES.copies).delete()
+    .eq("user_id", userId).eq("id", copyId).is("reserved_line", null).is("pulled_at", null)
+    .select("id");
+  if (error) throw new Error(error.message);
+  return (data || []).length === 1;
+}

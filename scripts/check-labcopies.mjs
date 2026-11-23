@@ -10,7 +10,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
-  listingForGroup, nextCopySeqs, listingsToTouch, priceFromComps, listBlockers, ORDER_WINDOW_HOURS,
+  removeBlocker, listingForGroup, nextCopySeqs, listingsToTouch, priceFromComps, listBlockers, ORDER_WINDOW_HOURS,
   groupsFromItems, groupKey, queueOf, desiredFor, planFor, assignSales, unitKey, pickList, pilePositions, isForSale
 } from "../apps/app/lib/lab-copies.js";
 
@@ -120,6 +120,17 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("a comps price is pence", priceFromComps({ suggested_price: 12.49 }), 1249);
   eq("an unpriced card is null, not zero", [priceFromComps({ suggested_price: 0 }), priceFromComps({ suggested_price: null }), priceFromComps(null)], [null, null, null]);
   eq("List all is refused naming the unpriced", listBlockers([{ key: "a", title: "Mew" }, { key: "b", title: "Lugia" }], (k) => (k === "a" ? 249 : null)), ["Lugia"]);
+}
+
+// ---- taking one copy off ----------------------------------------------------------------
+{
+  const l = L("A", "111", "c1");
+  const copies = [C("c1", "A", 1), C("c2", "A", 2), C("c3", "A", 3, { reserved_line: "x#1", reserved_order: "o-9" }), C("c4", "A", 4, { pulled_at: "t" })];
+  eq("a copy for sale can be removed", removeBlocker(copies[1], l, copies), null);
+  eq("…a sold one can't (it's a buyer's)", /has sold/.test(removeBlocker(copies[2], l, copies)), true);
+  eq("…a pulled one can't", /pulled/.test(removeBlocker(copies[3], l, copies)), true);
+  eq("…nor the last for sale: that is End listing", /last copy/.test(removeBlocker(copies[0], l, [copies[0], copies[2]])), true);
+  eq("…nor on an ended listing", /ended/.test(removeBlocker(copies[1], { ...l, ended_at: "t" }, copies)), true);
 }
 
 // ---- where a copy is in the pile --------------------------------------------------

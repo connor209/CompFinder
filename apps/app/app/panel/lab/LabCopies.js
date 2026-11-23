@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CardUploaderCsv from "@/lib/carduploader.js";
-import { groupsFromItems, desiredFor, pickList, pilePositions, listingForGroup, priceFromComps, listBlockers, PHOTO_PROMISE } from "@/lib/lab-copies.js";
+import { groupsFromItems, desiredFor, pickList, pilePositions, listingForGroup, priceFromComps, listBlockers, removeBlocker, PHOTO_PROMISE } from "@/lib/lab-copies.js";
 
 /**
  * The lab screen. Four parts, top to bottom: the scorecard the test is judged
@@ -386,6 +386,17 @@ export default function LabCopies() {
                       <div style={{ color: state === "sold" ? "var(--warn)" : state === "next" ? "var(--accent)" : "var(--ink-soft)" }}>
                         {isShowing ? "on eBay now" : state}
                       </div>
+                      {!l.ended_at && !removeBlocker(c, l, copies) && (
+                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 6px", marginTop: 2 }} disabled={!!busy} onClick={() => {
+                          const n = d.quantity;
+                          if (!window.confirm(
+                            `Take ${c.sku} off "${l.title}"?\n\neBay quantity ${n} → ${n - 1}.` +
+                            (isShowing ? ` It's the copy on show, so the listing moves on to the next copy's photos.` : "") +
+                            `\n\nThe card is still in the LAB pile — take it out once this is done, or the pile numbers will be off by one.`
+                          )) return;
+                          run(`rm-${c.id}`, { action: "remove", copyId: c.id }, (r) => setMsg({ text: `${r.sku} removed: eBay quantity ${r.from} → ${r.to}${r.moved ? ", photos moved on" : ""}. Take it out of the pile.` }));
+                        }}>✕ Remove</button>
+                      )}
                     </div>
                   );
                 })}
