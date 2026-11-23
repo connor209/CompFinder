@@ -15,11 +15,29 @@
  * are sent, so two runs revising at once still end on the right copy.
  */
 import { fetchRecentOrders, fetchItemQuantity, reviseFixedPriceListing } from "./ebay.js";
-import { assignSales, planFor } from "./lab-copies.js";
+import { assignSales, planFor, isTransientEbayError } from "./lab-copies.js";
 import { loadLab, logEvent, reserveCopy, updateListing } from "./lab-store.js";
 import { scanLoads } from "./lab-ebay.js";
 
 const ROUNDS = 3;
+const REVISE_WAITS_MS = [0, 4000, 10000];
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Send the photos, trying again on eBay's temporary errors. */
+async function revisePictures(token, itemId, imageUrls) {
+  let last;
+  for (let i = 0; i < REVISE_WAITS_MS.length; i++) {
+    if (REVISE_WAITS_MS[i]) await sleep(REVISE_WAITS_MS[i]);
+    try {
+      const r = await reviseFixedPriceListing(token, itemId, { imageUrls });
+      return { ...r, tries: i + 1 };
+    } catch (e) {
+      last = e;
+      if (!isTransientEbayError(e.message)) break;
+    }
+  }
+  throw last;
+}
 
 export async function runCheck(sb, userId, token, { source = "button", itemId = null } = {}) {
   const notes = [];
@@ -89,15 +107,16 @@ export async function runCheck(sb, userId, token, { source = "button", itemId = 
         continue;
       }
       try {
-        const r = await reviseFixedPriceListing(token, l.ebay_item_id, { imageUrls: plan.pictureUrls });
+        const r = await revisePictures(token, l.ebay_item_id, plan.pictureUrls);
         await updateListing(sb, userId, l.id, { pictured_copy_id: plan.headId });
         moved += 1;
         changed += 1;
-        await logEvent(sb, userId, l.id, "pictures", { showing: plan.desired.head.sku, pictures: plan.pictureUrls.length, warning: r.warning, via: source });
+        await logEvent(sb, userId, l.id, "pictures", { showing: plan.desired.head.sku, pictures: plan.pictureUrls.length, warning: r.warning, tries: r.tries, via: source });
         if (r.warning) notes.push(`${l.title}: eBay accepted the photos with a warning — ${r.warning}`);
       } catch (e) {
-        notes.push(`${l.title}: photo change failed — ${e.message}`);
-        await logEvent(sb, userId, l.id, "error", { message: e.message, sku: plan.desired.head.sku, via: source });
+        const transient = isTransientEbayError(e.message);
+        notes.push(`${l.title}: photo change failed — ${e.message}${transient ? " (eBay may have made it anyway; the next check sends it again)" : ""}`);
+        await logEvent(sb, userId, l.id, "error", { message: e.message, sku: plan.desired.head.sku, transient, via: source });
       }
     }
     if (!changed) break;

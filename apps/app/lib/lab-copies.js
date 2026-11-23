@@ -233,3 +233,15 @@ export function pickList(copies) {
     .map((c) => ({ ...c, position: pos.get(String(c.id)) || null }))
     .sort((a, b) => (b.position || 0) - (a.position || 0));
 }
+
+/**
+ * An eBay failure worth trying again. "System error. Unable to process your
+ * request. Please try again later." came back on the lab's first notified
+ * sale for a photo change eBay HAD made — so a temporary error says nothing
+ * about whether the change happened, and sending the same photos again is
+ * harmless. A refusal about the request itself (a bad picture, a listing that
+ * has ended) is not retried: it would fail the same way.
+ */
+export function isTransientEbayError(message) {
+  return /system error|try again later|temporarily unavailable|timed?\s*out|ECONNRESET|ETIMEDOUT|fetch failed|\((5\d\d)\)/i.test(String(message || ""));
+}

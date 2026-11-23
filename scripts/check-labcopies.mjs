@@ -88,6 +88,15 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("more sold than held → oversold, never invented", [over.reservations.length, over.oversold.map((o) => o.line)], [1, ["l3#2".replace("l3", "l1")]]);
 }
 
+// ---- which eBay failures are worth a retry -------------------------------------------
+{
+  const { isTransientEbayError } = await import("../apps/app/lib/lab-copies.js");
+  eq("eBay's 'System error … try again later' is retried (it had made the change)", isTransientEbayError("System error. Unable to process your request. Please try again later."), true);
+  eq("a 503 is retried", isTransientEbayError("eBay listing revision failed (503)."), true);
+  eq("a refused picture is not", isTransientEbayError("The picture URL is invalid."), false);
+  eq("an ended listing is not", isTransientEbayError("You are not allowed to revise ended listings."), false);
+}
+
 // ---- where a copy is in the pile --------------------------------------------------
 {
   const copies = [C("c1", "A", 1, { reserved_line: "a#1" }), C("c2", "A", 2, { pulled_at: "x" }), C("c3", "A", 3, { reserved_line: "b#1" }), C("c4", "B", 4)];
