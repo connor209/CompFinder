@@ -52,7 +52,11 @@ export default function LabCopies() {
     const r = await api({ action: "notifyState" });
     setNotify(r.ok ? { state: r.state } : { error: r.error });
   }, []);
-  useEffect(() => { if (lab && !lab.missing) loadNotify(); }, [lab?.missing, loadNotify]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Keyed on a boolean that actually CHANGES when the lab arrives. `lab?.missing`
+  // is undefined before the load and after it, so the effect never re-ran and
+  // the line sat on "Asking eBay…" for ever.
+  const labReady = Boolean(lab && lab.ok !== false && !lab.missing);
+  useEffect(() => { if (labReady) loadNotify(); }, [labReady, loadNotify]);
 
   async function notifyOn() {
     const url = `${window.location.origin}/api/lab/ebay-notify`;
