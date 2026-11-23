@@ -283,7 +283,7 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
 // ---- the side build stays on the side ----------------------------------------------
 {
   const root = new URL("../apps/app/", import.meta.url).pathname;
-  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js", "app/api/lab/sweep/route.js", "app/panel/lab/settings/ListingSettings.js", "app/panel/lab/settings/page.js", "lib/listing-template.js", "lib/lab-inventory.js", "app/panel/lab/inventory/LabInventory.js", "app/panel/lab/inventory/page.js"]);
+  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js", "app/api/lab/sweep/route.js", "app/panel/lab/settings/ListingSettings.js", "app/panel/lab/settings/page.js", "lib/listing-template.js", "lib/lab-inventory.js", "lib/lab-stacks.js", "lib/toploader.js", "app/panel/lab/inventory/LabInventory.js", "app/panel/lab/inventory/page.js"]);
   const offenders = [];
   const offendersOf = (needle, okFiles) => {
     const out = [];
@@ -325,7 +325,9 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("a check never asks eBay about every listing", /for \(const l of live\)[^}]*fetchItemQuantity/.test(run), false);
   eq("the lab-run never writes the app's own stock tables", /stack_cards|stock_checkouts|listing_copy_state|ebay_listings/.test(run), false);
   const route = readFileSync(join(root, "app/api/lab/route.js"), "utf8");
-  eq("the lab never writes the app's own stock tables", /stack_cards|stock_checkouts|listing_copy_state|ebay_listings/.test(route + store), false);
+  // Since the fold (042) lab-store DOES write stack_cards — that is the fold.
+  // The route and the check never name it: one file owns lab stack cards.
+  eq("only lab-store names stack_cards; the lab never touches checkouts or the listings mirror", [/stack_cards/.test(route), /stock_checkouts|listing_copy_state|ebay_listings/.test(route + store)], [false, false]);
 }
 
 // ---- eBay's sale notification ------------------------------------------------------

@@ -254,6 +254,36 @@ export default function LabCopies() {
   }
 
   if (!lab) return <main style={{ maxWidth: 980, margin: "0 auto", padding: 16 }}>Loading the lab…</main>;
+  if (lab.foldPending || lab.needsMove) {
+    return (
+      <main style={{ maxWidth: 980, margin: "0 auto", padding: 16 }}>
+        <h1>Lab · quantity listings</h1>
+        <section style={box}>
+          <strong>The lab now keeps its copies in the stacks</strong>
+          <p style={small}>
+            Every lab copy becomes an ordinary stack card, marked LAB, in a stack named after its pile (TEST2-14 goes in LAB-TEST2).
+            A copy whose SKU is already on a stack as a card nobody has pulled is that card, and stays where it is. Nothing on eBay changes.
+          </p>
+          {lab.foldPending ? (
+            <p>Run <code>supabase/migrations/042_lab_into_stacks.sql</code> in Supabase first.</p>
+          ) : (
+            <>
+              <p><strong>{lab.unmoved}</strong> cop{lab.unmoved === 1 ? "y" : "ies"} to move. Until they have, the lab — and sale notifications — wait.</p>
+              <button className="btn btn-primary" disabled={!!busy} onClick={async () => {
+                setBusy("move");
+                const r = await api({ action: "moveToStacks" });
+                setBusy(null);
+                if (!r.ok) setMsg({ bad: true, text: r.error });
+                else setMsg({ bad: r.refused?.length > 0, text: `${r.moved} moved into new stack cards, ${r.adopted} matched to cards already on a stack${r.refused?.length ? `. Not moved: ${r.refused.map((x) => `${x.sku} (${x.why})`).join("; ")}` : "."}` });
+                await reload();
+              }}>{busy === "move" ? "Moving…" : "▸ Move lab copies into stacks"}</button>
+            </>
+          )}
+          {msg && <p style={{ color: msg.bad ? "var(--bad)" : "var(--good)" }}>{msg.text}</p>}
+        </section>
+      </main>
+    );
+  }
   if (lab.missing) {
     return (
       <main style={{ maxWidth: 980, margin: "0 auto", padding: 16 }}>

@@ -169,7 +169,7 @@ export default function LabInventory() {
   }
 
   if (!lab) return <main className="li-wrap">Loading the inventory…</main>;
-  if (!lab.ok) return <main className="li-wrap">{lab.missing ? "Run migration 039 first." : `Couldn't load: ${lab.error}`}</main>;
+  if (!lab.ok) return <main className="li-wrap">{lab.missing ? "Run migration 039 first." : lab.needsMove || lab.foldPending ? <>{lab.error} <a href="/panel/lab">Open the lab</a></> : `Couldn't load: ${lab.error}`}</main>;
 
   const Pager = () => (
     <span className="li-pager">

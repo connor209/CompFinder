@@ -147,7 +147,9 @@ export function copyOrder(a, b) {
  * listing keeps showing a card somebody has already bought.
  */
 export function isForSale(c) {
-  return Boolean(c) && !c.pulled_at && !c.reserved_line;
+  // Checked out is not for sale either: since the fold a lab copy is a stack
+  // card, and a card in a box at a show can't be posted today.
+  return Boolean(c) && !c.pulled_at && !c.reserved_line && !c.checked_out_at;
 }
 
 /** One listing's queue, head first. */
@@ -283,13 +285,17 @@ export function pileOf(sku) {
  */
 export function pilePositions(copies) {
   const piles = new Map();
+  const out = new Map();
   for (const c of copies || []) {
     if (c.pulled_at) continue;
+    // Since the fold (docs/LAB_FOLD.md) a copy is a stack card and carries its
+    // stack's name and its live rank there — stackpos.js's number, the same
+    // one Stacks and the pull sheet show. That wins over reading the SKU.
+    if (c.pile != null && c.live_position != null) { out.set(String(c.id), { pile: c.pile, position: c.live_position }); continue; }
     const { pile, n } = pileOf(c.sku);
     if (!piles.has(pile)) piles.set(pile, []);
     piles.get(pile).push({ c, n });
   }
-  const out = new Map();
   for (const [pile, list] of piles) {
     list.sort((a, b) => (a.n - b.n) || (a.c.pile_seq - b.c.pile_seq) || String(a.c.id).localeCompare(String(b.c.id)));
     list.forEach(({ c }, i) => out.set(String(c.id), { pile, position: i + 1 }));

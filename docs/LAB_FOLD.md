@@ -1,6 +1,6 @@
 # Step 2: folding the lab into the stacks
 
-23 Nov 2026 · plan, nothing built yet
+23 Nov 2026 · **step 1 built** (migration 042, the move, the lab reading stacks). Decided: tonight's listings stay live, the lab's Pick list goes when the pull sheet takes over (step 2), lab stacks are `LAB-<pile>`.
 
 The lab proved quantity listings on real eBay (`docs/LAB_COPIES.md`) and grew
 settings, templates and an inventory view (`docs/LISTING_STUDIO.md`). Its
@@ -42,8 +42,8 @@ Columns that already exist and mean the same thing are reused:
   `stackpos.js`, the app's one rule for positions.
 
 The lab's own pile numbering from the SKU (`pileOf`) retires. **A lab card's
-stack is its pile:** stack `TEST2` for TEST2-1…TEST2-17, made if it doesn't
-exist. `ebay_item_id` stays **empty** on lab cards: the old multi-copy script
+stack is its pile, prefixed:** stack `LAB-TEST2` for TEST2-1…TEST2-17, made if
+it doesn't exist, and never chosen by a filing plan (`fileableStacks`). `ebay_item_id` stays **empty** on lab cards: the old multi-copy script
 (`copyqueue-run.mjs`) groups by it, and must never try to manage a lab
 listing.
 

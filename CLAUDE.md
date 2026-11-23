@@ -315,6 +315,17 @@ stream` (the relay, only while streaming).
   title } in, evidence out): what a title parses to, that every fetched sale
   comes back with a reason from the caller's vocabulary, that a failed lookup
   is "timeout" with no rows and never active listings, and one search a title.
+- `scripts/check-labcopies.mjs` — the quantity-listing lab (`docs/LAB_COPIES.md`,
+  `docs/LISTING_STUDIO.md`): which copy a sale reserves and what the listing
+  shows next, a buyer shown a different copy flagged, notifications and the
+  sweep touching only listings that changed, templates (the photo promise
+  always appended, CardUploader's `/catalog/` database image never a scan),
+  the inventory view, and greps that nothing outside the lab reads its tables.
+- `scripts/check-labstacks.mjs` — the lab folded into the stacks
+  (`docs/LAB_FOLD.md`): a lab copy is a stack card with `lab_listing_id`, in a
+  `LAB-<pile>` stack no filing plan may choose; the move is idempotent, adopts
+  a card already stacked under the SKU and refuses a pulled or lab one; a lab
+  card's position is the stack's live rank.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft

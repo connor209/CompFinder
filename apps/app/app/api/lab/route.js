@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, reviseItemPrice, endListing } from "@/lib/ebay";
 import { desiredFor, listingForGroup, nextCopySeqs, removeBlocker, queueOf, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
 import {
-  loadLab, loadListingSettings, saveListingSettings, logEvent, insertListing, insertCopies, deleteCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
+  loadLab, loadListingSettings, saveListingSettings, logEvent, insertListing, insertCopies, undoCopies, moveLabCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
 } from "@/lib/lab-store";
 import { addLabListing, scanLoads, reviseLabText } from "@/lib/lab-ebay";
 import { inventoryRows, templatePlan } from "@/lib/lab-inventory";
@@ -49,7 +49,9 @@ export async function GET() {
   const { sb, user } = await session();
   if (!user) return json({ ok: false, error: "Not signed in." }, 401);
   const lab = await loadLab(sb, user.id);
-  if (!lab.ok) return json(lab, lab.missing ? 200 : 500);
+  // Not yet moved into the stacks, or 042 still to run: the page needs to say
+  // so and offer the move, so these are answers, not server errors.
+  if (!lab.ok) return json(lab, lab.missing || lab.needsMove || lab.foldPending ? 200 : 500);
   const ls = await loadListingSettings(sb, user.id);
   return json({ ...lab, listingSettings: withDefaults(ls.settings), listingSettingsSaved: Boolean(ls.settings), listingSettingsMissing: Boolean(ls.missing) });
 }
@@ -60,8 +62,18 @@ export async function POST(request) {
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: "Bad request." }, 400); }
 
+  // The move runs BEFORE the lab can load: it is what makes it loadable.
+  if (body.action === "moveToStacks") {
+    try {
+      const r = await moveLabCopies(sb, user.id);
+      await logEvent(sb, user.id, null, "moved", { moved: r.moved, adopted: r.adopted, refused: r.refused });
+      return json({ ok: true, ...r });
+    } catch (e) {
+      return json({ ok: false, error: e.message }, 500);
+    }
+  }
   const lab = await loadLab(sb, user.id);
-  if (!lab.ok) return json(lab, lab.missing ? 409 : 500);
+  if (!lab.ok) return json(lab, lab.missing || lab.needsMove || lab.foldPending ? 409 : 500);
 
   try {
     switch (body.action) {
@@ -161,7 +173,7 @@ async function create(sb, user, lab, { group, pricePence, subtype = "", marketPe
   });
   let rows;
   try {
-    rows = await insertCopies(sb, user.id, listing.id, copies);
+    rows = await insertCopies(sb, user.id, listing.id, copies, { title: r.title });
   } catch (e) {
     await deleteListing(sb, user.id, listing.id);
     throw e;
@@ -175,7 +187,9 @@ async function create(sb, user, lab, { group, pricePence, subtype = "", marketPe
   }
 
   const token = await tokenFor(user.id);
-  if (!token) { await deleteListing(sb, user.id, listing.id); return { ok: false, error: "eBay account not connected." }; }
+  // Undo the stack cards BEFORE the listing: the foreign key would otherwise
+  // leave them on the stacks as ordinary cards with no listing.
+  if (!token) { await undoCopies(sb, user.id, rows); await deleteListing(sb, user.id, listing.id); return { ok: false, error: "eBay account not connected." }; }
 
   let result;
   try {
@@ -191,6 +205,7 @@ async function create(sb, user, lab, { group, pricePence, subtype = "", marketPe
       pictureUrls: desiredFor({ ...listing, extra_images: listing.extra_images || [] }, rows).pictureUrls
     });
   } catch (e) {
+    await undoCopies(sb, user.id, rows);
     await deleteListing(sb, user.id, listing.id);
     return { ok: false, error: e.message };
   }
@@ -222,12 +237,12 @@ async function join(sb, user, lab, listing, group) {
   if (before.listingStatus && before.listingStatus !== "Active") {
     return { ok: false, error: `"${listing.title}" is ${before.listingStatus} on eBay — end it in the lab, then list these as a new listing.` };
   }
-  const rows = await insertCopies(sb, user.id, listing.id, copies);
+  const rows = await insertCopies(sb, user.id, listing.id, copies, { title: listing.title });
   const to = (before.available ?? 0) + rows.length;
   try {
     await reviseItemQuantity(token, listing.ebay_item_id, to);
   } catch (e) {
-    await deleteCopies(sb, user.id, rows.map((r) => r.id));
+    await undoCopies(sb, user.id, rows);
     return { ok: false, error: `eBay refused the new quantity for "${listing.title}": ${e.message}` };
   }
   await logEvent(sb, user.id, listing.id, "joined", { added: rows.map((r) => r.sku), from: before.available, to });

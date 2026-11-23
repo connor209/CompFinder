@@ -23,6 +23,7 @@
  * bare node.
  */
 
+import { isLabStack } from "./lab-stacks.js";
 import { isShowBinder } from "./showbinder.js";
 import { isCardmarketStack } from "./cardmarket.js";
 
@@ -69,7 +70,10 @@ export function isUnorderedStack(stackOrName) {
 export function fileableStacks(stacks) {
   // A Cardmarket divider (MTG-C) is a box in another room holding cards that
   // are not on eBay at all; a returned show card filed behind one is lost.
-  return (stacks || []).filter((s) => !isUnorderedStack(s) && !isCardmarketStack(s));
+  // A lab stack (LAB-TEST2) holds the copies of the lab's quantity listings;
+  // a returned show card filed there sits among copies of a listing it isn't
+  // on (docs/LAB_FOLD.md).
+  return (stacks || []).filter((s) => !isUnorderedStack(s) && !isCardmarketStack(s) && !isLabStack(s));
 }
 
 /**
