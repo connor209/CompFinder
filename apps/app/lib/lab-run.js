@@ -1,21 +1,29 @@
 /**
- * One "check for sales" for one account: read the sales, reserve the copies,
- * move each listing's photos on to its new head copy. Shared by the lab's
- * button and by eBay's sale notification (app/api/lab/ebay-notify), so the
- * two can never disagree about what a sale does.
+ * One check for one account: read the sales, reserve the copies, move the
+ * affected listings' photos on to their new head copy. Shared by the lab's
+ * button, eBay's sale notification (app/api/lab/ebay-notify) and the nightly
+ * sweep (app/api/lab/sweep), so none of them can disagree about what a sale
+ * does.
+ *
+ * BUILT TO SCALE. The cost of a check is the orders in its window plus a
+ * couple of calls per listing that CHANGED — never a call per listing held:
+ *   - orders are read over a narrow window (ORDER_WINDOW_HOURS): two hours
+ *     for a notification, three days for the button and the sweep;
+ *   - eBay is asked only about listingsToTouch(): one that just had a copy
+ *     reserved, the one a notification named, or one whose photos are behind
+ *     its queue by our own rows.
  *
  * Server-only. `sb` may be the signed-in user's client or the admin client:
- * every lab-store call filters on `userId` by hand, so both are safe.
+ * every lab-store call filters on `userId` by hand.
  *
- * SAFE TO RUN TWICE AT ONCE, which a notification arriving while somebody
- * presses the button will do. A reservation is guarded on the copy still
- * being free and the unique index on reserved_line refuses one unit twice;
- * a reservation that loses that race reloads and goes again rather than
- * leaving its sale without a copy. The photos are planned again after they
- * are sent, so two runs revising at once still end on the right copy.
+ * SAFE TO RUN TWICE AT ONCE (a notification while somebody presses the
+ * button). A reservation is guarded on the copy still being free and the
+ * unique index on reserved_line refuses one unit twice; a reservation that
+ * loses that race reloads and goes again. Photos are planned again after
+ * they are sent, so two runs revising at once still end on the right copy.
  */
 import { fetchRecentOrders, fetchItemQuantity, reviseFixedPriceListing } from "./ebay.js";
-import { assignSales, planFor, isTransientEbayError } from "./lab-copies.js";
+import { assignSales, planFor, isTransientEbayError, listingsToTouch, ORDER_WINDOW_HOURS } from "./lab-copies.js";
 import { loadLab, logEvent, reserveCopy, updateListing } from "./lab-store.js";
 import { scanLoads } from "./lab-ebay.js";
 
@@ -39,26 +47,29 @@ async function revisePictures(token, itemId, imageUrls) {
   throw last;
 }
 
-export async function runCheck(sb, userId, token, { source = "button", itemId = null } = {}) {
+export async function runCheck(sb, userId, token, { source = "button", itemId = null, windowHours = null } = {}) {
   const notes = [];
   let reserved = 0;
   let mismatched = 0;
   let oversold = 0;
   let lines = null;
+  const reservedListingIds = new Set();
+  const hours = windowHours || ORDER_WINDOW_HOURS[source] || 72;
 
   // 1. Sales → reservations, against what each listing was showing.
   for (let round = 0; round < ROUNDS; round++) {
     const lab = await loadLab(sb, userId);
     if (!lab.ok) return { ok: false, error: lab.error, missing: lab.missing };
     const live = lab.listings.filter((l) => l.ebay_item_id && !l.ended_at);
-    if (!live.length) return { ok: true, reserved, mismatched, oversold, moved: 0, quantities: [], notes: ["No live lab listings."], sawItem: false };
-    if (!lines) lines = await fetchRecentOrders(token, 30);
+    if (!live.length) return { ok: true, reserved, mismatched, oversold, moved: 0, asked: 0, quantities: [], notes: ["No live lab listings."], sawItem: false };
+    if (!lines) lines = await fetchRecentOrders(token, hours / 24);
     const { reservations, oversold: over } = assignSales(lab.copies, live, lines);
     let lost = 0;
     for (const r of reservations) {
       const res = await reserveCopy(sb, userId, r);
       if (!res.ok) { lost += 1; continue; }
       reserved += 1;
+      reservedListingIds.add(String(r.listingId));
       if (r.mismatch) mismatched += 1;
       await logEvent(sb, userId, r.listingId, r.mismatch ? "mismatch" : "reserved", {
         sku: r.sku, orderId: r.orderId, line: r.line, soldAt: r.soldAt, via: source
@@ -75,28 +86,31 @@ export async function runCheck(sb, userId, token, { source = "button", itemId = 
     if (round === ROUNDS - 1) notes.push(`${lost} sale${lost === 1 ? "" : "s"} couldn't be reserved after ${ROUNDS} tries — press Check again.`);
   }
 
-  // 2. Photos. Planned, sent, then planned again: a second run that reserved
-  //    a copy while this one was revising leaves a plan that still differs.
+  // 2. Photos, for the listings that changed. Planned, sent, then planned
+  //    again: a second run that reserved a copy meanwhile leaves a plan
+  //    that still differs.
   let moved = 0;
+  let asked = 0;
   let quantities = [];
   for (let pass = 0; pass < 2; pass++) {
     const lab = await loadLab(sb, userId);
     if (!lab.ok) break;
-    const live = lab.listings.filter((l) => l.ebay_item_id && !l.ended_at);
+    const touch = listingsToTouch(lab.listings, lab.copies, { reservedListingIds: [...reservedListingIds], itemId });
     let changed = 0;
-    quantities = [];
-    for (const l of live) {
+    if (pass === 0) quantities = [];
+    for (const l of touch) {
       let available = null;
       let status = null;
       try {
         const q = await fetchItemQuantity(token, l.ebay_item_id);
+        asked += 1;
         available = q.available;
         status = q.listingStatus;
       } catch (e) {
         if (pass === 0) notes.push(`${l.title}: couldn't read eBay's count (${e.message}).`);
       }
       const plan = planFor(l, lab.copies, available);
-      if (plan.quantityMismatch) quantities.push({ listingId: l.id, title: l.title, ...plan.quantityMismatch });
+      if (pass === 0 && plan.quantityMismatch) quantities.push({ listingId: l.id, title: l.title, ...plan.quantityMismatch });
       if (pass === 0 && status && status !== "Active") notes.push(`${l.title}: eBay says the listing is ${status}.`);
       if (pass === 0) for (const b of plan.blocked) notes.push(`${l.title}: ${b}.`);
       if (!plan.pictureUrls || (status && status !== "Active")) continue;
@@ -122,9 +136,15 @@ export async function runCheck(sb, userId, token, { source = "button", itemId = 
     if (!changed) break;
   }
 
+  // Only the listings this check could speak for get a new "checked" time.
   const lab = await loadLab(sb, userId);
   const now = new Date().toISOString();
-  if (lab.ok) for (const l of lab.listings.filter((x) => x.ebay_item_id && !x.ended_at)) await updateListing(sb, userId, l.id, { checked_at: now }).catch(() => {});
+  if (lab.ok) {
+    const scope = source === "notification"
+      ? lab.listings.filter((l) => l.ebay_item_id && String(l.ebay_item_id) === String(itemId))
+      : lab.listings.filter((l) => l.ebay_item_id && !l.ended_at);
+    for (const l of scope) await updateListing(sb, userId, l.id, { checked_at: now }).catch(() => {});
+  }
   const sawItem = itemId ? (lines || []).some((ln) => String(ln.ebay_item_id) === String(itemId)) : null;
-  return { ok: true, reserved, mismatched, oversold, moved, quantities, notes, sawItem };
+  return { ok: true, reserved, mismatched, oversold, moved, asked, orders: (lines || []).length, windowHours: hours, quantities, notes, sawItem };
 }

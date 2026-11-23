@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, endListing } from "@/lib/ebay";
-import { desiredFor, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
+import { desiredFor, listingForGroup, nextCopySeqs, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
 import {
-  loadLab, logEvent, insertListing, insertCopies, updateListing, deleteListing, markPulled, releaseCopy
+  loadLab, logEvent, insertListing, insertCopies, deleteCopies, updateListing, deleteListing, markPulled, releaseCopy
 } from "@/lib/lab-store";
 import { addLabListing, scanLoads } from "@/lib/lab-ebay";
 import { runCheck } from "@/lib/lab-run";
@@ -105,12 +105,17 @@ export async function POST(request) {
 async function create(sb, user, lab, { group, pricePence, settings = {} }) {
   const price = Number(pricePence);
   if (!group || !Array.isArray(group.copies) || group.copies.length < 1) return { ok: false, error: "No copies to list." };
-  if (!Number.isInteger(price) || price < 99) return { ok: false, error: "Type a price of at least £0.99." };
   if (!LISTABLE_CONDITIONS.includes(group.condition)) return { ok: false, error: `Condition ${group.condition} can't be listed.` };
 
   const have = new Set(lab.copies.map((c) => String(c.sku).toLowerCase()));
   const dup = group.copies.find((c) => have.has(String(c.sku).toLowerCase()));
   if (dup) return { ok: false, error: `${dup.sku} is already in the lab.` };
+
+  // A card + condition already live: the new copies join the back of its
+  // queue and its quantity goes up. No second listing for the same card.
+  const existing = listingForGroup(lab.listings, group);
+  if (existing) return join(sb, user, lab, existing, group);
+  if (!Number.isInteger(price) || price < 99) return { ok: false, error: "Type a price of at least £0.99." };
 
   // copy_seq = pile order, so the queue sells them front to back. Left null,
   // every copy would tie on added_at (one insert) and fall to a random id.
@@ -121,7 +126,7 @@ async function create(sb, user, lab, { group, pricePence, settings = {} }) {
   }
 
   // Ours first, so a listing eBay accepted always has a row to belong to.
-  const listing = await insertListing(sb, user.id, { title: group.title, condition: group.condition, price_pence: price });
+  const listing = await insertListing(sb, user.id, { title: group.title, condition: group.condition, price_pence: price, card_key: group.key || null });
   let rows;
   try {
     rows = await insertCopies(sb, user.id, listing.id, copies);
@@ -163,6 +168,33 @@ async function check(sb, user) {
   const token = await tokenFor(user.id);
   if (!token) return { ok: false, error: "eBay account not connected." };
   return runCheck(sb, user.id, token, { source: "button" });
+}
+
+/**
+ * New copies onto the back of a live listing. The listing keeps its price:
+ * changing what a live listing asks is its own decision, not a side effect of
+ * shelving more copies. Ours first, then eBay's count; if eBay refuses, the
+ * copies are taken back out so the lab never holds copies eBay isn't selling.
+ */
+async function join(sb, user, lab, listing, group) {
+  const seqs = nextCopySeqs(lab.copies, listing.id, group.copies.length);
+  const copies = group.copies.map((c, i) => ({ sku: c.sku, pile_seq: c.seq, copy_seq: seqs[i], scans: (c.scans || []).slice(0, MAX_SCANS) }));
+  const token = await tokenFor(user.id);
+  if (!token) return { ok: false, error: "eBay account not connected." };
+  const before = await fetchItemQuantity(token, listing.ebay_item_id);
+  if (before.listingStatus && before.listingStatus !== "Active") {
+    return { ok: false, error: `"${listing.title}" is ${before.listingStatus} on eBay — end it in the lab, then list these as a new listing.` };
+  }
+  const rows = await insertCopies(sb, user.id, listing.id, copies);
+  const to = (before.available ?? 0) + rows.length;
+  try {
+    await reviseItemQuantity(token, listing.ebay_item_id, to);
+  } catch (e) {
+    await deleteCopies(sb, user.id, rows.map((r) => r.id));
+    return { ok: false, error: `eBay refused the new quantity for "${listing.title}": ${e.message}` };
+  }
+  await logEvent(sb, user.id, listing.id, "joined", { added: rows.map((r) => r.sku), from: before.available, to });
+  return { ok: true, joined: true, itemId: listing.ebay_item_id, from: before.available, to, pricePence: listing.price_pence, warnings: [] };
 }
 
 async function setQuantity(sb, user, lab, listingId) {

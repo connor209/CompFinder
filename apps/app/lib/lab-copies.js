@@ -245,3 +245,64 @@ export function pickList(copies) {
 export function isTransientEbayError(message) {
   return /system error|try again later|temporarily unavailable|timed?\s*out|ECONNRESET|ETIMEDOUT|fetch failed|\((5\d\d)\)/i.test(String(message || ""));
 }
+
+// ---- Scale: touch only what changed -------------------------------------------
+
+/**
+ * The listing a group of new copies JOINS, if one is live: same card, same
+ * condition. A second NM Lapras raises the quantity of the NM Lapras listing
+ * rather than starting a rival one. Listings made before card_key existed are
+ * matched on title + condition, which is what made them a group then.
+ */
+export function listingForGroup(listings, group) {
+  const live = (listings || []).filter((l) => l.ebay_item_id && !l.ended_at);
+  return live.find((l) => l.card_key && l.card_key === group.key)
+    || live.find((l) => !l.card_key && l.title === group.title && String(l.condition).toUpperCase() === String(group.condition).toUpperCase())
+    || null;
+}
+
+/** copy_seq for copies joining the back of a listing's queue. */
+export function nextCopySeqs(copies, listingId, n) {
+  const mine = (copies || []).filter((c) => String(c.listing_id) === String(listingId));
+  const top = mine.reduce((m, c) => Math.max(m, Number.isFinite(Number(c.copy_seq)) ? Number(c.copy_seq) : Number(c.pile_seq) || 0), -1);
+  return Array.from({ length: n }, (_, i) => top + 1 + i);
+}
+
+/**
+ * Which listings a check has to ask eBay about. At nine cards it asked about
+ * all of them; at two thousand that is two thousand calls per sale, which is
+ * most of eBay's daily allowance gone by lunchtime. So only:
+ *   - a listing that just had a copy reserved,
+ *   - the listing a notification named,
+ *   - a listing whose photos are behind its queue (decided from our own rows,
+ *     no eBay call — a revision that failed last time is retried here).
+ */
+export function listingsToTouch(listings, copies, { reservedListingIds = [], itemId = null } = {}) {
+  const ids = new Set(reservedListingIds.map(String));
+  for (const l of listings || []) {
+    if (!l.ebay_item_id || l.ended_at) continue;
+    if (itemId && String(l.ebay_item_id) === String(itemId)) ids.add(String(l.id));
+    const head = queueOf(l.id, copies)[0];
+    if (head && String(l.pictured_copy_id || "") !== String(head.id)) ids.add(String(l.id));
+  }
+  return (listings || []).filter((l) => ids.has(String(l.id)) && l.ebay_item_id && !l.ended_at);
+}
+
+/** How far back each kind of check reads orders. Narrow on purpose: every order in the window is read. */
+export const ORDER_WINDOW_HOURS = { notification: 2, button: 72, sweep: 72 };
+
+/**
+ * A price for a group, from /api/batch-comps' answer for its head copy.
+ * Unpriced is null, never 0 — the list is refused while any group has none.
+ */
+export function priceFromComps(result) {
+  if (!result) return null;
+  const p = Number(result.suggested_price);
+  if (!Number.isFinite(p) || p <= 0) return null;
+  return Math.round(p * 100);
+}
+
+/** Groups that may not be listed yet, named — the exportGuard rule. */
+export function listBlockers(groups, priceOf) {
+  return (groups || []).filter((g) => priceOf(g.key) == null).map((g) => g.title);
+}

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CardUploaderCsv from "@/lib/carduploader.js";
-import { groupsFromItems, desiredFor, pickList, pilePositions, PHOTO_PROMISE } from "@/lib/lab-copies.js";
+import { groupsFromItems, desiredFor, pickList, pilePositions, listingForGroup, priceFromComps, listBlockers, PHOTO_PROMISE } from "@/lib/lab-copies.js";
 
 /**
  * The lab screen. Four parts, top to bottom: the scorecard the test is judged
@@ -33,6 +33,9 @@ export default function LabCopies() {
   const [lastCheck, setLastCheck] = useState(null);
   const [file, setFile] = useState(null); // { name, groups, refused }
   const [prices, setPrices] = useState({});
+  const [comps, setComps] = useState({}); // group key → { pence, confidence, n, flags, error }
+  const [progress, setProgress] = useState(null); // { label, done, total }
+  const [failures, setFailures] = useState([]); // [{ title, error }] from the last List all
   const [preview, setPreview] = useState(null); // group key
   const [settings, setSettings] = useState({ categoryId: "183454", postcode: "", shippingCost: "0", dispatchDays: "2", returnsDays: "14" });
 
@@ -137,19 +140,108 @@ export default function LabCopies() {
     return Math.round(Number(v) * 100);
   }
 
-  async function list(g) {
-    const pence = priceOf(g.key);
-    if (pence == null) { setMsg({ bad: true, text: "Type a price first." }); return; }
+  const joinOf = (g) => listingForGroup(lab?.listings || [], g);
+
+  /**
+   * Price every group from sold comps through /api/batch-comps — the app's
+   * own batch pricer, house rules and all, unchanged. One card per group (its
+   * head copy: the copies are the same card in the same condition), fifty to
+   * a request and one request at a time, as that route asks. A typed price is
+   * never overwritten; an unpriced group stays blank and blocks List all.
+   */
+  async function priceAll() {
+    const todo = (file?.groups || []).filter((g) => !joinOf(g));
+    if (!todo.length) return;
+    setBusy("price");
+    setMsg(null);
+    setProgress({ label: "Pricing from sold comps", done: 0, total: todo.length });
+    const next = {};
+    for (let i = 0; i < todo.length; i += 50) {
+      const chunk = todo.slice(i, i + 50);
+      const cards = chunk.map((g) => ({
+        sku: g.copies[0].sku, name: g.cardName, number: g.cardNumber, set: g.set, title: g.title, condition: g.condition, language: g.language
+      }));
+      try {
+        const res = await fetch("/api/batch-comps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards }) });
+        const j = await res.json();
+        if (!res.ok || !j.results) throw new Error(j.error || `Pricing answered ${res.status}.`);
+        const bySku = new Map(j.results.map((r) => [String(r.sku), r]));
+        for (const g of chunk) {
+          const r = bySku.get(String(g.copies[0].sku));
+          const flags = r?.flags ? Object.keys(r.flags).filter((k) => r.flags[k]) : [];
+          next[g.key] = { pence: priceFromComps(r), confidence: r?.confidence || null, n: r?.n_comps ?? null, flags };
+        }
+      } catch (e) {
+        for (const g of chunk) next[g.key] = { pence: null, error: e.message };
+      }
+      setProgress({ label: "Pricing from sold comps", done: Math.min(i + 50, todo.length), total: todo.length });
+    }
+    setComps((c) => ({ ...c, ...next }));
+    setPrices((p) => {
+      const out = { ...p };
+      for (const [k, v] of Object.entries(next)) if (!String(out[k] || "").trim() && v.pence != null) out[k] = (v.pence / 100).toFixed(2);
+      return out;
+    });
+    setProgress(null);
+    setBusy(null);
+  }
+
+  /** Every group in the file, one at a time: new listings and joins alike. */
+  async function listAll() {
+    const groups = file?.groups || [];
+    const blockers = listBlockers(groups.filter((g) => !joinOf(g)), priceOf);
+    if (blockers.length) {
+      setMsg({ bad: true, text: `No price yet for ${blockers.slice(0, 3).join(", ")}${blockers.length > 3 ? ` and ${blockers.length - 3} more` : ""}. Type one, or price from sold comps.` });
+      return;
+    }
+    const joins = groups.filter((g) => joinOf(g));
+    const fresh = groups.filter((g) => !joinOf(g));
+    const total = fresh.reduce((t, g) => t + priceOf(g.key) * g.copies.length, 0);
     const ok = window.confirm(
-      `List "${g.title}" on eBay — LIVE, real buyers can buy it.\n\n` +
-      `${g.condition} · quantity ${g.copies.length} · ${gbp(pence)} each\nShowing ${g.copies[0].sku}'s scans.\n\nList it?`
+      `List ${groups.length} card${groups.length === 1 ? "" : "s"} on eBay — LIVE.\n\n` +
+      `${fresh.length} new listing${fresh.length === 1 ? "" : "s"} (${fresh.reduce((t, g) => t + g.copies.length, 0)} copies, ${gbp(total)} in all)\n` +
+      `${joins.length} joining a listing already live (its price stays)\n\nGo?`
+    );
+    if (!ok) return;
+    setBusy("listAll");
+    setMsg(null);
+    setFailures([]);
+    const failed = [];
+    const done = new Set();
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      setProgress({ label: "Listing", done: i, total: groups.length });
+      const r = await api({ action: "create", group: g, pricePence: priceOf(g.key), settings: { ...settings, shippingCost: Number(settings.shippingCost) || 0 } });
+      if (r.ok) done.add(g.key);
+      else failed.push({ title: g.title, error: r.error || "Failed." });
+    }
+    setProgress(null);
+    setBusy(null);
+    setFailures(failed);
+    setFile((f) => f && { ...f, groups: f.groups.filter((x) => !done.has(x.key)) });
+    setMsg(failed.length
+      ? { bad: true, text: `${done.size} listed, ${failed.length} failed — see below. The failed ones are still in the list to retry.` }
+      : { text: `All ${done.size} listed.` });
+    await reload();
+  }
+
+  async function list(g) {
+    const joining = joinOf(g);
+    const pence = joining ? joining.price_pence : priceOf(g.key);
+    if (pence == null) { setMsg({ bad: true, text: "Type a price first." }); return; }
+    const ok = window.confirm(joining
+      ? `Add ${g.copies.length} cop${g.copies.length === 1 ? "y" : "ies"} to "${joining.title}" (eBay ${joining.ebay_item_id})?\n\nIts quantity goes up by ${g.copies.length}; its price stays at ${gbp(joining.price_pence)}.`
+      : `List "${g.title}" on eBay — LIVE, real buyers can buy it.\n\n` +
+        `${g.condition} · quantity ${g.copies.length} · ${gbp(pence)} each\nShowing ${g.copies[0].sku}'s scans.\n\nList it?`
     );
     if (!ok) return;
     await run(`list-${g.key}`, {
       action: "create", group: g, pricePence: pence,
       settings: { ...settings, shippingCost: Number(settings.shippingCost) || 0 }
     }, (r) => {
-      setMsg({ text: `Listed — eBay item ${r.itemId}.${r.warnings?.length ? ` eBay warned: ${r.warnings.join(" ")}` : ""}` });
+      setMsg({ text: r.joined
+        ? `Added to eBay ${r.itemId}: quantity ${r.from ?? "?"} → ${r.to}.`
+        : `Listed — eBay item ${r.itemId}.${r.warnings?.length ? ` eBay warned: ${r.warnings.join(" ")}` : ""}` });
       setFile((f) => f && { ...f, groups: f.groups.filter((x) => x.key !== g.key) });
       setPreview(null);
     });
@@ -166,6 +258,13 @@ export default function LabCopies() {
   }
 
   const previewGroup = file?.groups.find((g) => g.key === preview) || null;
+  const rank = (g) => {
+    if (joinOf(g)) return 3;
+    const c = comps[g.key];
+    if (priceOf(g.key) == null) return 0;
+    if (c && (c.confidence === "low" || c.confidence === "none" || (c.flags || []).length)) return 1;
+    return 2;
+  };
 
   return (
     <main style={{ maxWidth: 980, margin: "0 auto", padding: 16, color: "var(--ink)" }}>
@@ -327,16 +426,35 @@ export default function LabCopies() {
           <div style={{ marginTop: 12 }}>
             <div style={small}>{file.name}: {file.rows} rows → {file.groups.length} listing{file.groups.length === 1 ? "" : "s"}{file.refused.length ? `, ${file.refused.length} refused` : ""}.</div>
             {file.refused.map((r) => <div key={r.sku} style={{ fontSize: 13, color: "var(--warn)" }}>✗ {r.sku} — {r.why}</div>)}
-            {file.groups.map((g) => (
+            <div style={{ ...row, margin: "10px 0" }}>
+              <button className="btn" disabled={!!busy || !file.groups.some((g) => !joinOf(g))} onClick={priceAll}>
+                {busy === "price" ? "Pricing…" : "£ Price from sold comps"}
+              </button>
+              <button className="btn btn-primary" disabled={!!busy || !file.groups.length} onClick={listAll}>
+                {busy === "listAll" ? "Listing…" : `List all ${file.groups.length} on eBay (live)`}
+              </button>
+              {progress && <span style={small}>{progress.label}: {progress.done} of {progress.total}…</span>}
+            </div>
+            {failures.map((f, i) => <div key={i} style={{ fontSize: 13, color: "var(--bad)" }}>✗ {f.title} — {f.error}</div>)}
+            {/* Exceptions first: no price, a thin or flagged price, then the rest. */}
+            {file.groups.slice().sort((a, b) => rank(a) - rank(b)).map((g) => (
               <div key={g.key} style={{ ...row, borderTop: "1px solid var(--line)", padding: "8px 0" }}>
                 <img src={g.copies[0].scans[0]} alt="" style={thumb} referrerPolicy="no-referrer" />
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <div><strong>{g.title}</strong></div>
                   <div style={small}>{g.condition} · {g.copies.length} cop{g.copies.length === 1 ? "y" : "ies"}: {g.copies.map((c) => c.sku).join(", ")}</div>
+                  {joinOf(g) && (
+                    <div style={{ fontSize: 13, color: "var(--accent)" }}>
+                      Joins eBay {joinOf(g).ebay_item_id}: quantity +{g.copies.length}, price stays {gbp(joinOf(g).price_pence)}
+                    </div>
+                  )}
+                  {!joinOf(g) && comps[g.key] && <CompsNote c={comps[g.key]} typed={priceOf(g.key)} />}
                 </div>
-                <label className="field" style={{ width: 110 }}><span>Price £</span>
-                  <input inputMode="decimal" value={prices[g.key] || ""} onChange={(e) => setPrices((p) => ({ ...p, [g.key]: e.target.value }))} />
-                </label>
+                {!joinOf(g) && (
+                  <label className="field" style={{ width: 110 }}><span>Price £</span>
+                    <input inputMode="decimal" value={prices[g.key] || ""} onChange={(e) => setPrices((p) => ({ ...p, [g.key]: e.target.value }))} />
+                  </label>
+                )}
                 <button className="btn" onClick={() => setPreview(preview === g.key ? null : g.key)}>{preview === g.key ? "Close preview" : "Preview"}</button>
               </div>
             ))}
@@ -347,7 +465,8 @@ export default function LabCopies() {
           <div style={{ ...box, marginTop: 12, background: "var(--surface-2)" }}>
             <div style={small}>As a buyer will see it</div>
             <h3 style={{ margin: "6px 0" }}>{previewGroup.title}</h3>
-            <div>Condition: Ungraded · {previewGroup.condition} · {priceOf(previewGroup.key) != null ? gbp(priceOf(previewGroup.key)) : "no price yet"} · {previewGroup.copies.length} available</div>
+            <div>Condition: Ungraded · {previewGroup.condition} · {joinOf(previewGroup) ? `${gbp(joinOf(previewGroup).price_pence)} (the live listing's price)` : priceOf(previewGroup.key) != null ? gbp(priceOf(previewGroup.key)) : "no price yet"} · {previewGroup.copies.length} {joinOf(previewGroup) ? "more" : "available"}</div>
+            {joinOf(previewGroup) && <p style={small}>These copies join the back of eBay {joinOf(previewGroup).ebay_item_id}&apos;s queue. Its photos don&apos;t change until the copies in front of them sell.</p>}
             <div style={{ ...row, margin: "10px 0" }}>
               {previewGroup.copies[0].scans.map((u) => <img key={u} src={u} alt="" style={{ ...thumb, width: 120, height: 166 }} referrerPolicy="no-referrer" />)}
             </div>
@@ -356,8 +475,8 @@ export default function LabCopies() {
               These are {previewGroup.copies[0].sku}&apos;s scans. After it sells and you press Check for sales, the listing shows{" "}
               {previewGroup.copies[1] ? `${previewGroup.copies[1].sku}'s` : "nothing more: it was the only copy"}.
             </p>
-            <button className="btn btn-primary" disabled={!!busy || priceOf(previewGroup.key) == null} onClick={() => list(previewGroup)}>
-              {busy === `list-${previewGroup.key}` ? "Listing…" : "List on eBay (live)"}
+            <button className="btn btn-primary" disabled={!!busy || (!joinOf(previewGroup) && priceOf(previewGroup.key) == null)} onClick={() => list(previewGroup)}>
+              {busy === `list-${previewGroup.key}` ? "Listing…" : joinOf(previewGroup) ? "Add to the live listing" : "List on eBay (live)"}
             </button>
           </div>
         )}
@@ -377,5 +496,19 @@ export default function LabCopies() {
         </div>
       </section>
     </main>
+  );
+}
+
+/** What the sold comps said about one group, beside the price box. */
+function CompsNote({ c, typed }) {
+  if (c.error) return <div style={{ fontSize: 13, color: "var(--bad)" }}>Pricing failed: {c.error}</div>;
+  if (c.pence == null) return <div style={{ fontSize: 13, color: "var(--bad)" }}>No price from sold comps{c.n != null ? ` (${c.n} comps)` : ""}. Type one.</div>;
+  const thin = c.confidence === "low" || c.confidence === "none" || (c.flags || []).length;
+  return (
+    <div style={{ fontSize: 13, color: thin ? "var(--warn)" : "var(--ink-soft)" }}>
+      Sold comps: {gbp(c.pence)} · {c.n ?? "?"} comps · {c.confidence || "?"} confidence
+      {(c.flags || []).length ? ` · ${c.flags.join(", ").replace(/_/g, " ")}` : ""}
+      {typed != null && typed !== c.pence ? ` · you typed ${gbp(typed)}` : ""}
+    </div>
   );
 }

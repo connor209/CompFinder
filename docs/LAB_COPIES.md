@@ -110,6 +110,41 @@ the photos move on by themselves, usually within a minute.
 - **Turn off** on the same line stops the sale notifications for this
   account.
 
+## At scale (step 1)
+
+What changed so the lab can carry a real inventory instead of nine cards:
+
+- **A check only asks eBay about the listings that changed.** Those are a
+  listing that just had a copy reserved, the item a notification named, or a
+  listing whose photos are behind its queue (a revision that failed last
+  time). The last is decided from our own rows with no eBay call. Before this,
+  every check made one call per listing, which at 2,000 listings would use
+  most of eBay's daily allowance on a few sales.
+- **Orders are read over a narrow window:** two hours for a notification,
+  three days for the button and the sweep. The scorecard's last-check line
+  says how many orders it read and how many listings it asked eBay about.
+- **A nightly sweep** (`/api/lab/sweep`, 3:45am, after the existing sync)
+  runs the same check for every account with a live lab listing. eBay doesn't
+  promise every notification, so this is what catches a missed one. It's the
+  one line this step adds outside the lab's own files: an entry in
+  `apps/app/vercel.json`.
+- **New copies join a live listing.** A card and condition already listed
+  gets the new copies at the back of its queue, and its quantity goes up on
+  eBay. Its price stays: changing what a live listing asks is its own
+  decision. If eBay refuses the new quantity, the copies are taken back out.
+- **A whole export at once:**
+  - **£ Price from sold comps** prices every new group through the app's own
+    `/api/batch-comps`, unchanged, with the house rules applied.
+  - Groups with no price come first, then thin or flagged ones; the rest are
+    ready.
+  - **List all** is refused, naming the cards, while any new group has no
+    price. A typed price always wins over the comps one.
+  - Failures are listed and stay in the file to retry; the rest carry on.
+
+Migration `040_lab_scale.sql` adds the card key that joining matches on, plus
+two indexes. Until it is run, listings are still made, and joining falls back
+to matching on title and condition.
+
 ## The gate
 
 Run it for two weeks. It passes when:

@@ -10,6 +10,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
+  listingForGroup, nextCopySeqs, listingsToTouch, priceFromComps, listBlockers, ORDER_WINDOW_HOURS,
   groupsFromItems, groupKey, queueOf, desiredFor, planFor, assignSales, unitKey, pickList, pilePositions, isForSale
 } from "../apps/app/lib/lab-copies.js";
 
@@ -97,6 +98,30 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("an ended listing is not", isTransientEbayError("You are not allowed to revise ended listings."), false);
 }
 
+// ---- scale: only what changed ---------------------------------------------------------
+{
+  const g = { key: "lapras|36/236|cosmic eclipse|NM", title: "Lapras NM", condition: "NM" };
+  const live = { id: "A", ebay_item_id: "111", card_key: g.key, title: "x", condition: "NM" };
+  eq("new copies join the live listing for the same card + condition", listingForGroup([live], g)?.id, "A");
+  eq("…never an ended one", listingForGroup([{ ...live, ended_at: "x" }], g), null);
+  eq("…never another condition", listingForGroup([{ ...live, card_key: "lapras|36/236|cosmic eclipse|LP" }], g), null);
+  eq("an older listing with no key joins on title + condition", listingForGroup([{ id: "B", ebay_item_id: "2", card_key: null, title: "Lapras NM", condition: "nm" }], g)?.id, "B");
+  eq("joining copies go to the back of the queue", nextCopySeqs([C("c1", "A", 1), C("c2", "A", 5), C("x", "B", 9)], "A", 2), [6, 7]);
+
+  const listings = [L("A", "111", "c1"), L("B", "222", "b1"), L("D", "444", "d2")];
+  const copies = [C("c1", "A", 1), C("c2", "A", 2), C("b1", "B", 3), C("d1", "D", 4, { reserved_line: "z#1" }), C("d2", "D", 5)];
+  eq("nothing changed → eBay is asked about nothing", listingsToTouch(listings, copies).map((l) => l.id), []);
+  eq("a reserved listing is asked about", listingsToTouch(listings, copies, { reservedListingIds: ["A"] }).map((l) => l.id), ["A"]);
+  eq("the notified item is asked about", listingsToTouch(listings, copies, { itemId: "222" }).map((l) => l.id), ["B"]);
+  const behind = [L("A", "111", "c1"), L("B", "222", "b1"), L("D", "444", "d1")];
+  eq("photos behind the queue (a failed revision) are retried, from our rows alone", listingsToTouch(behind, copies).map((l) => l.id), ["D"]);
+  eq("a notification reads a narrow window", ORDER_WINDOW_HOURS.notification <= 6, true);
+
+  eq("a comps price is pence", priceFromComps({ suggested_price: 12.49 }), 1249);
+  eq("an unpriced card is null, not zero", [priceFromComps({ suggested_price: 0 }), priceFromComps({ suggested_price: null }), priceFromComps(null)], [null, null, null]);
+  eq("List all is refused naming the unpriced", listBlockers([{ key: "a", title: "Mew" }, { key: "b", title: "Lugia" }], (k) => (k === "a" ? 249 : null)), ["Lugia"]);
+}
+
 // ---- where a copy is in the pile --------------------------------------------------
 {
   const copies = [C("c1", "A", 1, { reserved_line: "a#1" }), C("c2", "A", 2, { pulled_at: "x" }), C("c3", "A", 3, { reserved_line: "b#1" }), C("c4", "B", 4)];
@@ -107,7 +132,7 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
 // ---- the side build stays on the side ----------------------------------------------
 {
   const root = new URL("../apps/app/", import.meta.url).pathname;
-  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js"]);
+  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js", "app/api/lab/sweep/route.js"]);
   const offenders = [];
   const offendersOf = (needle, okFiles) => {
     const out = [];
@@ -142,9 +167,11 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   const store = readFileSync(join(root, "lib/lab-store.js"), "utf8");
   const reads = store.match(/\.from\(LAB_TABLES\.\w+\)[^;]*/g) || [];
   // ownerOfLiveItem is the one exception, by design: it is how a notification finds its user.
-  eq("every lab-store read or write filters on user_id", reads.filter((r) => !/insert\(/.test(r) && !/"user_id", userId/.test(r) && !/select\("id, user_id, checked_at"\)/.test(r)), []);
+  eq("every lab-store read or write filters on user_id", reads.filter((r) => !/insert\(/.test(r) && !/"user_id", userId/.test(r) && !/select\("id, user_id, checked_at"\)/.test(r) && !/select\("user_id"\)/.test(r)), []);
+  eq("…the sweep's user list is only read by the sweep", offendersOf("usersWithLiveListings", ["lib/lab-store.js", "app/api/lab/sweep/route.js"]), []);
   eq("…and the one that doesn't is only called by the notification route", offendersOf("ownerOfLiveItem", ["lib/lab-store.js", "app/api/lab/ebay-notify/route.js"]), []);
   const run = readFileSync(join(root, "lib/lab-run.js"), "utf8");
+  eq("a check never asks eBay about every listing", /for \(const l of live\)[^}]*fetchItemQuantity/.test(run), false);
   eq("the lab-run never writes the app's own stock tables", /stack_cards|stock_checkouts|listing_copy_state|ebay_listings/.test(run), false);
   const route = readFileSync(join(root, "app/api/lab/route.js"), "utf8");
   eq("the lab never writes the app's own stock tables", /stack_cards|stock_checkouts|listing_copy_state|ebay_listings/.test(route + store), false);

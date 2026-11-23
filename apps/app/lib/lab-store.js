@@ -32,9 +32,22 @@ export async function logEvent(sb, userId, listingId, kind, detail = {}) {
 
 /** The listing row first, so its copies have something to belong to. */
 export async function insertListing(sb, userId, row) {
-  const { data, error } = await sb.from(LAB_TABLES.listings).insert({ ...row, user_id: userId }).select("*").single();
+  let { data, error } = await sb.from(LAB_TABLES.listings).insert({ ...row, user_id: userId }).select("*").single();
+  // card_key arrives with migration 040. Before it is run the column is
+  // missing and Postgres refuses the whole insert, so try once without it:
+  // the listing is still made, it just can't be joined by key later.
+  if (error && "card_key" in row && /card_key/.test(error.message || "")) {
+    const { card_key, ...rest } = row; // eslint-disable-line no-unused-vars
+    ({ data, error } = await sb.from(LAB_TABLES.listings).insert({ ...rest, user_id: userId }).select("*").single());
+  }
   if (error) throw new Error(error.message);
   return data;
+}
+
+export async function deleteCopies(sb, userId, ids) {
+  if (!ids.length) return;
+  const { error } = await sb.from(LAB_TABLES.copies).delete().eq("user_id", userId).in("id", ids);
+  if (error) throw new Error(error.message);
 }
 
 export async function insertCopies(sb, userId, listingId, copies) {
@@ -115,4 +128,17 @@ export async function ownerOfLiveItem(admin, itemId) {
     .select("id, user_id, checked_at").eq("ebay_item_id", id).is("ended_at", null).limit(1);
   if (error || !data?.length) return null;
   return { listingId: data[0].id, userId: data[0].user_id, checkedAt: data[0].checked_at };
+}
+
+/**
+ * Every account with a live lab listing — what the nightly sweep walks. The
+ * second (and last) read not filtered on a user, for the same reason as
+ * ownerOfLiveItem: it is how a job with no user finds its users. Admin client,
+ * app/api/lab/sweep only.
+ */
+export async function usersWithLiveListings(admin) {
+  const { data, error } = await admin.from(LAB_TABLES.listings)
+    .select("user_id").not("ebay_item_id", "is", null).is("ended_at", null);
+  if (error) throw new Error(error.message);
+  return [...new Set((data || []).map((r) => r.user_id))];
 }
