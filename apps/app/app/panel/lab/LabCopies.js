@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CardUploaderCsv from "@/lib/carduploader.js";
+import { renderListing } from "@/lib/listing-template.js";
 import { groupsFromItems, desiredFor, pickList, pilePositions, displayOrder, listingForGroup, priceFromComps, listBlockers, removeBlocker, PHOTO_PROMISE } from "@/lib/lab-copies.js";
 
 /**
@@ -33,18 +34,14 @@ export default function LabCopies() {
   const [lastCheck, setLastCheck] = useState(null);
   const [file, setFile] = useState(null); // { name, groups, refused }
   const [prices, setPrices] = useState({});
-  const [comps, setComps] = useState({}); // group key → { pence, confidence, n, flags, error }
+  const [comps, setComps] = useState({});
+  const [subtypes, setSubtypes] = useState({}); // group key → subtype // group key → { pence, confidence, n, flags, error }
   const [progress, setProgress] = useState(null); // { label, done, total }
   const [failures, setFailures] = useState([]); // [{ title, error }] from the last List all
   const [preview, setPreview] = useState(null); // group key
   const [settings, setSettings] = useState({ categoryId: "183454", postcode: "", shippingCost: "0", dispatchDays: "2", returnsDays: "14" });
 
   useEffect(() => { setSettings((s) => ({ ...s, ...loadSettings() })); }, []);
-  const saveSettings = (patch) => setSettings((s) => {
-    const next = { ...s, ...patch };
-    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(next)); } catch {}
-    return next;
-  });
 
   const reload = useCallback(async () => setLab(await api()), []);
   useEffect(() => { reload(); }, [reload]);
@@ -122,8 +119,15 @@ export default function LabCopies() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const items = CardUploaderCsv.extractItems(String(reader.result || ""));
-        const { groups, refused } = groupsFromItems(items);
+        const text = String(reader.result || "");
+        const items = CardUploaderCsv.extractItems(text);
+        // Finish and set code are in the file but not in extractItems' shape.
+        // Read them off the raw rows, filtered the same way so index i is the
+        // same card on both sides.
+        const raw = CardUploaderCsv.rowsToObjects(CardUploaderCsv.parseCsv(text))
+          .filter((r) => (r["*C:Card Name"] || "").trim() && (r["*C:Card Number"] || "").trim());
+        const extras = raw.map((r) => ({ finish: (r["*C:Finish"] || "").trim(), setCode: (r["*C:Set Code"] || r["C:Set Code"] || "").trim() }));
+        const { groups, refused } = groupsFromItems(items, extras.length === items.length ? extras : []);
         setFile({ name: f.name, groups, refused, rows: items.length });
         setPreview(null);
       } catch (err) {
@@ -141,6 +145,8 @@ export default function LabCopies() {
   }
 
   const joinOf = (g) => listingForGroup(lab?.listings || [], g);
+  /** What a new listing for this group will say — the same function the server lists with. */
+  const renderOf = (g) => renderListing({ ...settings, ...(lab?.listingSettingsSaved ? lab.listingSettings : {}) }, g, { subtype: subtypes[g.key] || "", pricePence: priceOf(g.key) });
 
   /**
    * Price every group from sold comps through /api/batch-comps — the app's
@@ -211,7 +217,7 @@ export default function LabCopies() {
     for (let i = 0; i < groups.length; i++) {
       const g = groups[i];
       setProgress({ label: "Listing", done: i, total: groups.length });
-      const r = await api({ action: "create", group: g, pricePence: priceOf(g.key), settings: { ...settings, shippingCost: Number(settings.shippingCost) || 0 } });
+      const r = await api({ action: "create", group: g, pricePence: priceOf(g.key), subtype: subtypes[g.key] || "", marketPence: comps[g.key]?.pence ?? null, settings: { ...settings, shippingCost: Number(settings.shippingCost) || 0 } });
       if (r.ok) done.add(g.key);
       else failed.push({ title: g.title, error: r.error || "Failed." });
     }
@@ -236,7 +242,7 @@ export default function LabCopies() {
     );
     if (!ok) return;
     await run(`list-${g.key}`, {
-      action: "create", group: g, pricePence: pence,
+      action: "create", group: g, pricePence: pence, subtype: subtypes[g.key] || "", marketPence: comps[g.key]?.pence ?? null,
       settings: { ...settings, shippingCost: Number(settings.shippingCost) || 0 }
     }, (r) => {
       setMsg({ text: r.joined
@@ -268,7 +274,10 @@ export default function LabCopies() {
 
   return (
     <main style={{ maxWidth: 980, margin: "0 auto", padding: 16, color: "var(--ink)" }}>
-      <h1 style={{ marginBottom: 4 }}>Lab · quantity listings</h1>
+      <div style={{ ...row, justifyContent: "space-between" }}>
+        <h1 style={{ marginBottom: 4 }}>Lab · quantity listings</h1>
+        <a className="btn btn-ghost" href="/panel/lab/settings">⚙ Listing settings</a>
+      </div>
       <p style={small}>
         A side build. One listing per card and condition at quantity N, showing the copy that goes next. It has its
         own tables, and nothing else in the app reads them. See <code>docs/LAB_COPIES.md</code>.
@@ -421,17 +430,11 @@ export default function LabCopies() {
         <div style={row}>
           <input type="file" accept=".csv,text/csv" onChange={onFile} />
         </div>
-        <details style={{ marginTop: 10 }}>
-          <summary style={small}>Listing settings</summary>
-          <div style={{ ...row, marginTop: 8 }}>
-            <label className="field"><span>Category ID</span><input value={settings.categoryId} onChange={(e) => saveSettings({ categoryId: e.target.value })} /></label>
-            <label className="field"><span>Postcode</span><input value={settings.postcode} onChange={(e) => saveSettings({ postcode: e.target.value })} /></label>
-            <label className="field"><span>Postage £</span><input value={settings.shippingCost} onChange={(e) => saveSettings({ shippingCost: e.target.value })} /></label>
-            <label className="field"><span>Dispatch days</span><input value={settings.dispatchDays} onChange={(e) => saveSettings({ dispatchDays: e.target.value })} /></label>
-            <label className="field"><span>Returns days (blank = none)</span><input value={settings.returnsDays} onChange={(e) => saveSettings({ returnsDays: e.target.value })} /></label>
-          </div>
-          <p style={small}>If your eBay business policies are linked in Settings, those are used for postage and returns instead.</p>
-        </details>
+        <p style={{ ...small, marginTop: 10 }}>
+          Titles, descriptions, shop images, Best Offer and defaults:{" "}
+          <a href="/panel/lab/settings">Listing settings →</a>
+          {lab?.listingSettingsMissing ? " (run migration 041 to save them)" : !lab?.listingSettingsSaved ? " (none saved yet — using the defaults)" : ""}
+        </p>
 
         {file?.error && <p style={{ color: "var(--bad)" }}>{file.error}</p>}
         {file && !file.error && (
@@ -453,7 +456,7 @@ export default function LabCopies() {
               <div key={g.key} style={{ ...row, borderTop: "1px solid var(--line)", padding: "8px 0" }}>
                 <img src={g.copies[0].scans[0]} alt="" style={thumb} referrerPolicy="no-referrer" />
                 <div style={{ flex: 1, minWidth: 200 }}>
-                  <div><strong>{g.title}</strong></div>
+                  <div><strong>{joinOf(g) ? joinOf(g).title : renderOf(g).title}</strong>{!joinOf(g) && renderOf(g).titleCut && <span style={{ color: "var(--warn)", fontSize: 12 }}> · title cut at 80</span>}</div>
                   <div style={small}>{g.condition} · {g.copies.length} cop{g.copies.length === 1 ? "y" : "ies"}: {g.copies.map((c) => c.sku).join(", ")}</div>
                   {joinOf(g) && (
                     <div style={{ fontSize: 13, color: "var(--accent)" }}>
@@ -462,6 +465,14 @@ export default function LabCopies() {
                   )}
                   {!joinOf(g) && comps[g.key] && <CompsNote c={comps[g.key]} typed={priceOf(g.key)} />}
                 </div>
+                {!joinOf(g) && (lab?.listingSettings?.subtypes || []).length > 0 && (
+                  <label className="field" style={{ width: 120 }}><span>Subtype</span>
+                    <select value={subtypes[g.key] || ""} onChange={(e) => setSubtypes((t) => ({ ...t, [g.key]: e.target.value }))}>
+                      <option value="">—</option>
+                      {lab.listingSettings.subtypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </label>
+                )}
                 {!joinOf(g) && (
                   <label className="field" style={{ width: 110 }}><span>Price £</span>
                     <input inputMode="decimal" value={prices[g.key] || ""} onChange={(e) => setPrices((p) => ({ ...p, [g.key]: e.target.value }))} />
@@ -476,13 +487,25 @@ export default function LabCopies() {
         {previewGroup && (
           <div style={{ ...box, marginTop: 12, background: "var(--surface-2)" }}>
             <div style={small}>As a buyer will see it</div>
-            <h3 style={{ margin: "6px 0" }}>{previewGroup.title}</h3>
+            <h3 style={{ margin: "6px 0" }}>{joinOf(previewGroup) ? joinOf(previewGroup).title : renderOf(previewGroup).title}</h3>
+            {!joinOf(previewGroup) && renderOf(previewGroup).titleCut && (
+              <div style={{ fontSize: 13, color: "var(--warn)" }}>Title cut at 80 characters — lost: “{renderOf(previewGroup).titleFull.slice(renderOf(previewGroup).title.length).trim()}”</div>
+            )}
             <div>Condition: Ungraded · {previewGroup.condition} · {joinOf(previewGroup) ? `${gbp(joinOf(previewGroup).price_pence)} (the live listing's price)` : priceOf(previewGroup.key) != null ? gbp(priceOf(previewGroup.key)) : "no price yet"} · {previewGroup.copies.length} {joinOf(previewGroup) ? "more" : "available"}</div>
             {joinOf(previewGroup) && <p style={small}>These copies join the back of eBay {joinOf(previewGroup).ebay_item_id}&apos;s queue. Its photos don&apos;t change until the copies in front of them sell.</p>}
             <div style={{ ...row, margin: "10px 0" }}>
-              {previewGroup.copies[0].scans.map((u) => <img key={u} src={u} alt="" style={{ ...thumb, width: 120, height: 166 }} referrerPolicy="no-referrer" />)}
+              {(joinOf(previewGroup) ? previewGroup.copies[0].scans : renderOf(previewGroup).pictures).map((u) => (
+                <img key={u} src={u} alt="" style={{ ...thumb, width: 120, height: 166, outline: previewGroup.copies[0].scans.includes(u) ? "none" : "2px dashed var(--line-strong)" }} referrerPolicy="no-referrer" />
+              ))}
             </div>
-            <p style={small}>{PHOTO_PROMISE}</p>
+            {!joinOf(previewGroup) && renderOf(previewGroup).extraImages.length > 0 && <p style={small}>Dashed: your shop images. The rest are this copy&apos;s scans.</p>}
+            {!joinOf(previewGroup) ? (
+              <iframe title="Description" sandbox="" style={{ width: "100%", minHeight: 240, background: "#fff", borderRadius: 8, border: "1px solid var(--line)" }}
+                srcDoc={`<!doctype html><meta charset="utf-8"><body style="font-family:Arial,sans-serif;font-size:14px;color:#111;padding:12px">${renderOf(previewGroup).descriptionHtml}</body>`} />
+            ) : <p style={small}>{PHOTO_PROMISE}</p>}
+            {!joinOf(previewGroup) && renderOf(previewGroup).bestOffer && !renderOf(previewGroup).bestOffer.error && (
+              <p style={small}>Best Offer on{renderOf(previewGroup).bestOffer.autoAcceptPence != null ? ` · accepts ${gbp(renderOf(previewGroup).bestOffer.autoAcceptPence)}+` : ""}{renderOf(previewGroup).bestOffer.minPence != null ? ` · declines under ${gbp(renderOf(previewGroup).bestOffer.minPence)}` : ""}</p>
+            )}
             <p style={small}>
               These are {previewGroup.copies[0].sku}&apos;s scans. After it sells and you press Check for sales, the listing shows{" "}
               {previewGroup.copies[1] ? `${previewGroup.copies[1].sku}'s` : "nothing more: it was the only copy"}.

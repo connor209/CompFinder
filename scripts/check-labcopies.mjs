@@ -133,6 +133,64 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("…nor on an ended listing", /ended/.test(removeBlocker(copies[1], { ...l, ended_at: "t" }, copies)), true);
 }
 
+// ---- the database image is never a scan ---------------------------------------------
+{
+  const { splitScans } = await import("../apps/app/lib/lab-copies.js");
+  // Off a real export: two scans under /cards/, CardUploader's database image under /catalog/.
+  const urls = [
+    "https://images.carduploader.com/cards/2026/11/23/d389b0784180cdeaeffeffd92675cbff.jpg",
+    "https://images.carduploader.com/cards/2026/11/23/989e38048ff2bca314a6ad692f3aa000.jpg",
+    "https://images.carduploader.com/catalog/japanese_pokemon_cards/2026/10/26/3cf6.jpg"
+  ];
+  const sp = splitScans(urls);
+  eq("the /catalog/ picture is the database image, not a scan", [sp.scans.length, sp.dbImage], [2, urls[2]]);
+  eq("…whatever position it sits in", splitScans([urls[2], urls[0]]).scans, [urls[0]]);
+  const { groups, refused } = groupsFromItems([
+    { sku: "CS-9PDUJK", title: "Mareep", cardName: "Mareep", cardNumber: "002/020", set: "Zeraora Deck", condition: "NM", images: urls },
+    { sku: "TEST3-1", title: "Mareep", cardName: "Mareep", cardNumber: "002/020", set: "Zeraora Deck", condition: "NM", images: [urls[2]] },
+    { sku: "TEST3-2", title: "Mareep", cardName: "Mareep", cardNumber: "002/020", set: "Zeraora Deck", condition: "NM", images: urls }
+  ]);
+  eq("a CardUploader SKU is refused, saying how to fix it", /Automatic eBay Inventory/.test(refused.find((r) => r.sku === "CS-9PDUJK")?.why || ""), true);
+  eq("a row with only a database image has no scans to list", /only a database image/.test(refused.find((r) => r.sku === "TEST3-1")?.why || ""), true);
+  eq("the copy's scans never include the database image", groups[0].copies[0].scans.includes(urls[2]), false);
+  eq("…which the group keeps for the inventory view", groups[0].dbImage, urls[2]);
+}
+
+// ---- templates ----------------------------------------------------------------------
+{
+  const T = await import("../apps/app/lib/listing-template.js");
+  const card = { name: "Mareep", number: "002/020", set: "Zeraora Deck", finish: "Holo", condition: "NM", language: "Japanese", game: "Pokémon TCG", sku: "TEST2-1" };
+  const t1 = T.buildTitle({ abbreviateCondition: true, parts: [{ type: "field", key: "name" }, { type: "field", key: "number" }, { type: "field", key: "set" }, { type: "field", key: "language", upper: true }, { type: "field", key: "condition" }] }, card);
+  eq("a title from parts, capitals where asked", t1.text, "Mareep 002/020 Zeraora Deck JAPANESE NM");
+  eq("condition spelled out when not abbreviated", T.buildTitle({ abbreviateCondition: false, parts: [{ type: "field", key: "condition" }] }, card).text, "Near Mint");
+  eq("an empty part leaves no double space", T.buildTitle({ parts: [{ type: "field", key: "name" }, { type: "field", key: "rarity" }, { type: "text", value: "TCG" }] }, card).text, "Mareep TCG");
+  const long = T.buildTitle({ parts: [{ type: "field", key: "name" }, { type: "text", value: "x".repeat(30) + " " + "y".repeat(30) + " " + "z".repeat(30) }] }, card);
+  eq("over 80 is cut at a whole word, and says so", [long.cut, long.text.length <= 80, long.text.endsWith("y".repeat(30))], [true, true, true]);
+  const d = T.renderDescription("<p>{name} — {set}</p><p>{bogus}</p>", { ...card, name: "<b>M</b>" });
+  eq("placeholders are filled and escaped", d.html.startsWith("<p>&lt;b&gt;M&lt;/b&gt; — Zeraora Deck</p>"), true);
+  eq("an unknown placeholder is reported, not dropped", d.unknown, ["bogus"]);
+  eq("the photo promise is always appended", d.html.includes(T.PHOTO_PROMISE), true);
+  eq("scripts are refused at save", /Scripts/.test(T.descriptionProblem("<script>x</script>") || ""), true);
+  eq("event handlers are refused", /Event handlers/.test(T.descriptionProblem('<img src=x onerror="a()">') || ""), true);
+  eq("plain HTML is fine", T.descriptionProblem("<p><b>Thanks</b> for looking</p>"), null);
+  eq("shop images go first, after the first scan, and last", T.arrangePictures(["s1", "s2"], [{ url: "L", position: "last" }, { url: "F", position: "first" }, { url: "S", position: "second" }, { url: "off", enabled: false }]), ["F", "s1", "S", "s2", "L"]);
+  const many = T.arrangePictures(Array.from({ length: 20 }, (_, i) => `s${i}`), Array.from({ length: 6 }, (_, i) => ({ url: `shop${i}`, position: "last" })));
+  eq("over 24 pictures drops shop images, never scans", [many.length, many.filter((u) => /^s\d+$/.test(u)).length], [24, 20]);
+  eq("Best Offer thresholds in pence", T.bestOfferFor({ enabled: true, autoAcceptPct: "90", minPct: "70" }, 1000), { autoAcceptPence: 900, minPence: 700 });
+  eq("accept below decline is refused", Boolean(T.bestOfferFor({ enabled: true, autoAcceptPct: "60", minPct: "70" }, 1000).error), true);
+  eq("Best Offer off sends nothing", T.bestOfferFor({ enabled: false }, 1000), null);
+  eq("a title without the card name can't be saved", T.settingsProblems(T.withDefaults({ title: { parts: [{ type: "text", value: "x" }] } })).some((p) => /card name/.test(p)), true);
+  eq("an empty saved row reads as the defaults", T.withDefaults(null).categoryId, "183454");
+  const r = T.renderListing({ shopImages: [{ url: "BANNER", position: "first" }] }, { condition: "NM", card, copies: [{ sku: "TEST2-1", scans: ["a", "b"] }] }, { pricePence: 249 });
+  eq("renderListing: what the preview shows is what the server sends", [r.pictures, r.title.startsWith("Mareep 002/020")], [["BANNER", "a", "b"], true]);
+
+  // Rotation keeps the listing's own shop images, and only swaps the scans.
+  const { desiredFor } = await import("../apps/app/lib/lab-copies.js");
+  const listing = { id: "A", ebay_item_id: "1", extra_images: [{ url: "BANNER", position: "first" }] };
+  const cps = [{ id: "c1", listing_id: "A", copy_seq: 0, scan_urls: ["c1a"], reserved_line: "x#1" }, { id: "c2", listing_id: "A", copy_seq: 1, scan_urls: ["c2a", "c2b"] }];
+  eq("a rotation keeps the shop images and swaps the scans", desiredFor(listing, cps).pictureUrls, ["BANNER", "c2a", "c2b"]);
+}
+
 // ---- where a copy is in the pile --------------------------------------------------
 {
   const copies = [C("c1", "A", 1, { reserved_line: "a#1" }), C("c2", "A", 2, { pulled_at: "x" }), C("c3", "A", 3, { reserved_line: "b#1" }), C("c4", "B", 4)];
@@ -156,7 +214,7 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
 // ---- the side build stays on the side ----------------------------------------------
 {
   const root = new URL("../apps/app/", import.meta.url).pathname;
-  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js", "app/api/lab/sweep/route.js"]);
+  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js", "app/api/lab/sweep/route.js", "app/panel/lab/settings/ListingSettings.js", "app/panel/lab/settings/page.js", "lib/listing-template.js"]);
   const offenders = [];
   const offendersOf = (needle, okFiles) => {
     const out = [];
@@ -191,7 +249,7 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   const store = readFileSync(join(root, "lib/lab-store.js"), "utf8");
   const reads = store.match(/\.from\(LAB_TABLES\.\w+\)[^;]*/g) || [];
   // ownerOfLiveItem is the one exception, by design: it is how a notification finds its user.
-  eq("every lab-store read or write filters on user_id", reads.filter((r) => !/insert\(/.test(r) && !/"user_id", userId/.test(r) && !/select\("id, user_id, checked_at"\)/.test(r) && !/select\("user_id"\)/.test(r)), []);
+  eq("every lab-store read or write filters on user_id", reads.filter((r) => !/insert\(/.test(r) && !/upsert\(\{ user_id: userId/.test(r) && !/"user_id", userId/.test(r) && !/select\("id, user_id, checked_at"\)/.test(r) && !/select\("user_id"\)/.test(r)), []);
   eq("…the sweep's user list is only read by the sweep", offendersOf("usersWithLiveListings", ["lib/lab-store.js", "app/api/lab/sweep/route.js"]), []);
   eq("…and the one that doesn't is only called by the notification route", offendersOf("ownerOfLiveItem", ["lib/lab-store.js", "app/api/lab/ebay-notify/route.js"]), []);
   const run = readFileSync(join(root, "lib/lab-run.js"), "utf8");

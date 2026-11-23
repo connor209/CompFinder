@@ -1,6 +1,6 @@
 # Listing studio: settings, templates and the inventory view
 
-23 Nov 2026 · plan, nothing built yet
+23 Nov 2026 · **A and B built** (migration 041, `/panel/lab/settings`); C not yet
 
 CompFinder owns listing; CardUploader is used once per stack, for
 recognition only. The lab proved the listing method (`docs/LAB_COPIES.md`).
@@ -199,6 +199,13 @@ Purely additive, like 039 and 040, and named in one file.
    piece that rewrites live listings in bulk.
 
 ## Questions before building
+
+**Answered 23 Nov:** the existing `listing-photos` bucket; one default
+shipping policy, so no price bands; no watermark. The database image is in
+the export: CardUploader appends it to `PicURL`, under `/catalog/` where
+scans are under `/cards/`, and `splitScans()` separates them by that path.
+The export must carry your location SKUs, which means CardUploader's
+Automatic eBay Inventory is OFF; a `CS-` SKU is refused with that reason.
 
 1. **Where should the shop images live?** The app already has one Supabase
    storage bucket, and six small images is nothing to store. Or you paste a

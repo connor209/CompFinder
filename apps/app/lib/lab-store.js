@@ -6,7 +6,7 @@
  * everybody's lab.
  */
 
-export const LAB_TABLES = { listings: "lab_listings", copies: "lab_copies", events: "lab_events" };
+export const LAB_TABLES = { listings: "lab_listings", copies: "lab_copies", events: "lab_events", settings: "listing_settings" };
 
 /** Postgres saying the table isn't there: migration 039 has not been run. */
 export function isMissingLab(err) {
@@ -31,17 +31,35 @@ export async function logEvent(sb, userId, listingId, kind, detail = {}) {
 }
 
 /** The listing row first, so its copies have something to belong to. */
+/**
+ * Columns added by later migrations (040, 041). Postgres refuses a whole
+ * insert that names a missing column, so an insert that fails on one of
+ * these is tried again without them: the listing is still made, it just
+ * carries less. Every one is optional for exactly that reason.
+ */
+const OPTIONAL_LISTING_COLUMNS = ["card_key", "card", "subtype", "extra_images", "db_image_url", "market_pence", "market_at"];
+
 export async function insertListing(sb, userId, row) {
   let { data, error } = await sb.from(LAB_TABLES.listings).insert({ ...row, user_id: userId }).select("*").single();
-  // card_key arrives with migration 040. Before it is run the column is
-  // missing and Postgres refuses the whole insert, so try once without it:
-  // the listing is still made, it just can't be joined by key later.
-  if (error && "card_key" in row && /card_key/.test(error.message || "")) {
-    const { card_key, ...rest } = row; // eslint-disable-line no-unused-vars
+  if (error && OPTIONAL_LISTING_COLUMNS.some((c) => c in row && new RegExp(`\\b${c}\\b`).test(error.message || ""))) {
+    const rest = Object.fromEntries(Object.entries(row).filter(([k]) => !OPTIONAL_LISTING_COLUMNS.includes(k)));
     ({ data, error } = await sb.from(LAB_TABLES.listings).insert({ ...rest, user_id: userId }).select("*").single());
   }
   if (error) throw new Error(error.message);
   return data;
+}
+
+/** The account's listing settings, or null if none saved (or migration 041 not run). */
+export async function loadListingSettings(sb, userId) {
+  const { data, error } = await sb.from(LAB_TABLES.settings).select("settings, updated_at").eq("user_id", userId).maybeSingle();
+  if (error) return { settings: null, missing: isMissingLab(error) || /listing_settings/.test(error.message || ""), error: error.message };
+  return { settings: data?.settings || null, updatedAt: data?.updated_at || null };
+}
+
+export async function saveListingSettings(sb, userId, settings) {
+  const { error } = await sb.from(LAB_TABLES.settings)
+    .upsert({ user_id: userId, settings, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) throw new Error(/listing_settings/.test(error.message || "") ? "Run migration 041 in Supabase first — listing settings have nowhere to be saved yet." : error.message);
 }
 
 export async function deleteCopies(sb, userId, ids) {

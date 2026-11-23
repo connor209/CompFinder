@@ -36,7 +36,7 @@ export async function addLabListing(accessToken, L) {
   if (!descriptor) throw new Error(`Condition ${L.condition} can't be listed as an ungraded card.`);
   const qty = Number(L.quantity);
   if (!Number.isInteger(qty) || qty < 1) throw new Error("Quantity must be at least 1.");
-  const pics = (L.scanUrls || []).filter(Boolean);
+  const pics = (L.pictureUrls || L.scanUrls || []).filter(Boolean);
   if (!pics.length) throw new Error("No scans to show.");
 
   const specifics = [
@@ -66,13 +66,25 @@ export async function addLabListing(accessToken, L) {
       (L.returnsDays ? `<ReturnsWithinOption>Days_${parseInt(L.returnsDays, 10)}</ReturnsWithinOption><ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>` : "") +
       `</ReturnPolicy>`;
 
-  const description = `<p>${x(L.title)}</p><p>${x(PHOTO_PROMISE)}</p>`;
+  // A template's rendering (lib/listing-template.js) when there is one; it
+  // already carries the photo promise. The bare fallback carries it too.
+  const description = L.descriptionHtml || `<p>${x(L.title)}</p><p>${x(PHOTO_PROMISE)}</p>`;
+  const bo = L.bestOffer || null;
+  const bestOffer = bo
+    ? `<BestOfferDetails><BestOfferEnabled>true</BestOfferEnabled></BestOfferDetails>` +
+      (bo.autoAcceptPence != null || bo.minPence != null
+        ? `<ListingDetails>` +
+          (bo.autoAcceptPence != null ? `<BestOfferAutoAcceptPrice currencyID="GBP">${(bo.autoAcceptPence / 100).toFixed(2)}</BestOfferAutoAcceptPrice>` : "") +
+          (bo.minPence != null ? `<MinimumBestOfferPrice currencyID="GBP">${(bo.minPence / 100).toFixed(2)}</MinimumBestOfferPrice>` : "") +
+          `</ListingDetails>`
+        : "")
+    : "";
 
   const body =
     `<?xml version="1.0" encoding="utf-8"?>` +
     `<AddFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><Item>` +
     `<Title>${x(String(L.title).slice(0, 80))}</Title>` +
-    `<Description><![CDATA[${description}]]></Description>` +
+    `<Description><![CDATA[${String(description).replace(/]]>/g, "]]&gt;")}]]></Description>` +
     `<PrimaryCategory><CategoryID>${x(L.categoryId || "183454")}</CategoryID></PrimaryCategory>` +
     `<StartPrice>${(Number(L.pricePence) / 100).toFixed(2)}</StartPrice>` +
     `<Quantity>${qty}</Quantity>` +
@@ -84,6 +96,7 @@ export async function addLabListing(accessToken, L) {
     `<ConditionDescriptors><ConditionDescriptor><Name>40001</Name><Value>${descriptor}</Value></ConditionDescriptor></ConditionDescriptors>` +
     `<PictureDetails>${pics.map((u) => `<PictureURL>${x(u)}</PictureURL>`).join("")}</PictureDetails>` +
     `<ItemSpecifics>${specifics}</ItemSpecifics>` +
+    bestOffer +
     fulfilment +
     `</Item></AddFixedPriceItemRequest>`;
 

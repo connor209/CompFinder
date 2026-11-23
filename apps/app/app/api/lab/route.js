@@ -4,10 +4,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, endListing } from "@/lib/ebay";
 import { desiredFor, listingForGroup, nextCopySeqs, removeBlocker, queueOf, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
 import {
-  loadLab, logEvent, insertListing, insertCopies, deleteCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
+  loadLab, loadListingSettings, saveListingSettings, logEvent, insertListing, insertCopies, deleteCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
 } from "@/lib/lab-store";
 import { addLabListing, scanLoads } from "@/lib/lab-ebay";
 import { runCheck } from "@/lib/lab-run";
+import { renderListing, settingsProblems, withDefaults } from "@/lib/listing-template";
 import { getNotificationState, enableSaleNotifications, disableSaleNotifications } from "@/lib/lab-notify";
 
 /**
@@ -45,7 +46,8 @@ export async function GET() {
   if (!user) return json({ ok: false, error: "Not signed in." }, 401);
   const lab = await loadLab(sb, user.id);
   if (!lab.ok) return json(lab, lab.missing ? 200 : 500);
-  return json(lab);
+  const ls = await loadListingSettings(sb, user.id);
+  return json({ ...lab, listingSettings: withDefaults(ls.settings), listingSettingsSaved: Boolean(ls.settings), listingSettingsMissing: Boolean(ls.missing) });
 }
 
 export async function POST(request) {
@@ -73,6 +75,14 @@ export async function POST(request) {
       }
       case "setQuantity": return json(await setQuantity(sb, user, lab, body.listingId));
       case "remove": return json(await remove(sb, user, lab, body.copyId));
+      case "saveSettings": {
+        const next = withDefaults(body.settings);
+        const problems = settingsProblems(next);
+        if (problems.length) return json({ ok: false, error: problems.join(" ") });
+        await saveListingSettings(sb, user.id, next);
+        await logEvent(sb, user.id, null, "settings", { descriptions: next.descriptions.length, shopImages: next.shopImages.length, bestOffer: next.bestOffer.enabled });
+        return json({ ok: true, settings: next });
+      }
       case "end": return json(await end(sb, user, lab, body.listingId));
       case "notifyState":
       case "notifyOn":
@@ -104,7 +114,7 @@ export async function POST(request) {
   }
 }
 
-async function create(sb, user, lab, { group, pricePence, settings = {} }) {
+async function create(sb, user, lab, { group, pricePence, subtype = "", marketPence = null, settings = {} }) {
   const price = Number(pricePence);
   if (!group || !Array.isArray(group.copies) || group.copies.length < 1) return { ok: false, error: "No copies to list." };
   if (!LISTABLE_CONDITIONS.includes(group.condition)) return { ok: false, error: `Condition ${group.condition} can't be listed.` };
@@ -127,8 +137,21 @@ async function create(sb, user, lab, { group, pricePence, settings = {} }) {
     return { ok: false, error: `${head.sku}'s first scan doesn't load from CardUploader — nothing was listed.` };
   }
 
+  // Written from the SAVED settings through the same renderListing() the
+  // preview used. Older device-side settings (category, postcode…) fill in
+  // anything an account that never saved settings is missing.
+  const saved = await loadListingSettings(sb, user.id);
+  const r = renderListing({ ...settings, ...(saved.settings || {}) }, group, { subtype, pricePence: price });
+  if (r.bestOffer?.error) return { ok: false, error: `Best Offer: ${r.bestOffer.error}` };
+  if (r.unknownPlaceholders.length) return { ok: false, error: `The description uses ${r.unknownPlaceholders.map((k) => `{${k}}`).join(", ")}, which isn't a placeholder — fix the template first.` };
+
   // Ours first, so a listing eBay accepted always has a row to belong to.
-  const listing = await insertListing(sb, user.id, { title: group.title, condition: group.condition, price_pence: price, card_key: group.key || null });
+  const listing = await insertListing(sb, user.id, {
+    title: r.title, condition: group.condition, price_pence: price, card_key: group.key || null,
+    card: group.card || null, subtype: subtype || null, extra_images: r.extraImages,
+    db_image_url: group.dbImage || null,
+    market_pence: Number.isInteger(marketPence) ? marketPence : null, market_at: Number.isInteger(marketPence) ? new Date().toISOString() : null
+  });
   let rows;
   try {
     rows = await insertCopies(sb, user.id, listing.id, copies);
@@ -151,9 +174,14 @@ async function create(sb, user, lab, { group, pricePence, settings = {} }) {
   try {
     result = await addLabListing(token, {
       ...settings,
-      title: group.title, pricePence: price, quantity: rows.length, condition: group.condition,
+      categoryId: r.categoryId, postcode: r.postcode, shippingCost: r.shippingCost, dispatchDays: r.dispatchDays, returnsDays: r.returnsDays,
+      title: r.title, descriptionHtml: r.descriptionHtml, bestOffer: r.bestOffer,
+      pricePence: price, quantity: rows.length, condition: group.condition,
       cardName: group.cardName, cardNumber: group.cardNumber, set: group.set, language: group.language,
-      scanUrls: headRow.scan_urls
+      // Read back off the stored row, so this is exactly the arrangement every
+      // later photo rotation sends. Before 041 there's no column to keep them
+      // in, so no shop images rather than shop images that vanish on rotation.
+      pictureUrls: desiredFor({ ...listing, extra_images: listing.extra_images || [] }, rows).pictureUrls
     });
   } catch (e) {
     await deleteListing(sb, user.id, listing.id);
@@ -161,7 +189,7 @@ async function create(sb, user, lab, { group, pricePence, settings = {} }) {
   }
   await updateListing(sb, user.id, listing.id, { ebay_item_id: result.itemId, pictured_copy_id: headRow.id });
   await logEvent(sb, user.id, listing.id, "listed", {
-    itemId: result.itemId, quantity: rows.length, showing: headRow.sku, pricePence: price, warnings: result.warnings
+    itemId: result.itemId, quantity: rows.length, showing: headRow.sku, pricePence: price, title: r.title, titleCut: r.titleCut || undefined, warnings: result.warnings
   });
   return { ok: true, itemId: result.itemId, warnings: result.warnings };
 }

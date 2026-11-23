@@ -17,6 +17,7 @@
  */
 
 import { reconcile } from "./copyqueue.js";
+import { arrangePictures } from "./listing-template.js";
 
 /** eBay allows 24; a card needs a front, a back and a couple of close-ups. */
 export const MAX_SCANS = 12;
@@ -30,10 +31,8 @@ export const MAX_SCANS = 12;
 export const CONDITION_DESCRIPTOR = { NM: "400010", LP: "400011", MP: "400012", HP: "400013" };
 export const LISTABLE_CONDITIONS = Object.keys(CONDITION_DESCRIPTOR);
 
-/** What the listing says about the photo, because it is now a promise. */
-export const PHOTO_PROMISE =
-  "The photos show the exact copy you will receive. If you buy more than one, " +
-  "the others are further copies of the same card in the same condition.";
+/** What the listing says about the photo — one wording, owned by the template module. */
+export { PHOTO_PROMISE } from "./listing-template.js";
 
 const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
@@ -52,16 +51,54 @@ export function groupKey(item) {
  * promise), graded (a slab is not this test), a condition eBay cannot be
  * told, or a SKU used twice in the file.
  */
-export function groupsFromItems(items) {
+/**
+ * A row's pictures, split: the copy's own scans, and CardUploader's database
+ * image (the catalogue picture of the card, added when "Include database
+ * image" is on). Told apart by PATH — scans live under /cards/, the database
+ * image under /catalog/ — not by position, since the number of scans varies.
+ *
+ * The database image is never a scan. On a listing that promises "the photos
+ * show the exact copy you will receive", a stock picture is a picture of a
+ * card we are not sending.
+ */
+export function splitScans(urls) {
+  const scans = [];
+  let dbImage = null;
+  for (const u of urls || []) {
+    const s = String(u || "").trim();
+    if (!s) continue;
+    let path = "";
+    try { path = new URL(s).pathname; } catch { path = s; }
+    if (/^\/catalog\//i.test(path)) { if (!dbImage) dbImage = s; continue; }
+    scans.push(s);
+  }
+  return { scans, dbImage };
+}
+
+/** CardUploader's own SKU (CS-9PDUJK): one per card and condition, shared by every copy. */
+const isCuSku = (sku) => /^cs-[a-z0-9]+(?:_[a-z0-9]+)?$/i.test(String(sku || "").trim());
+
+/** The card's details as templates and filters read them. */
+function cardOf(it, extra = {}) {
+  return {
+    name: it.cardName || "", number: it.cardNumber || "", set: it.set || "", setCode: extra.setCode || "",
+    rarity: it.rarity || "", finish: extra.finish || "", language: it.language || "", game: it.game || "",
+    year: it.year || "", illustrator: it.illustrator || "", type: it.cardType || "", stage: it.stage || ""
+  };
+}
+
+export function groupsFromItems(items, extras = []) {
   const groups = new Map();
   const refused = [];
   const seen = new Set();
   (items || []).forEach((it, i) => {
     const sku = String(it?.sku || "").trim();
+    const { scans, dbImage } = splitScans(it?.images);
     const why =
       !sku ? "no SKU (CustomLabel) on the row"
+      : isCuSku(sku) ? "this is CardUploader's own SKU, not your location SKU — turn off Automatic eBay Inventory in CardUploader and export again"
       : seen.has(sku.toLowerCase()) ? "the same SKU appears twice in the file"
-      : !(it.images || []).length ? "no scans in PicURL"
+      : !scans.length ? "no scans in PicURL (only a database image)"
       : it.graded ? "a graded card — not part of this test"
       : !LISTABLE_CONDITIONS.includes(String(it.condition || "").toUpperCase())
         ? `condition "${it.conditionLabel || it.condition || "blank"}" can't be listed as an ungraded card`
@@ -76,10 +113,14 @@ export function groupsFromItems(items) {
         cardName: it.cardName, cardNumber: it.cardNumber, set: it.set,
         language: it.language || "English",
         condition: String(it.condition).toUpperCase(),
+        card: cardOf(it, extras[i] || {}),
+        dbImage: dbImage || null,
         copies: []
       });
     }
-    groups.get(key).copies.push({ sku, seq: i, scans: (it.images || []).slice(0, MAX_SCANS) });
+    const g = groups.get(key);
+    if (!g.dbImage && dbImage) g.dbImage = dbImage;
+    g.copies.push({ sku, seq: i, scans: scans.slice(0, MAX_SCANS) });
   });
   return { groups: [...groups.values()], refused };
 }
@@ -123,7 +164,11 @@ export function desiredFor(listing, copies) {
   const queue = queueOf(listing?.id, copies);
   const head = queue[0] || null;
   const scans = head ? (head.scan_urls || []).filter(Boolean).slice(0, MAX_SCANS) : [];
-  return { itemId: String(listing?.ebay_item_id || ""), queue, head, quantity: queue.length, pictureUrls: scans.length ? scans : null };
+  // The shop images this listing was made with ride along every rotation:
+  // only the copy's own scans change. A snapshot on the listing, so editing
+  // the settings later never rewrites a live listing's pictures behind you.
+  const pics = scans.length ? arrangePictures(scans, listing?.extra_images || []) : [];
+  return { itemId: String(listing?.ebay_item_id || ""), queue, head, quantity: queue.length, pictureUrls: pics.length ? pics : null };
 }
 
 /**
