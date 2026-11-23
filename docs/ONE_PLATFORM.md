@@ -61,7 +61,7 @@ and dropping its export back onto the stack.
 
 | When | Where | What |
 |---|---|---|
-| Per stack | CardCropper | Check breaks; stacks, crops and photos go to CompFinder |
+| Per stack | CardCropper | Check breaks; stacks and condition scores go to CompFinder |
 | Per stack | CardUploader | Recognise, check, export |
 | Per stack | CompFinder | Condition, price, list, shelve |
 | Daily | CompFinder | Pick, pack, ship, returns |
@@ -115,6 +115,13 @@ rest are the next copies in the queue. The listing says so:
   sent to eBay.
 - **Where KA12 is** is its live position in its stack, which changes as cards
   in front of it are pulled.
+
+**The photos are CardUploader's.** Every copy's scans are the ones
+uploaded to CardUploader for recognition, at the URLs its export gives. We
+keep no copies of our own for now. eBay copies a picture into its own hosting
+when it is added to a listing, so a live listing does not depend on
+CardUploader. Only the next revision does, because it needs the next copy's
+scan URL to still load.
 
 **eBay caches pictures by URL.** Every copy's scan gets its own URL and is
 never overwritten in place. `listing_copy_state` records which copy each
@@ -171,13 +178,14 @@ stack, desktop), pick and pack (daily, phone) and returns.
    one against the pile.
 3. **Stacks appear in CompFinder by themselves.** CardCropper creates the three
    stacks (260820-001 to -003), gives each the next free divider (KA, KB, KC),
-   crops every card and uploads its photos. Each stack shows **Scanned** and
+   and crops every card. Each stack shows **Scanned** and
    the slip to write for the top of the pile.
 4. **Recognise in CardUploader.** The stack page shows the one thing to do
    there: the folder to upload and the divider to type, each with a copy
    button. Recognise, check the matches, export.
 5. **Drop the export onto the stack.** CompFinder matches each row to its copy
-   by SKU and shows our scan beside CardUploader's match. Rows where they
+   by SKU, keeps every scan URL on the row, and shows the scan beside
+   CardUploader's catalogue match. Rows where they
    disagree come first. The stack moves to **Recognised**.
 6. **Condition.** The stack opens worst-first, with the back corners already on
    screen. One key per grade (NM, LP, MP, HP, DMG, HOLD) and an optional
@@ -238,7 +246,7 @@ usable on its own.
 |---|---|---|---|
 | 0 | Live test of the queue: one card at quantity 3, each copy with its own scans | eBay, via `scripts/copyqueue-run.mjs --item <id> --apply` | A sale moves the photo to the next copy, the quantity is right, and the photo a buyer saw matches the copy picked. See `docs/MULTI_QUANTITY_LISTINGS.md` for the 20-card version |
 | 1 | Stack board: every stack with its status and one next-step button | CompFinder | It is the app's home screen for intake and shows existing stacks correctly |
-| 2 | Scan station: confirmed breaks create stacks, assign the next divider and upload each copy's photos to CompFinder's own storage | CardCropper | A 150-card run appears as three Scanned stacks with photos, and no CSV is written |
+| 2 | Scan station: confirmed breaks create stacks, assign the next divider and send each copy's condition scores | CardCropper | A 150-card run appears as three Scanned stacks, and no CSV is written |
 | 3 | Drop-in CardUploader import, with our scan shown beside its match | CompFinder (extends `import-store.js`) | Mismatches list first, and the stack moves to Recognised |
 | 4 | Condition screen: worst first, keyboard grades, agent pre-fill, crease rule | CompFinder, with scores computed by CardCropper | A stack of 50 can be graded without leaving the screen |
 | 5 | Pricing by card and grade, exceptions first | CompFinder (batch pricing) | Only Low, Skipped and £0.00 need attention; the price is saved on each copy |
@@ -284,8 +292,8 @@ lapse.
   the binder or the storefront.
 - **Magic stays on Cardmarket.** `isCardmarketStack()` keeps MTG- dividers off
   the stack board and out of List stack.
-- **CardCropper writes as a signed-in user, or through one narrow upload
-  endpoint in the app.** It never holds the service-role key: a key on a shop
+- **CardCropper writes as a signed-in user, or through one narrow endpoint
+  in the app.** It never holds the service-role key: a key on a shop
   PC can read and write everything. Divider letters are handed out by the
   database in one step, so two runs can never take the same letter.
 
@@ -314,7 +322,7 @@ listings only, and Pick shows both kinds in one list.
 | eBay keeps showing an old photo | The buyer sees a copy that has gone | Every scan has its own URL, never overwritten. `listing_copy_state` records what each listing was last revised to show |
 | A bug lists or prices live stock wrongly | Wrong prices on eBay in bulk | Preview before every publish, bulk actions only on rows on screen, a log of every eBay change |
 | CardUploader changes its export | Recognition stops reaching CompFinder | The import checks the columns and refuses with a clear message, never a partial import |
-| CardUploader removes hosted scans | Listings lose their photos | Photos are copied into CompFinder's storage at import and never linked from CardUploader |
+| CardUploader stops hosting scans (we leave, it changes, or it deletes old ones) | Live listings keep their photos, because eBay copies a picture when it is added. What breaks is moving a listing on to its next copy, and showing scans in CompFinder | The revision checks the next copy's scan URL loads before sending it, and holds the listing on its current photo with a warning if not. Our own storage is a later piece, worth building only if this ever happens |
 | The same card is in two listings during the move | A little untidy, no harm | Pick shows orders from both in one list |
 | Staff learn a new flow mid-season | Mistakes while it beds in | One stack trial first, and the SOP rewritten for each phase |
 
