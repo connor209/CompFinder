@@ -119,7 +119,13 @@ listings** sorts them out. Nothing in this step changes their prices.
 3. **The exclusions** on Show Desk, the stream box and deals, plus the LAB
    badge in My listings.
 
-Each ships on its own and is tested before the next. `npm run check` passes
+Each ships on its own and is tested before the next.
+
+**Decided 2026-11-23: no shows in 2027.** Lab cards staying out of the Show
+Desk, binders, the counter and the stream box is the permanent position, not a
+gap waiting to be filled. Nobody should build show, binder or stream support for
+lab cards unless that plan changes. The guards stay, so nothing reaches those
+screens by accident. `npm run check` passes
 at every step.
 
 ## Questions before building
