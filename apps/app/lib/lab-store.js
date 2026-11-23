@@ -14,10 +14,31 @@ export function isMissingLab(err) {
   return err?.code === "42P01" || err?.code === "PGRST205" || /lab_(listings|copies|events)|schema cache|does not exist/i.test(msg);
 }
 
+/**
+ * Every row of one lab table for one account, past PostgREST's 1,000-row cap.
+ * Each page is in a TOTAL order (the caller's column, then id), or a page
+ * boundary can repeat some rows and skip others with nothing erroring — the
+ * pull-sheet bug pagedSelect.js documents. Unlike pagedSelect, a failed page
+ * is RETURNED, never swallowed: a lab that read half its copies would show
+ * stock as sold out and send photos for the wrong copy.
+ */
+const PAGE = 1000;
+async function readAll(sb, table, userId, orderCol) {
+  let rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb.from(table).select("*").eq("user_id", userId)
+      .order(orderCol, { ascending: true }).order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) return { error };
+    rows = rows.concat(data || []);
+    if (!data || data.length < PAGE) return { data: rows };
+  }
+}
+
 export async function loadLab(sb, userId) {
   const [l, c, e] = await Promise.all([
-    sb.from(LAB_TABLES.listings).select("*").eq("user_id", userId).order("created_at", { ascending: true }),
-    sb.from(LAB_TABLES.copies).select("*").eq("user_id", userId).order("pile_seq", { ascending: true }),
+    readAll(sb, LAB_TABLES.listings, userId, "created_at"),
+    readAll(sb, LAB_TABLES.copies, userId, "pile_seq"),
     sb.from(LAB_TABLES.events).select("*").eq("user_id", userId).order("at", { ascending: false }).limit(200)
   ]);
   const err = l.error || c.error || e.error;

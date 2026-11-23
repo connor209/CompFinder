@@ -276,7 +276,10 @@ export default function LabCopies() {
     <main style={{ maxWidth: 980, margin: "0 auto", padding: 16, color: "var(--ink)" }}>
       <div style={{ ...row, justifyContent: "space-between" }}>
         <h1 style={{ marginBottom: 4 }}>Lab · quantity listings</h1>
-        <a className="btn btn-ghost" href="/panel/lab/settings">⚙ Listing settings</a>
+        <div style={row}>
+          <a className="btn btn-ghost" href="/panel/lab/inventory">▤ Inventory</a>
+          <a className="btn btn-ghost" href="/panel/lab/settings">⚙ Listing settings</a>
+        </div>
       </div>
       <p style={small}>
         A side build. One listing per card and condition at quantity N, showing the copy that goes next. It has its

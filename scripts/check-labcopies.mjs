@@ -191,6 +191,43 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("a rotation keeps the shop images and swaps the scans", desiredFor(listing, cps).pictureUrls, ["BANNER", "c2a", "c2b"]);
 }
 
+// ---- the inventory view ----------------------------------------------------------------
+{
+  const I = await import("../apps/app/lib/lab-inventory.js");
+  const listings = [
+    { id: "A", ebay_item_id: "111", title: "Mareep 002/020 Zeraora Deck NM", condition: "NM", price_pence: 249, market_pence: 300, created_at: "2026-11-23T20:00:00Z", pictured_copy_id: "a1", card: { name: "Mareep", number: "002/020", set: "Zeraora Deck", language: "Japanese" }, db_image_url: "https://images.carduploader.com/catalog/x.jpg" },
+    { id: "B", ebay_item_id: "222", title: "Latios 106/172 VSTAR Universe NM", condition: "NM", price_pence: 999, created_at: "2026-11-23T21:00:00Z", pictured_copy_id: "b1", card: { name: "Latios", number: "106/172", set: "VSTAR Universe", language: "Japanese" } },
+    { id: "C", ebay_item_id: "333", title: "Suicune LP", condition: "LP", price_pence: null, created_at: "2026-11-22T10:00:00Z", ended_at: "2026-11-23T10:00:00Z", card: { name: "Suicune", language: "English" } }
+  ];
+  const copies = [
+    { id: "a1", listing_id: "A", sku: "TEST-1", pile_seq: 0, copy_seq: 0, scan_urls: ["a1.jpg"], reserved_line: "x#1", reserved_order: "o1" },
+    { id: "a2", listing_id: "A", sku: "TEST-2", pile_seq: 1, copy_seq: 1, scan_urls: ["a2.jpg"] },
+    { id: "a3", listing_id: "A", sku: "TEST2-1", pile_seq: 0, copy_seq: 2, scan_urls: ["a3.jpg"], pulled_at: "t" },
+    { id: "b1", listing_id: "B", sku: "TEST-6", pile_seq: 5, copy_seq: 5, scan_urls: ["b1.jpg"], reserved_line: "y#1" }
+  ];
+  const rows = I.inventoryRows(listings, copies);
+  const A = rows.find((r) => r.id === "A");
+  eq("a row counts for sale · to pick · picked", [A.forSale, A.waiting, A.picked], [1, 1, 1]);
+  eq("…its picture is the database image, flagged as stock", [A.picture, A.pictureIsDb], ["https://images.carduploader.com/catalog/x.jpg", true]);
+  eq("…without one it's the copy on show", rows.find((r) => r.id === "B").picture, "b1.jpg");
+  eq("status: live, sold out at quantity 0, ended", rows.map((r) => r.status), ["live", "soldout", "ended"]);
+  eq("copies come in selling order with their pile", A.copies.map((c) => `${c.sku}:${c.state}`), ["TEST-1:sold", "TEST2-1:picked", "TEST-2:next"]);
+  eq("search: every word, any order, accents off", I.filterRows(rows, { ...I.EMPTY_FILTERS, q: "zeraora mareep" }).map((r) => r.id), ["A"]);
+  eq("search: an exact SKU finds its card", I.filterRows(rows, { ...I.EMPTY_FILTERS, q: "TEST2-1" }).map((r) => r.id), ["A"]);
+  eq("search: an eBay item number finds its listing", I.filterRows(rows, { ...I.EMPTY_FILTERS, q: "222" }).map((r) => r.id), ["B"]);
+  eq("filter: waiting to be picked", I.filterRows(rows, { ...I.EMPTY_FILTERS, waiting: true }).map((r) => r.id).sort(), ["A", "B"]);
+  eq("filter: a pile", I.filterRows(rows, { ...I.EMPTY_FILTERS, pile: "TEST2" }).map((r) => r.id), ["A"]);
+  eq("an unpriced row sorts last both ways", [I.sortRows(rows, "price-asc").map((r) => r.id), I.sortRows(rows, "price-desc").map((r) => r.id)], [["A", "B", "C"], ["B", "A", "C"]]);
+  eq("pages of 50, the total always known", I.pageOf(Array.from({ length: 120 }, (_, i) => i), 3), { rows: Array.from({ length: 20 }, (_, i) => 100 + i), page: 3, pages: 3, total: 120 });
+  eq("bulk acts on ticked AND on screen only", I.actionable(new Set(["A", "C"]), rows.filter((r) => r.id !== "C")).map((r) => r.id), ["A"]);
+  eq("ticking nothing is nothing, never everything", I.actionable(new Set(), rows), []);
+  const plan = I.pricePlan(rows, { mode: "market" });
+  eq("price by sold comps: changes the priced, says why it skips the rest", plan.map((p) => p.skip || `${p.from}->${p.to}`), ["249->300", "no sold-comps price", "ended"]);
+  eq("one price for all: same price is left alone", I.pricePlan([rows[0]], { mode: "exact", pence: 249 })[0].skip, "already that price");
+  eq("a typed price reads as pence; junk and zero don't", [I.parsePence("£12.49"), I.parsePence("12"), I.parsePence("0"), I.parsePence("1.234")], [1249, 1200, null, null]);
+  eq("filter options are built from the rows", I.facets(rows).languages, ["English", "Japanese"]);
+}
+
 // ---- where a copy is in the pile --------------------------------------------------
 {
   const copies = [C("c1", "A", 1, { reserved_line: "a#1" }), C("c2", "A", 2, { pulled_at: "x" }), C("c3", "A", 3, { reserved_line: "b#1" }), C("c4", "B", 4)];
@@ -214,7 +251,7 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
 // ---- the side build stays on the side ----------------------------------------------
 {
   const root = new URL("../apps/app/", import.meta.url).pathname;
-  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js", "app/api/lab/sweep/route.js", "app/panel/lab/settings/ListingSettings.js", "app/panel/lab/settings/page.js", "lib/listing-template.js"]);
+  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js", "app/api/lab/sweep/route.js", "app/panel/lab/settings/ListingSettings.js", "app/panel/lab/settings/page.js", "lib/listing-template.js", "lib/lab-inventory.js", "app/panel/lab/inventory/LabInventory.js", "app/panel/lab/inventory/page.js"]);
   const offenders = [];
   const offendersOf = (needle, okFiles) => {
     const out = [];
@@ -240,7 +277,7 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
       const rel = p.slice(root.length);
       if (allowed.has(rel)) continue;
       const src = readFileSync(p, "utf8");
-      if (/lab-(copies|store|ebay|run|notify)|lab_(listings|copies|events)|\/api\/lab\b/.test(src)) offenders.push(rel);
+      if (/lab-(copies|store|ebay|run|notify|inventory)|lab_(listings|copies|events)|\/api\/lab\b/.test(src)) offenders.push(rel);
     }
   };
   walk(root);

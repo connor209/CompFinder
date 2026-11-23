@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, endListing } from "@/lib/ebay";
+import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, reviseItemPrice, endListing } from "@/lib/ebay";
 import { desiredFor, listingForGroup, nextCopySeqs, removeBlocker, queueOf, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
 import {
   loadLab, loadListingSettings, saveListingSettings, logEvent, insertListing, insertCopies, deleteCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
@@ -24,6 +24,8 @@ import { getNotificationState, enableSaleNotifications, disableSaleNotifications
  *   setQuantity { listingId }                    make eBay's count match the queue
  *   end         { listingId }                    end the listing on eBay
  *   remove      { copyId }                       take one copy off its listing
+ *   setPrices   { changes: [{ listingId, pence }] } bulk price, from the inventory view
+ *   endMany     { listingIds }                   bulk end, from the inventory view
  *
  * Every eBay change is written to lab_events with what was sent.
  */
@@ -75,6 +77,8 @@ export async function POST(request) {
       }
       case "setQuantity": return json(await setQuantity(sb, user, lab, body.listingId));
       case "remove": return json(await remove(sb, user, lab, body.copyId));
+      case "setPrices": return json(await setPrices(sb, user, lab, body.changes));
+      case "endMany": return json(await endMany(sb, user, lab, body.listingIds));
       case "saveSettings": {
         const next = withDefaults(body.settings);
         const problems = settingsProblems(next);
@@ -263,6 +267,55 @@ async function remove(sb, user, lab, copyId) {
     moved = r.moved || 0;
   }
   return { ok: true, sku: copy.sku, from: ours, to: ours - 1, moved };
+}
+
+/** The most a bulk action takes in one request — a screen's worth, never the whole stock. */
+const BULK_MAX = 50;
+
+/**
+ * Bulk price. Each change is checked again here (a live lab listing of this
+ * account, at least £0.99), sent to eBay, then recorded; one failure is
+ * reported and the rest carry on. Never more than a page at a time.
+ */
+async function setPrices(sb, user, lab, changes) {
+  const list = Array.isArray(changes) ? changes.slice(0, BULK_MAX + 1) : [];
+  if (!list.length) return { ok: false, error: "Nothing to change." };
+  if (list.length > BULK_MAX) return { ok: false, error: `At most ${BULK_MAX} listings at once.` };
+  const token = await tokenFor(user.id);
+  if (!token) return { ok: false, error: "eBay account not connected." };
+  const results = [];
+  for (const ch of list) {
+    const l = lab.listings.find((x) => x.id === ch?.listingId);
+    const pence = Number(ch?.pence);
+    if (!l?.ebay_item_id || l.ended_at) { results.push({ listingId: ch?.listingId, ok: false, error: "Not a live lab listing." }); continue; }
+    if (!Number.isInteger(pence) || pence < 99) { results.push({ listingId: l.id, ok: false, error: "Price under £0.99." }); continue; }
+    try {
+      await reviseItemPrice(token, l.ebay_item_id, pence / 100);
+      await updateListing(sb, user.id, l.id, { price_pence: pence });
+      await logEvent(sb, user.id, l.id, "price", { from: l.price_pence, to: pence });
+      results.push({ listingId: l.id, ok: true, from: l.price_pence, to: pence });
+    } catch (e) {
+      await logEvent(sb, user.id, l.id, "error", { action: "price", message: e.message });
+      results.push({ listingId: l.id, ok: false, error: e.message });
+    }
+  }
+  return { ok: true, results, changed: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length };
+}
+
+async function endMany(sb, user, lab, ids) {
+  const list = Array.isArray(ids) ? ids.slice(0, BULK_MAX + 1) : [];
+  if (!list.length) return { ok: false, error: "Nothing ticked." };
+  if (list.length > BULK_MAX) return { ok: false, error: `At most ${BULK_MAX} listings at once.` };
+  const results = [];
+  for (const id of list) {
+    try {
+      const r = await end(sb, user, lab, id);
+      results.push({ listingId: id, ok: r.ok, error: r.error });
+    } catch (e) {
+      results.push({ listingId: id, ok: false, error: e.message });
+    }
+  }
+  return { ok: true, results, changed: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length };
 }
 
 async function setQuantity(sb, user, lab, listingId) {

@@ -1,6 +1,6 @@
 # Listing studio: settings, templates and the inventory view
 
-23 Nov 2026 · **A and B built** (migration 041, `/panel/lab/settings`); C not yet
+23 Nov 2026 · **A, B and C built**: `/panel/lab/settings` (migration 041) and `/panel/lab/inventory`. Apply template still to come
 
 CompFinder owns listing; CardUploader is used once per stack, for
 recognition only. The lab proved the listing method (`docs/LAB_COPIES.md`).
