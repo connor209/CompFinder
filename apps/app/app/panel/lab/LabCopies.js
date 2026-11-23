@@ -294,6 +294,7 @@ export default function LabCopies() {
           <div style={{ ...small, marginTop: 10 }}>
             Last check: {lastCheck.reserved} reserved, {lastCheck.moved} photo{lastCheck.moved === 1 ? "" : "s"} moved
             {lastCheck.mismatched ? `, ${lastCheck.mismatched} where the buyer saw a different copy` : ""}.
+            {lastCheck.orders != null ? ` Read ${lastCheck.orders} order line${lastCheck.orders === 1 ? "" : "s"} from the last ${lastCheck.windowHours}h; asked eBay about ${lastCheck.asked} listing${lastCheck.asked === 1 ? "" : "s"}.` : ""}
             {(lastCheck.notes || []).map((n, i) => <div key={i}>⚠ {n}</div>)}
             {(lastCheck.quantities || []).map((q) => (
               <div key={q.listingId}>
