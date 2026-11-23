@@ -98,8 +98,23 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
 // ---- the side build stays on the side ----------------------------------------------
 {
   const root = new URL("../apps/app/", import.meta.url).pathname;
-  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js"]);
+  const allowed = new Set(["lib/lab-copies.js", "lib/lab-store.js", "lib/lab-ebay.js", "app/api/lab/route.js", "app/panel/lab/LabCopies.js", "app/panel/lab/page.js", "lib/lab-run.js", "lib/lab-notify.js", "app/api/lab/ebay-notify/route.js"]);
   const offenders = [];
+  const offendersOf = (needle, okFiles) => {
+    const out = [];
+    const w = (dir) => {
+      for (const f of readdirSync(dir)) {
+        if (f === "node_modules" || f === ".next") continue;
+        const p = join(dir, f);
+        if (statSync(p).isDirectory()) { w(p); continue; }
+        if (!/\.(js|jsx|mjs)$/.test(f)) continue;
+        const rel = p.slice(root.length);
+        if (!okFiles.includes(rel) && readFileSync(p, "utf8").includes(needle)) out.push(rel);
+      }
+    };
+    w(root);
+    return out;
+  };
   const walk = (dir) => {
     for (const f of readdirSync(dir)) {
       if (f === "node_modules" || f === ".next") continue;
@@ -109,7 +124,7 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
       const rel = p.slice(root.length);
       if (allowed.has(rel)) continue;
       const src = readFileSync(p, "utf8");
-      if (/lab-(copies|store|ebay)|lab_(listings|copies|events)|\/api\/lab\b/.test(src)) offenders.push(rel);
+      if (/lab-(copies|store|ebay|run|notify)|lab_(listings|copies|events)|\/api\/lab\b/.test(src)) offenders.push(rel);
     }
   };
   walk(root);
@@ -117,9 +132,43 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
 
   const store = readFileSync(join(root, "lib/lab-store.js"), "utf8");
   const reads = store.match(/\.from\(LAB_TABLES\.\w+\)[^;]*/g) || [];
-  eq("every lab-store read or write filters on user_id", reads.filter((r) => !/insert\(/.test(r) && !/"user_id", userId/.test(r)), []);
+  // ownerOfLiveItem is the one exception, by design: it is how a notification finds its user.
+  eq("every lab-store read or write filters on user_id", reads.filter((r) => !/insert\(/.test(r) && !/"user_id", userId/.test(r) && !/select\("id, user_id, checked_at"\)/.test(r)), []);
+  eq("…and the one that doesn't is only called by the notification route", offendersOf("ownerOfLiveItem", ["lib/lab-store.js", "app/api/lab/ebay-notify/route.js"]), []);
+  const run = readFileSync(join(root, "lib/lab-run.js"), "utf8");
+  eq("the lab-run never writes the app's own stock tables", /stack_cards|stock_checkouts|listing_copy_state|ebay_listings/.test(run), false);
   const route = readFileSync(join(root, "app/api/lab/route.js"), "utf8");
   eq("the lab never writes the app's own stock tables", /stack_cards|stock_checkouts|listing_copy_state|ebay_listings/.test(route + store), false);
+}
+
+// ---- eBay's sale notification ------------------------------------------------------
+{
+  const { parseNotification, verifySignature } = await import("../apps/app/lib/lab-notify.js");
+  const { createHash } = await import("node:crypto");
+  const soap = (ts, sig, event = "FixedPriceTransaction", item = "407384047214") =>
+    `<?xml version="1.0"?><soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"><soapenv:Header>` +
+    `<ebl:RequesterCredentials xmlns:ebl="urn:ebay:apis:eBLBaseComponents"><ebl:NotificationSignature>${sig}</ebl:NotificationSignature></ebl:RequesterCredentials>` +
+    `</soapenv:Header><soapenv:Body><GetItemTransactionsResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Timestamp>${ts}</Timestamp><Ack>Success</Ack>` +
+    `<NotificationEventName>${event}</NotificationEventName><RecipientUserID>seller</RecipientUserID><Item><ItemID>${item}</ItemID></Item>` +
+    `</GetItemTransactionsResponse></soapenv:Body></soapenv:Envelope>`;
+  const ts = "2026-11-23T12:00:00.000Z";
+  const now = Date.parse(ts) + 30000;
+  const n1 = parseNotification(soap(ts, "abc"));
+  eq("a sale notification parses", [n1.event, n1.itemId, n1.timestamp, n1.signature], ["FixedPriceTransaction", "407384047214", ts, "abc"]);
+  eq("garbage parses to nothing, never throws", parseNotification("<<not xml").event ?? null, null);
+
+  const saved = { d: process.env.EBAY_DEV_ID, a: process.env.EBAY_CLIENT_ID, c: process.env.EBAY_CLIENT_SECRET };
+  delete process.env.EBAY_DEV_ID;
+  process.env.EBAY_CLIENT_ID = "app"; process.env.EBAY_CLIENT_SECRET = "cert";
+  eq("no EBAY_DEV_ID → unverifiable, not trusted and not refused", verifySignature(n1, now), "unverifiable");
+  process.env.EBAY_DEV_ID = "dev";
+  const good = createHash("md5").update(`${ts}devappcert`).digest("base64");
+  eq("eBay's signature verifies", verifySignature(parseNotification(soap(ts, good)), now), "verified");
+  eq("a wrong signature is refused", verifySignature(parseNotification(soap(ts, "x" + good.slice(1))), now), "bad");
+  eq("an old notification is refused (replay)", verifySignature(parseNotification(soap(ts, good)), now + 11 * 60 * 1000), "bad");
+  for (const [k, v] of [["EBAY_DEV_ID", saved.d], ["EBAY_CLIENT_ID", saved.a], ["EBAY_CLIENT_SECRET", saved.c]]) {
+    if (v == null) delete process.env[k]; else process.env[k] = v;
+  }
 }
 
 console.log(failed ? `\n${failed} of ${n} lab checks failed.` : `✓ ${n} lab checks pass.`);

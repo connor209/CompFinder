@@ -101,3 +101,18 @@ export async function releaseCopy(sb, userId, copyId) {
   if (error) throw new Error(error.message);
   return (data || []).length === 1;
 }
+
+/**
+ * Whose lab listing is this eBay item? The ONE lookup not filtered on a user,
+ * because it is how a notification from eBay finds its user in the first
+ * place. Called with the admin client by app/api/lab/ebay-notify only, and it
+ * returns the owner and nothing else; everything after it filters on that.
+ */
+export async function ownerOfLiveItem(admin, itemId) {
+  const id = String(itemId || "").replace(/[^0-9]/g, "");
+  if (!id) return null;
+  const { data, error } = await admin.from(LAB_TABLES.listings)
+    .select("id, user_id, checked_at").eq("ebay_item_id", id).is("ended_at", null).limit(1);
+  if (error || !data?.length) return null;
+  return { listingId: data[0].id, userId: data[0].user_id, checkedAt: data[0].checked_at };
+}

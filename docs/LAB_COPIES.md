@@ -74,6 +74,42 @@ real listing on your account, so:
    - **The last copy.** When it sells, nothing is left to show and the
      listing goes to quantity 0.
 
+## eBay sale notifications
+
+Without these, a listing only moves on when somebody presses **Check for
+sales**. With them on, eBay tells the lab the moment a lab listing sells, and
+the photos move on by themselves, usually within a minute.
+
+- **Turn them on** from the lab's scorecard: **Turn on sale notifications**.
+  It points eBay at `/api/lab/ebay-notify` on whatever address the page is
+  open on, so use the production address, not a preview.
+- **A notification is only a prompt.** The lab never trusts what one says was
+  sold. It runs the same check as the button, which reads the sale from eBay's
+  order API with our own token. A forged notification can at most make the lab
+  look at eBay early.
+- **eBay's order API can lag the notification by a few seconds**, so a check
+  that can't see the sale yet waits and looks again: straight away, after 6s,
+  then after 15s more. If it still can't, the next notification or a press of
+  the button picks it up. Each notification leaves a `notified` line in the
+  log with how many tries it took.
+- **It covers every sale on the account.** eBay notifies for every
+  fixed-price sale; anything that isn't a lab listing is acknowledged and
+  ignored. The delivery address is set for this app's whole eBay connection.
+  Nothing else in the app uses it, and CardUploader lists through its own
+  keys. If eBay already has a different address, the lab says so and asks
+  before replacing it.
+- **The signature check needs `EBAY_DEV_ID`.** eBay signs each notification
+  with your Developer ID, which the app has never needed before. Add it in
+  Vercel → `comp-finder` → Settings → Environment Variables; it's the **Dev
+  ID** on developer.ebay.com → Application Keys (Production). Redeploy after
+  adding it. Until then, notifications still work but can't be verified, so a
+  repeat for the same listing within 20 seconds is ignored.
+- **The button still works**, and pressing it alongside a notification is
+  safe: a copy can only be reserved once, and a reservation that loses that
+  race tries again.
+- **Turn off** on the same line stops the sale notifications for this
+  account.
+
 ## The gate
 
 Run it for two weeks. It passes when:
@@ -82,9 +118,9 @@ Run it for two weeks. It passes when:
   flagged before it shipped;
 - every photo move appeared on eBay within one check;
 - the scorecard shows **0 oversold** and no unexplained errors;
-- the "buyer saw a different copy" count is small enough to live with, given
-  how often Check is pressed. That number decides whether the real build needs
-  an automatic check after every sale or only the nightly one.
+- the "buyer saw a different copy" count is small enough to live with, with
+  sale notifications on. That number says whether a minute's gap after a
+  sale is good enough.
 
 If it fails, the fallback in `ONE_PLATFORM.md` is the plan. Nothing else has
 been touched, so there is nothing to undo but the lab.

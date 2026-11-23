@@ -46,6 +46,39 @@ export default function LabCopies() {
   const reload = useCallback(async () => setLab(await api()), []);
   useEffect(() => { reload(); }, [reload]);
 
+  // eBay sale notifications: read once on open, since asking costs two eBay calls.
+  const [notify, setNotify] = useState(null); // { state } | { error }
+  const loadNotify = useCallback(async () => {
+    const r = await api({ action: "notifyState" });
+    setNotify(r.ok ? { state: r.state } : { error: r.error });
+  }, []);
+  useEffect(() => { if (lab && !lab.missing) loadNotify(); }, [lab?.missing, loadNotify]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function notifyOn() {
+    const url = `${window.location.origin}/api/lab/ebay-notify`;
+    if (!window.confirm(`Turn on eBay sale notifications?\n\neBay will tell ${url} the moment anything on your account sells. Only lab listings are acted on; every other sale is ignored.`)) return;
+    setBusy("notify");
+    let r = await api({ action: "notifyOn", url });
+    if (!r.ok && r.needsReplace) {
+      if (window.confirm(`${r.error}\n\nThat setting covers this app's whole eBay connection. Replace it with ${url}?`)) {
+        r = await api({ action: "notifyOn", url, replace: true });
+      }
+    }
+    setBusy(null);
+    if (r.ok) setNotify({ state: r.state });
+    else if (!r.needsReplace) setMsg({ bad: true, text: r.error });
+    reload();
+  }
+
+  async function notifyOff() {
+    if (!window.confirm("Turn sale notifications off? The listings then only move on when you press Check for sales.")) return;
+    setBusy("notify");
+    const r = await api({ action: "notifyOff" });
+    setBusy(null);
+    if (r.ok) setNotify({ state: r.state }); else setMsg({ bad: true, text: r.error });
+    reload();
+  }
+
   const copies = lab?.copies || [];
   const listings = lab?.listings || [];
   const events = lab?.events || [];
@@ -57,6 +90,7 @@ export default function LabCopies() {
     const count = (k) => events.filter((e) => e.kind === k).length;
     return {
       sold: count("reserved") + count("mismatch"),
+      notified: count("notified"),
       mismatch: count("mismatch"),
       moved: count("pictures"),
       oversold: count("oversold"),
@@ -151,6 +185,7 @@ export default function LabCopies() {
           <span>Photo moves <strong>{score.moved}</strong></span>
           <span style={{ color: score.oversold ? "var(--bad)" : undefined }}>Oversold <strong>{score.oversold}</strong></span>
           <span style={{ color: score.errors ? "var(--warn)" : undefined }}>Errors <strong>{score.errors}</strong></span>
+          <span>Notifications <strong>{score.notified}</strong></span>
         </div>
         {lastCheck && (
           <div style={{ ...small, marginTop: 10 }}>
@@ -168,6 +203,23 @@ export default function LabCopies() {
           </div>
         )}
         {msg && <div style={{ marginTop: 10, color: msg.bad ? "var(--bad)" : "var(--good)" }}>{msg.text}</div>}
+        <div style={{ ...row, justifyContent: "space-between", borderTop: "1px solid var(--line)", marginTop: 12, paddingTop: 12 }}>
+          <div style={small}>
+            {!notify && "Asking eBay about sale notifications…"}
+            {notify?.error && <span style={{ color: "var(--warn)" }}>Couldn&apos;t read eBay&apos;s notification settings: {notify.error}</span>}
+            {notify?.state && (notify.state.saleEnabled && notify.state.appEnabled && notify.state.url === (typeof window !== "undefined" ? `${window.location.origin}/api/lab/ebay-notify` : "")
+              ? <span style={{ color: "var(--good)" }}>● Sale notifications on: a sale moves the photo on by itself, within about a minute.</span>
+              : <span>○ Sale notifications off: listings only move on when you press Check for sales.{notify.state.url ? ` (eBay currently sends this app's notifications to ${notify.state.url}.)` : ""}</span>)}
+            {notify?.state && !notify.state.devIdSet && (
+              <div style={{ color: "var(--warn)" }}>
+                EBAY_DEV_ID isn&apos;t set, so notifications can&apos;t be signature-checked. They still work, but are only treated as a prompt to check eBay.
+              </div>
+            )}
+          </div>
+          {notify?.state && (notify.state.saleEnabled
+            ? <button className="btn btn-ghost" disabled={!!busy} onClick={notifyOff}>Turn off</button>
+            : <button className="btn" disabled={!!busy} onClick={notifyOn}>{busy === "notify" ? "Setting up…" : "Turn on sale notifications"}</button>)}
+        </div>
       </section>
 
       {/* ---------------- Pick ---------------- */}
