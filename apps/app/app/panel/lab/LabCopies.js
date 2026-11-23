@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CardUploaderCsv from "@/lib/carduploader.js";
-import { groupsFromItems, desiredFor, pickList, pilePositions, listingForGroup, priceFromComps, listBlockers, removeBlocker, PHOTO_PROMISE } from "@/lib/lab-copies.js";
+import { groupsFromItems, desiredFor, pickList, pilePositions, displayOrder, listingForGroup, priceFromComps, listBlockers, removeBlocker, PHOTO_PROMISE } from "@/lib/lab-copies.js";
 
 /**
  * The lab screen. Four parts, top to bottom: the scorecard the test is judged
@@ -335,7 +335,7 @@ export default function LabCopies() {
           <div key={c.id} style={{ ...row, borderTop: "1px solid var(--line)", padding: "8px 0" }}>
             {c.scan_urls?.[0] ? <img src={c.scan_urls[0]} alt="" style={thumb} referrerPolicy="no-referrer" /> : <div style={thumb} />}
             <div style={{ flex: 1, minWidth: 180 }}>
-              <div><strong>{c.sku}</strong> · card {c.position ?? "?"} in the LAB pile</div>
+              <div><strong>{c.sku}</strong> · card {c.position ?? "?"} in pile {c.pile || "?"}</div>
               <div style={small}>{listings.find((l) => l.id === c.listing_id)?.title} · order {c.reserved_order}</div>
               {c.reserved_mismatch && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ This buyer was shown a different copy. Check the photo on the order before sending.</div>}
             </div>
@@ -371,18 +371,18 @@ export default function LabCopies() {
                 </div>
                 {!l.ended_at && (
                   <button className="btn btn-ghost" disabled={!!busy} onClick={() => {
-                    if (window.confirm(`End "${l.title}" on eBay? Copies still in the queue stay in the LAB pile.`)) run(`end-${l.id}`, { action: "end", listingId: l.id });
+                    if (window.confirm(`End "${l.title}" on eBay? Copies still in the queue stay in their piles.`)) run(`end-${l.id}`, { action: "end", listingId: l.id });
                   }}>End listing</button>
                 )}
               </div>
               <div style={{ ...row, marginTop: 8 }}>
-                {mine.sort((a, b) => a.pile_seq - b.pile_seq).map((c) => {
+                {displayOrder(l.id, copies).map((c) => {
                   const state = c.pulled_at ? "pulled" : c.reserved_line ? "sold" : d.head?.id === c.id ? "next" : "queued";
                   const isShowing = showing?.id === c.id;
                   return (
                     <div key={c.id} style={{ textAlign: "center", fontSize: 12, opacity: c.pulled_at ? 0.4 : 1 }}>
                       {c.scan_urls?.[0] ? <img src={c.scan_urls[0]} alt="" style={{ ...thumb, outline: isShowing ? "3px solid var(--accent)" : "none" }} referrerPolicy="no-referrer" /> : <div style={thumb} />}
-                      <div><strong>{c.sku}</strong>{pos.get(String(c.id)) ? ` · #${pos.get(String(c.id))}` : ""}</div>
+                      <div><strong>{c.sku}</strong>{pos.get(String(c.id)) ? ` · ${pos.get(String(c.id)).pile} #${pos.get(String(c.id)).position}` : ""}</div>
                       <div style={{ color: state === "sold" ? "var(--warn)" : state === "next" ? "var(--accent)" : "var(--ink-soft)" }}>
                         {isShowing ? "on eBay now" : state}
                       </div>
@@ -392,7 +392,7 @@ export default function LabCopies() {
                           if (!window.confirm(
                             `Take ${c.sku} off "${l.title}"?\n\neBay quantity ${n} → ${n - 1}.` +
                             (isShowing ? ` It's the copy on show, so the listing moves on to the next copy's photos.` : "") +
-                            `\n\nThe card is still in the LAB pile — take it out once this is done, or the pile numbers will be off by one.`
+                            `\n\nThe card is still in its pile — take it out once this is done, or the pile numbers will be off by one.`
                           )) return;
                           run(`rm-${c.id}`, { action: "remove", copyId: c.id }, (r) => setMsg({ text: `${r.sku} removed: eBay quantity ${r.from} → ${r.to}${r.moved ? ", photos moved on" : ""}. Take it out of the pile.` }));
                         }}>✕ Remove</button>

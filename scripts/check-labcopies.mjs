@@ -11,7 +11,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   removeBlocker, listingForGroup, nextCopySeqs, listingsToTouch, priceFromComps, listBlockers, ORDER_WINDOW_HOURS,
-  groupsFromItems, groupKey, queueOf, desiredFor, planFor, assignSales, unitKey, pickList, pilePositions, isForSale
+  groupsFromItems, groupKey, queueOf, desiredFor, planFor, assignSales, unitKey, pickList, pilePositions, isForSale, pileOf, displayOrder
 } from "../apps/app/lib/lab-copies.js";
 
 let failed = 0;
@@ -136,8 +136,21 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
 // ---- where a copy is in the pile --------------------------------------------------
 {
   const copies = [C("c1", "A", 1, { reserved_line: "a#1" }), C("c2", "A", 2, { pulled_at: "x" }), C("c3", "A", 3, { reserved_line: "b#1" }), C("c4", "B", 4)];
-  eq("pulled copies close the pile up; reserved ones don't", [...pilePositions(copies)].map(([k, v]) => [k, v]), [["c1", 1], ["c3", 2], ["c4", 3]]);
+  eq("pulled copies close the pile up; reserved ones don't", [...pilePositions(copies)].map(([k, v]) => [k, v.position]), [["c1", 1], ["c3", 2], ["c4", 3]]);
   eq("pick list: reserved, deepest first", pickList(copies).map((c) => [c.id, c.position]), [["c3", 2], ["c1", 1]]);
+
+  // The bug the second run found: two files, each numbered from 0, one pile.
+  eq("the pile is the SKU's letters, the number its place", [pileOf("TEST-3"), pileOf("TEST2-14"), pileOf("LAB7"), pileOf("A_50")], [{ pile: "TEST", n: 3 }, { pile: "TEST2", n: 14 }, { pile: "LAB", n: 7 }, { pile: "A", n: 50 }]);
+  const two = [
+    { id: "t1", sku: "TEST-1", pile_seq: 0, listing_id: "A", copy_seq: 0 },
+    { id: "t3", sku: "TEST-3", pile_seq: 2, listing_id: "A", copy_seq: 2 },
+    { id: "u1", sku: "TEST2-1", pile_seq: 0, listing_id: "A", copy_seq: 3 },
+    { id: "u2", sku: "TEST2-2", pile_seq: 1, listing_id: "B", copy_seq: 0, reserved_line: "x#1" }
+  ];
+  const p2 = pilePositions(two);
+  eq("two runs are two piles, each counted from 1", ["t1", "t3", "u1", "u2"].map((id) => `${p2.get(id).pile}#${p2.get(id).position}`), ["TEST#1", "TEST#2", "TEST2#1", "TEST2#2"]);
+  eq("a pick names its pile", pickList(two).map((c) => `${c.pile}#${c.position}`), ["TEST2#2"]);
+  eq("a listing's row shows the queue in selling order, not file order", displayOrder("A", two).map((c) => c.id), ["t1", "t3", "u1"]);
 }
 
 // ---- the side build stays on the side ----------------------------------------------

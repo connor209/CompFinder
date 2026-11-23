@@ -215,23 +215,60 @@ export function assignSales(copies, listings, lines) {
 }
 
 /**
- * Where a copy is in the LAB pile right now: its rank among copies not yet
- * pulled, in pile (file) order. A reserved copy is still on the shelf, so it
- * still counts — the same rule stackpos.js keeps for a sold card nobody has
- * pulled yet.
+ * Which physical pile a copy is in, and where in it it was scanned, read off
+ * its SKU: "TEST2-14" is pile TEST2, card 14; "LAB7" is pile LAB, card 7.
+ *
+ * The SKU, not pile_seq. pile_seq is the row's place in ITS file, so every
+ * file starts again at 0 — two runs (TEST and TEST2) each had a "card 1", and
+ * ranking all copies on pile_seq interleaved two piles into one sequence that
+ * matched neither. A SKU with no trailing number is a pile of its own.
  */
-export function pilePositions(copies) {
-  const present = (copies || []).filter((c) => !c.pulled_at).sort((a, b) => (a.pile_seq - b.pile_seq) || String(a.id).localeCompare(String(b.id)));
-  return new Map(present.map((c, i) => [String(c.id), i + 1]));
+export function pileOf(sku) {
+  const s = String(sku || "").trim();
+  const m = s.match(/^(.*?)[-_ ]?(\d+)$/);
+  if (!m || !m[1]) return { pile: s.toUpperCase(), n: 0 };
+  return { pile: m[1].toUpperCase(), n: parseInt(m[2], 10) };
 }
 
-/** Reserved and still on the shelf, deepest first — pull from the back and every number above stays true. */
+/**
+ * Where each copy is right now: its pile and its rank in that pile among
+ * copies not yet pulled, in scan order. A reserved copy is still on the
+ * shelf, so it still counts — the rule stackpos.js keeps for a sold card
+ * nobody has pulled yet. Returns Map<id, { pile, position }>.
+ */
+export function pilePositions(copies) {
+  const piles = new Map();
+  for (const c of copies || []) {
+    if (c.pulled_at) continue;
+    const { pile, n } = pileOf(c.sku);
+    if (!piles.has(pile)) piles.set(pile, []);
+    piles.get(pile).push({ c, n });
+  }
+  const out = new Map();
+  for (const [pile, list] of piles) {
+    list.sort((a, b) => (a.n - b.n) || (a.c.pile_seq - b.c.pile_seq) || String(a.c.id).localeCompare(String(b.c.id)));
+    list.forEach(({ c }, i) => out.set(String(c.id), { pile, position: i + 1 }));
+  }
+  return out;
+}
+
+/**
+ * Reserved and still on the shelf: pile by pile, deepest first within a pile
+ * — pull from the back and every number above stays true.
+ */
 export function pickList(copies) {
   const pos = pilePositions(copies);
   return (copies || [])
     .filter((c) => c.reserved_line && !c.pulled_at)
-    .map((c) => ({ ...c, position: pos.get(String(c.id)) || null }))
-    .sort((a, b) => (b.position || 0) - (a.position || 0));
+    .map((c) => ({ ...c, pile: pos.get(String(c.id))?.pile || null, position: pos.get(String(c.id))?.position || null }))
+    .sort((a, b) => String(a.pile).localeCompare(String(b.pile), undefined, { numeric: true }) || (b.position || 0) - (a.position || 0));
+}
+
+/** A listing's copies in the order they sell: gone first (sold, pulled), then the queue. */
+export function displayOrder(listingId, copies) {
+  const mine = (copies || []).filter((c) => String(c.listing_id) === String(listingId));
+  const gone = mine.filter((c) => !isForSale(c)).sort(copyOrder);
+  return [...gone, ...queueOf(listingId, copies)];
 }
 
 /**
