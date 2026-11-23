@@ -138,3 +138,38 @@ export async function scanLoads(url) {
     return false;
   }
 }
+
+/**
+ * Rewrite a live lab listing's title and/or description (ReviseFixedPriceItem)
+ * — "Apply template". Only what is passed is sent; pictures, price and
+ * quantity are untouched. eBay restricts some changes on a listing that has
+ * sales, and says so in its error, which the caller shows per listing.
+ */
+export async function reviseLabText(accessToken, itemId, { title = null, descriptionHtml = null } = {}) {
+  const safeItem = String(itemId).replace(/[^0-9]/g, "");
+  if (!safeItem) throw new Error("Invalid item id.");
+  if (title == null && descriptionHtml == null) throw new Error("Nothing to revise.");
+  const body =
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><Item>` +
+    `<ItemID>${safeItem}</ItemID>` +
+    (title != null ? `<Title>${x(String(title).slice(0, 80))}</Title>` : "") +
+    (descriptionHtml != null ? `<Description><![CDATA[${String(descriptionHtml).replace(/]]>/g, "]]&gt;")}]]></Description>` : "") +
+    `</Item></ReviseFixedPriceItemRequest>`;
+  const res = await fetch(TRADING_URL, {
+    method: "POST",
+    headers: {
+      "X-EBAY-API-CALL-NAME": "ReviseFixedPriceItem",
+      "X-EBAY-API-SITEID": SITE_ID_UK,
+      "X-EBAY-API-COMPATIBILITY-LEVEL": COMPAT_LEVEL,
+      "X-EBAY-API-IAF-TOKEN": accessToken,
+      "Content-Type": "text/xml"
+    },
+    body
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`eBay revision failed (${res.status}).`);
+  const resp = parser.parse(text)?.ReviseFixedPriceItemResponse || {};
+  if (resp.Ack !== "Success" && resp.Ack !== "Warning") throw new Error(errorsOf(resp).join(" ") || "eBay rejected the revision.");
+  return { ok: true, warnings: errorsOf(resp) };
+}

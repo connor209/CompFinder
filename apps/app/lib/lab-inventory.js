@@ -8,6 +8,7 @@
  * disagree about which copy is on show or where a card is.
  */
 import { queueOf, displayOrder, pilePositions, pileOf } from "./lab-copies.js";
+import { renderListing } from "./listing-template.js";
 
 export const PAGE_SIZE = 50;
 
@@ -71,7 +72,9 @@ export function inventoryRows(listings, copies) {
       condition: String(l.condition || "").toUpperCase(),
       subtype: l.subtype || "",
       status: statusOf(l, queue.length),
-      forSale: queue.length,
+      // An ended listing sells nothing: its unsold copies are in their piles,
+      // on no listing, so they are not "for sale" anywhere.
+      forSale: l.ended_at ? 0 : queue.length,
       waiting,
       picked,
       total: mine.length,
@@ -190,4 +193,71 @@ export function pricePlan(rows, { mode = "exact", pence = null } = {}) {
     if (to === r.pricePence) return { row: r, skip: "already that price" };
     return { row: r, from: r.pricePence, to };
   });
+}
+
+// ---- Apply template -----------------------------------------------------------
+
+
+/**
+ * What re-applying the saved templates would do to each listing: the title
+ * it has now against the one the template writes, whether eBay's 80 cuts
+ * it, and why a row is skipped. Only live listings made since migration 041
+ * can be re-rendered — older ones never stored the card's details, so there
+ * is nothing to fill the placeholders from, and guessing them from the title
+ * would put words on a live listing that nobody chose.
+ *
+ * The server runs this SAME function on its own read of the rows, so the
+ * preview and what is sent cannot drift.
+ */
+export function templatePlan(rows, settings, { title = true, description = true } = {}) {
+  return (rows || []).map((r) => {
+    const l = r.listing || {};
+    if (r.status === "ended") return { row: r, skip: "ended" };
+    if (!l.card) return { row: r, skip: "listed before templates — no card details stored" };
+    if (!title && !description) return { row: r, skip: "nothing chosen" };
+    const head = (r.copies || []).find((c) => c.state === "next") || (r.copies || [])[0] || null;
+    const out = renderListing(settings, { card: l.card, condition: r.condition, copies: head ? [{ sku: head.sku, scans: head.scan_urls || [] }] : [] }, { subtype: l.subtype || "" });
+    if (out.unknownPlaceholders.length) return { row: r, skip: `description uses ${out.unknownPlaceholders.map((k) => `{${k}}`).join(", ")}` };
+    const titleChanges = title && out.title !== l.title;
+    if (!titleChanges && !description) return { row: r, skip: "title already matches" };
+    return {
+      row: r,
+      fromTitle: l.title,
+      toTitle: title ? out.title : null,
+      titleChanges,
+      titleCut: title && out.titleCut,
+      descriptionHtml: description ? out.descriptionHtml : null
+    };
+  });
+}
+
+// ---- One row per copy, and the CSV --------------------------------------------
+
+/** "All copies": every copy its own row, carrying its listing's columns. */
+export function copyRows(rows) {
+  return (rows || []).flatMap((r) => r.copies.map((c) => ({ ...r, id: `copy:${c.id}`, copy: c, copies: [c], listingRowId: r.id })));
+}
+
+/** "Hide empty": a listing with nothing left to sell (sold out or ended). */
+export const isEmptyRow = (r) => r.forSale === 0;
+
+const csvCell = (v) => {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+/** The rows on screen as a CSV: one line per copy, so every SKU is in it. */
+export function inventoryCsv(rows) {
+  const head = ["SKU", "Pile", "Position", "State", "Card", "Set", "Number", "Condition", "Language", "Subtype", "Price", "Market", "eBay item", "Listing status", "Added"];
+  const lines = [head.join(",")];
+  for (const r of rows || []) {
+    for (const c of r.copies || []) {
+      lines.push([
+        c.sku, c.pile, c.position ?? "", c.state, r.name || r.title, r.set, r.number, r.condition, r.language, r.subtype,
+        r.pricePence == null ? "" : (r.pricePence / 100).toFixed(2), r.marketPence == null ? "" : (r.marketPence / 100).toFixed(2),
+        r.itemId || "", r.status, r.addedAt || ""
+      ].map(csvCell).join(","));
+    }
+  }
+  return lines.join("\n");
 }

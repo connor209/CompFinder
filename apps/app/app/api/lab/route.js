@@ -6,7 +6,8 @@ import { desiredFor, listingForGroup, nextCopySeqs, removeBlocker, queueOf, LIST
 import {
   loadLab, loadListingSettings, saveListingSettings, logEvent, insertListing, insertCopies, deleteCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
 } from "@/lib/lab-store";
-import { addLabListing, scanLoads } from "@/lib/lab-ebay";
+import { addLabListing, scanLoads, reviseLabText } from "@/lib/lab-ebay";
+import { inventoryRows, templatePlan } from "@/lib/lab-inventory";
 import { runCheck } from "@/lib/lab-run";
 import { renderListing, settingsProblems, withDefaults } from "@/lib/listing-template";
 import { getNotificationState, enableSaleNotifications, disableSaleNotifications } from "@/lib/lab-notify";
@@ -26,6 +27,7 @@ import { getNotificationState, enableSaleNotifications, disableSaleNotifications
  *   remove      { copyId }                       take one copy off its listing
  *   setPrices   { changes: [{ listingId, pence }] } bulk price, from the inventory view
  *   endMany     { listingIds }                   bulk end, from the inventory view
+ *   applyTemplate { listingIds, title, description } re-write live listings from the saved templates
  *
  * Every eBay change is written to lab_events with what was sent.
  */
@@ -79,6 +81,7 @@ export async function POST(request) {
       case "remove": return json(await remove(sb, user, lab, body.copyId));
       case "setPrices": return json(await setPrices(sb, user, lab, body.changes));
       case "endMany": return json(await endMany(sb, user, lab, body.listingIds));
+      case "applyTemplate": return json(await applyTemplate(sb, user, lab, body));
       case "saveSettings": {
         const next = withDefaults(body.settings);
         const problems = settingsProblems(next);
@@ -300,6 +303,49 @@ async function setPrices(sb, user, lab, changes) {
     }
   }
   return { ok: true, results, changed: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).length };
+}
+
+/**
+ * Re-write live listings from the SAVED templates. Planned here with the same
+ * templatePlan() the screen previewed, on this request's own read of the
+ * rows, so a settings change in another tab since the preview is what goes
+ * out — and the screen's figures are never trusted. One failure (eBay
+ * refusing a title change on a listing with sales, say) is reported and the
+ * rest carry on.
+ */
+async function applyTemplate(sb, user, lab, { listingIds, title = true, description = true }) {
+  const ids = Array.isArray(listingIds) ? listingIds.slice(0, BULK_MAX + 1) : [];
+  if (!ids.length) return { ok: false, error: "Nothing ticked." };
+  if (ids.length > BULK_MAX) return { ok: false, error: `At most ${BULK_MAX} listings at once.` };
+  const saved = await loadListingSettings(sb, user.id);
+  if (!saved.settings) return { ok: false, error: "No listing settings saved yet — save them under Listing settings first." };
+  const want = new Set(ids.map(String));
+  const rows = inventoryRows(lab.listings, lab.copies).filter((r) => want.has(String(r.id)));
+  const plan = templatePlan(rows, saved.settings, { title: Boolean(title), description: Boolean(description) });
+  const token = await tokenFor(user.id);
+  if (!token) return { ok: false, error: "eBay account not connected." };
+  const results = [];
+  for (const p of plan) {
+    if (p.skip) { results.push({ listingId: p.row.id, ok: false, skipped: true, error: p.skip }); continue; }
+    try {
+      const r = await reviseLabText(token, p.row.itemId, {
+        title: p.titleChanges ? p.toTitle : null,
+        descriptionHtml: p.descriptionHtml
+      });
+      if (p.titleChanges) await updateListing(sb, user.id, p.row.id, { title: p.toTitle });
+      await logEvent(sb, user.id, p.row.id, "template", { fromTitle: p.titleChanges ? p.fromTitle : undefined, toTitle: p.titleChanges ? p.toTitle : undefined, description: Boolean(p.descriptionHtml), warnings: r.warnings });
+      results.push({ listingId: p.row.id, ok: true });
+    } catch (e) {
+      await logEvent(sb, user.id, p.row.id, "error", { action: "template", message: e.message });
+      results.push({ listingId: p.row.id, ok: false, error: e.message });
+    }
+  }
+  return {
+    ok: true, results,
+    changed: results.filter((r) => r.ok).length,
+    skipped: results.filter((r) => r.skipped).length,
+    failed: results.filter((r) => !r.ok && !r.skipped).length
+  };
 }
 
 async function endMany(sb, user, lab, ids) {

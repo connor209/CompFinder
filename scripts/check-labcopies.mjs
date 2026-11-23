@@ -228,6 +228,38 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("filter options are built from the rows", I.facets(rows).languages, ["English", "Japanese"]);
 }
 
+// ---- apply template, all copies, the CSV -------------------------------------------------
+{
+  const I = await import("../apps/app/lib/lab-inventory.js");
+  const T = await import("../apps/app/lib/listing-template.js");
+  const listings = [
+    { id: "A", ebay_item_id: "111", title: "Old Mareep title", condition: "NM", price_pence: 249, created_at: "2026-11-23T20:00:00Z", pictured_copy_id: "a1", card: { name: "Mareep", number: "002/020", set: "Zeraora Deck", language: "Japanese" } },
+    { id: "B", ebay_item_id: "222", title: "Latios before templates", condition: "NM", price_pence: 999, created_at: "2026-11-23T21:00:00Z", pictured_copy_id: "b1" },
+    { id: "C", ebay_item_id: "333", title: "Gone", condition: "NM", created_at: "2026-11-22T10:00:00Z", ended_at: "t", card: { name: "Suicune" } }
+  ];
+  const copies = [
+    { id: "a1", listing_id: "A", sku: "TEST-1", pile_seq: 0, copy_seq: 0, scan_urls: ["a1.jpg"] },
+    { id: "a2", listing_id: "A", sku: "TEST-2", pile_seq: 1, copy_seq: 1, scan_urls: ["a2.jpg"] },
+    { id: "b1", listing_id: "B", sku: "TEST-6", pile_seq: 5, copy_seq: 5, scan_urls: ["b1.jpg"] }
+  ];
+  const rows = I.inventoryRows(listings, copies);
+  const settings = T.withDefaults({ title: { abbreviateCondition: true, parts: [{ type: "field", key: "name" }, { type: "field", key: "number" }, { type: "field", key: "condition" }] } });
+  const plan = I.templatePlan(rows, settings);
+  eq("apply template: a new title from the stored card", [plan[0].fromTitle, plan[0].toTitle, plan[0].titleChanges], ["Old Mareep title", "Mareep 002/020 NM", true]);
+  eq("…a listing made before templates is skipped, not guessed at", /before templates/.test(plan[1].skip), true);
+  eq("…an ended one is skipped", plan[2].skip, "ended");
+  eq("…descriptions carry the photo promise", plan[0].descriptionHtml.includes(T.PHOTO_PROMISE), true);
+  const same = I.templatePlan([{ ...rows[0], listing: { ...rows[0].listing, title: "Mareep 002/020 NM" } }], settings, { title: true, description: false });
+  eq("…a title that already matches, with descriptions off, is left alone", same[0].skip, "title already matches");
+  eq("…nothing chosen does nothing", I.templatePlan([rows[0]], settings, { title: false, description: false })[0].skip, "nothing chosen");
+  const cr = I.copyRows(rows.slice(0, 1));
+  eq("all copies: one row per copy, each carrying its listing", cr.map((r) => [r.copy.sku, r.listingRowId]), [["TEST-1", "A"], ["TEST-2", "A"]]);
+  eq("hide empty drops what has nothing left to sell", rows.filter((r) => !I.isEmptyRow(r)).map((r) => r.id), ["A", "B"]);
+  const csv = I.inventoryCsv(rows.slice(0, 1)).split("\n");
+  eq("the CSV has a line per copy, SKU first", [csv.length, csv[1].split(",")[0], csv[2].split(",")[0]], [3, "TEST-1", "TEST-2"]);
+  eq("…and quotes a cell with a comma in it", I.inventoryCsv([{ ...rows[0], name: "Mareep, Holo" }]).includes('"Mareep, Holo"'), true);
+}
+
 // ---- where a copy is in the pile --------------------------------------------------
 {
   const copies = [C("c1", "A", 1, { reserved_line: "a#1" }), C("c2", "A", 2, { pulled_at: "x" }), C("c3", "A", 3, { reserved_line: "b#1" }), C("c4", "B", 4)];
