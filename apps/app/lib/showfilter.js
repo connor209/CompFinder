@@ -236,7 +236,9 @@ export function skuBatch(cards, prefix, { stackId = "", name = "", rankOf = null
   const n = String(name || "").trim();
   if (!p && !stackId && !n) return [];
   const rows = (cards || []).filter((c) =>
-    c && !c.pulled_at && !isCardAway(c, away) &&
+    // Never a lab card (docs/LAB_FOLD.md): its listing's quantity is the
+    // lab's, and a copy taken to a show would leave the listing selling it.
+    c && !c.pulled_at && !c.lab_listing_id && !isCardAway(c, away) &&
     (!stackId || String(c.stack_id) === String(stackId)) &&
     (!p || skuInBatch(c.sku, p)) &&
     (!n || titleMatches(c.title, n))

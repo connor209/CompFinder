@@ -4,6 +4,7 @@
  * skips it), writes a ledger row in stock_checkouts, and (best-effort) hides
  * the eBay listing via /api/ebay/hide.
  */
+import { LAB_CARD_REFUSAL } from "./lab-stacks.js";
 import { isUnorderedStack, carriedSticker } from "./toploader.js";
 
 /**
@@ -83,6 +84,10 @@ const STREAM_MIGRATION_MSG = "Run migration 031_stream_stock.sql in the Supabase
 export async function checkoutStackCard(sb, { card, stackName, event, hideMode, pool = "show" }) {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
+  // The backstop for every checkout path: a lab card's listing quantity is
+  // the lab's to manage (docs/LAB_FOLD.md), and hiding it would take every
+  // copy off sale, not this one.
+  if (card?.lab_listing_id) return { ok: false, error: LAB_CARD_REFUSAL };
 
   // 1) Flag the card as away — live positions re-flow immediately.
   const { error: flagErr } = await sb

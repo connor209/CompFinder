@@ -1028,6 +1028,9 @@ export async function fetchPendingOrders(accessToken, { labelledWithinDays = 0 }
       lines.push({
         orderId: String(order.orderId || ""),
         lineItemId: String(li.lineItemId || ""),
+        // The listing's item number: a lab listing carries no SKU, so this is
+        // how the pull sheet knows a line is a lab sale (docs/LAB_FOLD.md).
+        itemId: li.legacyItemId != null ? String(li.legacyItemId) : null,
         sku: li.sku != null ? String(li.sku) : null,
         title: li.title != null ? String(li.title) : "",
         variation,

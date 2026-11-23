@@ -1,5 +1,7 @@
 "use client";
 
+import { useLabItemIds, isLabListing } from "@/lib/lab-ids.js";
+import { LAB_BADGE_TITLE, LAB_CARD_REFUSAL } from "@/lib/lab-stacks.js";
 import { useEffect, useMemo, useState, useRef, useDeferredValue } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
@@ -389,18 +391,27 @@ const ALL_COLUMNS = [
           ) : canUpdate ? (
             <button className="itbl-set" onClick={() => ctx.onUpdate(g)} title="Update eBay price to market">↳ {pounds(p.recPence)}</button>
           ) : null}
-          {g._count > 1 ? (
-            <DealCopyPicker className="itbl-check" deal={ctx.deal} update={ctx.onDeal} copies={dealCopiesFor(g, ctx.priced, ctx.locations, ctx.stock)} />
-          ) : inStreamBox(g) ? null : (
-            <DealButton className="itbl-check" deal={ctx.deal} update={ctx.onDeal} line={dealLineFor(g, ctx.priced)} />
+          {isLabListing(ctx.labIds, g.ebay_item_id) ? (
+            // A lab listing (docs/LAB_FOLD.md): one listing for several copies,
+            // whose quantity and photos the lab manages. Dealing, streaming,
+            // showing or ending it from here would leave the lab out of step.
+            <a className="itbl-check" href="/panel/lab/inventory" title={LAB_BADGE_TITLE}>LAB</a>
+          ) : (
+            <>
+              {g._count > 1 ? (
+                <DealCopyPicker className="itbl-check" deal={ctx.deal} update={ctx.onDeal} copies={dealCopiesFor(g, ctx.priced, ctx.locations, ctx.stock)} />
+              ) : inStreamBox(g) ? null : (
+                <DealButton className="itbl-check" deal={ctx.deal} update={ctx.onDeal} line={dealLineFor(g, ctx.priced)} />
+              )}
+              <StreamButton className="itbl-check" relay={ctx.relay} item={streamItemFor(g, ctx.priced)} />
+              {/* Same checkout as the card view's, off the same showOut(): the
+                  table is the view you pack a show from, and a button that exists
+                  on one view of one list and not the other sends you back to the
+                  cards to do it a row at a time. */}
+              <button className="itbl-check" onClick={() => ctx.onShow(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
+              <button className="itbl-end" onClick={() => ctx.onEnd(g)} title="End (delist) on eBay">End</button>
+            </>
           )}
-          <StreamButton className="itbl-check" relay={ctx.relay} item={streamItemFor(g, ctx.priced)} />
-          {/* Same checkout as the card view's, off the same showOut(): the
-              table is the view you pack a show from, and a button that exists
-              on one view of one list and not the other sends you back to the
-              cards to do it a row at a time. */}
-          <button className="itbl-check" onClick={() => ctx.onShow(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
-          <button className="itbl-end" onClick={() => ctx.onEnd(g)} title="End (delist) on eBay">End</button>
         </span>
       );
     }
@@ -479,6 +490,8 @@ export default function Inventory({ onDeepDive }) {
   // See the note on useDeal(): a hook per row is what this screen was just
   // fixed for doing.
   const [deal, updateDeal] = useDeal();
+  // Lab listings (docs/LAB_FOLD.md), read once for the screen.
+  const labIds = useLabItemIds();
   // Once for the screen and handed down, the same rule useDeal() runs on: a
   // hook per row is a timer per row on the list this screen was fixed for.
   const relay = useRelay();
@@ -923,6 +936,12 @@ export default function Inventory({ onDeepDive }) {
 
   // Check a group's cards out to a show (Show desk) — matched by SKU.
   async function showOut(g) {
+    // The bulk "⤴ Show selected" comes through here too, so a ticked lab
+    // listing is refused here rather than at each button.
+    if (isLabListing(labIds, g.ebay_item_id)) {
+      setNote(`"${g.title}" is a lab listing — ${LAB_CARD_REFUSAL}`);
+      return;
+    }
     const skus = skusFor(g);
     if (skus.length === 0) {
       setNote("No SKU on this listing — check it out from Stacks or the Show desk instead.");
@@ -1354,7 +1373,7 @@ export default function Inventory({ onDeepDive }) {
                   </td>
                   {visibleCols(ALL_COLUMNS).map((c) => (
                     <td key={c.key} className={`itbl-${c.key}`}>
-                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, onShow: showOut, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay, locations, stock })}
+                      {c.cell(g, { priced, onCheck: checkPrice, updating, onUpdate: updateToMarket, onEnd: endOne, onShow: showOut, costs, onSetCost: setCost, deal, onDeal: updateDeal, relay, locations, stock, labIds })}
                     </td>
                   ))}
                 </tr>
@@ -1425,15 +1444,21 @@ export default function Inventory({ onDeepDive }) {
                     {onDeepDive ? (
                       <button className="inv-act" onClick={() => onDeepDive(g.title)}>Deep dive ↗</button>
                     ) : null}
-                    {g._count > 1 ? (
-                      <DealCopyPicker deal={deal} update={updateDeal} copies={dealCopiesFor(g, priced, locations, stock)} />
-                    ) : inStreamBox(g) ? null : <DealButton
-                      deal={deal}
-                      update={updateDeal}
-                      line={dealLineFor(g, priced)}
-                    />}
-                    <StreamButton relay={relay} item={streamItemFor(g, priced)} />
-                    <button className="inv-act" onClick={() => showOut(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
+                    {isLabListing(labIds, g.ebay_item_id) ? (
+                      <a className="inv-act" href="/panel/lab/inventory" title={LAB_BADGE_TITLE}>LAB · managed by the lab</a>
+                    ) : (
+                      <>
+                        {g._count > 1 ? (
+                          <DealCopyPicker deal={deal} update={updateDeal} copies={dealCopiesFor(g, priced, locations, stock)} />
+                        ) : inStreamBox(g) ? null : <DealButton
+                          deal={deal}
+                          update={updateDeal}
+                          line={dealLineFor(g, priced)}
+                        />}
+                        <StreamButton relay={relay} item={streamItemFor(g, priced)} />
+                        <button className="inv-act" onClick={() => showOut(g)} title="Check out to a show — hides the listing, stack numbering re-flows">⤴ Show</button>
+                      </>
+                    )}
                     <MarketLinks query={g.title} gameSlug="pokemon" label={g.title} />
                   </div>
                   {(() => {

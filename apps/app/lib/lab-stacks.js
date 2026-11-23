@@ -124,3 +124,14 @@ export function asLabCopy(card, { ranks, names } = {}) {
     live_position: ranks?.get(card.id) || null
   };
 }
+
+/**
+ * What the LAB badge says, everywhere. One wording, so every screen explains
+ * the same thing the same way.
+ */
+export const LAB_BADGE_TITLE =
+  "Listed by the lab: one eBay listing for every copy of this card, showing the photos of the copy that goes next. " +
+  "Being tested — not part of shows, the stream box or deals yet. Managed from the lab page.";
+
+/** Why a lab card can't be checked out, dealt or pulled by hand. */
+export const LAB_CARD_REFUSAL = "This is a lab card — its copies are managed by the lab, not checked out or pulled by hand yet.";

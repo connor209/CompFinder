@@ -1,6 +1,6 @@
 # Step 2: folding the lab into the stacks
 
-23 Nov 2026 · **step 1 built** (migration 042, the move, the lab reading stacks). Decided: tonight's listings stay live, the lab's Pick list goes when the pull sheet takes over (step 2), lab stacks are `LAB-<pile>`.
+23 Nov 2026 · **steps 1 and 2 built**, plus step 3's guards. Step 1 is migration 042, the move and the lab reading stacks. Step 2 is the pull sheet, Reconcile and Stacks. From step 3: Show Desk, checkout, deal, stream and My listings leave lab cards alone; badges on the counter and binder are still to do. Decided: tonight's listings stay live, the lab's Pick list goes when the pull sheet takes over (step 2), lab stacks are `LAB-<pile>`.
 
 The lab proved quantity listings on real eBay (`docs/LAB_COPIES.md`) and grew
 settings, templates and an inventory view (`docs/LISTING_STUDIO.md`). Its

@@ -158,6 +158,15 @@ export default function LabInventory() {
     reload();
   }
 
+  async function releaseCopy(c) {
+    if (!window.confirm(`Release ${c.sku}?\n\nOnly for a CANCELLED order (${c.reserved_order || "?"}). The copy goes back into its listing's queue and off the pull sheet.`)) return;
+    setBusy(true);
+    const r = await api({ action: "release", copyId: c.id });
+    setBusy(false);
+    setMsg(r.ok ? { text: `${c.sku} released — back in its queue.` } : { bad: true, text: r.error });
+    reload();
+  }
+
   function exportCsv() {
     const listings = grouped ? matched : [...new Map(matched.map((r) => [r.listingRowId, all.find((a) => a.id === r.listingRowId)])).values()].filter(Boolean);
     const blob = new Blob([inventoryCsv(listings)], { type: "text/csv" });
@@ -407,6 +416,7 @@ export default function LabInventory() {
                           {grouped && r.status !== "ended" && <button onClick={() => { setMenu(null); setTicked(new Set([String(r.id)])); setPanel("price"); }}>Set price…</button>}
                           {grouped && r.status !== "ended" && <button onClick={() => { setMenu(null); setTicked(new Set([String(r.id)])); setPanel("template"); }}>Apply template…</button>}
                           {c1 && !removeBlocker(c1, r.listing, lab.copies) && <button onClick={() => { setMenu(null); removeCopy(r, c1); }}>✕ Remove this copy</button>}
+                          {c1 && c1.state === "sold" && <button onClick={() => { setMenu(null); releaseCopy(c1); }}>Release (order cancelled)</button>}
                           {grouped && r.status !== "ended" && <button className="danger" onClick={() => { setMenu(null); endRows([r]); }}>End listing</button>}
                         </div>
                       )}
@@ -429,6 +439,7 @@ export default function LabInventory() {
                       <td className="sm-hide" /><td /><td className="sm-hide" /><td className="sm-hide" /><td /><td className="sm-hide" /><td /><td className="sm-hide" />
                       <td className="li-menucell">
                         {!removeBlocker(c, r.listing, lab.copies) && <button className="li-chip" disabled={busy} onClick={() => removeCopy(r, c)}>✕ Remove</button>}
+                        {c.state === "sold" && <button className="li-chip" disabled={busy} onClick={() => releaseCopy(c)} title="Only for a CANCELLED order: the copy goes back into its queue">Release</button>}
                       </td>
                     </tr>
                   )) : null}

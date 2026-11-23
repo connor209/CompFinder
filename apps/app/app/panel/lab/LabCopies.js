@@ -368,25 +368,17 @@ export default function LabCopies() {
         </div>
       </section>
 
-      {/* ---------------- Pick ---------------- */}
+      {/* ---------------- Picking happens on the pull sheet ---------------- */}
       <section style={box}>
-        <strong>Pick ({picks.length})</strong>
-        <p style={small}>Reserved copies still on the shelf, deepest first, so every number above stays true as you pull.</p>
-        {picks.length === 0 && <p style={small}>Nothing to pick.</p>}
-        {picks.map((c) => (
-          <div key={c.id} style={{ ...row, borderTop: "1px solid var(--line)", padding: "8px 0" }}>
-            {c.scan_urls?.[0] ? <img src={c.scan_urls[0]} alt="" style={thumb} referrerPolicy="no-referrer" /> : <div style={thumb} />}
-            <div style={{ flex: 1, minWidth: 180 }}>
-              <div><strong>{c.sku}</strong> · card {c.position ?? "?"} in pile {c.pile || "?"}</div>
-              <div style={small}>{listings.find((l) => l.id === c.listing_id)?.title} · order {c.reserved_order}</div>
-              {c.reserved_mismatch && <div style={{ color: "var(--bad)", fontSize: 13 }}>⚠ This buyer was shown a different copy. Check the photo on the order before sending.</div>}
-            </div>
-            <button className="btn btn-primary" disabled={!!busy} onClick={() => run(`pull-${c.id}`, { action: "pull", copyId: c.id })}>Picked</button>
-            <button className="btn btn-ghost" disabled={!!busy} onClick={() => {
-              if (window.confirm(`Release ${c.sku}? Only for a CANCELLED order. It goes back into its queue.`)) run(`rel-${c.id}`, { action: "release", copyId: c.id });
-            }}>Release</button>
-          </div>
-        ))}
+        <strong>Picking</strong>
+        <p style={small}>
+          {picks.length
+            ? <>{picks.length} sold lab cop{picks.length === 1 ? "y is" : "ies are"} waiting to be picked. </>
+            : <>Nothing waiting to be picked. </>}
+          Lab cards are stack cards now, so they&apos;re picked on the <a href="/panel/pull">pull sheet</a> with everything else: each
+          sale shows the exact copy the buyer saw, at its position in its LAB- stack, and Commit pulls it. A cancelled order is released
+          from the <a href="/panel/lab/inventory">inventory</a>.
+        </p>
       </section>
 
       {/* ---------------- Live listings ---------------- */}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabItemIds, isLabListing } from "@/lib/lab-ids.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { getShowEvent } from "@/lib/checkout";
@@ -71,7 +72,12 @@ export function useDeal() {
  * inert: no eBay call, no write, nothing to undo but a tap.
  */
 export function DealButton({ deal, update, line, className = "inv-act", title, preventDefault = false }) {
+  // Never on a lab listing (docs/LAB_FOLD.md): a table sale would take a
+  // copy off a listing whose copies and photos the lab manages. Every ＋ Deal
+  // on every screen — My listings, the binder, the want-list pickup — is this.
+  const labIds = useLabItemIds();
   if (!line || !deal) return null;
+  if (isLabListing(labIds, line.itemId)) return null;
   const already = inDeal(deal, line);
   // The first card in a basket stamps the trip on it, so a sale made from My
   // listings lands with the same event the desk would have written.
@@ -119,7 +125,8 @@ export function DealCopyPicker({ deal, update, copies, className = "inv-act", ti
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
-  const usable = (copies || []).filter((c) => c && c.line);
+  const labIds = useLabItemIds();
+  const usable = (copies || []).filter((c) => c && c.line && !isLabListing(labIds, c.line.itemId));
   if (!deal || usable.length === 0) return null;
   if (usable.length === 1 && !usable[0].blocked) {
     return <DealButton deal={deal} update={update} line={usable[0].line} className={className} title={title} />;

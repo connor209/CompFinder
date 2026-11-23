@@ -1,5 +1,7 @@
 "use client";
 
+import { liveLabItemIds } from "@/lib/lab-store.js";
+import { LAB_BADGE_TITLE } from "@/lib/lab-stacks.js";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
@@ -237,6 +239,11 @@ export default function PullSheet() {
     const { data: stacks } = await sb.from("card_stacks").select("id,name");
     const nameMap = new Map((stacks || []).map((s) => [s.id, s.name]));
     const cards = await pagedSelect(() => sb.from("stack_cards").select("*"));
+    // Which order lines are lab sales (docs/LAB_FOLD.md). A lab listing has no
+    // SKU, so its item number is the only way to know; a failed read leaves
+    // the set empty, and those lines fall back to loose picks as before.
+    const { data: { user: me } } = await sb.auth.getUser();
+    const labIds = me ? (await liveLabItemIds(sb, me.id)).ids : new Set();
 
     // A SKU maps to a QUEUE of copies, not to one card. One card per SKU is
     // still the ordinary case and behaves exactly as before — the queue is one
@@ -280,7 +287,8 @@ export default function PullSheet() {
     const { units: assigned, pulledFor } = assignPulls(lines, cards, {
       walkCompare: stackWalkCompare,
       stackNameOf: (id) => nameMap.get(id) || "",
-      cuChoice
+      cuChoice,
+      labItemIds: labIds
     });
     setCuReport(cuChoiceReport(assigned, cuChoice, cards));
     for (const u of assigned) {
@@ -299,7 +307,8 @@ export default function PullSheet() {
           // The card's own SKU is what is written on it. A variation line's
           // SKU (CS-…) names the card and condition, never this copy.
           sku: card.sku || l.sku, listingSku: card.sku && l.sku && card.sku !== l.sku ? l.sku : null,
-          via: u.via, title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf
+          via: u.via, lab: Boolean(u.lab), mismatch: Boolean(card.reserved_mismatch),
+          title: l.title, cardId: card.id, stackId: card.stack_id, position: card.position, buyer: l.buyer, ...unitOf
         });
       } else if (skl && awaySkus.has(skl)) {
         // Ordered on eBay while the card is checked out to a show — it can't
@@ -815,6 +824,8 @@ export default function PullSheet() {
                         since CardUploader is told separately (its own Pick). */}
                     {r.via === "cardUploader" ? <span className="badge2" title={r.listingSku || ""}> CardUploader&apos;s pick</span> : null}
                     {r.via === "variation" ? <span className="badge2" title={r.listingSku || ""}> front-most copy</span> : null}
+                    {r.lab ? <a className="badge2" href="/panel/lab/inventory" title={LAB_BADGE_TITLE}> LAB · the copy in the photo</a> : null}
+                    {r.lab && r.mismatch ? <span className="badge2" style={{ color: "var(--bad)" }} title="Two sales landed before the photo moved on: this buyer saw a different copy's photo."> ⚠ buyer saw another copy</span> : null}
                   </span>
                 </label>
               );
@@ -851,6 +862,7 @@ export default function PullSheet() {
                         {u.deliveryName || u.buyer ? <span className="loose-card-buyer">for {u.deliveryName || u.buyer}</span> : null}
                         {u.reason === "notstacked" ? <span className="loose-card-buyer">CardUploader card not on your stacks — upload its inventory on Stacks</span> : null}
                         {u.reason === "nocopyleft" ? <span className="loose-card-buyer">every copy is already pulled or away</span> : null}
+                        {u.reason === "labunreserved" ? <span className="loose-card-buyer">LAB sale with no copy reserved yet — press <a href="/panel/lab">Check for sales</a> on the lab page; the lab picks the copy, not this sheet</span> : null}
                       </span>
                     </label>
                   );

@@ -384,6 +384,10 @@ export function offSaleReason(sku, idx) {
  */
 export function cardOffSaleReason(card, idx) {
   if (card?.listing_sku) return null;
+  // A lab card (docs/LAB_FOLD.md) is on a lab listing that carries no SKU, so
+  // read by SKU it would be "not listed" and Reconcile would offer to pull a
+  // card that is for sale. The lab says whether it is sold; this says nothing.
+  if (card?.lab_listing_id) return null;
   return offSaleReason(card?.sku, idx);
 }
 

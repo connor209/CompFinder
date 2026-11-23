@@ -1,5 +1,6 @@
 "use client";
 
+import { useLabItemIds, isLabListing } from "@/lib/lab-ids.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { lotFrom, lotBlockers, streamValue, relayUrl, RELAY_ORIGIN } from "@/lib/livestream.js";
 
@@ -130,8 +131,11 @@ export function useRelay() {
 export function StreamButton({ relay, item, className = "inv-act" }) {
   const [phase, setPhase] = useState("idle"); // idle | working | done | error
   const [note, setNote] = useState("");
+  // Not a lab listing (docs/LAB_FOLD.md) — not part of the stream yet.
+  const labIds = useLabItemIds();
 
   if (!relay?.on || !item?.itemId) return null;
+  if (isLabListing(labIds, item.itemId)) return null;
 
   async function queue() {
     setPhase("working");

@@ -1,5 +1,6 @@
 "use client";
 
+import { isLabCard, LAB_BADGE_TITLE } from "@/lib/lab-stacks.js";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
@@ -644,8 +645,18 @@ export default function Stacks() {
                     )}
                     <span className="stack-sku">{c.sku}</span>
                     <span className="stack-title">{c.title || <em>—</em>}</span>
-                    <button className="stack-pull" onClick={() => checkOut(c)} disabled={busy} title="Take to a show — hides the listing, numbering re-flows">⤴ Show</button>
-                    <button className="stack-pull" onClick={() => pullCard(c)} disabled={busy}>Pull</button>
+                    {isLabCard(c) ? (
+                      // A lab card: its listing is the lab's, and its copy leaves on the
+                      // pull sheet when it sells. No Show, no hand Pull.
+                      <a className="stack-pull" href="/panel/lab/inventory" title={LAB_BADGE_TITLE}>
+                        LAB{c.reserved_line ? " · sold, on the pull sheet" : ""}
+                      </a>
+                    ) : (
+                      <>
+                        <button className="stack-pull" onClick={() => checkOut(c)} disabled={busy} title="Take to a show — hides the listing, numbering re-flows">⤴ Show</button>
+                        <button className="stack-pull" onClick={() => pullCard(c)} disabled={busy}>Pull</button>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>

@@ -355,3 +355,14 @@ export async function removeCopy(sb, userId, copyId) {
   if (error) throw new Error(error.message);
   return (data || []).length === 1;
 }
+
+/**
+ * The eBay item ids of this account's live lab listings — what My listings,
+ * the deal and stream buttons and the pull sheet ask "is this a lab listing?"
+ * with. A lab listing carries no SKU, so the item id is the only handle on it.
+ */
+export async function liveLabItemIds(sb, userId) {
+  const r = await readAll(sb, LAB_TABLES.listings, userId, "created_at", (q) => q.not("ebay_item_id", "is", null).is("ended_at", null));
+  if (r.error) return { ok: false, missing: isMissingLab(r.error), ids: new Set() };
+  return { ok: true, ids: new Set(r.data.map((l) => String(l.ebay_item_id))) };
+}

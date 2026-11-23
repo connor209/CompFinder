@@ -31,7 +31,15 @@ import { isCuListingSku, listingSkuKey } from "./cu-files.js";
  * A card is given to at most one unit. Units with no card come back with
  * `card: null` and a `reason` the caller can show.
  */
-export function assignPulls(lines, cards, { walkCompare, stackNameOf = () => "", cuChoice = null } = {}) {
+export function assignPulls(lines, cardsIn, { walkCompare, stackNameOf = () => "", cuChoice = null, labItemIds = null } = {}) {
+  // A lab card (docs/LAB_FOLD.md) is never matched by SKU, by CardUploader's
+  // choice or by "front-most copy": the lab already decided which copy each
+  // sale takes (reserved_line) when the sale came in, and the photo the buyer
+  // saw was that copy's. So lab cards are kept out of every queue below and
+  // answer only to their own reservation.
+  const cards = (cardsIn || []).filter((c) => !c?.lab_listing_id);
+  const labByUnit = new Map();
+  for (const c of cardsIn || []) if (c?.lab_listing_id && c.reserved_line) labByUnit.set(String(c.reserved_line), c);
   const pulledFor = new Map(); // lineItemId -> [card], the cards pulled for that line
   for (const c of cards || []) {
     if (!c?.pulled_at || !c.pulled_line) continue;
@@ -68,6 +76,13 @@ export function assignPulls(lines, cards, { walkCompare, stackNameOf = () => "",
     for (let n = 0; n < count; n++) {
       const key = count > 1 ? `${l.lineItemId}#${n + 1}` : String(l.lineItemId);
       const base = { line: l, n, key, unitOf: count > 1 ? { unit: n + 1, ofUnits: count } : null };
+      // The lab's reservation for this unit, if it has one: always "#n".
+      const lab = labByUnit.get(`${l.lineItemId}#${n + 1}`);
+      if (lab) {
+        claimed.add(lab.id);
+        units.push({ ...base, card: lab, done: Boolean(lab.pulled_at), via: lab.pulled_at ? "pulled" : "lab", lab: true });
+        continue;
+      }
       if (n < done.length) {
         claimed.add(done[n].id);
         units.push({ ...base, card: done[n], done: true, via: "pulled" });
@@ -92,6 +107,9 @@ export function assignPulls(lines, cards, { walkCompare, stackNameOf = () => "",
   }
   for (const u of units) {
     if (u.done || u.card) continue;
+    // A sale on a lab listing that the lab hasn't reserved a copy for yet (a
+    // missed notification): never guessed at — the lab decides which copy.
+    if (labItemIds && u.line.itemId && labItemIds.has(String(u.line.itemId))) { u.reason = "labunreserved"; u.lab = true; continue; }
     const k = skl(u.line);
     if (!k) { u.reason = "nosku"; continue; }
     const q = (bySku.get(k) || []).find((c) => !claimed.has(c.id));

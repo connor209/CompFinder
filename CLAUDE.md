@@ -325,7 +325,11 @@ stream` (the relay, only while streaming).
   (`docs/LAB_FOLD.md`): a lab copy is a stack card with `lab_listing_id`, in a
   `LAB-<pile>` stack no filing plan may choose; the move is idempotent, adopts
   a card already stacked under the SKU and refuses a pulled or lab one; a lab
-  card's position is the stack's live rank.
+  card's position is the stack's live rank. And the rest of the app leaves
+  a lab card to the lab: the pull sheet takes the copy the lab RESERVED and
+  never guesses an unreserved lab sale, Reconcile never offers one, the Show
+  Desk picker never lists one, `checkoutStackCard()` refuses one, and ＋ Deal,
+  the stream button and ⤴ Show never appear on a lab listing.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
