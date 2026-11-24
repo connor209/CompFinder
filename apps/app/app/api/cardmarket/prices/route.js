@@ -2,11 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { matchCatalog, cmFigures, isReverse } from "@/lib/cm-match";
 import { loadEurGbp } from "@/lib/fx";
-import { catalogRowsForSets } from "@/lib/catalog-read";
+import { catalogRowsForCards, lookupKey, matchSetFor } from "@/lib/catalog-read";
 
 /**
  * POST /api/cardmarket/prices — Cardmarket's price guide for our cards, in
- * pounds. Body: { cards: [{ id, name, number, set, finish?, title?, cardmarketId? }] }.
+ * pounds. Body: { cards: [{ id, name, number, set, language?, setCode?, finish?, title?, cardmarketId? }] }.
  * A card already linked to its product (migration 045, lib/card-identity.js)
  * sends `cardmarketId` and is not matched again.
  * Answers { ok, rate, rateAsOf, rateFallback, results: { [id]: { cardmarketId,
@@ -33,15 +33,15 @@ export async function POST(request) {
   // catalogue read per set, by Cardmarket's own set name.
   const linked = cards.filter((c) => /^\d+$/.test(String(c.cardmarketId ?? "")));
   const toMatch = cards.filter((c) => !linked.includes(c));
-  const bySet = await catalogRowsForSets(sb, toMatch.map((c) => c.set));
+  const rowsBy = await catalogRowsForCards(sb, toMatch);
 
   const results = {};
   const wanted = new Map();
   for (const c of linked) wanted.set(c.id, { card: c, id: String(c.cardmarketId), name: c.name || "" });
   for (const c of toMatch) {
-    const rows = bySet.get(String(c.set).trim().toLowerCase());
-    if (!rows || rows.error) { results[c.id] = { why: rows?.error ? `catalogue read failed: ${rows.error}` : "set not in the catalogue" }; continue; }
-    const m = matchCatalog(c, rows);
+    const rows = rowsBy.get(lookupKey(c));
+    if (!rows || rows.error || !rows.length) { results[c.id] = { why: rows?.error ? `catalogue read failed: ${rows.error}` : "set not in the catalogue" }; continue; }
+    const m = matchCatalog({ ...c, set: matchSetFor(c) }, rows);
     if (!m.row) { results[c.id] = { why: m.why }; continue; }
     wanted.set(c.id, { card: c, id: m.row.cardmarket_id, name: m.row.name });
   }

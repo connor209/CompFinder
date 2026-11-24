@@ -12,7 +12,7 @@
  */
 import { liveRanks } from "./stackpos.js";
 import { matchCatalog } from "./cm-match.js";
-import { catalogRowsForSets } from "./catalog-read.js";
+import { catalogRowsForCards, lookupKey, matchSetFor } from "./catalog-read.js";
 import { movePlan, stackRowFrom, asLabCopy, labStackNameFor } from "./lab-stacks.js";
 
 export const LAB_TABLES = { listings: "lab_listings", copies: "lab_copies", events: "lab_events", settings: "listing_settings" };
@@ -218,14 +218,20 @@ export async function linkCatalog(sb, userId, listings, copies) {
   const need = (listings || []).filter((l) => (copies || []).some((c) => String(c.listing_id) === String(l.id) && c.cardmarket_id == null));
   const already = (listings || []).length - need.length;
   if (!need.length) return { ok: true, linked: 0, already, unmatched: [] };
-  const bySet = await catalogRowsForSets(sb, need.map((l) => l.card?.set));
+  const cardOf = (l) => ({ name: l.card?.name, number: l.card?.number, set: l.card?.set, language: l.card?.language, setCode: l.card?.setCode });
+  const rowsBy = await catalogRowsForCards(sb, need.map(cardOf));
   let linked = 0;
   const unmatched = [];
   for (const l of need) {
     const card = l.card || {};
-    const rows = bySet.get(String(card.set || "").trim().toLowerCase());
-    if (!rows || rows.error) { unmatched.push({ listingId: l.id, title: l.title, why: rows?.error ? `catalogue read failed: ${rows.error}` : "set not in the catalogue" }); continue; }
-    const m = matchCatalog({ name: card.name, number: card.number, set: card.set }, rows);
+    const c = cardOf(l);
+    const rows = rowsBy.get(lookupKey(c));
+    const coded = matchSetFor(c) !== c.set;
+    if (!rows || rows.error || !rows.length) {
+      unmatched.push({ listingId: l.id, title: l.title, why: rows?.error ? `catalogue read failed: ${rows.error}` : coded ? `no catalogue set with code ${matchSetFor(c).slice(5)}` : "set not in the catalogue" + (c.language && !/^english$/i.test(c.language) ? ` (and no ${c.language} set code known for "${c.set}")` : "") });
+      continue;
+    }
+    const m = matchCatalog({ name: card.name, number: card.number, set: matchSetFor(c) }, rows);
     if (!m.row) { unmatched.push({ listingId: l.id, title: l.title, why: m.why }); continue; }
     const { data, error } = await sb.from(CARDS).update({ cardmarket_id: m.row.cardmarket_id })
       .eq("user_id", userId).eq("lab_listing_id", l.id).is("cardmarket_id", null).select("id");

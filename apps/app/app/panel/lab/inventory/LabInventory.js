@@ -62,6 +62,7 @@ export default function LabInventory() {
   const [costMode, setCostMode] = useState("each");
   const [costText, setCostText] = useState("");
   const [costOverwrite, setCostOverwrite] = useState(false);
+  const [dupsOnly, setDupsOnly] = useState(false);
   const [tplTitle, setTplTitle] = useState(true);
   const [tplDesc, setTplDesc] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -113,7 +114,7 @@ export default function LabInventory() {
     // product (card-identity.js) and is not matched again by name.
     const productOf = new Map();
     for (const c of lab.copies || []) if (c.cardmarket_id != null && !productOf.has(String(c.listing_id))) productOf.set(String(c.listing_id), c.cardmarket_id);
-    const cards = (lab.listings || []).filter((l) => l.card?.set || productOf.has(String(l.id))).map((l) => ({ id: l.id, name: l.card?.name, number: l.card?.number, set: l.card?.set, finish: l.card?.finish || "", title: l.title, cardmarketId: productOf.get(String(l.id)) ?? undefined }));
+    const cards = (lab.listings || []).filter((l) => l.card?.set || productOf.has(String(l.id))).map((l) => ({ id: l.id, name: l.card?.name, number: l.card?.number, set: l.card?.set, finish: l.card?.finish || "", language: l.card?.language || "", setCode: l.card?.setCode || "", title: l.title, cardmarketId: productOf.get(String(l.id)) ?? undefined }));
     if (!cards.length) { setCm((x) => ({ ...x, error: "No listing has its card's set stored, so there is nothing to look up." })); return; }
     let gone = false;
     setCm((x) => ({ ...x, loading: true, error: null }));
@@ -135,12 +136,15 @@ export default function LabInventory() {
     return () => { gone = true; };
   }, [lab]);
   const all = useMemo(() => (lab?.ok ? inventoryRows(lab.listings, lab.copies).map((r) => (cm.byId[r.id] ? { ...r, cm: cm.byId[r.id] } : r)) : []), [lab, cm]);
+  const dups = useMemo(() => duplicateListings(all), [all]);
   const matched = useMemo(() => {
     let rows = filterRows(all, { ...f, q });
     if (hideEmpty) rows = rows.filter((r) => !isEmptyRow(r));
+    // "⚠ N listings share a card", clicked: just those, side by side.
+    if (dupsOnly) rows = rows.filter((r) => dups.has(r.id));
     rows = sortRows(rows, `${sortField}-${sortDir}`);
     return grouped ? rows : copyRows(rows);
-  }, [all, f, q, hideEmpty, grouped, sortField, sortDir]);
+  }, [all, f, q, hideEmpty, grouped, sortField, sortDir, dupsOnly, dups]);
   const view = pageOf(matched, page, pageSize);
   // Each dropdown's counts are over the rows every OTHER filter allows, so a
   // count says exactly what picking that option would show.
@@ -163,7 +167,6 @@ export default function LabInventory() {
   const cols = useMemo(() => ({ ...columnsFor(all), cm: true }), [all]);
   // The same card in the same condition live on two listings: the copies
   // belong on one (card-identity.js). And how many cards aren't linked yet.
-  const dups = useMemo(() => duplicateListings(all), [all]);
   const unlinked = useMemo(() => all.filter((r) => r.status !== "ended" && !isLinked(r.identity)).length, [all]);
   const chips = activeChips(f);
   const vt = useMemo(() => viewTotals(grouped ? matched : [...new Map(matched.map((r) => [r.listingRowId, all.find((a) => a.id === r.listingRowId)])).values()].filter(Boolean)), [matched, grouped, all]);
@@ -344,7 +347,12 @@ export default function LabInventory() {
             </span>
             {totals.waiting > 0 && <span className="li-warn">{totals.waiting} to pick</span>}
             {unlinked > 0 && <button className="li-link" disabled={busy} onClick={linkCards} title="Match each card to its Cardmarket product once and keep it, so prices and duplicates are read off the product rather than re-matched by name">🔗 {unlinked} not linked to the catalogue — link</button>}
-            {dups.size > 0 && <span className="li-warn" title="The same card in the same condition is live on more than one listing — its copies belong on one">⚠ {dups.size} listings share a card</span>}
+            {(dups.size > 0 || dupsOnly) && (
+              <button className="li-link li-warn" onClick={() => { setDupsOnly(!dupsOnly); if (!dupsOnly) { setSortField("name"); setSortDir("asc"); } }}
+                title="The same card in the same condition is live on more than one listing — its copies belong on one. Click to show just those, side by side.">
+                {dupsOnly ? "✕ Show every listing" : `⚠ ${dups.size} listings share a card — show them`}
+              </button>
+            )}
           </span>
         </div>
         <div className="li-headbtns">

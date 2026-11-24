@@ -49,7 +49,12 @@ eq("languages", ["Japanese", "korean", "", "English", "Thai"].map(languagePart),
   const catalog = [
     { cardmarket_id: 10, name: "Geodude", collector_number: "74", expansion: "Pokemon Card 151" },
     { cardmarket_id: 11, name: "Geodude (Master Ball Pattern)", collector_number: "74", expansion: "Pokemon Card 151" },
-    { cardmarket_id: 20, name: "Zubat", collector_number: "41", expansion: "Dark Phantasma" }
+    { cardmarket_id: 20, name: "Zubat", collector_number: "41", expansion: "Dark Phantasma" },
+    // English White Flare and the Japanese one, numbered differently: 033 is a
+    // different card in English, Woobat in Japanese.
+    { cardmarket_id: 30, name: "Joltik", collector_number: "33", expansion: "White Flare", expansion_code: "WHT" },
+    { cardmarket_id: 31, name: "Woobat (Poke Ball Pattern)", collector_number: "33", expansion: "White Flare (Japanese)", expansion_code: "sv11W" },
+    { cardmarket_id: 40, name: "Moltres", collector_number: "146", expansion: "Pokemon Card 151 JP", expansion_code: "sv2a" }
   ];
   const writes = [];
   const fake = (missing = false) => ({
@@ -57,8 +62,8 @@ eq("languages", ["Japanese", "korean", "", "English", "Thai"].map(languagePart),
       const q = { table, filters: [], patch: null };
       const api = {
         select() { return api; },
-        ilike(_, v) { q.ilike = v; return api; },
-        limit() { return Promise.resolve({ data: catalog.filter((r) => r.expansion.toLowerCase() === String(q.ilike).toLowerCase()), error: null }); },
+        ilike(col, v) { q.col = col; q.ilike = v; return api; },
+        limit() { return Promise.resolve({ data: catalog.filter((r) => String(r[q.col] || "").toLowerCase() === String(q.ilike).toLowerCase()), error: null }); },
         update(p) { q.patch = p; return api; },
         eq(k, v) { q.filters.push([k, v]); return api; },
         is(k, v) { q.filters.push([k, v]); return api; },
@@ -82,6 +87,17 @@ eq("languages", ["Japanese", "korean", "", "English", "Thai"].map(languagePart),
   eq("the plain card and its pattern link to their own products; a number belonging to another card is refused, never borrowed",
     [r.ok, writes.map((w) => [w.filters.find((f) => f[0] === "lab_listing_id")[1], w.patch.cardmarket_id]), r.unmatched.map((u) => u.listingId), r.already],
     [true, [["L1", 10], ["L2", 11]], ["L3"], 1]);
+  writes.length = 0;
+  const jp = [
+    { id: "J1", title: "Woobat PB", card: { name: "Woobat (Poke Ball Pattern)", number: "033/086", set: "White Flare", language: "Japanese" } },
+    { id: "J2", title: "Moltres", card: { name: "Moltres", number: "146/165", set: "Pokemon Card 151", language: "Japanese" } },
+    { id: "J3", title: "Zeraora", card: { name: "Mareep", number: "002/020", set: "Zeraora Deck", language: "Japanese" } }
+  ];
+  const j = await linkCatalog(fake(), "u1", jp, jp.map((l) => ({ listing_id: l.id, cardmarket_id: null })));
+  eq("a Japanese card is read by its set CODE, so it finds the Japanese product and never the English card at its number",
+    [writes.map((w) => [w.filters.find((f) => f[0] === "lab_listing_id")[1], w.patch.cardmarket_id]), j.unmatched.map((u) => u.listingId)],
+    [[["J1", 31], ["J2", 40]], ["J3"]]);
+  eq("a Japanese set with no known code says so", /no Japanese set code known/.test(j.unmatched[0].why), true);
   eq("every write names the user and only fills cards with no link", writes.every((w) => w.filters.some((f) => f[0] === "user_id" && f[1] === "u1") && w.filters.some((f) => f[0] === "cardmarket_id" && f[1] === null)), true);
   const m = await linkCatalog(fake(true), "u1", listings.slice(0, 1), copies);
   eq("before 045 it says so rather than failing quietly", [m.ok, m.missing], [false, true]);
@@ -90,7 +106,7 @@ eq("languages", ["Japanese", "korean", "", "English", "Thai"].map(languagePart),
 // ---- the greps ----
 {
   const route = read("apps/app/app/api/cardmarket/prices/route.js");
-  if (!/catalogRowsForSets\(/.test(route) || /from\("card_catalog"\)/.test(route)) { failed++; console.error("✗ the price guide route must read the catalogue through lib/catalog-read.js, the same read the link uses"); } else passed++;
+  if (!/catalogRowsForCards\(/.test(route) || /from\("card_catalog"\)/.test(route)) { failed++; console.error("✗ the price guide route must read the catalogue through lib/catalog-read.js, the same read the link uses"); } else passed++;
   if (!/cardmarketId/.test(route)) { failed++; console.error("✗ a linked card must be priced off its stored product, not re-matched"); } else passed++;
   const lab = read("apps/app/app/api/lab/route.js");
   if ((lab.match(/linkCatalog\(sb, user\.id, \[listing\]/g) || []).length < 2) { failed++; console.error("✗ both a new listing and a join must link the copies to their product"); } else passed++;

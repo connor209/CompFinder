@@ -2697,6 +2697,14 @@ stand and move over one at a time.
   card is worse than none.
 - **One catalogue read.** `lib/catalog-read.js` is the matching read for the
   price guide route and the link alike, so they cannot match a card two ways.
+  **A non-English card is read by its printed set CODE** (`setCodeFor()`:
+  `lib/japanese-sets.js`, or the promo code off "007/SV-P"), never by the
+  set's English name. The first link (2026-11-24) linked 170 cards and failed
+  41, every one Japanese: Cardmarket files Japanese sets under its own names,
+  so the name read found nothing, and where the name existed in English
+  (White Flare, Black Bolt) the Japanese numbering landed on a different
+  English card — refused by the name guard, correctly. A Japanese set with no
+  code in the table says so rather than guessing.
   A linked card sends its product to `/api/cardmarket/prices` and is not
   re-matched by name.
 - **The payoff on screen:** the Inventory flags the same card in the same
