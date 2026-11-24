@@ -397,6 +397,32 @@ eq("Sun & Moon and Sword & Shield era codes", ["Dream League", "Tag Bolt", "Rebe
 ok("a result says which set code it searched", jpp && evaluateCard(planCard(normaliseCard({ name: "Geodude", number: "074/165", set: "Pokemon Card 151", language: "Japanese" })), []).set_code === "sv2a");
 ok("page 2 is cached under its own key, never over page 1", /::page\$\{page\}/.test(routeSrc) && /getComps\(rungs\[0\]\.query, 2\)/.test(routeSrc));
 
+// --- 4g. every Zubat numbered 41 (TEST6, 2026-11-24) ----------------------------------
+// The numerator-only search returns every set's card 41; with overseas sellers
+// counted, a 1996 Base Set Zubat, a Carddass and a Sealdass sticker priced a
+// 2022 Dark Phantasma common.
+let zs = 0;
+const jpSale = (t, p) => ({ title: t, itemPricePence: Math.round(p * 100), postagePence: 0, itemLocation: "JP", _source: { itemId: `z${++zs}`, endedAt: new Date().toISOString() } });
+const zubat = planCard(normaliseCard({ name: "Zubat", number: "041/071", set: "Dark Phantasma", language: "Japanese", any_language: true, overseas: true, year: "2022" }));
+const zr = evaluateCard(zubat, [
+  jpSale("1996 Pokemon TCG Japanese Zubat Base Set #041 WZ74", 1.73),
+  jpSale("Pokemon Japanese Zubat NO. 041 Bandai Carddass Series 3-4 EXCELLENT", 16.67),
+  jpSale("Topsun Pokemon TCG Zubat 041 Pokemon Card Basic Non-Holo Common Japanese 1995", 7.36),
+  jpSale("ZUBAT 1996 POKEMON NEO REVELATION JAPANESE 041 COMMON Q7803", 0.77),
+  jpSale("LP - Pokemon Japanese Zubat No. 041 Bandai Sealdass Sticker", 3.68),
+  jpSale("Pokemon Japanese Zubat No. 041 Base Set Holo", 4),
+  jpSale("Zubat 041/071 Dark Phantasma s10a Japanese", 0.5),
+  jpSale("Pokemon Zubat 041 s10a Dark Phantasma Japanese NM", 0.6),
+  jpSale("Zubat 41/71 Japanese", 0.4)
+]);
+eq("only the Dark Phantasma sales count", zr.sales.map((x) => x.title).sort(), ["Pokemon Zubat 041 s10a Dark Phantasma Japanese NM", "Zubat 041/071 Dark Phantasma s10a Japanese", "Zubat 41/71 Japanese"]);
+eq("…each other one says why", zr.excluded.map((e) => e.reason).sort(), ["notACard", "notACard", "notACard", "setMismatch", "setMismatch", "setMismatch"]);
+ok("…a different year is a different card, give or take one", zr.excluded.some((e) => /says 1996, the card is 2022/.test(e.detail || "")));
+eq("a year either side is still the card (Japanese and English releases straddle a year)", evaluateCard(zubat, [jpSale("Zubat 041/071 Dark Phantasma 2023 Japanese", 0.5), jpSale("Zubat 041/071 s10a 2021", 0.5)]).n_comps, 2);
+eq("a Ditto sticker is still a Peelable Ditto", evaluateCard(numel, [comp("Pokemon GO Numel 013/078 Ditto sticker", 10, 2.5)]).n_comps, 1);
+eq("…but a Sealdass sticker never is", evaluateCard(numel, [comp("Numel 013/078 Ditto Sealdass sticker", 3)]).n_comps, 0);
+eq("an English card whose set has no distinctive word is not asked for one", evaluateCard(planCard(normaliseCard({ name: "Charizard", number: "4/102", set: "Base Set" })), [comp("Charizard Base Set Holo #4", 300)]).n_comps, 1);
+
 // --- 5. output ---------------------------------------------------------------
 
 eq("check mode: within £1 and 30% is not a difference", priceDiffers({ suggested_price: 10.49, current_price: 9.99 }).differs, false);

@@ -108,6 +108,7 @@ export function normaliseCard(raw = {}, index = 0) {
     number: strip(pick("number", "cardNumber", "card_number")),
     set: strip(pick("set", "setName", "set_name")),
     setCode: strip(pick("setCode", "set_code", "*C:Set Code", "C:Set Code")),
+    year: strip(pick("year", "*C:Year Manufactured")),
     variant: strip(pick("variant", "finish", "printing")),
     variantKeys,
     condition: strip(pick("condition")),
@@ -388,6 +389,12 @@ export function planCard(card) {
   // A bare number ("38") anchors nothing either — it is not a required word,
   // and the ladder searches without it — so it takes the same set rule.
   const setWords = (!number || bareNumber) && setUsable ? distinctiveSetWords(card.set) : [];
+  // A "/total" card's sale that leaves the total off ("Zubat #041", "No. 041")
+  // has nothing tying it to THIS set — the numerator-only search returns every
+  // set's card 41. Such a sale must name the set instead: a word of it or its
+  // code. (A set with no distinctive word and no code imposes nothing.)
+  const denominator = (!promo && String(number).match(/\/\s*[A-Z]{0,4}(\d{1,4})$/i)?.[1]) || "";
+  const setEvidence = setUsable ? distinctiveSetWords(card.set) : [];
 
   return {
     card,
@@ -402,6 +409,9 @@ export function planCard(card) {
     ladder,
     languageMarker: english || card.anyLanguage ? null : languageMarker(card.language, setUsable ? card.set : "", setCode),
     setWords,
+    denominator,
+    setEvidence,
+    year: /^(19|20)\d\d$/.test(card.year || "") ? Number(card.year) : null,
     setCode,
     settings,
     nameTokens,
@@ -441,7 +451,7 @@ export function mergeComps(pages) {
 /** Set-name words that say nothing about which printing a card is. */
 const SET_STOP = new Set(("pokemon pokémon card cards tcg set series collection edition era the of and ex gx v " +
   "unnumbered energies energy anniversary 25th sun moon sword shield scarlet violet black white diamond pearl " +
-  "promo promos box japanese english base expansion special").split(" "));
+  "promo promos box japanese english base expansion special dark light").split(" "));
 
 /** The words of a set name a seller would have to write to mean it ("Golden"). */
 export function distinctiveSetWords(setName) {
@@ -456,6 +466,16 @@ export function distinctiveSetWords(setName) {
 
 /** Set words too common to require when a set has a better one, but better than nothing. */
 const SECONDARY_SET_WORDS = new Set(["25th", "anniversary", "celebrations", "classic"]);
+
+/** Not a TCG card at all: Bandai's Carddass and Sealdass, Topsun, vending and gum stickers. */
+const OTHER_PRODUCT = /\b(?:carddass|sealdass|topsun|bandai|meiji|amada|vending|sticker|tazo|pog)\b/i;
+
+/** Whether a title carries the card's own "n/total" (zero padding either side ignored). */
+function hasOwnFraction(plan, title) {
+  const m = String(plan.number || "").match(/^([A-Z]{0,4})0*(\d{1,4})[a-z]?\s*\/\s*([A-Z]{0,4})0*(\d{1,4})$/i);
+  if (!m) return true;
+  return new RegExp(`(^|[^A-Z0-9])${m[1]}0*${m[2]}[a-z]?\\s*/\\s*${m[3]}0*${m[4]}(?![0-9])`, "i").test(title);
+}
 
 /** A sale of several copies: "x10", "10x", "lot of 4", "playset". */
 const QUANTITY_LOT = /\b(?:[2-9]|\d{2,})\s*x\b|\bx\s*(?:[2-9]|\d{2,})\b|\blot\s+of\b|\bplay\s*sets?\b|\bjob\s*lot\b/i;
@@ -531,6 +551,25 @@ export function prefilterComps(plan, comps) {
       const own = new RegExp(`(^|[^0-9])0*${Number(plan.jpPromo.digits)}([^0-9]|$)`);
       if (!own.test(t) && (/\b\d{1,3}\s*\/\s*\d{2,3}\b/.test(t) || /\b(?:sv|s|sm|xy|bw|m)-?p\b/i.test(t))) {
         excluded.push({ ...c, exclusionReason: "wrongNumber", exclusionDetail: `not ${plan.jpPromo.digits}/${plan.jpPromo.code}` });
+        continue;
+      }
+    }
+    if (OTHER_PRODUCT.test(t) && !(/\bsticker\b/i.test(t) && !/\b(carddass|sealdass|bandai|topsun)\b/i.test(t) && (plan.variantKeys || []).includes("ditto"))) {
+      excluded.push({ ...c, exclusionReason: "notACard", exclusionDetail: "another product (Carddass, Topsun, sticker…)" });
+      continue;
+    }
+    if (plan.year) {
+      const years = [...t.matchAll(/\b(19[89]\d|20[0-3]\d)\b/g)].map((m) => Number(m[1]));
+      if (years.length && years.every((y) => Math.abs(y - plan.year) > 1)) {
+        excluded.push({ ...c, exclusionReason: "setMismatch", exclusionDetail: `says ${years[0]}, the card is ${plan.year}` });
+        continue;
+      }
+    }
+    if (plan.denominator && !hasOwnFraction(plan, t)) {
+      const named = (plan.setEvidence || []).some((w) => new RegExp(`\\b${w}\\b`, "i").test(plain(t)))
+        || (plan.setCode && new RegExp(`\\b${plan.setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t));
+      if ((plan.setEvidence?.length || plan.setCode) && !named) {
+        excluded.push({ ...c, exclusionReason: "setMismatch", exclusionDetail: `no /${plan.denominator} and doesn't name the set` });
         continue;
       }
     }

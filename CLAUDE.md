@@ -828,6 +828,14 @@ for the same contract as JSON.
   card and the price follows by the SAME house rules (`evidencePrice` runs
   `housePrice`, never a copy), applied only on "Use this price". New sales
   drop old picks.
+- **Every Zubat numbered 41 (TEST6, 2026-11-24).** The numerator-only rung
+  returns every set's card 41, and with overseas sellers counted a 1996 Base
+  Set Zubat, a Carddass and a Sealdass sticker priced a 2022 Dark Phantasma
+  common. Now a "/total" card's sale WITHOUT its own fraction must name the
+  set (a distinctive word or the code); Carddass, Sealdass, Topsun, Bandai,
+  vending and stickers are `notACard` (a Ditto sticker excepted); and a year
+  in the title more than one off the card's own (`*C:Year Manufactured`) is
+  another card.
 - **A promo is its code, and its comps say "promo"** (`lib/promo.js`). The
   catalogue carried "BW33/101", which finds nothing; and the engine drops any
   comp saying "promo", so eleven UK sales showed and one counted.

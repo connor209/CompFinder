@@ -173,7 +173,7 @@ export default function LabAdd() {
       const cards = chunk.map((r) => ({
         sku: r.copies[0].sku, name: r.cardName, number: r.cardNumber, set: r.set, title: r.title, condition: r.condition,
         language: r.language || "English", any_language: Boolean(r.anyLanguage), overseas: Boolean(r.overseas), game: r.card?.game || "", variant: r.card?.finish || "",
-        set_code: r.card?.setCode || ""
+        set_code: r.card?.setCode || "", year: r.card?.year || ""
       }));
       const got = new Map();
       try {
