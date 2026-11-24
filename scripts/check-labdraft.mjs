@@ -6,7 +6,7 @@
 //   node scripts/check-labdraft.mjs
 import {
   mergeGroups, liveCopies, groupToSend, rowStatus, applyBulk, ladderUp, parsePrice,
-  filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, LISTABLE, isThin, unreadableRows
+  filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, LISTABLE, isThin, unreadableRows, settleSent, SENT_TIMEOUT_MS
 } from "../apps/app/lib/lab-draft.js";
 import { groupKey, keyForLanguage, groupsFromItems } from "../apps/app/lib/lab-copies.js";
 import { readFileSync } from "node:fs";
@@ -180,6 +180,32 @@ eq("changing language or sellers drops your picks with the old sales", [relangPi
 const pageSrc = readFileSync(new URL("../apps/app/app/panel/lab/add/LabAdd.js", import.meta.url), "utf8");
 eq("the page sends the overseas choice and keeps the sales", [/overseas: Boolean\(r\.overseas\)/.test(pageSrc), /evidence: evidenceFrom\(x\)/.test(pageSrc), /picks: null, pricePence/.test(pageSrc)], [true, true, true]);
 ok("…and prices your picks through lab-evidence, not a copy of the rules", /evidencePrice\(ev, row\.picks/.test(pageSrc) && !/percentileOf|roundUpToLadder/.test(pageSrc));
+
+// ---- listing in the background ------------------------------------------------------
+const sentRow = (id, skus, job = "j1-0", sentAt = 1000) => ({ ...row({ id, copies: skus.map((sku, i) => ({ sku, seq: i, scans: ["x"] })) }), pricePence: 300, result: { pending: true, job, sentAt } });
+const sentRows = [sentRow("a", ["KA1"]), sentRow("b", ["KA2"]), sentRow("c", ["KA3"]), sentRow("d", ["KA4"]), row({ id: "e", pricePence: 300 })];
+eq("a sent row is 'Listing on eBay…', not listable again", [rowStatus(sentRows[0]), LISTABLE.has("sending")], ["sending", false]);
+const labNow = {
+  events: [
+    { kind: "bulk_listed", detail: { job: "j1-0", rowId: "a", itemId: "111", joined: false } },
+    { kind: "bulk_failed", detail: { job: "j1-0", rowId: "b", error: "eBay said no" } },
+    { kind: "bulk_listed", detail: { job: "OLD", rowId: "d", itemId: "999" } }
+  ],
+  copies: [{ sku: "KA3", listing_id: "L3" }],
+  listings: [{ id: "L3", ebay_item_id: "333" }]
+};
+const settled = settleSent(sentRows, labNow, 2000);
+eq("settled from the job's own log line, or from the copies now in the lab", settled.map((r) => [r.id, rowStatus(r), r.result?.itemId || r.result?.error || null]), [
+  ["a", "listed", "111"], ["b", "failed", "eBay said no"], ["c", "listed", "333"], ["d", "sending", null], ["e", "ready", null]
+]);
+eq("another job's line for the same row id is not this one's answer", settled[3].result.pending, true);
+eq("no answer in ten minutes says so, and to check before re-listing", /Check Inventory/.test(settleSent([sentRow("z", ["KZ"])], { events: [], copies: [], listings: [] }, 1000 + SENT_TIMEOUT_MS + 1)[0].result.error), true);
+eq("nothing to settle returns the same list", settleSent([row({ id: "q" })], labNow) === settleSent([row({ id: "q" })], labNow) ? "n/a" : "n/a", "n/a");
+const unchanged = [row({ id: "q" })];
+eq("…the very same array (it is React state)", settleSent(unchanged, labNow) === unchanged, true);
+const route = readFileSync(new URL("../apps/app/app/api/lab/route.js", import.meta.url), "utf8");
+eq("the server lists in after(), with the admin client, and logs each card", [/after\(async/.test(route), /createAdminClient\(\)/.test(route), /"bulk_listed" : "bulk_failed"/.test(route), /"bulk_done"/.test(route)], [true, true, true, true]);
+eq("the page sends jobs, not one request per card", [/action: "createMany"/.test(pageSrc), /action: "create",/.test(pageSrc)], [true, false]);
 
 // ---- reload ------------------------------------------------------------------------------
 eq("the list survives a reload", restoreDraft(serialiseDraft(mix)).map((r) => [r.id, r.pricePence]), mix.map((r) => [r.id, r.pricePence]));

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, reviseItemPrice, endListing } from "@/lib/ebay";
@@ -28,10 +28,20 @@ import { getNotificationState, enableSaleNotifications, disableSaleNotifications
  *   setPrices   { changes: [{ listingId, pence }] } bulk price, from the inventory view
  *   endMany     { listingIds }                   bulk end, from the inventory view
  *   applyTemplate { listingIds, title, description } re-write live listings from the saved templates
+ *   createMany  { job, items: [{ rowId, group, pricePence, … }] }  list in the BACKGROUND:
+ *               answers at once and carries on after the page has gone. Each
+ *               card's outcome is a lab_events row (bulk_listed / bulk_failed,
+ *               with the job and the page's rowId) the page reads when it is
+ *               next open — nothing is lost if nobody is watching.
  *
  * Every eBay change is written to lab_events with what was sent.
  */
-export const maxDuration = 120;
+// 300: a background listing job (createMany) runs inside the same function
+// after its answer has gone, one card after another.
+export const maxDuration = 300;
+
+/** Cards one background job takes; the page sends several jobs at once. */
+const JOB_MAX = 15;
 
 const json = (body, status = 200) => NextResponse.json(body, { status });
 
@@ -78,6 +88,7 @@ export async function POST(request) {
   try {
     switch (body.action) {
       case "create": return json(await create(sb, user, lab, body));
+      case "createMany": return json(createMany(user, body));
       case "check": return json(await check(sb, user));
       case "pull": {
         const ok = await markPulled(sb, user.id, body.copyId);
@@ -218,6 +229,39 @@ async function create(sb, user, lab, { group, pricePence, subtype = "", marketPe
     itemId: result.itemId, quantity: rows.length, showing: headRow.sku, pricePence: price, title: r.title, titleCut: r.titleCut || undefined, warnings: result.warnings
   });
   return { ok: true, itemId: result.itemId, warnings: result.warnings };
+}
+
+/**
+ * Hand a batch to the server and answer straight away. The work runs in
+ * after(), so it outlives the request and the page that sent it, with the
+ * service-role client (the request's cookies are gone by then) — every read
+ * and write in create() still names this user. The lab is re-read before each
+ * card, because the card before may have made the listing this one joins.
+ */
+function createMany(user, { job, items } = {}) {
+  const list = Array.isArray(items) ? items.filter((x) => x && x.group && x.rowId) : [];
+  if (!job || !list.length) return { ok: false, error: "Nothing to list." };
+  if (list.length > JOB_MAX) return { ok: false, error: `At most ${JOB_MAX} cards a job — send several jobs.` };
+  after(async () => {
+    const admin = createAdminClient();
+    let listed = 0;
+    for (const item of list) {
+      const skus = (item.group.copies || []).map((c) => c.sku);
+      let r;
+      try {
+        const lab = await loadLab(admin, user.id);
+        r = lab.ok ? await create(admin, user, lab, { ...item, settings: {} }) : { ok: false, error: lab.error || "The lab couldn't be read." };
+      } catch (e) {
+        r = { ok: false, error: e.message || "Listing failed." };
+      }
+      if (r.ok) listed += 1;
+      await logEvent(admin, user.id, null, r.ok ? "bulk_listed" : "bulk_failed", {
+        job, rowId: item.rowId, skus, itemId: r.itemId || null, joined: Boolean(r.joined), error: r.ok ? undefined : r.error
+      });
+    }
+    await logEvent(admin, user.id, null, "bulk_done", { job, cards: list.length, listed });
+  });
+  return { ok: true, job, accepted: list.length };
 }
 
 async function check(sb, user) {

@@ -7,7 +7,7 @@ import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
   DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
-  LANGUAGES, DECISION_TEXT, unreadableRows
+  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent
 } from "@/lib/lab-draft.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
 import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer } from "@/lib/lab-evidence.js";
@@ -23,7 +23,7 @@ import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer 
 
 const gbp = (p) => (p == null ? "—" : `£${(p / 100).toFixed(2)}`);
 const SORTS = [["attention", "Needs attention first"], ["name", "Name"], ["sku", "SKU"], ["price-desc", "Your price, high first"], ["comps-desc", "Sold comps, high first"]];
-const STATUS_CLASS = { ready: "s-live", thin: "s-soldout", needsprice: "s-sold", toolow: "s-sold", failed: "s-sold", listed: "s-next", excluded: "s-ended", nocopies: "s-ended" };
+const STATUS_CLASS = { ready: "s-live", thin: "s-soldout", needsprice: "s-sold", toolow: "s-sold", failed: "s-sold", listed: "s-next", excluded: "s-ended", nocopies: "s-ended", sending: "s-soldout" };
 
 async function api(body) {
   const res = await fetch("/api/lab", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
@@ -71,10 +71,10 @@ export default function LabAdd() {
 
   const reloadLab = useCallback(async () => setLab(await api()), []);
   useEffect(() => { reloadLab(); setRows(loadDraft()); setLoaded(true); }, [reloadLab]);
-  // Listing and pricing run from this tab, one card at a time: closing or
-  // reloading it stops the run after the card in flight. Ask first.
+  // Pricing runs from this tab (listing runs on the server): closing or
+  // reloading it stops the pricing after the card in flight. Ask first.
   useEffect(() => {
-    if (busy !== "list" && busy !== "price") return undefined;
+    if (busy !== "price") return undefined;
     const warn = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
@@ -230,26 +230,47 @@ export default function LabAdd() {
       (checkFirst ? `\n\n⚠ ${checkFirst} of the new listings ${checkFirst === 1 ? "is" : "are"} marked Check first (a Terapeak check, a thin or wide price, or a failed lookup).` : "") +
       (skipped ? `\n\n${skipped} ticked row${skipped === 1 ? " isn't" : "s aren't"} ready and will be left alone.` : "") + "\n\nGo?"
     )) return;
+    // Handed to the server in jobs of a dozen, sent together: each job lists
+    // its cards on the server and carries on if this page is closed. The rows
+    // say "Listing on eBay…" until the lab's log says how each one went.
     setBusy("list");
     setMsg(null);
-    let okCount = 0;
-    for (let i = 0; i < go.length; i++) {
-      const r = go[i];
-      setProgress({ label: "Listing", done: i, total: go.length });
-      const res = await api({
-        action: "create", group: groupToSend(r), pricePence: r.pricePence, subtype: r.subtype || "",
-        marketPence: r.comps?.pence ?? null, titleOverride: r.titleOverride || "", settings: {}
-      });
-      if (res.ok) okCount += 1;
-      setRow(r.id, { result: res.ok ? { ok: true, itemId: res.itemId, joined: Boolean(res.joined) } : { ok: false, error: res.error || "Failed." } });
-    }
-    setProgress(null);
+    const job = `j${Date.now().toString(36)}`;
+    const PER_JOB = 12;
+    const chunks = [];
+    for (let i = 0; i < go.length; i += PER_JOB) chunks.push(go.slice(i, i + PER_JOB));
+    const answers = await Promise.all(chunks.map((chunk, n) => api({
+      action: "createMany", job: `${job}-${n}`,
+      items: chunk.map((r) => ({
+        rowId: r.id, group: groupToSend(r), pricePence: r.pricePence, subtype: r.subtype || "",
+        marketPence: r.comps?.pence ?? null, titleOverride: r.titleOverride || ""
+      }))
+    })));
+    const sentAt = Date.now();
+    const jobOf = new Map();
+    const refusedOf = new Map();
+    chunks.forEach((chunk, n) => chunk.forEach((r) => (answers[n]?.ok ? jobOf.set(r.id, `${job}-${n}`) : refusedOf.set(r.id, answers[n]?.error || "The server didn't take the job."))));
+    setRows((rs) => rs.map((r) => (jobOf.has(r.id) ? { ...r, result: { pending: true, job: jobOf.get(r.id), sentAt } }
+      : refusedOf.has(r.id) ? { ...r, result: { ok: false, error: refusedOf.get(r.id) } } : r)));
     setBusy(null);
     setTicked(new Set());
     refreshView();
-    setMsg(okCount === go.length ? { text: `All ${okCount} listed.` } : { bad: true, text: `${okCount} listed, ${go.length - okCount} failed — they're marked Failed and stay here to retry.` });
-    reloadLab();
+    setMsg(refusedOf.size
+      ? { bad: true, text: `${jobOf.size} sent to list, ${refusedOf.size} not taken — marked Failed to retry.` }
+      : { text: `${jobOf.size} card${jobOf.size === 1 ? "" : "s"} sent to list on eBay. They list on the server — you can leave this page; the rows update here as they go, or whenever you come back.` });
   }
+
+  // Rows sent to a background job are settled from the lab's log: on every
+  // load, and every few seconds while any are still out.
+  const sending = rows.some((r) => r.result?.pending);
+  useEffect(() => {
+    if (lab?.ok) setRows((rs) => settleSent(rs, lab));
+  }, [lab]);
+  useEffect(() => {
+    if (!sending) return undefined;
+    const t = setInterval(() => { reloadLab(); }, 6000);
+    return () => clearInterval(t);
+  }, [sending, reloadLab]);
 
   if (!lab) return <main className="li-wrap"><style>{LAB_TABLE_CSS}</style>Loading…</main>;
   if (!lab.ok) {
@@ -351,7 +372,7 @@ export default function LabAdd() {
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "exclude" }, "Left out")}>Leave out</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "include" }, "Put back")}>Put back</button>
           <button className="li-chip primary-chip" disabled={!onScreen.length || !!busy} onClick={() => listRows(onScreen)}>
-            {busy === "list" ? "Listing… keep this tab open" : `List ticked (${onScreen.length})`}
+            {busy === "list" ? "Sending…" : `List ticked (${onScreen.length})`}
           </button>
           <span className="li-dim">{onScreen.length ? `${onScreen.length} ticked` : "Tick rows to edit or list them"}</span>
           {hiddenTicks > 0 && <span className="li-warn">{hiddenTicks} ticked off screen — not acted on <button className="li-link" onClick={() => setTicked(new Set())}>untick</button></span>}

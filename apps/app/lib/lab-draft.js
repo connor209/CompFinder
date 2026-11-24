@@ -120,6 +120,7 @@ export const DECISION_TEXT = { apply: "Apply", terapeak: "Check Terapeak", keep:
  */
 export function rowStatus(row, joins) {
   if (row.result?.ok) return "listed";
+  if (row.result?.pending) return "sending";
   if (row.excluded) return "excluded";
   if (!liveCopies(row).length) return "nocopies";
   if (row.result && !row.result.ok) return "failed";
@@ -131,8 +132,52 @@ export function rowStatus(row, joins) {
 
 export const STATUS_TEXT = {
   ready: "Ready", thin: "Ready · check first", needsprice: "Needs a price", toolow: "Under £0.99",
-  failed: "Failed", listed: "Listed", excluded: "Left out", nocopies: "Every copy left out"
+  failed: "Failed", listed: "Listed", excluded: "Left out", nocopies: "Every copy left out",
+  sending: "Listing on eBay…"
 };
+
+/** How long a sent row waits for its job's answer before it says so. */
+export const SENT_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Rows sent to a background listing job, settled from what the lab now says
+ * (`lab` is /api/lab's GET: listings, copies, events). In order:
+ *   1. the job's own event for the row — bulk_listed or bulk_failed;
+ *   2. every copy of the row now in the lab — listed, whatever the log says
+ *      (the log is the last 200 events and could have scrolled past);
+ *   3. no answer after SENT_TIMEOUT_MS — failed, saying to check Inventory
+ *      before listing again, because a card that went up and lost its log
+ *      line must not be listed twice.
+ * Returns the same array if nothing changed (it is React state).
+ */
+export function settleSent(rows, lab, now = Date.now()) {
+  const events = (lab?.events || []).filter((e) => e.kind === "bulk_listed" || e.kind === "bulk_failed");
+  const inLab = new Map((lab?.copies || []).map((c) => [String(c.sku).toLowerCase(), c]));
+  const itemOf = new Map((lab?.listings || []).map((l) => [String(l.id), l.ebay_item_id]));
+  let changed = false;
+  const out = (rows || []).map((r) => {
+    if (!r.result?.pending) return r;
+    const ev = events.find((e) => e.detail?.job === r.result.job && String(e.detail?.rowId) === String(r.id));
+    if (ev) {
+      changed = true;
+      return { ...r, result: ev.kind === "bulk_listed"
+        ? { ok: true, itemId: ev.detail.itemId || null, joined: Boolean(ev.detail.joined) }
+        : { ok: false, error: ev.detail?.error || "Listing failed." } };
+    }
+    const copies = liveCopies(r);
+    const found = copies.map((c) => inLab.get(String(c.sku).toLowerCase())).filter(Boolean);
+    if (copies.length && found.length === copies.length) {
+      changed = true;
+      return { ...r, result: { ok: true, itemId: itemOf.get(String(found[0].listing_id)) || null, joined: false } };
+    }
+    if (now - (Number(r.result.sentAt) || 0) > SENT_TIMEOUT_MS) {
+      changed = true;
+      return { ...r, result: { ok: false, error: "No answer from the listing job. Check Inventory before listing this card again." } };
+    }
+    return r;
+  });
+  return changed ? out : rows;
+}
 /** Rows a "List" button may send: a thin price is the person's call, so it goes. */
 export const LISTABLE = new Set(["ready", "thin", "failed"]);
 
@@ -232,7 +277,7 @@ export function filterRows(rows, { filter = "all", q = "", file = "" } = {}, joi
 
 /** Sort: needs attention first by default, then by the chosen field. Unpriced last on price sorts. */
 export function sortRows(rows, sort = "attention", joinsOf = () => null) {
-  const rank = { failed: 0, needsprice: 1, toolow: 1, thin: 2, ready: 3, nocopies: 4, excluded: 5, listed: 6 };
+  const rank = { failed: 0, needsprice: 1, toolow: 1, thin: 2, ready: 3, sending: 3, nocopies: 4, excluded: 5, listed: 6 };
   const by = {
     attention: (a, b) => rank[rowStatus(a, joinsOf(a))] - rank[rowStatus(b, joinsOf(b))],
     name: (a, b) => String(a.title).localeCompare(String(b.title), undefined, { numeric: true }),
@@ -255,7 +300,7 @@ export function draftTotals(rows, joinsOf = () => null) {
   for (const r of rows || []) {
     const st = rowStatus(r, joinsOf(r));
     t.byStatus[st] = (t.byStatus[st] || 0) + 1;
-    if (st === "excluded" || st === "listed" || st === "nocopies") continue;
+    if (st === "excluded" || st === "listed" || st === "nocopies" || st === "sending") continue;
     t.rows += 1;
     const n = liveCopies(r).length;
     t.copies += n;
