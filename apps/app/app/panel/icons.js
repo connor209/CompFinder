@@ -71,6 +71,14 @@ const ICONS = {
       <path d="M9.4 9.2v10.6" />
     </>
   ),
+  // Lab — a flask.
+  flask: (
+    <>
+      <path d="M9.4 3.8h5.2" />
+      <path d="M10.2 3.8v5.4L4.9 18.3a1.2 1.2 0 0 0 1.04 1.8h12.12a1.2 1.2 0 0 0 1.04-1.8L13.8 9.2V3.8" />
+      <path d="M7.4 14.6h9.2" />
+    </>
+  ),
   // Upload from device — an arrow rising out of a tray.
   upload: (
     <>

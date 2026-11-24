@@ -14,7 +14,7 @@ import { getNotificationState, enableSaleNotifications, disableSaleNotifications
 
 /**
  * The quantity-listing lab (docs/LAB_COPIES.md). A side build: its own
- * tables, its own screen at /panel/lab, linked from nowhere.
+ * tables, its own screen at /panel/lab, under Lab in the panel nav.
  *
  * GET  → the lab's listings, copies and log.
  * POST { action, ... }:

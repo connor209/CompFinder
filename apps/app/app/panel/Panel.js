@@ -56,6 +56,10 @@ import MarketLinks from "./MarketLinks";
 import { Icon } from "./icons";
 import ThemeSeg from "./ThemeSeg";
 import SkinPicker from "./SkinPicker";
+import LabCopies from "./lab/LabCopies";
+import LabAdd from "./lab/add/LabAdd";
+import LabInventory from "./lab/inventory/LabInventory";
+import ListingSettings from "./lab/settings/ListingSettings";
 
 const LOCAL_BUDGET_KEY = "compfinder_soldcomps_budget";
 // The run currently on screen, kept for this browser tab. Saved runs live in
@@ -87,6 +91,12 @@ const STREAM_SLUG = {
   streamstock: "stream-stock",
   sheets: "sheets",
   cardmarket: "cardmarket",
+  // The lab keeps its own routes (/panel/lab/…); each renders this shell with
+  // the lab screen inside, so the nav is there and the URLs don't change.
+  lab: "lab",
+  labadd: "lab/add",
+  labinventory: "lab/inventory",
+  labsettings: "lab/settings",
   accounts: "accounts"
 };
 const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) => [v, k]));
@@ -133,6 +143,18 @@ const MODULES = [
     sections: [
       { key: "sheets", label: "Sell sheets", desc: "Build CSV imports for Cardmarket listing tools" },
       { key: "cardmarket", label: "Cardmarket stock", desc: "Load the MTG boxes and pick the day's orders" }
+    ]
+  },
+  {
+    key: "lab",
+    label: "Lab",
+    icon: "flask",
+    desc: "Quantity listings: one listing, several copies",
+    sections: [
+      { key: "lab", label: "Overview", desc: "Scorecard, sales checks and picking" },
+      { key: "labadd", label: "Add copies", desc: "Load CardUploader exports, price and list" },
+      { key: "labinventory", label: "Inventory", desc: "Lab listings and their copies" },
+      { key: "labsettings", label: "Listing settings", desc: "How lab listings are written" }
     ]
   },
   { key: "accounts", label: "Accounts", icon: "chart", desc: "Profit & loss and tax-ready reports", sections: [{ key: "accounts", label: "P&L" }] },
@@ -298,8 +320,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
 
   // Keep the active section in sync with the URL (back/forward, direct links).
   useEffect(() => {
-    const slug = (pathname || "").replace(/^\/panel\/?/, "").split("/")[0] || "dashboard";
-    const st = SLUG_STREAM[slug];
+    const parts = (pathname || "").replace(/^\/panel\/?/, "").split("/");
+    // Two-segment slugs (lab/add) first, so /panel/lab/add isn't read as the lab overview.
+    const st = SLUG_STREAM[parts.slice(0, 2).join("/")] || SLUG_STREAM[parts[0] || "dashboard"];
     if (st) setStream((cur) => (cur === st ? cur : st));
   }, [pathname]);
 
@@ -2314,6 +2337,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       {stream === "buy" && <Buy />}
       {stream === "browse" && <Browse onDeepDive={deepDiveCard} />}
       {stream === "accounts" && <Accounts />}
+      {stream === "lab" && <LabCopies />}
+      {stream === "labadd" && <LabAdd />}
+      {stream === "labinventory" && <LabInventory />}
+      {stream === "labsettings" && <ListingSettings />}
       {stream === "imports" && <Imports onPrice={(id) => router.push(`/panel/batch?import=${id}`, { scroll: false })} />}
       {stream === "batch" && (
         <>

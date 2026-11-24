@@ -9,7 +9,7 @@ import { groupsFromItems, pickList, listingForGroup, priceFromComps, listBlocker
 /**
  * The lab screen. Four parts, top to bottom: the scorecard the test is judged
  * on, adding copies from a CardUploader export, and the pick list. Each
- * listing and its copy queue is in the Inventory. Nothing here is linked from the rest of the app.
+ * listing and its copy queue is in the Inventory. Reached from Lab in the panel nav.
  */
 
 const SETTINGS_KEY = "cf-lab-settings";
