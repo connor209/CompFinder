@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { isPromoCard, promoNumber, textLooksPromo } from "../apps/app/lib/promo.js";
 import { compVariants, detectVariants, nameWithoutVariants, variantExclusion } from "../apps/app/lib/variants.js";
 import { housePrice, percentileOf, resolveRules, roundUpToLadder, rulesForGame, gameCode, decide, spreadTooWide, HOUSE_RULES } from "../apps/app/lib/house-pricing.js";
-import { cardsFromCsv, coreNameOf, engineTitle, evaluateCard, languageMarker, parseJpPromo, searchLadder, listsOtherCards, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
+import { cardsFromCsv, distinctiveSetWords, coreNameOf, engineTitle, evaluateCard, languageMarker, parseJpPromo, searchLadder, listsOtherCards, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
 import { settingsForText } from "../apps/app/lib/matching.js";
 
 let failed = 0;
@@ -325,6 +325,14 @@ const dar = planCard(normaliseCard({ name: "Basic Darkness Energy", number: "DAR
 eq("'DAR' is Cardmarket's code, not a number: no number, no required word", [dar.number, dar.nameTokens], ["", ["Darkness", "Energy"]]);
 eq("…and 'Basic' is Cardmarket's word, not a seller's", dar.baseName, "Darkness Energy");
 eq("…an era set name imposes nothing", dar.setWords, []);
+const metal = planCard(normaliseCard({ name: "Metal Energy", number: "38", set: "25th Anniversary Collection", language: "Japanese" }));
+eq("a bare number is also searched WITHOUT it — sellers list 'Metal Energy 25th Anniversary'", metal.ladder.map((r) => r.query), [
+  "Metal Energy 38 Japanese", "Metal Energy 38 s8a", "Metal Energy 38", "Metal Energy 25th Anniversary Collection", "Metal Energy s8a", "Metal Energy Japanese"
+]);
+eq("…and its sales must name the set's word, the weak one when it is all there is", [metal.setWords, distinctiveSetWords("25th Anniversary Golden Box")], [["25th", "anniversary"], ["golden"]]);
+const metalR = evaluateCard(metal, [comp("Metal Energy 25th Anniversary Japanese s8a", 2), comp("Japanese Metal Energy basic", 0.2), comp("Metal Energy 25th Anniversary Collection JP", 2.5)]);
+eq("…so a plain basic energy is left out", [metalR.n_comps, metalR.excluded.map((e) => e.reason)], [2, ["setMismatch"]]);
+eq("…and it goes to a person", metalR.decision, "terapeak");
 eq("a bare number searches but is never a required word", planCard(normaliseCard({ name: "Metal Energy", number: "38", set: "25th Anniversary Collection", language: "Japanese" })).nameTokens, ["Metal", "Energy"]);
 eq("…so '038/028' counts", run({ name: "Metal Energy", number: "38", set: "25th Anniversary Collection" }, [["Metal Energy 038/028 25th Anniversary Japanese", 3], ["Metal Energy s8a Japanese", 2.5]]).n_comps, 2);
 eq("a hyphenated name is two words to a seller", run({ name: "Chi-Yu", number: "025/187", set: "Terastal Festival ex" }, [["Chi Yu 025/187 Terastal Festival Japanese", 1.2], ["Chi-Yu 025/187 sv8a", 1]]).n_comps, 2);

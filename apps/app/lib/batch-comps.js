@@ -289,9 +289,13 @@ export function searchLadder({ baseName, coreName = "", variantWords = "", numbe
   // The number is what makes this safe — one card in a set carries it.
   if (coreName && number && !/^\d{1,4}[a-z]?$/i.test(number)) add("corename", q(coreName, variantWords, number, langWord));
   if (!english) add("nolanguage", q(baseName, variantWords, number));
-  // No number to anchor on: the set is the only thing between this card and
-  // every other copy of its name, so ask for it as sellers might write it.
-  if (!number && setName) add("withset", q(baseName, variantWords, setName));
+  // No number to anchor on — or a bare one ("38") sellers don't write: the
+  // set is the only thing between this card and every other copy of its
+  // name, so ask for it as sellers might write it, without the number.
+  const bare = !promo && /^\d{1,4}[a-z]?$/i.test(number);
+  if ((!number || bare) && setName) add("withset", q(baseName, variantWords, setName));
+  if (bare && setCode && /^[A-Za-z0-9-]{2,8}$/.test(setCode)) add("codenonumber", q(baseName, variantWords, setCode));
+  if (bare) add("nonumber", q(baseName, variantWords, langWord));
   if (!number && variantWords) add("nameonly", q(baseName, langWord));
   return rungs;
 }
@@ -381,7 +385,9 @@ export function planCard(card) {
   // and a ten-card lot. So a sale must name a distinctive word of the set,
   // when the set has one ("Golden"); an era or "Unnumbered Energies" says
   // nothing and imposes nothing.
-  const setWords = !number && setUsable ? distinctiveSetWords(card.set) : [];
+  // A bare number ("38") anchors nothing either — it is not a required word,
+  // and the ladder searches without it — so it takes the same set rule.
+  const setWords = (!number || bareNumber) && setUsable ? distinctiveSetWords(card.set) : [];
 
   return {
     card,
@@ -439,8 +445,17 @@ const SET_STOP = new Set(("pokemon pokémon card cards tcg set series collection
 
 /** The words of a set name a seller would have to write to mean it ("Golden"). */
 export function distinctiveSetWords(setName) {
-  return plain(setName).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !SET_STOP.has(w) && !/^\d+$/.test(w));
+  const words = plain(setName).toLowerCase().split(/[^a-z0-9]+/);
+  const strong = words.filter((w) => w.length >= 4 && !SET_STOP.has(w) && !/^\d+$/.test(w));
+  if (strong.length) return strong;
+  // Nothing better: a set like "25th Anniversary Collection" is still told
+  // apart by its "25th" — a weaker word, used only when it is all there is,
+  // so "25th Anniversary Golden Box" still asks for "Golden".
+  return words.filter((w) => SECONDARY_SET_WORDS.has(w));
 }
+
+/** Set words too common to require when a set has a better one, but better than nothing. */
+const SECONDARY_SET_WORDS = new Set(["25th", "anniversary", "celebrations", "classic"]);
 
 /** A sale of several copies: "x10", "10x", "lot of 4", "playset". */
 const QUANTITY_LOT = /\b(?:[2-9]|\d{2,})\s*x\b|\bx\s*(?:[2-9]|\d{2,})\b|\blot\s+of\b|\bplay\s*sets?\b|\bjob\s*lot\b/i;
@@ -523,7 +538,10 @@ export function prefilterComps(plan, comps) {
       excluded.push({ ...c, exclusionReason: "bundle", exclusionDetail: "several copies" });
       continue;
     }
-    if (plan.setWords?.length && !plan.setWords.some((w) => new RegExp(`\\b${w}\\b`, "i").test(plain(t)))) {
+    // The set's code ("s8a") names it as well as any word of its name does.
+    const namesSet = (plan.setWords || []).some((w) => new RegExp(`\\b${w}\\b`, "i").test(plain(t)))
+      || (plan.setCode && new RegExp(`\\b${plan.setCode.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(t));
+    if (plan.setWords?.length && !namesSet) {
       excluded.push({ ...c, exclusionReason: "setMismatch", exclusionDetail: `doesn't say ${plan.setWords.join(" / ")}` });
       continue;
     }
@@ -663,7 +681,7 @@ export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
   const verdict = decide({
     nSales: n, totals: house.totals, suggestedPence, currentPence: plan.card.currentPence,
     condition: plan.condition, putBack: highBack,
-    unrecognised: plan.unrecognisedVariant, numberless: !plan.number
+    unrecognised: plan.unrecognisedVariant, numberless: !plan.number || /^\d{1,4}[a-z]?$/i.test(plan.number) && !plan.promo
   }, rules);
   for (const f of verdict.flags) if (!(f in flags)) flags[f] = true;
 
