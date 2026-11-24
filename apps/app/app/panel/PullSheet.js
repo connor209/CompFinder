@@ -268,7 +268,7 @@ export default function PullSheet() {
     const stacks = stacksRes?.data;
     const nameMap = new Map((stacks || []).map((s) => [s.id, s.name]));
     const cards = [...shelfRes.data, ...pulledRes.data];
-    setTiming({ total: performance.now() - t0, took, cards: cards.length });
+    setTiming({ total: performance.now() - t0, took, cards: cards.length, ebay: ordersRes.timing || null });
 
     // A SKU maps to a QUEUE of copies, not to one card. One card per SKU is
     // still the ordinary case and behaves exactly as before — the queue is one
@@ -760,6 +760,7 @@ export default function PullSheet() {
         <p className="hint hint-small" title="How long opening this sheet took, and which part was slowest. Reads started together finish at the time of the slowest.">
           Opened in {(timing.total / 1000).toFixed(1)}s · {timing.cards.toLocaleString("en-GB")} stack cards read · slowest:{" "}
           {Object.entries(timing.took).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`).join(", ")}
+          {timing.ebay ? ` · eBay: token ${((timing.ebay.tokenMs || 0) / 1000).toFixed(1)}s, unshipped ${((timing.ebay.unshippedMs || 0) / 1000).toFixed(1)}s, labelled ${((timing.ebay.labelledMs || 0) / 1000).toFixed(1)}s` : ""}
         </p>
       ) : null}
       {packNote ? <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>{packNote}</p> : null}

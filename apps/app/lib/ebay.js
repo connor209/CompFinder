@@ -940,10 +940,13 @@ export async function fetchRecentOrders(accessToken, daysBack = 90) {
 async function fetchOrdersWhere(accessToken, filter) {
   // getOrders returns at most 200 orders a page. One page was all this ever
   // read, so after a big night every order past the 200th was simply not on
-  // the pull sheet. Page until eBay stops handing back a full one.
+  // the pull sheet. Every page is read — and since the first answer says how
+  // many there are (`total`), the rest are asked for TOGETHER rather than one
+  // after another: a week of dispatched orders is several pages, and the pull
+  // sheet was waiting on each in turn (measured 2026-11-24).
   const PAGE = 200;
-  const orders = [];
-  for (let offset = 0; offset < 10000; offset += PAGE) {
+  const PARALLEL = 5;
+  const pageAt = async (offset) => {
     const params = new URLSearchParams({ filter, limit: String(PAGE), offset: String(offset) });
     const res = await fetch(`${FULFILLMENT_ORDER}?${params}`, {
       headers: { Authorization: `Bearer ${accessToken}`, "X-EBAY-C-MARKETPLACE-ID": MARKETPLACE, Accept: "application/json" }
@@ -958,11 +961,30 @@ async function fetchOrdersWhere(accessToken, filter) {
       const why = await res.json().then((j) => j?.errors?.[0]?.longMessage || j?.errors?.[0]?.message, () => null);
       throw new Error(`eBay orders fetch failed (${res.status})${why ? `: ${why}` : "."}`);
     }
-    const json = await res.json();
-    const page = json.orders || [];
-    orders.push(...page);
-    if (page.length < PAGE || (json.total != null && offset + PAGE >= Number(json.total))) break;
+    return res.json();
+  };
+  const first = await pageAt(0);
+  const orders = [...(first.orders || [])];
+  const total = first.total != null ? Number(first.total) : null;
+  if ((first.orders || []).length < PAGE) return orders;
+  if (total == null) {
+    // No total to plan from: the old way, a page at a time until a short one.
+    for (let offset = PAGE; offset < 10000; offset += PAGE) {
+      const json = await pageAt(offset);
+      const page = json.orders || [];
+      orders.push(...page);
+      if (page.length < PAGE) break;
+    }
+    return orders;
   }
+  const offsets = [];
+  for (let o = PAGE; o < Math.min(total, 10000); o += PAGE) offsets.push(o);
+  for (let k = 0; k < offsets.length; k += PARALLEL) {
+    const pages = await Promise.all(offsets.slice(k, k + PARALLEL).map(pageAt));
+    for (const json of pages) orders.push(...(json.orders || []));
+  }
+  // An order arriving mid-read can shift one onto two pages; the caller
+  // already folds those (seenOrders), so a duplicate here costs nothing.
   return orders;
 }
 
@@ -979,27 +1001,39 @@ async function fetchOrdersWhere(accessToken, filter) {
  */
 export async function fetchPendingOrders(accessToken, { labelledWithinDays = 0 } = {}) {
   let labelledError = null;
-  const orders = (await fetchOrdersWhere(accessToken, "orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}"))
-    .map((o) => ({ order: o, labelPrinted: false }));
+  const t0 = Date.now();
+  const timing = {};
+  // The two reads don't depend on each other, so they go TOGETHER: the sheet
+  // waits for the slower, not the sum (measured 2026-11-24 at ~7s in turn).
+  const unshippedP = fetchOrdersWhere(accessToken, "orderfulfillmentstatus:{NOT_STARTED|IN_PROGRESS}")
+    .then((r) => { timing.unshippedMs = Date.now() - t0; return r; });
+  let labelledP = null;
   if (labelledWithinDays > 0) {
     const since = new Date(Date.now() - labelledWithinDays * 86_400_000).toISOString();
-    try {
-      // eBay accepts exactly two status sets here — {NOT_STARTED|IN_PROGRESS}
-      // and {FULFILLED|IN_PROGRESS} — and answers a bare {FULFILLED} with a
-      // 400. So ask for the pair and keep the FULFILLED ones; IN_PROGRESS
-      // orders already came back from the read above.
-      const labelled = await fetchOrdersWhere(accessToken, `lastmodifieddate:[${since}..],orderfulfillmentstatus:{FULFILLED|IN_PROGRESS}`);
-      for (const o of labelled) {
+    // eBay accepts exactly two status sets here — {NOT_STARTED|IN_PROGRESS}
+    // and {FULFILLED|IN_PROGRESS} — and answers a bare {FULFILLED} with a
+    // 400. So ask for the pair and keep the FULFILLED ones; IN_PROGRESS
+    // orders already came back from the other read.
+    labelledP = fetchOrdersWhere(accessToken, `lastmodifieddate:[${since}..],orderfulfillmentstatus:{FULFILLED|IN_PROGRESS}`)
+      .then((r) => { timing.labelledMs = Date.now() - t0; return { ok: true, orders: r }; }, (e) => ({ ok: false, error: e }));
+  }
+  // The unshipped orders are the sheet: their failure is the sheet's failure.
+  // (The labelled read has already caught its own, so nothing is left unhandled.)
+  const orders = (await unshippedP).map((o) => ({ order: o, labelPrinted: false }));
+  if (labelledP) {
+    const res = await labelledP;
+    if (res.ok) {
+      for (const o of res.orders) {
         if (o.orderFulfillmentStatus !== "FULFILLED") continue;
         // A cancelled order is nobody's parcel, label or not.
         if (o.cancelStatus?.cancelState === "CANCELED") continue;
         orders.push({ order: o, labelPrinted: true });
       }
-    } catch (e) {
-      // The unshipped orders are the sheet; the label-printed ones are the
-      // extra. Losing the extra must not cost the sheet — say so instead.
-      if (e.scope) throw e;
-      labelledError = e.message || "Couldn't read label-printed orders.";
+    } else {
+      // The label-printed ones are the extra. Losing the extra must not cost
+      // the sheet — say so instead. A refused token is the sheet's problem too.
+      if (res.error?.scope) throw res.error;
+      labelledError = res.error?.message || "Couldn't read label-printed orders.";
     }
   }
 
@@ -1044,7 +1078,7 @@ export async function fetchPendingOrders(accessToken, { labelledWithinDays = 0 }
       });
     }
   }
-  return { lines, labelledError };
+  return { lines, labelledError, timing };
 }
 
 /**

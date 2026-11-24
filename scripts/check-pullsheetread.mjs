@@ -156,5 +156,43 @@ const summary = (cards) => {
   eq("a failed stack read stops the sheet rather than showing an empty shelf", /shelfRes\.error \|\| pulledRes\.error/.test(sheet), true);
 }
 
+// ---- eBay: both reads together, every page, nothing twice ---------------------------
+{
+  const { fetchPendingOrders } = await import("../apps/app/lib/ebay.js");
+  const mk = (id, status) => ({ orderId: id, orderFulfillmentStatus: status, lineItems: [{ lineItemId: `${id}-L`, legacyItemId: "1", sku: "A1", title: "t", quantity: 1 }] });
+  const unshipped = Array.from({ length: 450 }, (_, i) => mk(`U${i}`, "NOT_STARTED"));
+  const labelled = [...Array.from({ length: 250 }, (_, i) => mk(`F${i}`, "FULFILLED")), mk("U0", "IN_PROGRESS")];
+  const started = [];
+  let open = 0;
+  let maxOpen = 0;
+  const real = globalThis.fetch;
+  const run = async ({ failLabelled = false } = {}) => {
+    started.length = 0; open = 0; maxOpen = 0;
+    globalThis.fetch = async (url) => {
+      const u = new URL(url);
+      const filter = u.searchParams.get("filter");
+      const offset = Number(u.searchParams.get("offset"));
+      const isLabelled = /FULFILLED/.test(filter);
+      started.push(`${isLabelled ? "F" : "U"}@${offset}`);
+      open += 1; maxOpen = Math.max(maxOpen, open);
+      await new Promise((r) => setTimeout(r, 5));
+      open -= 1;
+      if (isLabelled && failLabelled) return { ok: false, status: 500, json: async () => ({ errors: [{ message: "eBay down" }] }) };
+      const src = isLabelled ? labelled : unshipped;
+      return { ok: true, status: 200, json: async () => ({ total: src.length, orders: src.slice(offset, offset + 200) }) };
+    };
+    try { return await fetchPendingOrders("tok", { labelledWithinDays: 7 }); } finally { globalThis.fetch = real; }
+  };
+  const r = await run();
+  const ids = r.lines.map((l) => l.orderId);
+  eq("every unshipped order, all three pages", ids.filter((x) => x.startsWith("U")).length, 450);
+  eq("every label-printed order", ids.filter((x) => x.startsWith("F")).length, 250);
+  eq("an order on both lists appears once, as unshipped", [ids.filter((x) => x === "U0").length, r.lines.find((l) => l.orderId === "U0").labelPrinted], [1, false]);
+  eq("the two reads ran at the same time, and later pages together", maxOpen >= 3, true);
+  eq("the route can say where the time went", typeof r.timing?.unshippedMs === "number" && typeof r.timing?.labelledMs === "number", true);
+  const bad = await run({ failLabelled: true });
+  eq("a failed label-printed read never costs the sheet", [bad.lines.length, Boolean(bad.labelledError)], [450, true]);
+}
+
 console.log(failed ? `\n${failed} of ${n} pull-sheet read checks failed.` : `✓ ${n} pull-sheet read checks pass.`);
 process.exit(failed ? 1 : 0);

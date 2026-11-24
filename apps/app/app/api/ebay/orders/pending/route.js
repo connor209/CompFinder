@@ -18,10 +18,13 @@ export async function GET() {
 
   try {
     const admin = createAdminClient();
+    const t0 = Date.now();
     const token = await getValidUserAccessToken(admin, user.id);
     if (!token) return NextResponse.json({ ok: false, error: "eBay account not connected." }, { status: 400 });
-    const { lines, labelledError } = await fetchPendingOrders(token, { labelledWithinDays: LABELLED_WINDOW_DAYS });
-    return NextResponse.json({ ok: true, lines, labelledError });
+    const tokenMs = Date.now() - t0;
+    const { lines, labelledError, timing } = await fetchPendingOrders(token, { labelledWithinDays: LABELLED_WINDOW_DAYS });
+    // Where the server's time went, for the pull sheet's "Opened in" line.
+    return NextResponse.json({ ok: true, lines, labelledError, timing: { tokenMs, ...timing } });
   } catch (err) {
     if (err.scope) return NextResponse.json({ ok: false, scopeError: true, error: "Reconnect your eBay account to enable order picking." }, { status: 403 });
     return NextResponse.json({ ok: false, error: err.message || "Failed to load orders." }, { status: 502 });
