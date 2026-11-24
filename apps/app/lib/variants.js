@@ -306,3 +306,8 @@ export function isReverseKind(keys) {
 export function withoutReverseWords(title) {
   return String(title || "").replace(/\brev(?:erse)?\b[\s.\-]*(?:holo(?:foil)?|foil)?\b/gi, " ").replace(/\s{2,}/g, " ").trim();
 }
+
+/** A variant a sale need not say (mirror holo) — see prefilterComps for when it hardens. */
+export function isSoftVariant(key) {
+  return Boolean(BY_KEY[key]?.soft);
+}

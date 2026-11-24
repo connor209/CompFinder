@@ -803,6 +803,14 @@ for the same contract as JSON.
   shares a Japanese number, a non-English card only counts a sale whose title
   shows its language — the word, an Asian set code, the set name, or Japanese
   script (`languageMarker()`, reason `notThisLanguage`).
+- **Where TEST3 fell apart, and the rule each one became.** A "number" with no
+  digit ("DAR") is no number; a bare number ("38") searches but is never a
+  required word; a hyphenated name is two required words ("Chi Yu");
+  "Basic X Energy" is "X Energy" to a seller; a numberless card's sales must
+  name a distinctive word of its set ("Golden"), unless the set name is only
+  an era; "x10", "4x", "lot of", "playset" are lots; and the soft mirror
+  variant HARDENS once two sales say it, because then the market is telling
+  mirror and plain apart.
 - **A promo is its code, and its comps say "promo"** (`lib/promo.js`). The
   catalogue carried "BW33/101", which finds nothing; and the engine drops any
   comp saying "promo", so eleven UK sales showed and one counted.

@@ -24,7 +24,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import CardUploaderCsv from "./carduploader.js";
 import { appNameTokens, applyNumberGuards, dropForeignPostage, settingsForText, stripNumberingPrefix } from "./matching.js";
 import { isPromoCard, promoNumber, promoNumberPattern, anyPromoOfPrefix } from "./promo.js";
-import { detectVariants, isReverseKind, nameWithoutVariants, queryWordsFor, subjectTextFor, variantExclusion, variantLabel, withoutReverseWords } from "./variants.js";
+import { compVariants, detectVariants, isReverseKind, isSoftVariant, nameWithoutVariants, queryWordsFor, subjectTextFor, variantExclusion, variantLabel, withoutReverseWords } from "./variants.js";
 import { housePrice, houseTotal, resolveRules, rulesForGame, conditionCode, decide, gameCode, spreadTooWide } from "./house-pricing.js";
 import { UNPRICED_PENCE } from "./zero-price.js";
 import { japaneseSetCode } from "./japanese-sets.js";
@@ -234,7 +234,15 @@ export function searchLadder({ baseName, variantWords = "", number = "", promo =
 export function planCard(card) {
   const english = !card.language || /^english$/i.test(card.language) || /^(any|all)\b/i.test(card.language);
   const promo = isPromoCard({ number: card.number, set: card.set });
-  const number = promo ? promoNumber(card.number) : strip(card.number);
+  // What CardUploader writes in the number column is not always a printed
+  // number: "DAR" on an unnumbered energy is Cardmarket's code, and no seller
+  // writes it. A number with no digit is no number.
+  const rawNumber = promo ? promoNumber(card.number) : strip(card.number);
+  const number = /\d/.test(rawNumber) ? rawNumber : "";
+  // A bare number ("38", no "/total") is too weak to be a REQUIRED word —
+  // sellers write "038/028" or the set code — so it searches but never
+  // filters on its own.
+  const bareNumber = !promo && /^\d{1,4}[a-z]?$/i.test(number);
   const { keys, unrecognised } = detectVariants({
     name: card.name,
     variant: card.variant,
@@ -253,6 +261,8 @@ export function planCard(card) {
   const baseName = nameWithoutVariants(card.name)
     .replace(/\[[^\]]*\]/g, " ")
     .replace(/\(([^()]*)\)/g, (m, inner) => (/^[A-Z0-9!?]{1,2}$/i.test(inner.trim()) ? m : " "))
+    // Cardmarket's "Basic Darkness Energy" is "Darkness Energy" to a seller.
+    .replace(/^basic\s+(?=\S+\s+energy\b)/i, "")
     .replace(/\s{2,}/g, " ").trim() || card.name;
   const setUsable = card.set && !GENERIC_SET.has(card.set.toLowerCase());
   // A promo's code already names its set, and "Black and White Promos" is
@@ -288,9 +298,18 @@ export function planCard(card) {
     settings.excludeKeywords = rest;
   }
 
+  // Hyphenated names are two words to a seller as often as one ("Chi Yu",
+  // "Ho Oh"): split, each word still required, so both spellings count.
   const nameTokens = appNameTokens(
-    CompFinderPricing.simplifyTitle([baseName, promo ? "" : stripNumberingPrefix(number)].filter(Boolean).join(" "), settings.stripWords)
-  );
+    CompFinderPricing.simplifyTitle([baseName, promo || bareNumber ? "" : stripNumberingPrefix(number)].filter(Boolean).join(" "), settings.stripWords)
+  ).flatMap((t) => (/^[^-\s]+(?:-[^-\s]+)+$/.test(t) && !/^\d/.test(t) ? t.split("-") : [t]));
+
+  // A card with no number has only its name and set between it and every
+  // other copy of that name: a Golden Box Lightning Energy pooled 20p basics
+  // and a ten-card lot. So a sale must name a distinctive word of the set,
+  // when the set has one ("Golden"); an era or "Unnumbered Energies" says
+  // nothing and imposes nothing.
+  const setWords = !number && setUsable ? distinctiveSetWords(card.set) : [];
 
   return {
     card,
@@ -304,6 +323,7 @@ export function planCard(card) {
     queries,
     ladder,
     languageMarker: english || card.anyLanguage ? null : languageMarker(card.language, setUsable ? card.set : "", setCode),
+    setWords,
     setCode,
     settings,
     nameTokens,
@@ -336,6 +356,19 @@ export function mergeComps(pages) {
   }
   return out;
 }
+
+/** Set-name words that say nothing about which printing a card is. */
+const SET_STOP = new Set(("pokemon pokémon card cards tcg set series collection edition era the of and ex gx v " +
+  "unnumbered energies energy anniversary 25th sun moon sword shield scarlet violet black white diamond pearl " +
+  "promo promos box japanese english base expansion special").split(" "));
+
+/** The words of a set name a seller would have to write to mean it ("Golden"). */
+export function distinctiveSetWords(setName) {
+  return plain(setName).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !SET_STOP.has(w) && !/^\d+$/.test(w));
+}
+
+/** A sale of several copies: "x10", "10x", "lot of 4", "playset". */
+const QUANTITY_LOT = /\b(?:[2-9]|\d{2,})\s*x\b|\bx\s*(?:[2-9]|\d{2,})\b|\blot\s+of\b|\bplay\s*sets?\b|\bjob\s*lot\b/i;
 
 /**
  * Set and era names that carry "and" or "&" without being two cards.
@@ -381,6 +414,12 @@ export function listsOtherCards(plan, title) {
 export function prefilterComps(plan, comps) {
   const kept = [];
   const excluded = [];
+  // A SOFT variant (mirror holo) is not required of a sale — most never say
+  // it. But when at least two sales DO say it, the market is telling mirror
+  // and plain apart, and pooling them averages a £3 card with a 60p one; then
+  // it is required like any other.
+  const softKeys = (plan.variantKeys || []).filter((k) => isSoftVariant(k));
+  const hardened = softKeys.filter((k) => (comps || []).filter((c) => compVariants(c.title || "").includes(k)).length >= 2);
   const ours = plan.promo ? promoNumberPattern(plan.number) : null;
   const anyCode = plan.promo ? anyPromoOfPrefix(plan.number) : null;
   for (const c of comps || []) {
@@ -397,6 +436,18 @@ export function prefilterComps(plan, comps) {
           continue;
         }
       }
+    }
+    if (QUANTITY_LOT.test(t)) {
+      excluded.push({ ...c, exclusionReason: "bundle", exclusionDetail: "several copies" });
+      continue;
+    }
+    if (plan.setWords?.length && !plan.setWords.some((w) => new RegExp(`\\b${w}\\b`, "i").test(plain(t)))) {
+      excluded.push({ ...c, exclusionReason: "setMismatch", exclusionDetail: `doesn't say ${plan.setWords.join(" / ")}` });
+      continue;
+    }
+    if (hardened.length && hardened.some((k) => !compVariants(t).includes(k))) {
+      excluded.push({ ...c, exclusionReason: "missingVariant", exclusionDetail: hardened.map(variantLabel).join(", ") + " (sellers tell it apart)" });
+      continue;
     }
     if (plan.languageMarker && !plan.languageMarker.test(t)) {
       excluded.push({ ...c, exclusionReason: "notThisLanguage", exclusionDetail: plan.card?.language || "" });

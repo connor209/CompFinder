@@ -319,6 +319,30 @@ ok("an English card has no language rule", planCard(normaliseCard({ name: "Geodu
 const routeSrc = readFileSync(new URL("../apps/app/app/api/batch-comps/route.js", import.meta.url), "utf8");
 ok("depth 3 runs the ladder and reports each rung", /depth === 3/.test(routeSrc) && /plan\.ladder/.test(routeSrc) && /search \}/.test(routeSrc));
 
+// --- 4e. where the TEST3 batch fell apart (2026-11-24) ------------------------------
+const run = (card, titles) => evaluateCard(planCard(normaliseCard({ ...card, language: "Japanese" })), titles.map(([t, p]) => comp(t, p, 1)));
+const dar = planCard(normaliseCard({ name: "Basic Darkness Energy", number: "DAR", set: "Sun & Moon Era Unnumbered Energies", language: "Japanese" }));
+eq("'DAR' is Cardmarket's code, not a number: no number, no required word", [dar.number, dar.nameTokens], ["", ["Darkness", "Energy"]]);
+eq("…and 'Basic' is Cardmarket's word, not a seller's", dar.baseName, "Darkness Energy");
+eq("…an era set name imposes nothing", dar.setWords, []);
+eq("a bare number searches but is never a required word", planCard(normaliseCard({ name: "Metal Energy", number: "38", set: "25th Anniversary Collection", language: "Japanese" })).nameTokens, ["Metal", "Energy"]);
+eq("…so '038/028' counts", run({ name: "Metal Energy", number: "38", set: "25th Anniversary Collection" }, [["Metal Energy 038/028 25th Anniversary Japanese", 3], ["Metal Energy s8a Japanese", 2.5]]).n_comps, 2);
+eq("a hyphenated name is two words to a seller", run({ name: "Chi-Yu", number: "025/187", set: "Terastal Festival ex" }, [["Chi Yu 025/187 Terastal Festival Japanese", 1.2], ["Chi-Yu 025/187 sv8a", 1]]).n_comps, 2);
+ok("…Ho-Oh needs both words, either spelling", planCard(normaliseCard({ name: "Ho-Oh", number: "1/1" })).nameTokens.join() === "Ho,Oh");
+const golden = run({ name: "Lightning Energy", number: "", set: "25th Anniversary Golden Box" }, [
+  ["Lightning Energy 25th Anniversary Golden Box Japanese", 8], ["Lightning Energy Golden Box Japanese", 9],
+  ["Japanese Lightning Energy basic", 0.2], ["Lightning Energy Japanese x10", 0.5]
+]);
+eq("a numberless card needs its set's own word; a lot of ten is a lot", [golden.n_comps, golden.excluded.map((e) => e.reason).sort()], [2, ["bundle", "setMismatch"]]);
+ok("…priced off the Golden Box sales, not the 20p basics", golden.suggested_price > 8);
+const quantity = (t) => evaluateCard(planCard(normaliseCard({ name: "Pikachu", number: "025/165", set: "151" })), [comp(t, 1)]).excluded.map((e) => e.reason);
+eq("quantity lots", ["Pikachu 025/165 x4", "4x Pikachu 025/165", "Pikachu 025/165 lot of 3", "Pikachu 025/165 playset"].map(quantity), [["bundle"], ["bundle"], ["bundle"], ["bundle"]]);
+eq("…not a lot", ["Pikachu 025/165 151 x1 NM", "Pikachu 025/165 XY", "Mega Charizard X ex 025/165"].map((t) => quantity(t).includes("bundle")), [false, false, false]);
+const rose = (titles) => run({ name: "Rose Tower (Mirror Holofoil)", number: "182/190", set: "Shiny Star V" }, titles);
+eq("mirror: one sale saying it is not a market telling them apart", rose([["Rose Tower 182/190 Mirror Holo s4a Japanese", 3], ["Rose Tower 182/190 s4a Japanese", 0.6]]).n_comps, 2);
+const roseHard = rose([["Rose Tower 182/190 Mirror Holo s4a Japanese", 3], ["Rose Tower Mirror 182/190 Japanese", 3.2], ["Rose Tower 182/190 s4a Japanese", 0.6]]);
+eq("…two are: the plain copy goes, and the mirror is priced on its own", [roseHard.n_comps, roseHard.suggested_price > 2.49], [2, true]);
+
 // --- 5. output ---------------------------------------------------------------
 
 eq("check mode: within £1 and 30% is not a difference", priceDiffers({ suggested_price: 10.49, current_price: 9.99 }).differs, false);
