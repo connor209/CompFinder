@@ -264,6 +264,19 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("the filters in force, as chips", I.activeChips({ ...I.EMPTY_FILTERS, set: "Dark Phantasma", minPrice: "3", vsMarket: "under", multi: true }).map((c) => c.text),
     ["Set: Dark Phantasma", "Price £3–any", "Priced under market", "2+ copies"]);
   eq("all on one page", I.pageOf(inv, 1, 0).rows.length, 4);
+  // ---- where a card is ----
+  const placed = R("w", { name: "Palafin" });
+  placed.copies = [
+    { sku: "TEST5-30", pile: "LAB-TEST5", position: 21, state: "queued" },
+    { sku: "TEST5-4", pile: "LAB-TEST5", position: 3, state: "next" },
+    { sku: "TEST5-9", pile: "LAB-TEST5", position: 7, state: "sold" },
+    { sku: "TEST5-1", pile: "LAB-TEST5", position: null, state: "picked" }
+  ];
+  eq("where: every copy on the shelf at its live position, walk order, picked ones gone", I.whereOf(placed).map((w) => [w.sku, I.whereText(w), w.sold]),
+    [["TEST5-4", "LAB-TEST5 #3", false], ["TEST5-9", "LAB-TEST5 #7", true], ["TEST5-30", "LAB-TEST5 #21", false]]);
+  const other = R("v", { name: "Zubat" }); other.copies = [{ sku: "TEST6-2", pile: "LAB-TEST6", position: 2, state: "next" }];
+  const third = R("u", { name: "Entei" }); third.copies = [{ sku: "TEST5-50", pile: "LAB-TEST5", position: 40, state: "next" }];
+  eq("sort in walk order: stack, then position", I.sortRows([other, third, placed], "where-asc").map((r) => r.id), ["w", "u", "v"]);
 }
 
 // ---- apply template, all copies, the CSV -------------------------------------------------

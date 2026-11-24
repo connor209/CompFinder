@@ -4,7 +4,7 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, us
 import {
   inventoryRows, filterRows, sortRows, pageOf, actionable, parsePence, pricePlan, templatePlan,
   copyRows, isEmptyRow, inventoryCsv, EMPTY_FILTERS, STATUSES, PAGE_SIZES, SORT_FIELDS,
-  facetCounts, viewTotals, columnsFor, activeChips, marketGap, cmGap, VS_MARKET, VS_CM, ADDED, gameOf
+  facetCounts, viewTotals, columnsFor, activeChips, marketGap, cmGap, VS_MARKET, VS_CM, ADDED, gameOf, whereOf, whereText
 } from "@/lib/lab-inventory.js";
 import { removeBlocker } from "@/lib/lab-copies.js";
 import { LAB_TABLE_CSS as CSS } from "../labTableCss";
@@ -492,7 +492,7 @@ export default function LabInventory() {
                 <th className="li-cb">{grouped && <input type="checkbox" checked={allOnPage} aria-label="Tick this page" onChange={(e) => setTicked((t) => { const n = new Set(t); for (const r of view.rows) { if (e.target.checked) n.add(String(r.id)); else n.delete(String(r.id)); } return n; })} />}</th>
                 <Th field="name">Card</Th>
                 <th className="sm-hide">Status</th>
-                <Th field="sku">SKU</Th>
+                <Th field="where" title="Each copy's stack and its live position there — the number you count to, which closes up as cards are pulled. Click to sort in walk order.">SKU · where</Th>
                 <th className="sm-hide">eBay item</th>
                 <Th field="condition">Cond.</Th>
                 {cols.variant && <th className="sm-hide">Variant</th>}
@@ -544,9 +544,20 @@ export default function LabInventory() {
                         : <span className={`li-status s-${r.status}`}>{many ? `×${r.copies.length} ` : ""}{STATUS_LABEL[r.status]}</span>}
                     </td>
                     <td className="mono">
-                      {c1 ? <>{c1.sku}<small>{c1.position ? `pile ${c1.pile} #${c1.position}` : `pile ${c1.pile}`}</small></>
-                        : many ? <button className="li-link mono" onClick={() => toggleOpen(r.id)}>×{r.copies.length} copies</button>
-                        : r.copies[0]?.sku || "—"}
+                      {c1 ? <>{c1.sku}<small className="li-where">{c1.state === "picked" ? "picked" : `${c1.pile}${c1.position ? ` #${c1.position}` : ""}`}</small></>
+                        : many ? (() => {
+                          const ws = whereOf(r);
+                          return <>
+                            <button className="li-link mono" onClick={() => toggleOpen(r.id)}>×{r.copies.length} copies</button>
+                            <small className="li-where" title={ws.map((w) => `${w.sku}: ${whereText(w)}${w.sold ? " (sold, to pick)" : ""}`).join("\n")}>
+                              {ws.slice(0, 3).map(whereText).join(", ")}{ws.length > 3 ? ` +${ws.length - 3}` : ""}
+                            </small>
+                          </>;
+                        })()
+                        : (() => {
+                          const w = whereOf(r)[0];
+                          return <>{r.copies[0]?.sku || "—"}{w && <small className="li-where">{whereText(w)}{w.sold ? " · sold, to pick" : ""}</small>}</>;
+                        })()}
                     </td>
                     <td className="mono sm-hide">{r.itemId ? <a href={`https://www.ebay.co.uk/itm/${r.itemId}`} target="_blank" rel="noreferrer">{r.itemId}</a> : "—"}</td>
                     <td><b>{r.condition}</b></td>
@@ -603,7 +614,7 @@ export default function LabInventory() {
                         </div>
                       </td>
                       <td className="sm-hide"><span className={`li-status s-${c.state}`}>{c.onShow ? "On eBay now" : STATE_LABEL[c.state]}</span></td>
-                      <td className="mono">{c.sku}<small>{c.position ? `pile ${c.pile} #${c.position}` : `pile ${c.pile}`}</small></td>
+                      <td className="mono">{c.sku}<small className="li-where">{c.state === "picked" ? "picked" : `${c.pile}${c.position ? ` #${c.position}` : ""}`}</small></td>
                       <td className="sm-hide" /><td />{cols.variant && <td className="sm-hide" />}{cols.tcg && <td className="sm-hide" />}<td /><td className="sm-hide" /><td className="sm-hide" />{cols.cm && <><td className="sm-hide" /><td className="sm-hide" /></>}<td /><td className="sm-hide" />
                       <td className="li-menucell">
                         {!removeBlocker(c, r.listing, lab.copies) && <button className="li-chip" disabled={busy} onClick={() => removeCopy(r, c)}>✕ Remove</button>}
@@ -641,6 +652,7 @@ const INV_CSS = `
 .li-gap.over { color: var(--good, #3fb68b); }
 .li-gap.even { color: var(--ink-soft); }
 .li-viewtot b { color: var(--ink); }
+.li-where { color: var(--accent); font-weight: 600; }
 .li-up { color: var(--good, #3fb68b); }
 .li-down { color: var(--bad); }
 `;

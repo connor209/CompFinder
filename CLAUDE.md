@@ -324,8 +324,8 @@ stream` (the relay, only while streaming).
   sweep touching only listings that changed, templates (the photo promise
   always appended, CardUploader's `/catalog/` database image never a scan),
   the inventory view (filters by set, price range, price against market, 2+
-  copies and date added; sorts by set-then-number, natural SKU, condition and
-  the gap to market, a missing value last both ways; facet counts, on-screen
+  copies and date added; sorts by set-then-number, natural SKU, condition,
+  the gap to market and stack-then-live-position (walk order), a missing value last both ways; facet counts, on-screen
   totals, and a column that says the same on every row hidden), and greps
   that nothing outside the lab reads its tables.
 - `scripts/check-labstacks.mjs` — the lab folded into the stacks

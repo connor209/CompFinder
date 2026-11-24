@@ -208,8 +208,29 @@ const numberKey = (n) => { const m = String(n || "").match(/(\d+)(?:\D+(\d+))?/)
 export const SORT_FIELDS = [
   ["added", "Date added"], ["name", "Name"], ["set", "Set & number"], ["sku", "SKU"], ["condition", "Condition"],
   ["price", "Price"], ["market", "Market"], ["gap", "Price vs market (£)"], ["gappct", "Price vs market (%)"],
-  ["cm", "Cardmarket"], ["cmgap", "Price vs Cardmarket (%)"], ["forsale", "Quantity"]
+  ["cm", "Cardmarket"], ["cmgap", "Price vs Cardmarket (%)"], ["forsale", "Quantity"],
+  ["where", "Stack & position"]
 ];
+
+/**
+ * Where a row's cards physically are: each copy still on the shelf, as its
+ * stack and its LIVE position there (stackpos.js's number, the one Stacks and
+ * the pull sheet count to — it closes up as cards are pulled, so it is not
+ * the SKU's number once anything has gone). Sold-to-pick copies are on the
+ * shelf too and say so; picked ones are gone and left out.
+ */
+export function whereOf(row) {
+  return (row?.copies || [])
+    .filter((c) => c.state !== "picked")
+    .map((c) => ({ sku: c.sku, pile: c.pile, position: c.position ?? null, sold: c.state === "sold" }))
+    .sort((a, b) => String(a.pile).localeCompare(String(b.pile), undefined, { numeric: true }) || (a.position ?? 1e9) - (b.position ?? 1e9));
+}
+
+/** "LAB-TEST5 #12" — one place, as a person reads it off a stack. */
+export function whereText(w) {
+  if (!w) return "";
+  return `${w.pile}${w.position ? ` #${w.position}` : ""}`;
+}
 
 /** Sort. A row with no value (no price, no market) sorts LAST in both directions — never as 0. */
 export function sortRows(rows, key = "added-desc") {
@@ -229,6 +250,7 @@ export function sortRows(rows, key = "added-desc") {
       case "sku": return r.copies?.[0]?.sku ?? null;
       case "condition": return CONDITION_RANK[r.condition] ?? null;
       case "forsale": return r.forSale;
+      case "where": { const w = whereOf(r)[0]; return w ? `${w.pile}\u0000${String(w.position ?? 999999).padStart(6, "0")}` : null; }
       default: return null;
     }
   };
