@@ -150,7 +150,10 @@ export function slimRec(rec) {
     note: storableText(rec.note),
     graded: rec.graded ?? [],
     included: (rec.included || []).map(slimComp),
-    excluded: (rec.excluded || []).map(slimComp)
+    excluded: (rec.excluded || []).map(slimComp),
+    // Priced by the house rules (lib/house-rec.js): the decision and the
+    // engine's own figure, so a re-opened run still says how it was priced.
+    ...(rec.house ? { house: rec.house } : {})
   };
 }
 

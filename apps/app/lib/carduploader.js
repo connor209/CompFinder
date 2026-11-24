@@ -210,7 +210,12 @@ const CardUploaderCsv = (() => {
           language: str("*C:Language"),
           character: str("*C:Character"),
           game: str("*C:Game"),
-          quantity: str("*Quantity")
+          quantity: str("*Quantity"),
+          // The printing, from whichever finish columns the export carries
+          // (the same columns /api/batch-comps reads off a raw file), and the
+          // set code: both are what the house pricing route searches on.
+          finish: Object.keys(r).filter((k) => /finish|speciality|specialty|features|parallel|variant/i.test(k)).map((k) => str(k)).filter(Boolean).join(" "),
+          setCode: str("*C:Set Code")
         };
       });
   }

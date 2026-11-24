@@ -170,6 +170,36 @@ export async function insertCopies(sb, userId, listingId, copies, { title = null
   return out;
 }
 
+/**
+ * What each copy cost us (migration 044, lib/card-costs.js): [{ id, pence }],
+ * pence null to clear. Written in its OWN update after the card exists, so a
+ * database without 044 still lists the card — the cost is what is lost, and
+ * the answer says so ({ ok: false, missing: true }). Only lab cards.
+ */
+export async function setCardCosts(sb, userId, entries) {
+  const list = (entries || []).filter((e) => e && e.id && (e.pence === null || (Number.isInteger(e.pence) && e.pence >= 0)));
+  if (!list.length) return { ok: true, saved: 0 };
+  const byPence = new Map();
+  for (const e of list) {
+    const k = e.pence === null ? "null" : String(e.pence);
+    if (!byPence.has(k)) byPence.set(k, []);
+    byPence.get(k).push(e.id);
+  }
+  let saved = 0;
+  for (const [k, ids] of byPence) {
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data, error } = await sb.from(CARDS).update({ cost_pence: k === "null" ? null : Number(k) })
+        .eq("user_id", userId).in("id", ids.slice(i, i + 200)).not("lab_listing_id", "is", null).select("id");
+      if (error) {
+        if (/cost_pence/.test(error.message || "")) return { ok: false, missing: true, saved, error: "Run migration 044 in Supabase first — costs have nowhere to be saved yet." };
+        return { ok: false, saved, error: error.message };
+      }
+      saved += (data || []).length;
+    }
+  }
+  return { ok: true, saved };
+}
+
 /** Undo insertCopies: delete what it inserted, give back what it adopted. */
 export async function undoCopies(sb, userId, rows) {
   const made = (rows || []).filter((r) => !r._adopted).map((r) => r.id);

@@ -7,6 +7,7 @@
  * pile rules (lab-copies.js), so this view and the lab page can never
  * disagree about which copy is on show or where a card is.
  */
+import { splitLotCost } from "./card-costs.js";
 import { queueOf, displayOrder, pilePositions, pileOf } from "./lab-copies.js";
 import { renderListing } from "./listing-template.js";
 
@@ -63,6 +64,9 @@ export function inventoryRows(listings, copies) {
     const card = l.card || {};
     const piles = [...new Set(mine.map((c) => pileOf(c.sku).pile))].sort();
     const showing = mine.find((c) => String(c.id) === String(l.pictured_copy_id)) || null;
+    // What the copies still for sale cost us, per copy (card-costs.js):
+    // averaged over the ones that carry a cost, and how many of them do.
+    const costed = queue.filter((c) => c.cost_pence != null);
     return {
       id: l.id,
       listing: l,
@@ -82,6 +86,8 @@ export function inventoryRows(listings, copies) {
       total: mine.length,
       pricePence: l.price_pence ?? null,
       marketPence: l.market_pence ?? null,
+      costPence: costed.length ? Math.round(costed.reduce((t, c) => t + Number(c.cost_pence), 0) / costed.length) : null,
+      costed: costed.length,
       marketAt: l.market_at || null,
       itemId: l.ebay_item_id || null,
       addedAt: l.created_at || null,
@@ -209,7 +215,7 @@ export const SORT_FIELDS = [
   ["added", "Date added"], ["name", "Name"], ["set", "Set & number"], ["sku", "SKU"], ["condition", "Condition"],
   ["price", "Price"], ["market", "Market"], ["gap", "Price vs market (£)"], ["gappct", "Price vs market (%)"],
   ["cm", "Cardmarket"], ["cmgap", "Price vs Cardmarket (%)"], ["forsale", "Quantity"],
-  ["where", "Stack & position"]
+  ["where", "Stack & position"], ["cost", "Cost"], ["margin", "Price less cost"]
 ];
 
 /**
@@ -250,6 +256,8 @@ export function sortRows(rows, key = "added-desc") {
       case "sku": return r.copies?.[0]?.sku ?? null;
       case "condition": return CONDITION_RANK[r.condition] ?? null;
       case "forsale": return r.forSale;
+      case "cost": return r.costPence;
+      case "margin": return r.costPence == null || r.pricePence == null ? null : r.pricePence - r.costPence;
       case "where": { const w = whereOf(r)[0]; return w ? `${w.pile}\u0000${String(w.position ?? 999999).padStart(6, "0")}` : null; }
       default: return null;
     }
@@ -308,14 +316,22 @@ export function facetCounts(rows) {
 
 /** What the rows on screen add up to: listings, copies for sale, and their worth at price and at market. */
 export function viewTotals(rows) {
-  const t = { listings: 0, copies: 0, price: 0, market: 0, unmarketed: 0, unpriced: 0, cm: 0, uncm: 0 };
+  const t = { listings: 0, copies: 0, price: 0, market: 0, unmarketed: 0, unpriced: 0, cm: 0, uncm: 0, cost: 0, uncosted: 0, costedValue: 0 };
   for (const r of rows || []) {
     t.listings += 1;
     t.copies += r.forSale;
     if (r.pricePence == null) t.unpriced += 1; else t.price += r.pricePence * r.forSale;
     if (r.marketPence == null) { if (r.forSale > 0) t.unmarketed += 1; } else t.market += r.marketPence * r.forSale;
     if (r.cm?.pence == null) { if (r.forSale > 0) t.uncm += 1; } else t.cm += r.cm.pence * r.forSale;
+    // Cost over the copies that carry one; the rest are counted, never £0.
+    const costed = r.costed || 0;
+    t.uncosted += Math.max(0, r.forSale - costed);
+    if (costed && r.costPence != null) {
+      t.cost += r.costPence * costed;
+      if (r.pricePence != null) t.costedValue += r.pricePence * costed;
+    }
   }
+  t.margin = t.cost || t.costedValue ? t.costedValue - t.cost : null;
   return t;
 }
 
@@ -443,4 +459,22 @@ export function inventoryCsv(rows) {
     }
   }
   return lines.join("\n");
+}
+
+/**
+ * Costs for the copies of some listings (Inventory → Cost): { copyId, sku,
+ * pence } per copy. "each" puts one figure on every copy; "lot" shares a sum
+ * by what each card is priced at (card-costs.js splitLotCost). A copy that
+ * already has a cost keeps it unless `overwrite` — a sold copy's cost is what
+ * its sale is measured against, and a later lot should not rewrite it.
+ */
+export function costPlan(rows, { mode = "each", pence = null, overwrite = false } = {}) {
+  if (!Number.isInteger(pence) || pence < 0) return [];
+  const target = (rows || [])
+    .map((r) => ({ r, copies: (r.copies || []).filter((c) => overwrite || c.cost_pence == null) }))
+    .filter((x) => x.copies.length);
+  const each = mode === "lot"
+    ? splitLotCost(target.map((x) => ({ id: x.r.id, copies: x.copies.length, weight: x.r.pricePence ?? x.r.marketPence ?? 0 })), pence)
+    : null;
+  return target.flatMap((x) => x.copies.map((c) => ({ copyId: c.id, sku: c.sku, pence: each ? each.get(String(x.r.id)) : pence })));
 }

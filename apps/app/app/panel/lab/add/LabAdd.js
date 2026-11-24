@@ -12,6 +12,7 @@ import {
 import { LAB_TABLE_CSS } from "../labTableCss";
 import { PRICING_KEY } from "@/lib/lab-overview.js";
 import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer } from "@/lib/lab-evidence.js";
+import { parseCostPence } from "@/lib/card-costs.js";
 
 /**
  * Add copies: the working list between a CardUploader export and eBay.
@@ -49,6 +50,7 @@ export default function LabAdd() {
   const [panel, setPanel] = useState(null); // "price" | "subtype"
   const [priceText, setPriceText] = useState("");
   const [pctText, setPctText] = useState("0");
+  const [costText, setCostText] = useState("");
   const [subtypePick, setSubtypePick] = useState("");
   // The language of the NEXT file loaded. Batches are one language each, so
   // it is chosen before loading and stamped on every card in the file.
@@ -425,6 +427,7 @@ export default function LabAdd() {
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "price" ? null : "price")}>Set price ▾</button>
           {subtypes.length > 0 && <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "subtype" ? null : "subtype")}>Subtype ▾</button>}
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "language" ? null : "language")}>Language &amp; sellers ▾</button>
+          <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "cost" ? null : "cost")}>Cost ▾</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "exclude" }, "Left out")}>Leave out</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "include" }, "Put back")}>Put back</button>
           <button className="li-chip primary-chip" disabled={!onScreen.length || !!busy} onClick={() => listRows(onScreen)}>
@@ -457,6 +460,23 @@ export default function LabAdd() {
             </span>
           </div>
         )}
+        {panel === "cost" && (() => {
+          const pence = parseCostPence(costText);
+          const copies = onScreen.reduce((t, r) => t + liveCopies(r).length, 0);
+          return (
+            <div className="li-panel inset">
+              <span>What {onScreen.length} card{onScreen.length === 1 ? "" : "s"} ({copies} cop{copies === 1 ? "y" : "ies"}) cost you:</span>
+              <input className="li-num" inputMode="decimal" placeholder="£" value={costText} onChange={(e) => setCostText(e.target.value)} />
+              <button className="li-btn" disabled={pence == null} onClick={() => bulk({ op: "costEach", pence }, `Cost set to ${gbp(pence)} a copy`)}>Each copy</button>
+              <button className="li-btn" disabled={pence == null} onClick={() => bulk({ op: "costLot", pence }, `${gbp(pence)} for the lot, split by price`)}>For the lot, split by price</button>
+              <button className="li-btn" onClick={() => bulk({ op: "costClear" }, "Costs cleared")}>Clear</button>
+              <span className="li-dim" style={{ flexBasis: "100%" }}>
+                Saved on each card when it lists, so a sale can say what it made. A lot is shared by what each card is priced at (the dearer card carries more of it) — price first, then split.
+                No cost is &ldquo;not known&rdquo;, never free. Cards already listed take a cost in the Inventory.
+              </span>
+            </div>
+          );
+        })()}
         {panel === "language" && (
           <div className="li-panel inset">
             <span>Language for {onScreen.length}:</span>
@@ -521,6 +541,7 @@ export default function LabAdd() {
                             <small>
                               {[r.set, r.cardNumber, r.subtype, r.language && r.language !== "English" ? r.language : "", r.anyLanguage ? "every language" : "", r.overseas ? "overseas sellers" : ""].filter(Boolean).join(" · ")}
                               {t.own ? " · your title" : ""}{t.cut ? <span className="li-warn"> · cut at 80</span> : null}
+                              {r.costPence != null ? ` · cost ${gbp(r.costPence)}${live.length > 1 ? " each" : ""}` : ""}
                             </small>
                             <small className="sm-only">
                               <span className={`li-status ${STATUS_CLASS[st]}`}>{STATUS_TEXT[st]}</span> ×{live.length} · {r.condition}

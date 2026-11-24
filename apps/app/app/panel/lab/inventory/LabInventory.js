@@ -4,8 +4,9 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, us
 import {
   inventoryRows, filterRows, sortRows, pageOf, actionable, parsePence, pricePlan, templatePlan,
   copyRows, isEmptyRow, inventoryCsv, EMPTY_FILTERS, STATUSES, PAGE_SIZES, SORT_FIELDS,
-  facetCounts, viewTotals, columnsFor, activeChips, marketGap, cmGap, VS_MARKET, VS_CM, ADDED, gameOf, whereOf, whereText
+  facetCounts, viewTotals, columnsFor, activeChips, marketGap, cmGap, VS_MARKET, VS_CM, ADDED, gameOf, whereOf, whereText, costPlan
 } from "@/lib/lab-inventory.js";
+import { parseCostPence } from "@/lib/card-costs.js";
 import { removeBlocker } from "@/lib/lab-copies.js";
 import { LAB_TABLE_CSS as CSS } from "../labTableCss";
 
@@ -57,6 +58,9 @@ export default function LabInventory() {
   const [menu, setMenu] = useState(null); // row id with its ⋮ menu open
   const [priceMode, setPriceMode] = useState("exact");
   const [priceText, setPriceText] = useState("");
+  const [costMode, setCostMode] = useState("each");
+  const [costText, setCostText] = useState("");
+  const [costOverwrite, setCostOverwrite] = useState(false);
   const [tplTitle, setTplTitle] = useState(true);
   const [tplDesc, setTplDesc] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -178,6 +182,7 @@ export default function LabInventory() {
   const pPlan = useMemo(() => (panel === "price" ? pricePlan(onScreen, { mode: priceMode, pence: parsePence(priceText) }) : []), [panel, onScreen, priceMode, priceText]);
   const tPlan = useMemo(() => (panel === "template" && settings ? templatePlan(onScreen, settings, { title: tplTitle, description: tplDesc }) : []), [panel, onScreen, settings, tplTitle, tplDesc]);
   const pGo = pPlan.filter((p) => !p.skip);
+  const cPlan = useMemo(() => (panel === "cost" ? costPlan(onScreen, { mode: costMode, pence: parseCostPence(costText), overwrite: costOverwrite }) : []), [panel, onScreen, costMode, costText, costOverwrite]);
   const tGo = tPlan.filter((p) => !p.skip);
 
   const setFilter = (patch) => setF((x) => ({ ...x, ...patch }));
@@ -195,7 +200,7 @@ export default function LabInventory() {
       <button onClick={() => sortBy(field, firstDir)}>{children}<span className="li-arrow">{sortField === field ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span></button>
     </th>
   );
-  const ncols = 11 + (cols.variant ? 1 : 0) + (cols.tcg ? 1 : 0) + (cols.cm ? 2 : 0);
+  const ncols = 12 + (cols.variant ? 1 : 0) + (cols.tcg ? 1 : 0) + (cols.cm ? 2 : 0);
 
   function finish(r, verb) {
     if (!r.ok) { setMsg({ bad: true, text: r.error || "That didn't work." }); return; }
@@ -224,6 +229,25 @@ export default function LabInventory() {
     if (!pGo.length) return;
     run({ action: "setPrices", changes: pGo.map((p) => ({ listingId: p.row.id, pence: p.to })) }, "repriced",
       `Change ${pGo.length} price${pGo.length === 1 ? "" : "s"} on eBay?\n\n${listLines(pGo, (p) => `${p.row.title}: ${gbp(p.from)} → ${gbp(p.to)}`)}`);
+  }
+
+  /** What the copies cost us — saved on each card, not on eBay (card-costs.js). */
+  async function saveCosts(costs, label) {
+    if (!costs.length) return;
+    setBusy(true);
+    setMsg(null);
+    const r = await api({ action: "setCosts", costs: costs.map((c) => ({ copyId: c.copyId, pence: c.pence })) });
+    setBusy(false);
+    setMsg(r.ok ? { text: `${label} — ${r.saved} cop${r.saved === 1 ? "y" : "ies"}.` } : { bad: true, text: r.error || "Costs weren't saved." });
+    if (r.ok) { setPanel(null); setTicked(new Set()); reload(); }
+  }
+
+  function editCopyCost(c) {
+    const typed = window.prompt(`What did ${c.sku} cost you? (blank to clear)`, c.cost_pence != null ? (c.cost_pence / 100).toFixed(2) : "");
+    if (typed == null) return;
+    const pence = typed.trim() === "" ? null : parseCostPence(typed);
+    if (typed.trim() !== "" && pence == null) { setMsg({ bad: true, text: `"${typed}" isn't an amount.` }); return; }
+    saveCosts([{ copyId: c.id, pence }], pence == null ? `${c.sku}'s cost cleared` : `${c.sku} cost ${gbp(pence)}`);
   }
 
   function applyTemplates() {
@@ -426,6 +450,7 @@ export default function LabInventory() {
             <>
               <button className="li-chip" disabled={!onScreen.length || busy} onClick={() => setPanel(panel === "price" ? null : "price")}>Price ▾</button>
               <button className="li-chip" disabled={!onScreen.length || busy} onClick={() => setPanel(panel === "template" ? null : "template")}>Apply template ▾</button>
+              <button className="li-chip" disabled={!onScreen.length || busy} onClick={() => setPanel(panel === "cost" ? null : "cost")}>Cost ▾</button>
               <button className="li-chip danger" disabled={!onScreen.length || busy} onClick={() => endRows(onScreen)}>End listings</button>
               <span className="li-dim">{onScreen.length ? `${onScreen.length} ticked` : "Tick rows to act on them"}</span>
               {hiddenTicks > 0 && <span className="li-warn">{hiddenTicks} ticked off screen — not acted on <button className="li-link" onClick={() => setTicked(new Set())}>untick</button></span>}
@@ -434,7 +459,7 @@ export default function LabInventory() {
           <span className="li-spacer" />
           <span className="li-dim li-viewtot" title="What the rows matching your search and filters add up to, across every page">
             {view.total.toLocaleString("en-GB")} {grouped ? "listing" : "cop"}{grouped ? (view.total === 1 ? "" : "s") : view.total === 1 ? "y" : "ies"}
-            {grouped && <> · {vt.copies} for sale · <b>{gbpBig(vt.price)}</b> at price · {gbpBig(vt.market)} at market{vt.unmarketed ? "*" : ""}{cols.cm ? <> · {gbpBig(vt.cm)} at Cardmarket{vt.uncm ? "*" : ""}</> : null}</>}
+            {grouped && <> · {vt.copies} for sale · <b>{gbpBig(vt.price)}</b> at price · {gbpBig(vt.market)} at market{vt.unmarketed ? "*" : ""}{cols.cm ? <> · {gbpBig(vt.cm)} at Cardmarket{vt.uncm ? "*" : ""}</> : null}{vt.cost ? <span title={`What the copies for sale cost you, over the ${vt.copies - vt.uncosted} that carry a cost${vt.uncosted ? ` — ${vt.uncosted} have none and aren't counted` : ""}. Margin is their price less their cost, before fees and postage.`}> · cost {gbpBig(vt.cost)}{vt.uncosted ? "*" : ""} · margin {gbpBig(vt.margin)}</span> : null}</>}
           </span>
           <Pager />
         </div>
@@ -448,6 +473,23 @@ export default function LabInventory() {
               {pPlan.map((p) => <div key={p.row.id} className={p.skip ? "skip" : ""}>{p.row.title}: {p.skip ? `skipped — ${p.skip}` : `${gbp(p.from)} → ${gbp(p.to)}`}</div>)}
             </div>
             <button className="li-btn primary" disabled={busy || !pGo.length} onClick={applyPrices}>{busy ? "Changing…" : `Change ${pGo.length} on eBay`}</button>
+          </div>
+        )}
+
+        {panel === "cost" && (
+          <div className="li-panel inset">
+            <label className="li-check"><input type="radio" checked={costMode === "each"} onChange={() => setCostMode("each")} /> Each copy cost</label>
+            <label className="li-check"><input type="radio" checked={costMode === "lot"} onChange={() => setCostMode("lot")} /> The lot cost, split by price</label>
+            <input className="li-num" inputMode="decimal" placeholder="£" value={costText} onChange={(e) => setCostText(e.target.value)} />
+            <label className="li-check"><input type="checkbox" checked={costOverwrite} onChange={(e) => setCostOverwrite(e.target.checked)} /> replace costs already set</label>
+            <span className="li-dim" style={{ flexBasis: "100%" }}>
+              Saved on each card (sold and picked ones too, so their sales can say what they made) — nothing changes on eBay. {costOverwrite ? "" : "Copies that already have a cost keep it."}
+            </span>
+            <div className="li-plan">
+              {cPlan.slice(0, 40).map((p) => <div key={p.copyId}>{p.sku}: {gbp(p.pence)}</div>)}
+              {cPlan.length > 40 ? <div className="skip">…and {cPlan.length - 40} more</div> : null}
+            </div>
+            <button className="li-btn primary" disabled={busy || !cPlan.length} onClick={() => saveCosts(cPlan, costMode === "lot" ? `${gbp(parseCostPence(costText))} split over the lot` : `Cost set to ${gbp(parseCostPence(costText))} a copy`)}>{busy ? "Saving…" : `Save ${cPlan.length} cost${cPlan.length === 1 ? "" : "s"}`}</button>
           </div>
         )}
 
@@ -500,6 +542,7 @@ export default function LabInventory() {
                 <Th field="price" className="r" firstDir="desc">Price</Th>
                 <Th field="market" className="r sm-hide" firstDir="desc">Market</Th>
                 <Th field="gappct" className="r sm-hide" title="Your price against the sold-comps figure. Red: under market. Click to sort.">vs mkt</Th>
+                <Th field="cost" className="r sm-hide" title="What each copy for sale cost you (the average, where copies differ). * where some copies have no cost.">Cost</Th>
                 {cols.cm && <Th field="cm" className="r sm-hide" firstDir="desc" title={`Cardmarket's trend in pounds, from today's price guide${cm.rate ? ` at £${Number(cm.rate.rate).toFixed(4)}/€${cm.rate.fallback ? " (approximate — no ECB rate stored yet)" : cm.rate.asOf ? ` (ECB ${cm.rate.asOf})` : ""}` : ""}`}>CM</Th>}
                 {cols.cm && <Th field="cmgap" className="r sm-hide" title="Your price against Cardmarket's trend. Red: under Cardmarket.">vs CM</Th>}
                 <Th field="forsale" className="r" firstDir="desc">Qty</Th>
@@ -569,6 +612,9 @@ export default function LabInventory() {
                       title={gap ? `${gap.pence < 0 ? "Under" : "Over"} market by £${(Math.abs(gap.pence) / 100).toFixed(2)}` : "No market figure to compare"}>
                       {gap ? `${gap.pct > 0 ? "+" : ""}${gap.pct}%` : "—"}
                     </td>
+                    <td className="r sm-hide" title={r.costPence != null ? `${r.costed} of ${r.forSale} for sale carry a cost${r.pricePence != null ? ` · price less cost £${((r.pricePence - r.costPence) / 100).toFixed(2)}` : ""}` : "No cost recorded — Cost ▾ to add one"}>
+                      {c1 ? (c1.cost_pence != null ? gbp(c1.cost_pence) : "—") : r.costPence != null ? <>{gbp(r.costPence)}{r.costed < r.forSale ? "*" : ""}</> : "—"}
+                    </td>
                     {cols.cm && (() => {
                       const c = r.cm;
                       const cg = cmGap(r);
@@ -594,6 +640,8 @@ export default function LabInventory() {
                           {r.itemId && <a href={`https://www.ebay.co.uk/itm/${r.itemId}`} target="_blank" rel="noreferrer">View on eBay</a>}
                           {grouped && r.status !== "ended" && <button onClick={() => { setMenu(null); setTicked(new Set([String(r.id)])); setPanel("price"); }}>Set price…</button>}
                           {grouped && r.status !== "ended" && <button onClick={() => { setMenu(null); setTicked(new Set([String(r.id)])); setPanel("template"); }}>Apply template…</button>}
+                          {c1 && <button onClick={() => { setMenu(null); editCopyCost(c1); }}>£ Set cost…</button>}
+                          {grouped && <button onClick={() => { setMenu(null); setTicked(new Set([String(r.id)])); setPanel("cost"); }}>£ Set cost…</button>}
                           {c1 && !removeBlocker(c1, r.listing, lab.copies) && <button onClick={() => { setMenu(null); removeCopy(r, c1); }}>✕ Remove this copy</button>}
                           {c1 && c1.state === "sold" && <button onClick={() => { setMenu(null); releaseCopy(c1); }}>Release (order cancelled)</button>}
                           {grouped && r.status !== "ended" && <button className="danger" onClick={() => { setMenu(null); endRows([r]); }}>End listing</button>}
@@ -615,7 +663,9 @@ export default function LabInventory() {
                       </td>
                       <td className="sm-hide"><span className={`li-status s-${c.state}`}>{c.onShow ? "On eBay now" : STATE_LABEL[c.state]}</span></td>
                       <td className="mono">{c.sku}<small className="li-where">{c.state === "picked" ? "picked" : `${c.pile}${c.position ? ` #${c.position}` : ""}`}</small></td>
-                      <td className="sm-hide" /><td />{cols.variant && <td className="sm-hide" />}{cols.tcg && <td className="sm-hide" />}<td /><td className="sm-hide" /><td className="sm-hide" />{cols.cm && <><td className="sm-hide" /><td className="sm-hide" /></>}<td /><td className="sm-hide" />
+                      <td className="sm-hide" /><td />{cols.variant && <td className="sm-hide" />}{cols.tcg && <td className="sm-hide" />}<td /><td className="sm-hide" /><td className="sm-hide" />
+                      <td className="r sm-hide"><button className="li-link" disabled={busy} onClick={() => editCopyCost(c)} title="What this copy cost you">{c.cost_pence != null ? gbp(c.cost_pence) : "＋ cost"}</button></td>
+                      {cols.cm && <><td className="sm-hide" /><td className="sm-hide" /></>}<td /><td className="sm-hide" />
                       <td className="li-menucell">
                         {!removeBlocker(c, r.listing, lab.copies) && <button className="li-chip" disabled={busy} onClick={() => removeCopy(r, c)}>✕ Remove</button>}
                         {c.state === "sold" && <button className="li-chip" disabled={busy} onClick={() => releaseCopy(c)} title="Only for a CANCELLED order: the copy goes back into its queue">Release</button>}

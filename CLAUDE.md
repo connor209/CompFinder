@@ -365,6 +365,14 @@ stream` (the relay, only while streaming).
   fake database, the matcher reaches the same answer for every open line as it
   did over the full read; a missing column falls back to `*` rather than an
   empty shelf; and a failed stack read stops the sheet.
+- `scripts/check-cardcosts.mjs` — what a card cost us (`lib/card-costs.js`,
+  migration 044): a typed cost, a lot split by price that sums to the lot, a
+  lab sale costed from the copy that went (the listing's cost per unit
+  otherwise), one unknown unit making the line unknown rather than £0, the
+  cost riding on each copy from Add copies and never touching a listed row,
+  Inventory's cost plan leaving a copy's existing cost alone unless told,
+  and greps that Sales costs through `saleCost()` and both a new listing and
+  a join write the costs.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -867,6 +875,21 @@ for the same contract as JSON.
   who didn't write it.
 - **Unpriced is 0.00 in the CSV**, per the zero-price rule, and
   `summary.unpriced_skus` names them.
+- **The Batch screen prices file cards the same way (2026-11-24).** One way
+  to price a card, whichever screen it is on: **Pricing rules → House rules**
+  (the default, remembered per device) sends each CardUploader card through
+  this route at depth 3, three cards a request and ONE request in flight —
+  each request paces its own searches, so several at once would run past
+  SoldComps' 60 a minute. `lib/house-rec.js` turns the answer into the `rec`
+  every Batch consumer already reads (saved runs, overrides, stickers, the
+  £0.00 guard, the eBay export), so none of them changed: the price IS the
+  house price, `confidence` is Low for a Terapeak decision (held from a
+  sticker) and None with no price, and `rec.house` keeps the decision and the
+  engine's own figure, saved with the run. The row's `query` stays the Batch
+  query, or every row would read as corrected since it was priced. Pasted
+  titles and the show pool still take the engine path — the route needs the
+  card's fields — and **Engine** is still offered for comparison.
+  `recurse-batch.mjs` counts a house-priced card as nothing to reproduce.
 - **Not measured against live data yet.** The fixtures in
   `check-batchcomps.mjs` are written the way sellers write; the acceptance
   figures (Riolu ~11 comps / ~£49.99, Numel ~29 / ~£12.49) need a real run.
@@ -2612,6 +2635,36 @@ Three things about it that are the point rather than detail:
   checkbox that brings them back, and the count of cards at a show is in the
   summary. A row that vanished with no count looks exactly like a card we never
   had, in the one list you would go looking in to find out.
+
+## What a card cost, so a sale says what it made
+
+Profit was only ever worked out over sales with a cost, and the only cost the
+app kept was one per eBay LISTING (`listing_costs`, typed in My listings). A
+lab listing is several copies bought at different times for different money,
+so the cost belongs to the COPY: `stack_cards.cost_pence`, migration 044,
+rules in `lib/card-costs.js`.
+
+- **Set when the batch is loaded.** Add copies → **Cost ▾**: each copy, or
+  one figure for the lot split by what each card is priced at (price first,
+  then split; the shares sum to the lot exactly). The cost rides on each copy
+  in `groupToSend()` and the lab route writes it after the stack cards exist
+  (`setCardCosts`, a separate update), so a database without 044 still lists
+  the card and the warning says the cost wasn't saved.
+- **Set or corrected later** in the lab's Inventory: **Cost ▾** on ticked
+  listings (copies already costed keep theirs unless "replace" is ticked — a
+  sold copy's cost is what its sale is measured against), or one copy's cost
+  from its row. Sold and picked copies take a cost too; that is the point.
+- **A sale is costed from the copy that went.** The lab knows which copy each
+  sold unit took (`reserved_line` = `<line item id>#<unit>`), so Sales reads
+  that copy's cost, and falls back to the listing's cost per unit for
+  everything else. One unit with neither makes the line UNKNOWN — never £0,
+  which books the whole price as profit.
+- **Inventory shows it**: a Cost column (the average over costed copies, `*`
+  where some have none), and cost and margin in the view's totals, over
+  costed copies only.
+
+Accounts is untouched: its cost of goods is the Buy ledger, which is what was
+spent, not what was sold.
 
 ## Show history is the ledger, grouped
 

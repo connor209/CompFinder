@@ -119,6 +119,8 @@ export function asLabCopy(card, { ranks, names } = {}) {
     reserved_mismatch: Boolean(card.reserved_mismatch),
     pulled_at: card.pulled_at || null,
     checked_out_at: card.checked_out_at || null,
+    // What this copy cost us (migration 044); null is unknown, never free.
+    cost_pence: card.cost_pence ?? null,
     stack_id: card.stack_id,
     pile: names?.get(card.stack_id) || null,
     live_position: ranks?.get(card.id) || null

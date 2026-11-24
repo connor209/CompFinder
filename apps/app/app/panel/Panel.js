@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { APP_SETTINGS, appNameTokens, applyConditionPreference, applyNumberGuards, conditionPreferenceHolds, dropForeignPostage, needsActiveCheck, poolDisagrees, reviewVerdict, settingsForText, soldContradictsAsking, MIN_SOLD_COMPS_TO_PRICE } from "@/lib/matching";
 import { createGate, runPool, SOLDCOMPS_GAP_MS, BROWSE_GAP_MS, BATCH_CONCURRENCY } from "@/lib/pace";
+import { canPriceHouse, houseCardFor, recFromHouse, HOUSE_PER_REQUEST, HOUSE_SEARCHES_PER_CARD } from "@/lib/house-rec.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { buildStockIndex, buildHistoryIndex, checkRow, priceGap } from "@/lib/stockcheck.js";
 import { loadImport, batchItemsFrom, saveImport, updateItem as updateImportItem } from "@/lib/import-store.js";
@@ -343,6 +344,18 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // app has always done. Each extra pass is one more request PER CARD that
   // needs it, which is why the control says so out loud.
   const [searchDepth, setSearchDepth] = useState(1);
+  // Which rules price a card from a CardUploader file. "house" is what Add
+  // copies uses (/api/batch-comps: the full search ladder, p40, the postage
+  // cap, the game's floor) — one way to price a card, whichever screen it is
+  // on. "engine" is the Batch screen's own older path, kept for comparison.
+  // Pasted titles and the show pool always take the engine path: the house
+  // route needs the card's fields. See lib/house-rec.js.
+  const [pricingRules, setPricingRules] = useState(() => {
+    try { return localStorage.getItem("cf-batch-rules") === "engine" ? "engine" : "house"; } catch { return "house"; }
+  });
+  useEffect(() => { try { localStorage.setItem("cf-batch-rules", pricingRules); } catch { /* per-device preference only */ } }, [pricingRules]);
+  // What one card from a file costs at the rules and depth chosen.
+  const perFileCard = pricingRules === "house" ? HOUSE_SEARCHES_PER_CARD : searchDepth;
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [includeCondition, setIncludeCondition] = useState(false);
@@ -706,7 +719,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
    */
   function rerunCurrent() {
     if (results.length === 0 || running) return;
-    const most = results.length * searchDepth;
+    const most = results.length * perFileCard;
     if (!confirm(
       `Price these ${results.length} card(s) again with the current filters?\n\n` +
       `Up to ${most} SoldComps request(s) — fewer, because anything priced in the last 24 hours is cached, ` +
@@ -1377,7 +1390,69 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
 
     // The gates in fetchSoldCompsWithRetry and fetchActiveListings do the
     // pacing now, so the pool only decides how many cards may be in the air.
-    await runPool(items.length, BATCH_CONCURRENCY, priceOne, () => stoppedEarly);
+    // File cards under the house rules go to /api/batch-comps a few at a
+    // time, ONE request in flight: each request paces its own searches, so
+    // several at once would run past SoldComps' 60 a minute. Everything else
+    // (pasted titles, the show pool, or the engine chosen) prices as before.
+    const houseIdx = pricingRules === "house" ? items.map((it, i) => (canPriceHouse(it) ? i : -1)).filter((i) => i >= 0) : [];
+    const houseSet = new Set(houseIdx);
+    const engineIdx = items.map((_, i) => i).filter((i) => !houseSet.has(i));
+    const priceHouseChunk = async (idxs) => {
+      const started = idxs.map((i) => ({ i, title: items[i].title, image: items[i].csvItem?.images?.[0] || null }));
+      setPricingNow((cur) => [...cur, ...started]);
+      try {
+        done += idxs.length;
+        setStatus(`Pricing ${done} of ${items.length} by the house rules: "${items[idxs[0]].title}"${idxs.length > 1 ? ` and ${idxs.length - 1} more` : ""}`);
+        const cards = idxs.map((i) => houseCardFor(items[i], { overseas: itemLocation === "worldwide" }));
+        let j = null;
+        let failure = null;
+        try {
+          const res = await fetch("/api/batch-comps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards, depth: 3 }) });
+          j = await res.json().catch(() => null);
+          if (!res.ok || !j || !Array.isArray(j.results)) failure = (j && j.error) || `Pricing answered ${res.status}.`;
+          if (j && j.isAuthError) {
+            stoppedEarly = true;
+            stopReason = `Stopped at item ${done} of ${items.length} — ${failure}`;
+          }
+        } catch (err) {
+          failure = err.message || "The pricing request failed.";
+        }
+        const byIndex = new Map((j?.results || []).map((x) => [x.index, x]));
+        for (let k = 0; k < idxs.length; k++) {
+          const i = idxs[k];
+          const item = items[i];
+          const built = buildQueryForItem(item, settings, includeCondition, useFullTitle);
+          const x = byIndex.get(k);
+          const rec = failure ? null : recFromHouse(x);
+          const base = { title: item.title, sku: item.sku, query: built.query, csvItem: built.csvItem, nameTokens: built.nameTokens, set: built.set, cardNumber: built.cardNumber };
+          if (!rec) {
+            consecutiveFailures++;
+            collected[i] = { ...base, rec: null, failed: failure || x?.error || "No answer for this card." };
+          } else {
+            consecutiveFailures = 0;
+            collected[i] = { ...base, rec, fromCache: !!x.from_cache };
+          }
+        }
+        setResults(collected.filter(Boolean));
+        if (failure) {
+          setStatus(stopReason || `Item ${done} of ${items.length}: ${failure}`);
+          setStatusIsError(true);
+          if (!stoppedEarly && consecutiveFailures >= settings.maxConsecutiveFailures) {
+            stoppedEarly = true;
+            stopReason = `Stopped after ${consecutiveFailures} failures in a row (item ${done} of ${items.length}).`;
+            setStatus(stopReason);
+          }
+        }
+      } finally {
+        setPricingNow((cur) => cur.filter((c) => !idxs.includes(c.i)));
+      }
+    };
+    for (let k = 0; k < houseIdx.length && !stoppedEarly; k += HOUSE_PER_REQUEST) {
+      await priceHouseChunk(houseIdx.slice(k, k + HOUSE_PER_REQUEST));
+    }
+    if (!stoppedEarly && engineIdx.length) {
+      await runPool(engineIdx.length, BATCH_CONCURRENCY, (k) => priceOne(engineIdx[k]), () => stoppedEarly);
+    }
 
     // Pulling stops at the first stop signal, but cards already running finish
     // — so compact away the slots that were never reached.
@@ -1748,7 +1823,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       // depth it used cannot be compared against another one. The file that
       // prompted this carried none, so "how many searches did this card run"
       // was unanswerable from the only artefact that could have answered it.
-      searchOptions: { ebaySite, itemLocation, itemCondition, soldAfterDays: Number(soldWithin), searchDepth, minPrice: minPrice || null, maxPrice: maxPrice || null },
+      searchOptions: { ebaySite, itemLocation, itemCondition, soldAfterDays: Number(soldWithin), searchDepth, pricingRules, minPrice: minPrice || null, maxPrice: maxPrice || null },
       poolName: poolRunRef.current || null,
       // The ladder across the whole run — cards by how many searches each used,
       // what it cost against the ceiling, and what the wider searches added.
@@ -1767,7 +1842,10 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               overridePence: r.rec.overridePence ?? null,
               confidence: r.rec.confidence ?? null, dataSource: r.rec.dataSource ?? null,
               priceHeld: !!r.rec.priceHeld, note: r.rec.note || "",
-              used: (r.rec.included || []).length, excluded: (r.rec.excluded || []).length
+              used: (r.rec.included || []).length, excluded: (r.rec.excluded || []).length,
+              // Priced by the house rules, not the engine: a harness replaying
+              // the engine cannot reproduce it, and must not try.
+              house: r.rec.house ? { decision: r.rec.house.decision, enginePence: r.rec.house.enginePence } : null
             }
           : null,
         // What the ladder did for THIS card: the rungs it was eligible for,
@@ -2274,8 +2352,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
               <p className="hint">
                 Every card in <b>{imported.label}</b>, searched on the titles <b>as they stand now</b> —
                 so a title corrected on the Imports screen is the one that gets priced. Costs up to{" "}
-                <b>{imported.items.length * searchDepth}</b> SoldComps request
-                {imported.items.length * searchDepth === 1 ? "" : "s"} at the <b>search depth</b> set below.
+                <b>{imported.items.length * perFileCard}</b> SoldComps request
+                {imported.items.length * perFileCard === 1 ? "" : "s"} {pricingRules === "house" ? <>under the <b>house rules</b> (the full search ladder)</> : <>at the <b>search depth</b> set below</>}.
                 The run saves itself, and re-opening it later spends nothing.
               </p>
               <div className="row">
@@ -2373,6 +2451,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
           defaultOpen={false}
           title="SoldComps filters"
           summary={[
+            pricingRules === "house" ? "House rules for file cards" : "Engine rules",
             `Depth ${searchDepth}${searchDepth > 1 ? ` (up to ${searchDepth} searches a card)` : ""}`,
             ebaySite,
             `sold within ${soldWithin} days`,
@@ -2414,6 +2493,21 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 <option value="used">Used</option>
               </select>
             </label>
+            <label className="field">
+              <span>Pricing rules</span>
+              <select value={pricingRules} onChange={(e) => setPricingRules(e.target.value)}>
+                <option value="house">House rules — same as Add copies</option>
+                <option value="engine">Engine (older Batch pricing)</option>
+              </select>
+            </label>
+            {pricingRules === "house" ? (
+              <p className="hint hint-small" style={{ flexBasis: "100%", margin: 0 }}>
+                Cards from a CardUploader file are priced exactly as Add copies prices them: every way sellers
+                title the card searched, UK sales from the last 90 days, p40 of the totals with postage capped,
+                up the .49/.99 ladder off the game's floor, then the condition step. Search depth and the
+                filters below apply only to pasted titles and the show pool. Worldwide counts overseas sellers.
+              </p>
+            ) : null}
             <label className="field">
               <span>Search depth</span>
               <select value={searchDepth} onChange={(e) => setSearchDepth(Number(e.target.value))}>
@@ -2501,9 +2595,9 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
             <p className="hint">
               <b>{pending.label}</b> is loaded and nothing has been spent yet. Set the filters above —{" "}
               <b>search depth</b> especially — and then start. Costs up to{" "}
-              <b>{pending.items.length * searchDepth}</b> SoldComps request
-              {pending.items.length * searchDepth === 1 ? "" : "s"}
-              {searchDepth > 1 ? " at the depth selected above, and fewer in practice: a card that comes back with a full page, or with enough sales already, stops early" : ""}
+              <b>{pending.items.length * perFileCard}</b> SoldComps request
+              {pending.items.length * perFileCard === 1 ? "" : "s"}
+              {pricingRules === "house" ? " under the house rules — every way sellers title the card, the same searches Add copies makes" : searchDepth > 1 ? " at the depth selected above, and fewer in practice: a card that comes back with a full page, or with enough sales already, stops early" : ""}
               . Anything priced in the last 24 hours comes back from the cache for nothing.
             </p>
             <div className="results-actions">
@@ -2741,7 +2835,7 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 className="btn btn-ghost"
                 disabled={running}
                 onClick={rerunCurrent}
-                title={`Price these ${results.length} cards again with the filters as they stand now — including any cards you have corrected. Costs up to ${results.length * searchDepth} SoldComps request(s); cards priced in the last 24 hours come back from the cache for nothing.`}
+                title={`Price these ${results.length} cards again with the filters as they stand now — including any cards you have corrected. Costs up to ${results.length * perFileCard} SoldComps request(s); cards priced in the last 24 hours come back from the cache for nothing.`}
               >
                 ↻ Re-run ({results.length})
               </button>

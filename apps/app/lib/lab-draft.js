@@ -14,6 +14,7 @@
  *   language       the batch's language, chosen when it was loaded
  *   anyLanguage    count sold comps in every language, not just this one
  *   overseas       count sales from sellers outside the UK
+ *   costPence      what EACH copy cost us, or null for not known (card-costs.js)
  *   picks          the sales YOU chose to price from (ids), or null for the
  *                  filter's own choice — see lab-evidence.js
  *   comps          what /api/batch-comps said ({ pence, n, confidence, flags,
@@ -26,6 +27,7 @@
  */
 
 import { keyForLanguage } from "./lab-copies.js";
+import { splitLotCost } from "./card-costs.js";
 
 export const DRAFT_KEY = "cf-lab-add-draft-v1";
 
@@ -92,8 +94,10 @@ export function liveCopies(row) {
 
 /** The group the server is sent: the row with its skipped copies taken out. */
 export function groupToSend(row) {
-  const { pricePence, titleOverride, subtype, skippedSkus, excluded, comps, result, file, id, ...g } = row; // eslint-disable-line no-unused-vars
-  return { ...g, copies: liveCopies(row) };
+  const { pricePence, titleOverride, subtype, skippedSkus, excluded, comps, result, file, id, costPence, ...g } = row; // eslint-disable-line no-unused-vars
+  // The cost rides on each copy: it is the copy's, written to its stack card.
+  const cost = Number.isInteger(costPence) && costPence >= 0 ? costPence : null;
+  return { ...g, copies: liveCopies(row).map((c) => (cost == null ? c : { ...c, costPence: cost })) };
 }
 
 const THIN = new Set(["low", "none"]);
@@ -222,9 +226,19 @@ export function parsePrice(v) {
  */
 export function applyBulk(rows, ids, action) {
   const on = new Set((ids || []).map(String));
+  // A lot's cost is shared over the rows it covers, by what each is worth
+  // (its price, else the comps' figure), per copy — worked out across the
+  // whole selection before any row is changed.
+  const lot = action.op === "costLot"
+    ? splitLotCost((rows || []).filter((r) => on.has(String(r.id)) && !r.result?.ok && !r.excluded)
+      .map((r) => ({ id: r.id, copies: liveCopies(r).length, weight: r.pricePence ?? r.comps?.pence ?? 0 })), action.pence)
+    : null;
   return (rows || []).map((r) => {
     if (!on.has(String(r.id)) || r.result?.ok) return r;
     switch (action.op) {
+      case "costEach": return Number.isInteger(action.pence) && action.pence >= 0 ? { ...r, costPence: action.pence } : r;
+      case "costLot": return lot.has(String(r.id)) ? { ...r, costPence: lot.get(String(r.id)) } : r;
+      case "costClear": return { ...r, costPence: null };
       case "price": return action.pence >= 99 ? { ...r, pricePence: action.pence } : r;
       case "comps": return r.comps?.pence != null ? { ...r, pricePence: r.comps.pence } : r;
       case "compsPct": {

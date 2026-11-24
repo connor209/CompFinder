@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { currentSettings } from "@/lib/current-settings";
 import { pagedSelect } from "@/lib/pagedSelect";
+import { costIndex, saleCost } from "@/lib/card-costs.js";
 
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 // Shared default eBay final-value fee estimate — kept in step with Accounts.
@@ -25,7 +26,7 @@ function fmtDate(iso) {
 const SALES_DAYS = 90;
 export default function Sales() {
   const [sales, setSales] = useState(null);
-  const [costs, setCosts] = useState(new Map());
+  const [costs, setCosts] = useState(() => costIndex());
   const [feePct, setFeePct] = useState(DEFAULT_FEE_PCT);
   const [settings, setSettings] = useState({});
   const [syncing, setSyncing] = useState(false);
@@ -48,7 +49,17 @@ export default function Sales() {
     );
     setSales(data);
     const { data: costRows } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
-    setCosts(new Map((costRows || []).map((r) => [r.ebay_item_id, r.cost_pence])));
+    // A lab copy that sold carries its OWN cost (migration 044), found by the
+    // order unit it was reserved for; before 044 the read fails and every sale
+    // falls back to its listing's cost, as it always did.
+    let soldCopies = [];
+    try {
+      soldCopies = await pagedSelect(
+        () => supabase.from("stack_cards").select("id,reserved_line,cost_pence").not("reserved_line", "is", null).not("cost_pence", "is", null),
+        { orderBy: "id" }
+      );
+    } catch { /* no per-copy costs yet: listing costs still apply */ }
+    setCosts(costIndex({ listingCosts: costRows || [], cards: soldCopies }));
     // Share the eBay-fee % with the Accounts P&L so the same data reads the same
     // on both screens.
     const { data: { user } } = await supabase.auth.getUser();
@@ -104,8 +115,9 @@ export default function Sales() {
     return (sales || []).map((s) => {
       const revenue = s.sold_pence ?? null;
       const fees = revenue != null ? Math.round(revenue * (feePct / 100)) : null;
-      const unitCost = costs.get(s.ebay_item_id);
-      const cost = unitCost != null ? unitCost * (s.quantity || 1) : null;
+      // The copy's own cost where the lab knows which copy went, else the
+      // listing's cost per unit; any unit unknown makes the line unknown.
+      const cost = saleCost(s, costs).pence;
       // No cost recorded is UNKNOWN, never £0: treating it as free books the
       // whole price as profit, the flattering direction (Show history's rule).
       const profit = revenue != null && fees != null && cost != null ? revenue - fees - cost : null;

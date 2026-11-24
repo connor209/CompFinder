@@ -369,6 +369,9 @@ if (CORPUS) {
     // exactly the confident, plausible, wrong number this block exists to
     // refuse. Counted as nothing to match, like a held card.
     if (shipped.dataSource === "active") { repro.active = (repro.active || 0) + 1; continue; }
+    // Priced by the house rules (/api/batch-comps), not the engine this
+    // harness replays: nothing to reproduce, counted like an active card.
+    if (shipped.house) { repro.house = (repro.house || 0) + 1; continue; }
     if (r.now.finalPence === shipped.finalPence) repro.exact++;
     else {
       repro.off++;
@@ -377,7 +380,7 @@ if (CORPUS) {
   }
   const total = repro.exact + repro.off;
   const rate = total ? repro.exact / total : 1;
-  const aside = [repro.held ? `${repro.held} held` : null, repro.active ? `${repro.active} priced from asking prices` : null]
+  const aside = [repro.held ? `${repro.held} held` : null, repro.active ? `${repro.active} priced from asking prices` : null, repro.house ? `${repro.house} priced by the house rules` : null]
     .filter(Boolean).join(", ");
   console.log(`  reproduces the run it came from: ${repro.exact}/${total}` + (aside ? ` (${aside} — no sold price to match)` : ""));
   if (rate < 0.95) {

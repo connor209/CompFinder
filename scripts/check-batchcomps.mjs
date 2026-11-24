@@ -22,6 +22,8 @@ import { compVariants, detectVariants, nameWithoutVariants, variantExclusion } f
 import { housePrice, percentileOf, resolveRules, roundUpToLadder, rulesForGame, gameCode, decide, spreadTooWide, HOUSE_RULES } from "../apps/app/lib/house-pricing.js";
 import { cardsFromCsv, distinctiveSetWords, coreNameOf, engineTitle, evaluateCard, languageMarker, parseJpPromo, searchLadder, listsOtherCards, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
 import { settingsForText } from "../apps/app/lib/matching.js";
+import { canPriceHouse, houseCardFor, recFromHouse, houseConfidence } from "../apps/app/lib/house-rec.js";
+import { slimRec } from "../apps/app/lib/batch-store.js";
 
 let failed = 0;
 const fail = (m) => { failed++; console.error("FAIL", m); };
@@ -461,6 +463,36 @@ for (const f of ["packages/core/pricing.js", "packages/core/cardnumber.js"]) {
 const qs = read("apps/app/app/panel/QuickSearch.js");
 if (!/prefilterComps\(/.test(qs)) fail("Quick Search must read variants and promo numbers through prefilterComps, not its own copy");
 if (!/promoNumber\(/.test(qs)) fail("Quick Search must cut a promo's set total off");
+
+// ---- One pricing path: the Batch screen's file cards go through the house route ----
+{
+  const item = { source: "csv", title: "Shedinja 014/107 Reverse Holo Corrected", sku: "AB12",
+    csvItem: { cardName: "Shedinja", cardNumber: "014/107", set: "Deoxys", condition: "Unknown", conditionLabel: "Lightly Played", language: "", game: "Pokémon", finish: "Reverse Holo", setCode: "", year: "2005", title: "old" } };
+  eq("a file card can be priced the house way; a pasted title cannot", [canPriceHouse(item), canPriceHouse({ source: "paste", title: "x" }), canPriceHouse({ source: "csv", csvItem: {} })], [true, false, false]);
+  const card = houseCardFor(item, { overseas: true });
+  eq("the route's card: the ROW's title (a correction is priced), the file's fields, the finish, overseas from Worldwide",
+    [card.title, card.name, card.number, card.set, card.condition, card.language, card.variant, card.overseas],
+    ["Shedinja 014/107 Reverse Holo Corrected", "Shedinja", "014/107", "Deoxys", "Lightly Played", "English", "Reverse Holo", true]);
+  // A real evaluateCard answer, turned into the Batch screen's rec.
+  const plan = planCard(normaliseCard({ sku: "X", name: "Numel", number: "012/098", set: "Ancient Origins", condition: "NM" }));
+  const sale = (t, p, d) => ({ title: t, itemPricePence: p, postagePence: 100, totalPence: p + 100, _source: { endedAt: d, url: `u${p}`, itemId: `i${p}` } });
+  const x = evaluateCard(plan, [
+    sale("Numel 012/098 Ancient Origins NM", 399, "2026-11-01"), sale("Numel 12/98 Ancient Origins", 449, "2026-11-02"),
+    sale("Numel 012/098 Ancient Origins Pokemon", 499, "2026-11-03"), sale("Numel 012/098 Ancient Origins", 549, "2026-11-04"),
+    sale("Charmander 012/098 Ancient Origins", 2000, "2026-11-05")
+  ], { queries: ["q"] });
+  const rec = recFromHouse({ ...x, index: 0 });
+  eq("the rec's price IS the house price, never the engine's", rec.finalPence, x.suggested_pence);
+  eq("every counted sale is a comp with pence and its date; every left-out one keeps why", [rec.included.length, rec.included.every((c) => c.totalPence > 0 && c._source.endedAt), rec.excluded.every((c) => c.exclusionReason)], [x.sales.length, true, true]);
+  eq("the decision and the engine's own figure ride along", [rec.house.decision, rec.house.enginePence], [x.decision, x.engine_price == null ? null : Math.round(x.engine_price * 100)]);
+  eq("a saved run keeps how it was priced", slimRec(rec).house?.decision, x.decision);
+  eq("a Terapeak card is Low (held from a sticker), no price is None", [houseConfidence({ suggested_pence: 500, decision: "terapeak", confidence: "High" }), houseConfidence({ suggested_pence: null }), houseConfidence({ suggested_pence: 500, decision: "apply", confidence: "Medium" })], ["Low", "None", "Medium"]);
+  eq("a failed lookup is no rec (the row fails, never a price)", recFromHouse({ error: "timeout" }), null);
+  const panel = read("apps/app/app/panel/Panel.js");
+  if (!/recFromHouse\(/.test(panel) || !/\/api\/batch-comps/.test(panel)) fail("the Batch screen must price file cards through /api/batch-comps and recFromHouse, not a copy of the house rules");
+  if (/housePrice\(/.test(panel)) fail("the Batch screen must not run the house rules itself — the route does, one definition");
+  if (!/query: built\.query/.test(panel)) fail("a house-priced row must keep the Batch query, or every row reads as corrected since it was priced");
+}
 
 if (failed) {
   console.error(`\ncheck-batchcomps: ${failed} failure(s)`);

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, reviseItemPrice, endListing } from "@/lib/ebay";
 import { desiredFor, listingForGroup, nextCopySeqs, removeBlocker, queueOf, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
-import {
+import { setCardCosts,
   loadLab, loadListingSettings, saveListingSettings, logEvent, insertListing, insertCopies, undoCopies, moveLabCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
 } from "@/lib/lab-store";
 import { addLabListing, scanLoads, reviseLabText } from "@/lib/lab-ebay";
@@ -103,6 +103,7 @@ export async function POST(request) {
       case "setQuantity": return json(await setQuantity(sb, user, lab, body.listingId));
       case "remove": return json(await remove(sb, user, lab, body.copyId));
       case "setPrices": return json(await setPrices(sb, user, lab, body.changes));
+      case "setCosts": return json(await setCosts(sb, user, lab, body.costs));
       case "endMany": return json(await endMany(sb, user, lab, body.listingIds));
       case "applyTemplate": return json(await applyTemplate(sb, user, lab, body));
       case "saveSettings": {
@@ -193,6 +194,7 @@ async function create(sb, user, lab, { group, pricePence, subtype = "", marketPe
     await deleteListing(sb, user.id, listing.id);
     throw e;
   }
+  const costNote = await costsFor(sb, user, rows, group);
   const headRow = desiredFor(listing, rows).head;
 
   if (!settings.policies) {
@@ -228,7 +230,31 @@ async function create(sb, user, lab, { group, pricePence, subtype = "", marketPe
   await logEvent(sb, user.id, listing.id, "listed", {
     itemId: result.itemId, quantity: rows.length, showing: headRow.sku, pricePence: price, title: r.title, titleCut: r.titleCut || undefined, warnings: result.warnings
   });
-  return { ok: true, itemId: result.itemId, warnings: result.warnings };
+  return { ok: true, itemId: result.itemId, warnings: costNote ? [...(result.warnings || []), costNote] : result.warnings };
+}
+
+/**
+ * What the copies cost, written once they exist (lab-store setCardCosts):
+ * each copy of the group carries costPence from Add copies. A failure costs
+ * the cost and never the listing — the answer is a warning to show.
+ */
+async function costsFor(sb, user, rows, group) {
+  const bySku = new Map((group.copies || []).map((c) => [String(c.sku).toLowerCase(), c.costPence]));
+  const entries = rows.map((r) => ({ id: r.id, pence: bySku.get(String(r.sku).toLowerCase()) })).filter((e) => Number.isInteger(e.pence) && e.pence >= 0);
+  if (!entries.length) return null;
+  const res = await setCardCosts(sb, user.id, entries);
+  return res.ok ? null : `Listed, but the cost wasn't saved: ${res.error}`;
+}
+
+/** Inventory's cost edits: [{ copyId, pence }] — pence null clears. Only this account's lab cards. */
+async function setCosts(sb, user, lab, costs) {
+  const mine = new Set(lab.copies.map((c) => String(c.id)));
+  const entries = (Array.isArray(costs) ? costs : [])
+    .filter((c) => c && mine.has(String(c.copyId)))
+    .map((c) => ({ id: c.copyId, pence: c.pence == null ? null : Number(c.pence) }))
+    .filter((e) => e.pence === null || (Number.isInteger(e.pence) && e.pence >= 0 && e.pence <= 10000000));
+  if (!entries.length) return { ok: false, error: "No costs to save." };
+  return setCardCosts(sb, user.id, entries);
 }
 
 /**
@@ -293,8 +319,9 @@ async function join(sb, user, lab, listing, group) {
     await undoCopies(sb, user.id, rows);
     return { ok: false, error: `eBay refused the new quantity for "${listing.title}": ${e.message}` };
   }
+  const costNote = await costsFor(sb, user, rows, group);
   await logEvent(sb, user.id, listing.id, "joined", { added: rows.map((r) => r.sku), from: before.available, to });
-  return { ok: true, joined: true, itemId: listing.ebay_item_id, from: before.available, to, pricePence: listing.price_pence, warnings: [] };
+  return { ok: true, joined: true, itemId: listing.ebay_item_id, from: before.available, to, pricePence: listing.price_pence, warnings: costNote ? [costNote] : [] };
 }
 
 /**
