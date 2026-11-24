@@ -350,6 +350,14 @@ stream` (the relay, only while streaming).
   not the engine's confidence — decides what is "check first". And the sales
   table (`lib/lab-evidence.js`): every sale found with why, capped without
   cutting a counted one, priced from your picks by house-pricing.js itself.
+- `scripts/check-cardmarket-prices.mjs` — Cardmarket's price guide beside our
+  prices (`lib/cm-match.js`, `lib/fx.js`, `/api/cardmarket/prices`): a card is
+  matched to its Cardmarket product by set name, number and then name (the
+  plain Geodude and its Master Ball and Poké Ball patterns are three products
+  at 074; a number that matches a different card is refused, never borrowed),
+  the figures in pounds at the ECB's daily rate (migration 043, refreshed by
+  the nightly price job and Sync now), a reverse holo reads the reverse
+  figures, and a grep that nothing which prices a card reads the guide yet.
 - `scripts/check-pullsheetread.mjs` — what the pull sheet reads
   (`lib/pullsheet-read.js`): every card still on the shelf, plus only the
   PULLED cards an open line can mention (by SKU, `pulled_line`, CardUploader

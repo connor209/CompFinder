@@ -285,6 +285,33 @@ export default function LabAdd() {
       : { text: `${jobOf.size} card${jobOf.size === 1 ? "" : "s"} sent to list on eBay. They list on the server — you can leave this page; the rows update here as they go, or whenever you come back.` });
   }
 
+  // ---- Cardmarket's price guide, for reference -------------------------
+  // Read from what the nightly job stored (no request to Cardmarket), kept
+  // on the row for a day, shown beside the sold comps — never priced from.
+  const CM_TTL_MS = 24 * 60 * 60 * 1000;
+  const [cmRate, setCmRate] = useState(null);
+  const cmBusy = useRef(false);
+  useEffect(() => {
+    if (!loaded || cmBusy.current) return;
+    const due = rows.filter((r) => r.set && !r.result?.ok && (!r.cm || Date.now() - (r.cm.fetchedAt || 0) > CM_TTL_MS)).slice(0, 400);
+    if (!due.length) return;
+    cmBusy.current = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/cardmarket/prices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+          cards: due.map((r) => ({ id: r.id, name: r.cardName, number: r.cardNumber, set: r.set, finish: r.card?.finish || "", title: r.title }))
+        }) });
+        const j = await res.json();
+        if (j.ok) {
+          setCmRate({ rate: j.rate, asOf: j.rateAsOf, fallback: j.rateFallback });
+          const at = Date.now();
+          setRows((rs) => rs.map((r) => (j.results?.[r.id] ? { ...r, cm: { ...j.results[r.id], fetchedAt: at } } : r)));
+        }
+      } catch { /* reference only: a failed read leaves the rows as they were */ }
+      cmBusy.current = false;
+    })();
+  }, [loaded, rows]);
+
   // Rows sent to a background job are settled from the lab's log: on every
   // load, and every few seconds while any are still out.
   const sending = rows.some((r) => r.result?.pending);
@@ -516,6 +543,7 @@ export default function LabAdd() {
                         {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}
                         {r.comps?.flags?.includes("in_hand_check") && <small className="li-warn">check in hand</small>}
                         {r.comps?.evidence && <small className="li-dim" style={{ whiteSpace: "normal", maxWidth: 220 }}>{evidenceSummary(r.comps.evidence)}</small>}
+                        <CmLine cm={r.cm} rate={cmRate} />
                         {r.comps?.evidence?.length > 0 && (
                           <button className="li-link" onClick={() => setOpen((o) => new Set(o).add(r.id))}>
                             {picksDiffer(r.comps.evidence, r.picks) ? "🔍 your picks" : "🔍 see sales"}
@@ -589,6 +617,26 @@ export default function LabAdd() {
   );
 }
 
+/**
+ * Cardmarket's figure for a row, in pounds: the trend (the reverse holo's for
+ * a reverse), an arrow for where the 7-day average sits against the 30-day,
+ * and the euros and the rate behind it on hover. A card with no Cardmarket
+ * product it can be pinned to says so on hover rather than borrowing another's.
+ */
+function CmLine({ cm, rate }) {
+  if (!cm) return null;
+  if (cm.pence == null) return <small className="li-dim" title={cm.why || "No Cardmarket figure"}>Cardmarket —</small>;
+  const arrow = cm.dir === "up" ? "↑" : cm.dir === "down" ? "↓" : "";
+  const tip = [
+    `Cardmarket ${cm.reverse ? "reverse holo " : ""}trend €${cm.eurTrend != null ? cm.eurTrend.toFixed(2) : "?"}`,
+    cm.avg7Pence != null ? `7-day £${(cm.avg7Pence / 100).toFixed(2)}` : "", cm.avg30Pence != null ? `30-day £${(cm.avg30Pence / 100).toFixed(2)}` : "",
+    cm.lowPence != null ? `low £${(cm.lowPence / 100).toFixed(2)}` : "", cm.product ? `product: ${cm.product}` : "",
+    rate ? `at £${Number(rate.rate).toFixed(4)}/€${rate.fallback ? " (approximate — no ECB rate stored yet)" : rate.asOf ? ` (ECB ${rate.asOf})` : ""}` : "",
+    cm.asOf ? `guide of ${cm.asOf}` : ""
+  ].filter(Boolean).join(" · ");
+  return <small className="la-cm" title={tip}>Cardmarket £{(cm.pence / 100).toFixed(2)}{arrow ? ` ${arrow}` : ""}{rate?.fallback ? "*" : ""}</small>;
+}
+
 /** The pricing run, as a bar: cards done of the total, time left, what is being searched now. */
 function PricingBar({ p, onStop }) {
   const [now, setNow] = useState(Date.now());
@@ -644,6 +692,10 @@ function SalesFound({ row, onPicks, onUse, disabled }) {
       <div className="la-sales-head">
         <b>Sales found</b>
         <span className="li-dim">{evidenceSummary(ev)}</span>
+        {row.cm?.pence != null && (
+          <span className="la-cm">Cardmarket {row.cm.reverse ? "reverse " : ""}trend <b>{gbp(row.cm.pence)}</b>
+            {row.cm.avg7Pence != null ? ` · 7d ${gbp(row.cm.avg7Pence)}` : ""}{row.cm.avg30Pence != null ? ` · 30d ${gbp(row.cm.avg30Pence)}` : ""}{row.cm.lowPence != null ? ` · low ${gbp(row.cm.lowPence)}` : ""}</span>
+        )}
         <span className="li-spacer" />
         {outCount > 0 && <label className="li-check"><input type="checkbox" checked={showOut} onChange={(e) => setShowOut(e.target.checked)} /> show the {outCount} left out</label>}
         {row.comps.search?.length > 0 && <button className="li-link" onClick={() => setShowSearches((v) => !v)}>{showSearches ? "hide" : "show"} the {row.comps.search.length} searches</button>}
@@ -718,6 +770,8 @@ const EXTRA_CSS = `
 .la-bar > div { height: 100%; background: var(--accent); transition: width .4s ease; }
 .la-current { white-space: normal; }
 .la-now { color: var(--accent); font-weight: 600; }
+.la-cm { color: var(--ink-soft); }
+.la-cm b { color: var(--ink); }
 .la-sales { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
 .la-sales-head, .la-sales-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
 .la-sales-table td, .la-sales-table th { font-size: 12.5px; }

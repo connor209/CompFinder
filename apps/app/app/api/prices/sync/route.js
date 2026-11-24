@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncPrices, prunePriceHistory } from "@/lib/pricesync";
+import { refreshEurGbp } from "@/lib/fx";
 
 /**
  * Run the price ingest on demand from Settings.
@@ -46,6 +47,7 @@ export async function POST(request) {
 
   // Only worth pruning after a full run; a single game barely moves the needle.
   const pruned = game ? null : await prunePriceHistory(admin);
+  const fx = await refreshEurGbp(admin);
   const failed = results.filter((r) => !r.ok).length;
-  return NextResponse.json({ ok: failed === 0, failed, pruned, results });
+  return NextResponse.json({ ok: failed === 0, failed, pruned, fx, results });
 }

@@ -118,7 +118,7 @@ export function matchesSearch(row, q) {
 
 export const EMPTY_FILTERS = {
   q: "", status: "", condition: "", pile: "", language: "", subtype: "", waiting: false,
-  set: "", minPrice: "", maxPrice: "", vsMarket: "", multi: false, added: "", game: ""
+  set: "", minPrice: "", maxPrice: "", vsMarket: "", multi: false, added: "", game: "", vsCm: ""
 };
 
 /** Price against the sold-comps figure: the question a repricing pass starts from. */
@@ -137,6 +137,33 @@ export function marketGap(row) {
   const pence = row.pricePence - row.marketPence;
   return { pence, pct: Math.round((pence / row.marketPence) * 100) };
 }
+
+/**
+ * Price less Cardmarket's trend (in pounds), the same shape as marketGap. The
+ * Cardmarket figure is attached by the screen as `row.cm` (lib/cm-match.js):
+ * it is read daily, where the sold-comps market is frozen at listing time.
+ */
+export function cmGap(row) {
+  const cm = row?.cm?.pence;
+  if (row?.pricePence == null || cm == null || cm <= 0) return null;
+  const pence = row.pricePence - cm;
+  return { pence, pct: Math.round((pence / cm) * 100) };
+}
+
+function vsOf(g) {
+  if (!g) return "none";
+  if (Math.abs(g.pct) <= 10) return "match";
+  return g.pence < 0 ? "under" : "over";
+}
+const vsCmOf = (row) => vsOf(cmGap(row));
+
+/** The same four buckets, against Cardmarket. */
+export const VS_CM = [
+  ["under", "Priced under Cardmarket"],
+  ["over", "Priced over Cardmarket"],
+  ["match", "At Cardmarket (±10%)"],
+  ["none", "No Cardmarket figure"]
+];
 
 function vsMarketOf(row) {
   const g = marketGap(row);
@@ -158,6 +185,7 @@ export function filterRows(rows, f = EMPTY_FILTERS, now = Date.now()) {
     (min == null || (r.pricePence != null && r.pricePence >= min)) &&
     (max == null || (r.pricePence != null && r.pricePence <= max)) &&
     (!f.vsMarket || vsMarketOf(r) === f.vsMarket) &&
+    (!f.vsCm || vsCmOf(r) === f.vsCm) &&
     (!f.multi || r.total > 1) &&
     (!f.added || (r.addedAt && now - Date.parse(r.addedAt) <= (ADDED_MS[f.added] || Infinity))) &&
     (!f.status || r.status === f.status) &&
@@ -179,7 +207,8 @@ const numberKey = (n) => { const m = String(n || "").match(/(\d+)(?:\D+(\d+))?/)
  */
 export const SORT_FIELDS = [
   ["added", "Date added"], ["name", "Name"], ["set", "Set & number"], ["sku", "SKU"], ["condition", "Condition"],
-  ["price", "Price"], ["market", "Market"], ["gap", "Price vs market (£)"], ["gappct", "Price vs market (%)"], ["forsale", "Quantity"]
+  ["price", "Price"], ["market", "Market"], ["gap", "Price vs market (£)"], ["gappct", "Price vs market (%)"],
+  ["cm", "Cardmarket"], ["cmgap", "Price vs Cardmarket (%)"], ["forsale", "Quantity"]
 ];
 
 /** Sort. A row with no value (no price, no market) sorts LAST in both directions — never as 0. */
@@ -192,6 +221,8 @@ export function sortRows(rows, key = "added-desc") {
       case "market": return r.marketPence;
       case "gap": return marketGap(r)?.pence ?? null;
       case "gappct": return marketGap(r)?.pct ?? null;
+      case "cm": return r.cm?.pence ?? null;
+      case "cmgap": return cmGap(r)?.pct ?? null;
       case "added": return r.addedAt;
       case "name": return r.name || r.title;
       case "set": return r.set ? `${r.set}\u0000${String(numberKey(r.number) ?? "").padStart(12, "0")}` : null;
@@ -248,18 +279,20 @@ export function facetCounts(rows) {
     languages: count(rows.map((r) => r.language)),
     subtypes: count(rows.map((r) => r.subtype)),
     games: count(rows.map(gameOf)),
-    vsMarket: count(rows.map(vsMarketOf))
+    vsMarket: count(rows.map(vsMarketOf)),
+    vsCm: count(rows.map(vsCmOf))
   };
 }
 
 /** What the rows on screen add up to: listings, copies for sale, and their worth at price and at market. */
 export function viewTotals(rows) {
-  const t = { listings: 0, copies: 0, price: 0, market: 0, unmarketed: 0, unpriced: 0 };
+  const t = { listings: 0, copies: 0, price: 0, market: 0, unmarketed: 0, unpriced: 0, cm: 0, uncm: 0 };
   for (const r of rows || []) {
     t.listings += 1;
     t.copies += r.forSale;
     if (r.pricePence == null) t.unpriced += 1; else t.price += r.pricePence * r.forSale;
     if (r.marketPence == null) { if (r.forSale > 0) t.unmarketed += 1; } else t.market += r.marketPence * r.forSale;
+    if (r.cm?.pence == null) { if (r.forSale > 0) t.uncm += 1; } else t.cm += r.cm.pence * r.forSale;
   }
   return t;
 }
@@ -270,7 +303,8 @@ export function columnsFor(rows) {
   return {
     variant: distinct((r) => r.listing?.card?.finish) > 0,
     tcg: distinct(gameOf) > 1,
-    subtype: distinct((r) => r.subtype) > 0
+    subtype: distinct((r) => r.subtype) > 0,
+    cm: (rows || []).some((r) => r.cm)
   };
 }
 
@@ -281,6 +315,7 @@ export function activeChips(f) {
   for (const k of Object.keys(label)) if (f[k]) chips.push({ key: k, text: `${label[k]}: ${k === "status" ? (STATUSES.find(([v]) => v === f[k])?.[1] || f[k]) : f[k]}`, clear: { [k]: "" } });
   if (f.minPrice || f.maxPrice) chips.push({ key: "price", text: `Price ${f.minPrice ? `£${f.minPrice}` : "any"}–${f.maxPrice ? `£${f.maxPrice}` : "any"}`, clear: { minPrice: "", maxPrice: "" } });
   if (f.vsMarket) chips.push({ key: "vsMarket", text: VS_MARKET.find(([v]) => v === f.vsMarket)?.[1] || f.vsMarket, clear: { vsMarket: "" } });
+  if (f.vsCm) chips.push({ key: "vsCm", text: VS_CM.find(([v]) => v === f.vsCm)?.[1] || f.vsCm, clear: { vsCm: "" } });
   if (f.added) chips.push({ key: "added", text: `Added: ${ADDED.find(([v]) => v === f.added)?.[1] || f.added}`, clear: { added: "" } });
   if (f.multi) chips.push({ key: "multi", text: "2+ copies", clear: { multi: false } });
   if (f.waiting) chips.push({ key: "waiting", text: "Sold, to pick", clear: { waiting: false } });

@@ -258,8 +258,8 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("sort: furthest under market first; no market last both ways", [S("gappct-asc"), S("gappct-desc")], [["a", "c", "b", "d"], ["b", "c", "a", "d"]]);
   eq("sort: condition, best first", S("condition-asc")[3], "a");
   eq("facet counts", I.facetCounts(inv).sets, [["Dark Phantasma", 2], ["Shiny Treasure ex", 2]]);
-  eq("what the rows on screen come to", I.viewTotals(inv), { listings: 4, copies: 5, price: 249 + 499 + 498 + 249, market: 399 + 249 + 498, unmarketed: 1, unpriced: 0 });
-  eq("a column that says the same on every row is hidden", I.columnsFor(inv), { variant: false, tcg: false, subtype: false });
+  eq("what the rows on screen come to", I.viewTotals(inv), { listings: 4, copies: 5, price: 249 + 499 + 498 + 249, market: 399 + 249 + 498, unmarketed: 1, unpriced: 0, cm: 0, uncm: 4 });
+  eq("a column that says the same on every row is hidden", I.columnsFor(inv), { variant: false, tcg: false, subtype: false, cm: false });
   eq("…and shown when it tells rows apart", I.columnsFor([...inv, R("e", { game: "Yu-Gi-Oh!" })]).tcg, true);
   eq("the filters in force, as chips", I.activeChips({ ...I.EMPTY_FILTERS, set: "Dark Phantasma", minPrice: "3", vsMarket: "under", multi: true }).map((c) => c.text),
     ["Set: Dark Phantasma", "Price £3–any", "Priced under market", "2+ copies"]);

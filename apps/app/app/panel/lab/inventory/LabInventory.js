@@ -4,7 +4,7 @@ import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, us
 import {
   inventoryRows, filterRows, sortRows, pageOf, actionable, parsePence, pricePlan, templatePlan,
   copyRows, isEmptyRow, inventoryCsv, EMPTY_FILTERS, STATUSES, PAGE_SIZES, SORT_FIELDS,
-  facetCounts, viewTotals, columnsFor, activeChips, marketGap, VS_MARKET, ADDED, gameOf
+  facetCounts, viewTotals, columnsFor, activeChips, marketGap, cmGap, VS_MARKET, VS_CM, ADDED, gameOf
 } from "@/lib/lab-inventory.js";
 import { removeBlocker } from "@/lib/lab-copies.js";
 import { LAB_TABLE_CSS as CSS } from "../labTableCss";
@@ -99,7 +99,29 @@ export default function LabInventory() {
     return () => document.removeEventListener("mousedown", close);
   }, [menu]);
 
-  const all = useMemo(() => (lab?.ok ? inventoryRows(lab.listings, lab.copies) : []), [lab]);
+  // Cardmarket's price guide for each listing's card, read from what the
+  // nightly job stored — reference only, beside the sold-comps market.
+  const [cm, setCm] = useState({ byId: {}, rate: null });
+  useEffect(() => {
+    if (!lab?.ok) return;
+    const cards = (lab.listings || []).filter((l) => l.card?.set).map((l) => ({ id: l.id, name: l.card.name, number: l.card.number, set: l.card.set, finish: l.card.finish || "", title: l.title }));
+    if (!cards.length) return;
+    let gone = false;
+    (async () => {
+      const byId = {};
+      let rate = null;
+      for (let i = 0; i < cards.length; i += 400) {
+        try {
+          const res = await fetch("/api/cardmarket/prices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards: cards.slice(i, i + 400) }) });
+          const j = await res.json();
+          if (j.ok) { Object.assign(byId, j.results || {}); rate = { rate: j.rate, asOf: j.rateAsOf, fallback: j.rateFallback }; }
+        } catch { /* reference only */ }
+      }
+      if (!gone) setCm({ byId, rate });
+    })();
+    return () => { gone = true; };
+  }, [lab]);
+  const all = useMemo(() => (lab?.ok ? inventoryRows(lab.listings, lab.copies).map((r) => (cm.byId[r.id] ? { ...r, cm: cm.byId[r.id] } : r)) : []), [lab, cm]);
   const matched = useMemo(() => {
     let rows = filterRows(all, { ...f, q });
     if (hideEmpty) rows = rows.filter((r) => !isEmptyRow(r));
@@ -119,7 +141,8 @@ export default function LabInventory() {
       languages: facetCounts(without(["language"])).languages,
       subtypes: facetCounts(without(["subtype"])).subtypes,
       games: facetCounts(without(["game"])).games,
-      vsMarket: Object.fromEntries(facetCounts(without(["vsMarket"])).vsMarket)
+      vsMarket: Object.fromEntries(facetCounts(without(["vsMarket"])).vsMarket),
+      vsCm: Object.fromEntries(facetCounts(without(["vsCm"])).vsCm)
     };
   }, [base, f, q]);
   const cols = useMemo(() => columnsFor(all), [all]);
@@ -166,7 +189,7 @@ export default function LabInventory() {
       <button onClick={() => sortBy(field, firstDir)}>{children}<span className="li-arrow">{sortField === field ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span></button>
     </th>
   );
-  const ncols = 11 + (cols.variant ? 1 : 0) + (cols.tcg ? 1 : 0);
+  const ncols = 11 + (cols.variant ? 1 : 0) + (cols.tcg ? 1 : 0) + (cols.cm ? 2 : 0);
 
   function finish(r, verb) {
     if (!r.ok) { setMsg({ bad: true, text: r.error || "That didn't work." }); return; }
@@ -358,6 +381,14 @@ export default function LabInventory() {
               {VS_MARKET.map(([k, l]) => <option key={k} value={k}>{l} ({fc.vsMarket[k] || 0})</option>)}
             </select>
           </label>
+          {cols.cm && (
+            <label>vs Cardmarket
+              <select value={f.vsCm} onChange={(e) => setFilter({ vsCm: e.target.value })}>
+                <option value="">Any</option>
+                {VS_CM.map(([k, l]) => <option key={k} value={k}>{l} ({fc.vsCm[k] || 0})</option>)}
+              </select>
+            </label>
+          )}
           <label>Added
             <select value={f.added} onChange={(e) => setFilter({ added: e.target.value })}>
               <option value="">Any time</option>
@@ -394,7 +425,7 @@ export default function LabInventory() {
           <span className="li-spacer" />
           <span className="li-dim li-viewtot" title="What the rows matching your search and filters add up to, across every page">
             {view.total.toLocaleString("en-GB")} {grouped ? "listing" : "cop"}{grouped ? (view.total === 1 ? "" : "s") : view.total === 1 ? "y" : "ies"}
-            {grouped && <> · {vt.copies} for sale · <b>{gbpBig(vt.price)}</b> at price · {gbpBig(vt.market)} at market{vt.unmarketed ? "*" : ""}</>}
+            {grouped && <> · {vt.copies} for sale · <b>{gbpBig(vt.price)}</b> at price · {gbpBig(vt.market)} at market{vt.unmarketed ? "*" : ""}{cols.cm ? <> · {gbpBig(vt.cm)} at Cardmarket{vt.uncm ? "*" : ""}</> : null}</>}
           </span>
           <Pager />
         </div>
@@ -460,6 +491,8 @@ export default function LabInventory() {
                 <Th field="price" className="r" firstDir="desc">Price</Th>
                 <Th field="market" className="r sm-hide" firstDir="desc">Market</Th>
                 <Th field="gappct" className="r sm-hide" title="Your price against the sold-comps figure. Red: under market. Click to sort.">vs mkt</Th>
+                {cols.cm && <Th field="cm" className="r sm-hide" firstDir="desc" title={`Cardmarket's trend in pounds, from today's price guide${cm.rate ? ` at £${Number(cm.rate.rate).toFixed(4)}/€${cm.rate.fallback ? " (approximate — no ECB rate stored yet)" : cm.rate.asOf ? ` (ECB ${cm.rate.asOf})` : ""}` : ""}`}>CM</Th>}
+                {cols.cm && <Th field="cmgap" className="r sm-hide" title="Your price against Cardmarket's trend. Red: under Cardmarket.">vs CM</Th>}
                 <Th field="forsale" className="r" firstDir="desc">Qty</Th>
                 <Th field="added" className="sm-hide" firstDir="desc">Added</Th>
                 <th />
@@ -516,6 +549,19 @@ export default function LabInventory() {
                       title={gap ? `${gap.pence < 0 ? "Under" : "Over"} market by £${(Math.abs(gap.pence) / 100).toFixed(2)}` : "No market figure to compare"}>
                       {gap ? `${gap.pct > 0 ? "+" : ""}${gap.pct}%` : "—"}
                     </td>
+                    {cols.cm && (() => {
+                      const c = r.cm;
+                      const cg = cmGap(r);
+                      const tip = c?.pence != null
+                        ? [`Cardmarket ${c.reverse ? "reverse holo " : ""}trend €${c.eurTrend?.toFixed(2) ?? "?"}`, c.avg7Pence != null ? `7-day ${gbp(c.avg7Pence)}` : "", c.avg30Pence != null ? `30-day ${gbp(c.avg30Pence)}` : "", c.lowPence != null ? `low ${gbp(c.lowPence)}` : "", c.product ? `product: ${c.product}` : "", c.asOf ? `guide of ${c.asOf}` : ""].filter(Boolean).join(" · ")
+                        : c?.why || "No Cardmarket figure";
+                      return (
+                        <>
+                          <td className="r sm-hide" title={tip}>{c?.pence != null ? <>{gbp(c.pence)}{c.dir === "up" ? <span className="li-up"> ↑</span> : c.dir === "down" ? <span className="li-down"> ↓</span> : null}</> : "—"}</td>
+                          <td className={`r sm-hide li-gap ${cg ? (Math.abs(cg.pct) <= 10 ? "even" : cg.pence < 0 ? "under" : "over") : ""}`}>{cg ? `${cg.pct > 0 ? "+" : ""}${cg.pct}%` : "—"}</td>
+                        </>
+                      );
+                    })()}
                     <td className="r">
                       {c1 ? (c1.state === "next" || c1.state === "queued" ? 1 : 0) : r.forSale}
                       {!c1 && r.waiting > 0 && <small className="li-warn">{r.waiting} to pick</small>}
@@ -549,7 +595,7 @@ export default function LabInventory() {
                       </td>
                       <td className="sm-hide"><span className={`li-status s-${c.state}`}>{c.onShow ? "On eBay now" : STATE_LABEL[c.state]}</span></td>
                       <td className="mono">{c.sku}<small>{c.position ? `pile ${c.pile} #${c.position}` : `pile ${c.pile}`}</small></td>
-                      <td className="sm-hide" /><td />{cols.variant && <td className="sm-hide" />}{cols.tcg && <td className="sm-hide" />}<td /><td className="sm-hide" /><td className="sm-hide" /><td /><td className="sm-hide" />
+                      <td className="sm-hide" /><td />{cols.variant && <td className="sm-hide" />}{cols.tcg && <td className="sm-hide" />}<td /><td className="sm-hide" /><td className="sm-hide" />{cols.cm && <><td className="sm-hide" /><td className="sm-hide" /></>}<td /><td className="sm-hide" />
                       <td className="li-menucell">
                         {!removeBlocker(c, r.listing, lab.copies) && <button className="li-chip" disabled={busy} onClick={() => removeCopy(r, c)}>✕ Remove</button>}
                         {c.state === "sold" && <button className="li-chip" disabled={busy} onClick={() => releaseCopy(c)} title="Only for a CANCELLED order: the copy goes back into its queue">Release</button>}
@@ -586,4 +632,6 @@ const INV_CSS = `
 .li-gap.over { color: var(--good, #3fb68b); }
 .li-gap.even { color: var(--ink-soft); }
 .li-viewtot b { color: var(--ink); }
+.li-up { color: var(--good, #3fb68b); }
+.li-down { color: var(--bad); }
 `;

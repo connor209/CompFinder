@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncPrices, prunePriceHistory } from "@/lib/pricesync";
+import { refreshEurGbp } from "@/lib/fx";
 
 /**
  * Nightly Cardmarket price pull (Vercel Cron — see vercel.json), then thin the
@@ -9,6 +10,8 @@ import { syncPrices, prunePriceHistory } from "@/lib/pricesync";
  *
  * GET /api/cron/prices           all enabled games
  * GET /api/cron/prices?game=x    just one
+ *
+ * Also refreshes the ECB's euro→pound rate (lib/fx.js, migration 043).
  */
 export const maxDuration = 300;
 
@@ -34,6 +37,9 @@ export async function GET(request) {
   }
 
   const pruned = await prunePriceHistory(admin);
+  // The euro rate every Cardmarket figure is shown at. A failure here is
+  // reported and changes nothing: yesterday's rate stays in place.
+  const fx = await refreshEurGbp(admin);
   const failed = results.filter((r) => !r.ok).length;
-  return NextResponse.json({ ok: failed === 0, games: results.length, failed, pruned, results });
+  return NextResponse.json({ ok: failed === 0, games: results.length, failed, pruned, fx, results });
 }
