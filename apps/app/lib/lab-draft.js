@@ -60,6 +60,27 @@ export function mergeGroups(existing, groups, file, { anyLanguage = false } = {}
   return { rows: list, refused, added };
 }
 
+/**
+ * Rows of a CardUploader export the reader skips — no card name or no card
+ * number — named, so a 50-row file that loads 49 says which one went. Blank
+ * lines (every cell empty) are not rows and are not counted. `rows` are
+ * CardUploaderCsv.rowsToObjects() output, in file order; row numbers are the
+ * spreadsheet's (the header is row 1).
+ */
+export function unreadableRows(rows) {
+  const out = [];
+  (rows || []).forEach((r, i) => {
+    const cells = Object.values(r || {}).map((v) => String(v ?? "").trim());
+    if (!cells.some(Boolean)) return;
+    const name = String(r["*C:Card Name"] || "").trim();
+    const number = String(r["*C:Card Number"] || "").trim();
+    if (name && number) return;
+    const missing = [!name && "card name", !number && "card number"].filter(Boolean).join(" and ");
+    out.push({ sku: String(r.CustomLabel || r["*CustomLabel"] || "").trim() || `row ${i + 2}`, title: String(r["*Title"] || r.Title || "").trim(), why: `no ${missing} on the row — fill it in in CardUploader and export again` });
+  });
+  return out;
+}
+
 /** The copies this row will actually list, skipped ones out. */
 export function liveCopies(row) {
   const skip = new Set((row.skippedSkus || []).map((s) => String(s).toLowerCase()));

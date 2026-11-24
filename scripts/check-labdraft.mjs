@@ -6,7 +6,7 @@
 //   node scripts/check-labdraft.mjs
 import {
   mergeGroups, liveCopies, groupToSend, rowStatus, applyBulk, ladderUp, parsePrice,
-  filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, LISTABLE, isThin
+  filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, LISTABLE, isThin, unreadableRows
 } from "../apps/app/lib/lab-draft.js";
 import { groupKey, keyForLanguage, groupsFromItems } from "../apps/app/lib/lab-copies.js";
 import { readFileSync } from "node:fs";
@@ -118,6 +118,17 @@ eq("a failed lookup is check first", isThin(row({ comps: { error: "x", decision:
 const page = readFileSync(new URL("../apps/app/app/panel/lab/add/LabAdd.js", import.meta.url), "utf8");
 eq("the page sends the batch's language and the every-language choice", [/any_language: Boolean\(r\.anyLanguage\)/.test(page), /language: r\.language/.test(page)], [true, true]);
 eq("the page stamps the batch language on every card it loads", /language: batchLang/.test(page), true);
+
+// ---- rows the reader skips are named, not lost -------------------------------------
+const skippedRows = unreadableRows([
+  { CustomLabel: "KA1", "*C:Card Name": "Mareep", "*C:Card Number": "1/1" },
+  { CustomLabel: "KA2", "*Title": "Mystery card", "*C:Card Name": "", "*C:Card Number": "5/9" },
+  { CustomLabel: "", "*C:Card Name": "Latios", "*C:Card Number": "" },
+  { CustomLabel: "", "*C:Card Name": "", "*C:Card Number": "" }
+]);
+eq("a row with no name or number is named", skippedRows.map((x) => x.sku), ["KA2", "row 4"]);
+eq("…saying what is missing", skippedRows.map((x) => x.why.split(" on ")[0]), ["no card name", "no card number"]);
+eq("a blank line is not a row", skippedRows.length, 2);
 
 // ---- reload ------------------------------------------------------------------------------
 eq("the list survives a reload", restoreDraft(serialiseDraft(mix)).map((r) => [r.id, r.pricePence]), mix.map((r) => [r.id, r.pricePence]));

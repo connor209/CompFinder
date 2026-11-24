@@ -7,7 +7,7 @@ import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
   DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
-  LANGUAGES, DECISION_TEXT
+  LANGUAGES, DECISION_TEXT, unreadableRows
 } from "@/lib/lab-draft.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
 
@@ -107,19 +107,22 @@ export default function LabAdd() {
     let next = rows;
     const newRefused = [];
     let added = 0;
+    let rowsRead = 0;
     for (const f of picked) {
       try {
         const text = await f.text();
         // The batch's language beats whatever the file or a title said.
         const items = CardUploaderCsv.extractItems(text).map((it) => ({ ...it, language: batchLang }));
-        const raw = CardUploaderCsv.rowsToObjects(CardUploaderCsv.parseCsv(text))
-          .filter((r) => (r["*C:Card Name"] || "").trim() && (r["*C:Card Number"] || "").trim());
+        const allRows = CardUploaderCsv.rowsToObjects(CardUploaderCsv.parseCsv(text));
+        const skipped = unreadableRows(allRows);
+        rowsRead += allRows.length - allRows.filter((r) => !Object.values(r || {}).some((v) => String(v ?? "").trim())).length;
+        const raw = allRows.filter((r) => (r["*C:Card Name"] || "").trim() && (r["*C:Card Number"] || "").trim());
         const extras = raw.map((r) => ({ finish: (r["*C:Finish"] || "").trim(), setCode: (r["*C:Set Code"] || r["C:Set Code"] || "").trim() }));
         const { groups, refused: rf } = groupsFromItems(items, extras.length === items.length ? extras : []);
         const merged = mergeGroups(next, groups, f.name, { anyLanguage: anyLang });
         next = merged.rows;
         added += merged.added;
-        newRefused.push(...rf.map((x) => ({ ...x, file: f.name })), ...merged.refused.map((x) => ({ ...x, file: f.name })));
+        newRefused.push(...skipped.map((x) => ({ ...x, file: f.name })), ...rf.map((x) => ({ ...x, file: f.name })), ...merged.refused.map((x) => ({ ...x, file: f.name })));
       } catch (err) {
         newRefused.push({ sku: f.name, title: "", why: err.message || "couldn't read that file", file: f.name });
       }
@@ -127,7 +130,7 @@ export default function LabAdd() {
     setRows(next);
     refreshView();
     setRefused((r) => [...r, ...newRefused]);
-    setMsg({ text: `${added} cop${added === 1 ? "y" : "ies"} loaded from ${picked.length} file${picked.length === 1 ? "" : "s"} as ${batchLang}${anyLang ? " (sold comps in every language)" : ""}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.` });
+    setMsg({ text: `${rowsRead} row${rowsRead === 1 ? "" : "s"} read, ${added} cop${added === 1 ? "y" : "ies"} loaded from ${picked.length} file${picked.length === 1 ? "" : "s"} as ${batchLang}${anyLang ? " (sold comps in every language)" : ""}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.` });
   }
 
   // ---- pricing -----------------------------------------------------------
