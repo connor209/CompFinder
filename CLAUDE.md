@@ -330,6 +330,13 @@ stream` (the relay, only while streaming).
   never guesses an unreserved lab sale, Reconcile never offers one, the Show
   Desk picker never lists one, `checkoutStackCard()` refuses one, and ＋ Deal,
   the stream button and ⤴ Show never appear on a lab listing.
+- `scripts/check-labdraft.mjs` — the lab's Add copies working list
+  (`lib/lab-draft.js`, `/panel/lab/add`): several exports merge into one list
+  (a SKU loaded twice is refused, the list given is never changed), each row's
+  status, every bulk edit (one price, sold comps, comps ± %, the .49/.99
+  ladder, clear, subtype, leave out) never touching a listed row, only rows
+  ticked AND on screen acted on, left-out copies never sent, and the list
+  surviving a reload.
 - `scripts/check-pullsheetread.mjs` — what the pull sheet reads
   (`lib/pullsheet-read.js`): every card still on the shelf, plus only the
   PULLED cards an open line can mention (by SKU, `pulled_line`, CardUploader

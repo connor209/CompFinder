@@ -445,101 +445,18 @@ export default function LabCopies() {
         })}
       </section>
 
-      {/* ---------------- Add copies ---------------- */}
+      {/* ---------------- Add copies: its own page now ---------------- */}
       <section style={box}>
-        <strong>Add copies from a CardUploader export</strong>
-        <p style={small}>
-          Recognise the LAB stack in CardUploader and export it, but <strong>don&apos;t list it there</strong>. Copies of the same
-          card in the same condition become one listing, and they sell in the order they sit in the file.
-        </p>
-        <div style={row}>
-          <input type="file" accept=".csv,text/csv" onChange={onFile} />
-        </div>
-        <p style={{ ...small, marginTop: 10 }}>
-          Titles, descriptions, shop images, Best Offer and defaults:{" "}
-          <a href="/panel/lab/settings">Listing settings →</a>
-          {lab?.listingSettingsMissing ? " (run migration 041 to save them)" : !lab?.listingSettingsSaved ? " (none saved yet — using the defaults)" : ""}
-        </p>
-
-        {file?.error && <p style={{ color: "var(--bad)" }}>{file.error}</p>}
-        {file && !file.error && (
-          <div style={{ marginTop: 12 }}>
-            <div style={small}>{file.name}: {file.rows} rows → {file.groups.length} listing{file.groups.length === 1 ? "" : "s"}{file.refused.length ? `, ${file.refused.length} refused` : ""}.</div>
-            {file.refused.map((r) => <div key={r.sku} style={{ fontSize: 13, color: "var(--warn)" }}>✗ {r.sku} — {r.why}</div>)}
-            <div style={{ ...row, margin: "10px 0" }}>
-              <button className="btn" disabled={!!busy || !file.groups.some((g) => !joinOf(g))} onClick={priceAll}>
-                {busy === "price" ? "Pricing…" : "£ Price from sold comps"}
-              </button>
-              <button className="btn btn-primary" disabled={!!busy || !file.groups.length} onClick={listAll}>
-                {busy === "listAll" ? "Listing…" : `List all ${file.groups.length} on eBay (live)`}
-              </button>
-              {progress && <span style={small}>{progress.label}: {progress.done} of {progress.total}…</span>}
-            </div>
-            {failures.map((f, i) => <div key={i} style={{ fontSize: 13, color: "var(--bad)" }}>✗ {f.title} — {f.error}</div>)}
-            {/* Exceptions first: no price, a thin or flagged price, then the rest. */}
-            {file.groups.slice().sort((a, b) => rank(a) - rank(b)).map((g) => (
-              <div key={g.key} style={{ ...row, borderTop: "1px solid var(--line)", padding: "8px 0" }}>
-                <img src={g.copies[0].scans[0]} alt="" style={thumb} referrerPolicy="no-referrer" />
-                <div style={{ flex: 1, minWidth: 200 }}>
-                  <div><strong>{joinOf(g) ? joinOf(g).title : renderOf(g).title}</strong>{!joinOf(g) && renderOf(g).titleCut && <span style={{ color: "var(--warn)", fontSize: 12 }}> · title cut at 80</span>}</div>
-                  <div style={small}>{g.condition} · {g.copies.length} cop{g.copies.length === 1 ? "y" : "ies"}: {g.copies.map((c) => c.sku).join(", ")}</div>
-                  {joinOf(g) && (
-                    <div style={{ fontSize: 13, color: "var(--accent)" }}>
-                      Joins eBay {joinOf(g).ebay_item_id}: quantity +{g.copies.length}, price stays {gbp(joinOf(g).price_pence)}
-                    </div>
-                  )}
-                  {!joinOf(g) && comps[g.key] && <CompsNote c={comps[g.key]} typed={priceOf(g.key)} />}
-                </div>
-                {!joinOf(g) && (lab?.listingSettings?.subtypes || []).length > 0 && (
-                  <label className="field" style={{ width: 120 }}><span>Subtype</span>
-                    <select value={subtypes[g.key] || ""} onChange={(e) => setSubtypes((t) => ({ ...t, [g.key]: e.target.value }))}>
-                      <option value="">—</option>
-                      {lab.listingSettings.subtypes.map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </label>
-                )}
-                {!joinOf(g) && (
-                  <label className="field" style={{ width: 110 }}><span>Price £</span>
-                    <input inputMode="decimal" value={prices[g.key] || ""} onChange={(e) => setPrices((p) => ({ ...p, [g.key]: e.target.value }))} />
-                  </label>
-                )}
-                <button className="btn" onClick={() => setPreview(preview === g.key ? null : g.key)}>{preview === g.key ? "Close preview" : "Preview"}</button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {previewGroup && (
-          <div style={{ ...box, marginTop: 12, background: "var(--surface-2)" }}>
-            <div style={small}>As a buyer will see it</div>
-            <h3 style={{ margin: "6px 0" }}>{joinOf(previewGroup) ? joinOf(previewGroup).title : renderOf(previewGroup).title}</h3>
-            {!joinOf(previewGroup) && renderOf(previewGroup).titleCut && (
-              <div style={{ fontSize: 13, color: "var(--warn)" }}>Title cut at 80 characters — lost: “{renderOf(previewGroup).titleFull.slice(renderOf(previewGroup).title.length).trim()}”</div>
-            )}
-            <div>Condition: Ungraded · {previewGroup.condition} · {joinOf(previewGroup) ? `${gbp(joinOf(previewGroup).price_pence)} (the live listing's price)` : priceOf(previewGroup.key) != null ? gbp(priceOf(previewGroup.key)) : "no price yet"} · {previewGroup.copies.length} {joinOf(previewGroup) ? "more" : "available"}</div>
-            {joinOf(previewGroup) && <p style={small}>These copies join the back of eBay {joinOf(previewGroup).ebay_item_id}&apos;s queue. Its photos don&apos;t change until the copies in front of them sell.</p>}
-            <div style={{ ...row, margin: "10px 0" }}>
-              {(joinOf(previewGroup) ? previewGroup.copies[0].scans : renderOf(previewGroup).pictures).map((u) => (
-                <img key={u} src={u} alt="" style={{ ...thumb, width: 120, height: 166, outline: previewGroup.copies[0].scans.includes(u) ? "none" : "2px dashed var(--line-strong)" }} referrerPolicy="no-referrer" />
-              ))}
-            </div>
-            {!joinOf(previewGroup) && renderOf(previewGroup).extraImages.length > 0 && <p style={small}>Dashed: your shop images. The rest are this copy&apos;s scans.</p>}
-            {!joinOf(previewGroup) ? (
-              <iframe title="Description" sandbox="" style={{ width: "100%", minHeight: 240, background: "#fff", borderRadius: 8, border: "1px solid var(--line)" }}
-                srcDoc={`<!doctype html><meta charset="utf-8"><body style="font-family:Arial,sans-serif;font-size:14px;color:#111;padding:12px">${renderOf(previewGroup).descriptionHtml}</body>`} />
-            ) : <p style={small}>{PHOTO_PROMISE}</p>}
-            {!joinOf(previewGroup) && renderOf(previewGroup).bestOffer && !renderOf(previewGroup).bestOffer.error && (
-              <p style={small}>Best Offer on{renderOf(previewGroup).bestOffer.autoAcceptPence != null ? ` · accepts ${gbp(renderOf(previewGroup).bestOffer.autoAcceptPence)}+` : ""}{renderOf(previewGroup).bestOffer.minPence != null ? ` · declines under ${gbp(renderOf(previewGroup).bestOffer.minPence)}` : ""}</p>
-            )}
+        <div style={{ ...row, justifyContent: "space-between" }}>
+          <div>
+            <strong>Add copies</strong>
             <p style={small}>
-              These are {previewGroup.copies[0].sku}&apos;s scans. After it sells and you press Check for sales, the listing shows{" "}
-              {previewGroup.copies[1] ? `${previewGroup.copies[1].sku}'s` : "nothing more: it was the only copy"}.
+              Load CardUploader exports (several at once), price them from sold comps, edit prices, titles, subtypes and which copies go — one at a
+              time or in bulk — then list. The working list is kept on this device until you clear it.
             </p>
-            <button className="btn btn-primary" disabled={!!busy || (!joinOf(previewGroup) && priceOf(previewGroup.key) == null)} onClick={() => list(previewGroup)}>
-              {busy === `list-${previewGroup.key}` ? "Listing…" : joinOf(previewGroup) ? "Add to the live listing" : "List on eBay (live)"}
-            </button>
           </div>
-        )}
+          <a className="btn btn-primary" href="/panel/lab/add">Open Add copies →</a>
+        </div>
       </section>
 
       {/* ---------------- The log ---------------- */}

@@ -133,7 +133,7 @@ export async function POST(request) {
   }
 }
 
-async function create(sb, user, lab, { group, pricePence, subtype = "", marketPence = null, settings = {} }) {
+async function create(sb, user, lab, { group, pricePence, subtype = "", marketPence = null, titleOverride = "", settings = {} }) {
   const price = Number(pricePence);
   if (!group || !Array.isArray(group.copies) || group.copies.length < 1) return { ok: false, error: "No copies to list." };
   if (!LISTABLE_CONDITIONS.includes(group.condition)) return { ok: false, error: `Condition ${group.condition} can't be listed.` };
@@ -161,6 +161,10 @@ async function create(sb, user, lab, { group, pricePence, subtype = "", marketPe
   // anything an account that never saved settings is missing.
   const saved = await loadListingSettings(sb, user.id);
   const r = renderListing({ ...settings, ...(saved.settings || {}) }, group, { subtype, pricePence: price });
+  // A title typed for this one card on the Add copies page beats the
+  // template — eBay's 80 characters still apply. Blank means the template.
+  const override = String(titleOverride || "").replace(/\s+/g, " ").trim();
+  if (override) r.title = override.slice(0, 80);
   if (r.bestOffer?.error) return { ok: false, error: `Best Offer: ${r.bestOffer.error}` };
   if (r.unknownPlaceholders.length) return { ok: false, error: `The description uses ${r.unknownPlaceholders.map((k) => `{${k}}`).join(", ")}, which isn't a placeholder — fix the template first.` };
 
