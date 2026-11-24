@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { groupsFromItems, listingForGroup, priceFromComps } from "@/lib/lab-copies.js";
 import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
@@ -60,6 +60,9 @@ export default function LabAdd() {
   const [overseasPick, setOverseasPick] = useState(false);
   const [busy, setBusy] = useState(null);
   const [progress, setProgress] = useState(null);
+  // The rows in the request being priced right now, shown on the rows.
+  const [pricingIds, setPricingIds] = useState(() => new Set());
+  const stopRef = useRef(false);
   const [msg, setMsg] = useState(null);
   // The view (which rows, in what order) is worked out when you ASK for it —
   // a filter, a search, a sort, a load, a bulk action — never because a price
@@ -150,27 +153,35 @@ export default function LabAdd() {
   /** Sold comps for the ticked rows on screen, or — nothing ticked — every row not yet priced from comps. */
   async function priceFromSold() {
     const base = onScreen.length ? onScreen : rows.filter((r) => !r.comps && !r.result?.ok && !r.excluded);
-    const todo = base.filter((r) => !joinsOf(r) && !r.result?.ok);
+    const todo = base.filter((r) => !joinsOf(r) && !r.result?.ok && !r.result?.pending);
     if (!todo.length) { setMsg({ text: "Nothing to price — every row has sold comps, joins a live listing or is listed." }); return; }
     setBusy("price");
     setMsg(null);
-    const got = new Map();
-    // The full search ladder (depth 3) is up to seven searches a card, paced at
-    // SoldComps' 60 a minute — so a few cards a request, well inside the
-    // server's five minutes.
-    const PER_REQUEST = 6;
+    stopRef.current = false;
+    // A few cards a request: each is up to seven searches paced at SoldComps'
+    // 60 a minute, and a small request is what lets the bar move and the rows
+    // fill in as the run goes rather than all at the end.
+    const PER_REQUEST = 3;
+    const startedAt = Date.now();
+    const tally = { done: 0, priced: 0, noPrice: 0, failed: 0, searches: 0, cacheHits: 0 };
+    const show = (current) => setProgress({ ...tally, total: todo.length, startedAt, current });
     for (let i = 0; i < todo.length; i += PER_REQUEST) {
-      setProgress({ label: "Pricing from sold comps (every search)", done: i, total: todo.length });
+      if (stopRef.current) break;
       const chunk = todo.slice(i, i + PER_REQUEST);
+      setPricingIds(new Set(chunk.map((r) => r.id)));
+      show(chunk.map((r) => r.title));
       const cards = chunk.map((r) => ({
         sku: r.copies[0].sku, name: r.cardName, number: r.cardNumber, set: r.set, title: r.title, condition: r.condition,
         language: r.language || "English", any_language: Boolean(r.anyLanguage), overseas: Boolean(r.overseas), game: r.card?.game || "", variant: r.card?.finish || "",
         set_code: r.card?.setCode || ""
       }));
+      const got = new Map();
       try {
         const res = await fetch("/api/batch-comps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards, depth: 3 }) });
         const j = await res.json();
         if (!res.ok || !j.results) throw new Error(j.error || `Pricing answered ${res.status}.`);
+        tally.searches += j.summary?.soldcomps_requests || 0;
+        tally.cacheHits += j.summary?.cache_hits || 0;
         const bySku = new Map(j.results.map((x) => [String(x.sku), x]));
         for (const r of chunk) {
           const x = bySku.get(String(r.copies[0].sku));
@@ -190,18 +201,26 @@ export default function LabAdd() {
       } catch (e) {
         for (const r of chunk) got.set(r.id, { pence: null, error: e.message });
       }
+      for (const c of got.values()) {
+        tally.done += 1;
+        if (c.error) tally.failed += 1; else if (c.pence != null) tally.priced += 1; else tally.noPrice += 1;
+      }
+      // Each request's rows fill in as soon as it answers. A price already
+      // typed is never overwritten; new sales drop any old picks.
+      setRows((rs) => rs.map((r) => {
+        const c = got.get(r.id);
+        if (!c) return r;
+        return { ...r, comps: c, picks: null, pricePence: r.pricePence != null ? r.pricePence : c.pence };
+      }));
+      show([]);
     }
-    // A price already typed is never overwritten by comps.
-    setRows((rs) => rs.map((r) => {
-      const c = got.get(r.id);
-      if (!c) return r;
-      // New sales, so any sales you had picked from the old ones are gone.
-      return { ...r, comps: c, picks: null, pricePence: r.pricePence != null ? r.pricePence : c.pence };
-    }));
+    const stopped = stopRef.current && tally.done < todo.length;
+    setPricingIds(new Set());
     setProgress(null);
     setBusy(null);
     refreshView();
-    setMsg({ text: `Priced ${got.size} card${got.size === 1 ? "" : "s"} from sold comps. Typed prices were kept.` });
+    const mins = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
+    setMsg({ bad: tally.failed > 0, text: `${stopped ? `Stopped after ${tally.done} of ${todo.length}. ` : ""}Priced ${tally.priced}, ${tally.noPrice} with no sales to price from${tally.failed ? `, ${tally.failed} failed (marked error — price them again)` : ""}. ${tally.searches} searches, ${tally.cacheHits} from the cache, about ${mins} min. Typed prices were kept.` });
   }
 
   // ---- bulk edits ----------------------------------------------------------
@@ -359,6 +378,10 @@ export default function LabAdd() {
       </div>
 
       {msg && <div className={msg.bad ? "li-msg bad" : "li-msg"}>{msg.text}</div>}
+      {progress && <PricingBar p={progress} onStop={() => { stopRef.current = true; setProgress((x) => (x ? { ...x, stopping: true } : x)); }} />}
+      {rows.some((r) => r.result?.pending) && (
+        <div className="li-msg">⏳ {rows.filter((r) => r.result?.pending).length} card{rows.filter((r) => r.result?.pending).length === 1 ? "" : "s"} still listing on eBay — on the server, so you can leave this page. Rows update every few seconds.</div>
+      )}
 
       <div className="li-card">
         {/* ---------------- Bulk bar ---------------- */}
@@ -376,7 +399,7 @@ export default function LabAdd() {
           </button>
           <span className="li-dim">{onScreen.length ? `${onScreen.length} ticked` : "Tick rows to edit or list them"}</span>
           {hiddenTicks > 0 && <span className="li-warn">{hiddenTicks} ticked off screen — not acted on <button className="li-link" onClick={() => setTicked(new Set())}>untick</button></span>}
-          {progress && <span className="li-dim">{progress.label}: {progress.done} of {progress.total}…</span>}
+          {busy === "price" && <span className="li-dim">Pricing — see the bar above</span>}
           <span className="li-spacer" />
           <button className="li-chip" onClick={refreshView} title="Apply your edits to the filter and sort. Rows don't move while you type.">↻ Re-sort</button>
           <span className="li-dim">{shown.length} of {rows.length} shown</span>
@@ -482,7 +505,7 @@ export default function LabAdd() {
                       <td className="mono sm-hide">{live.length}{live.length !== r.copies.length ? <small>of {r.copies.length}</small> : null}</td>
                       <td className="sm-hide"><b>{r.condition}</b></td>
                       <td className="r sm-hide" title={r.comps?.error || (r.comps ? `${r.comps.n ?? "?"} sales counted${r.comps.searches ? ` of ${r.comps.fetched ?? "?"} found across ${r.comps.searches} searches` : ""} · ${r.comps.confidence || "?"} confidence${r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}${r.comps.reason ? ` (${r.comps.reason})` : ""}` : ""}${r.comps.flags?.length ? ` · ${r.comps.flags.join(", ").replace(/_/g, " ")}` : ""}` : "Not priced from sold comps yet")}>
-                        {r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(r.comps?.pence ?? null)}
+                        {pricingIds.has(r.id) ? <span className="la-now">⏳ pricing now…</span> : r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(r.comps?.pence ?? null)}
                         {r.comps && !r.comps.error && <small className={isThin(r) ? "li-warn" : ""}>{r.comps.n ?? "?"} sale{r.comps.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
                         {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}
                         {r.comps?.flags?.includes("in_hand_check") && <small className="li-warn">check in hand</small>}
@@ -557,6 +580,35 @@ export default function LabAdd() {
         </div>
       </div>
     </main>
+  );
+}
+
+/** The pricing run, as a bar: cards done of the total, time left, what is being searched now. */
+function PricingBar({ p, onStop }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const pct = p.total ? Math.round((p.done / p.total) * 100) : 0;
+  const elapsed = (now - p.startedAt) / 1000;
+  const left = p.done > 0 ? Math.max(0, Math.round((elapsed / p.done) * (p.total - p.done))) : null;
+  const fmt = (sec) => (sec >= 90 ? `${Math.round(sec / 60)} min` : `${Math.round(sec)}s`);
+  return (
+    <div className="la-progress" role="status" aria-live="polite">
+      <div className="la-progress-top">
+        <b>Pricing from sold comps</b>
+        <span><b>{p.done}</b> of {p.total} cards · {pct}%</span>
+        <span className="li-dim">{left == null ? "working out time left…" : `about ${fmt(left)} left`} · {fmt(elapsed)} so far</span>
+        <span className="li-spacer" />
+        <button className="li-btn" disabled={p.stopping} onClick={onStop}>{p.stopping ? "Stopping after these…" : "Stop"}</button>
+      </div>
+      <div className="la-bar" aria-hidden="true"><div style={{ width: `${pct}%` }} /></div>
+      <div className="la-progress-foot li-dim">
+        <span>✓ {p.priced} priced</span>
+        {p.noPrice > 0 && <span>· {p.noPrice} no sales</span>}
+        {p.failed > 0 && <span style={{ color: "var(--bad)" }}>· {p.failed} failed</span>}
+        <span>· {p.searches} searches ({p.cacheHits} from cache)</span>
+        {p.current?.length > 0 && <span className="la-current">· now: {p.current.join(" · ")}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -654,6 +706,12 @@ const EXTRA_CSS = `
 .la-fields input:not([type=checkbox]), .la-fields select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); min-width: 320px; max-width: 100%; }
 .la-fields .li-check { flex-direction: row; }
 .la-copies { display: flex; flex-wrap: wrap; gap: 10px; }
+.la-progress { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; background: var(--surface); position: sticky; top: 8px; z-index: 5; }
+.la-progress-top, .la-progress-foot { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 13px; }
+.la-bar { height: 10px; border-radius: 999px; background: var(--surface-sink); overflow: hidden; }
+.la-bar > div { height: 100%; background: var(--accent); transition: width .4s ease; }
+.la-current { white-space: normal; }
+.la-now { color: var(--accent); font-weight: 600; }
 .la-sales { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
 .la-sales-head, .la-sales-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
 .la-sales-table td, .la-sales-table th { font-size: 12.5px; }
