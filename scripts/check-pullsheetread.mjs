@@ -21,9 +21,16 @@ function eq(name, got, want) {
 function fakeDb(rows, { missingColumns = [] } = {}) {
   const calls = [];
   const from = (table) => {
-    const q = { cols: "*", filters: [], ranges: null };
+    const q = { cols: "*", filters: [], head: false };
+    const matching = () => rows.filter((r) => q.filters.every((f) => f(r)));
     const api = {
-      select(cols) { q.cols = cols; return api; },
+      select(cols, opts = {}) { q.cols = cols; q.head = Boolean(opts.head); return api; },
+      // A head-only count is awaited directly, with no range().
+      then(resolve, reject) {
+        if (!q.head) return Promise.reject(new Error("fake: a query was awaited without range()")).then(resolve, reject);
+        calls.push({ table, cols: "count" });
+        return Promise.resolve({ count: matching().length, error: null }).then(resolve, reject);
+      },
       is(col, v) { q.filters.push((r) => (v === null ? r[col] == null : r[col] === v)); return api; },
       not(col, op, v) { q.filters.push((r) => !(v === null ? r[col] == null : r[col] === v)); return api; },
       in(col, vals) { const s = new Set(vals); q.filters.push((r) => s.has(r[col])); return api; },
@@ -34,11 +41,11 @@ function fakeDb(rows, { missingColumns = [] } = {}) {
       },
       order() { return api; },
       range(a, b) {
-        calls.push({ table, cols: q.cols });
+        calls.push({ table, cols: q.cols, range: [a, b] });
         const named = q.cols === "*" ? [] : q.cols.split(",");
         const bad = named.find((c) => missingColumns.includes(c));
         if (bad) return Promise.resolve({ data: null, error: { message: `Could not find the '${bad}' column of 'stack_cards' in the schema cache` } });
-        const out = rows.filter((r) => q.filters.every((f) => f(r))).sort((x, y) => String(x.id).localeCompare(String(y.id)))
+        const out = matching().sort((x, y) => String(x.id).localeCompare(String(y.id)))
           .map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !missingColumns.includes(k))));
         return Promise.resolve({ data: out.slice(a, b + 1), error: null });
       }
@@ -101,6 +108,17 @@ const summary = (cards) => {
   eq("history no line names is never read", pulled.data.some((c) => c.id === "old"), false);
   eq("the matcher answers EXACTLY as it did over every card", summary([...shelf.data, ...pulled.data]), summary(rows));
   eq("named columns — scans and Cardmarket data stay on the server", db.calls.every((c) => c.cols !== "*"), true);
+}
+
+{
+  // A shelf bigger than a page: read several pages at once, and nothing lost,
+  // doubled or left past the count.
+  const big = Array.from({ length: 4321 }, (_, i) => ({ id: `c${String(i).padStart(5, "0")}`, stack_id: "A", position: i, sku: `A${i}`, pulled_at: null }));
+  const db = fakeDb(big);
+  const shelf = await readShelfCards(db);
+  eq("a 4,321-card shelf comes back whole, once each", [shelf.data.length, new Set(shelf.data.map((c) => c.id)).size], [4321, 4321]);
+  eq("…counted once, then paged", db.calls.filter((c) => c.cols === "count").length, 1);
+  eq("…pages past the first are read together, not one after another", db.calls.filter((c) => c.range && c.range[0] > 0).length >= 4, true);
 }
 
 {

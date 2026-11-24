@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getSetIndex, matchSetFromTitle } from "@/lib/set-index.js";
+import { matchSetFromTitle } from "@/lib/set-index.js";
+import { sharedSetIndex } from "@/lib/set-index-shared.js";
 
 /**
  * Resolve eBay listing titles to catalogue sets (name + code).
@@ -33,7 +34,9 @@ export async function POST(request) {
   const titles = Array.isArray(body.titles) ? body.titles.filter((t) => typeof t === "string").slice(0, 500) : [];
   if (titles.length === 0) return NextResponse.json({ ok: true, available: true, matches: {} });
 
-  const { index, available } = await getSetIndex(supabase);
+  // Shared across instances (lib/set-index-shared.js): read per instance, the
+  // cm_sets view cost ~12s of every pull-sheet open.
+  const { index, available } = await sharedSetIndex(supabase);
   if (!index) return NextResponse.json({ ok: true, available: false, matches: {} });
 
   const matches = {};

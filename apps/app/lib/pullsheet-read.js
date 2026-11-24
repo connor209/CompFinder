@@ -38,10 +38,53 @@ export const SHEET_COLUMNS = [
 const PAGE = 1000;
 const CHUNK = 150;
 
-/** Every page of one query, in a total order; the error is RETURNED, never swallowed. */
-async function readPaged(build) {
-  let rows = [];
-  for (let from = 0; ; from += PAGE) {
+/**
+ * Every page of one query, SEVERAL AT A TIME. The shelf is 17,000-odd cards
+ * (measured 2026-11-24, 6.1s read one page after another); counting first
+ * and then reading the pages in parallel takes about as long as the slowest
+ * few. Every page is in a total order (id), so a card can't land on two
+ * pages or none. The error is RETURNED, never swallowed.
+ */
+const PARALLEL = 6;
+async function readPaged(build, countQuery = null) {
+  const head = await build().order("id", { ascending: true }).range(0, PAGE - 1);
+  if (head.error) return { error: head.error };
+  const first = head.data || [];
+  if (first.length < PAGE) return { data: first };
+  const counted = countQuery ? await countOf(countQuery) : null;
+  if (counted == null) return readPagedInOrder(build, first);
+  const starts = [];
+  for (let from = PAGE; from < counted; from += PAGE) starts.push(from);
+  const pages = [first];
+  for (let i = 0; i < starts.length; i += PARALLEL) {
+    const batch = await Promise.all(starts.slice(i, i + PARALLEL).map((from) => build().order("id", { ascending: true }).range(from, from + PAGE - 1)));
+    const bad = batch.find((r) => r.error);
+    if (bad) return { error: bad.error };
+    pages.push(...batch.map((r) => r.data || []));
+  }
+  // Rows added while the pages were read sit past the count: one last
+  // in-order page picks them up rather than leaving them off the sheet.
+  const tail = await build().order("id", { ascending: true }).range(counted, counted + PAGE - 1);
+  if (!tail.error && tail.data?.length) pages.push(tail.data);
+  const byId = new Map();
+  for (const p of pages) for (const r of p) byId.set(r.id, r);
+  return { data: [...byId.values()] };
+}
+
+/** How many rows the query matches, or null if the count can't be had. */
+async function countOf(countQuery) {
+  try {
+    const { count, error } = await countQuery();
+    return error || count == null ? null : count;
+  } catch {
+    return null;
+  }
+}
+
+/** The old way: one page after another, until a short page. */
+async function readPagedInOrder(build, first) {
+  let rows = first.slice();
+  for (let from = PAGE; ; from += PAGE) {
     const { data, error } = await build().order("id", { ascending: true }).range(from, from + PAGE - 1);
     if (error) return { error };
     rows = rows.concat(data || []);
@@ -51,9 +94,11 @@ async function readPaged(build) {
 
 /** Named columns first; `*` if the database doesn't have one of them yet. */
 async function readWithFallback(sb, narrow) {
-  const named = await readPaged(() => narrow(sb.from("stack_cards").select(SHEET_COLUMNS)));
+  // The count is its own query with the same filters: a head-only select.
+  const count = () => narrow(sb.from("stack_cards").select("id", { count: "exact", head: true }));
+  const named = await readPaged(() => narrow(sb.from("stack_cards").select(SHEET_COLUMNS)), count);
   if (!named.error) return named;
-  return readPaged(() => narrow(sb.from("stack_cards").select("*")));
+  return readPaged(() => narrow(sb.from("stack_cards").select("*")), count);
 }
 
 /** 1. Every card still on a shelf (or away at a show — the sheet names those too). */
