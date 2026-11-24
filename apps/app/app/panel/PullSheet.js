@@ -1,10 +1,10 @@
 "use client";
 
+import { readShelfCards, readPulledFor } from "@/lib/pullsheet-read.js";
 import { liveLabItemIds } from "@/lib/lab-store.js";
 import { LAB_BADGE_TITLE } from "@/lib/lab-stacks.js";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { pagedSelect } from "@/lib/pagedSelect";
 import { fallbackSetName } from "@compfinder/core/setmatch.js";
 import { assignPulls, cuChoiceReport, pulledOutsideSheet } from "@/lib/pullmatch";
 import { cuChoiceIndex, isMissingListingSku, parsePickListCsv } from "@/lib/cu-files";
@@ -170,6 +170,9 @@ export default function PullSheet() {
   const [cuFile, setCuFile] = useState(null); // { name, at, rows }
   const [cuReport, setCuReport] = useState(null);
   const [cuError, setCuError] = useState("");
+  // How long the last open took, and where — shown small under the sheet so a
+  // slow open says which part was slow.
+  const [timing, setTiming] = useState(null);
 
   const supabase = () => createClient();
 
@@ -177,10 +180,26 @@ export default function PullSheet() {
     setLoading(true);
     setError("");
     setNeedsReconnect(false);
-    let ordersRes;
-    try {
-      ordersRes = await fetch("/api/ebay/orders/pending").then((r) => r.json());
-    } catch {
+    const t0 = performance.now();
+    const took = {};
+    const timed = (name, p) => p.then((v) => { took[name] = performance.now() - t0; return v; });
+    const sb = supabase();
+    const cu = readCuPicks();
+    const cuChoice = cu ? cuChoiceIndex(cu.rows) : null;
+
+    // ---- Round 1, all at once. Nothing here depends on eBay's answer, so it
+    // no longer waits for it: the slowest of the four sets the time, not the
+    // sum. (lib/pullsheet-read.js says what is read and why.)
+    const ordersP = timed("eBay orders", fetch("/api/ebay/orders/pending").then((r) => r.json()).catch(() => null));
+    const stacksP = timed("stacks", sb.from("card_stacks").select("id,name"));
+    const shelfP = timed("cards on the shelf", readShelfCards(sb));
+    // Which order lines are lab sales (docs/LAB_FOLD.md). A lab listing has no
+    // SKU, so its item number is the only way to know; a failed read leaves
+    // the set empty, and those lines fall back to loose picks as before.
+    const labP = timed("lab listings", sb.auth.getUser().then(({ data: { user: me } }) => (me ? liveLabItemIds(sb, me.id).then((r) => r.ids) : new Set())).catch(() => new Set()));
+
+    const ordersRes = await ordersP;
+    if (!ordersRes) {
       setError("Couldn't load orders.");
       setLoading(false);
       return;
@@ -196,16 +215,36 @@ export default function PullSheet() {
     // than putting a week of sent orders back on it.
     const rawLines = ordersRes.lines || [];
     const labelledIds = [...new Set(rawLines.filter((l) => l.labelPrinted).map((l) => l.orderId))];
-    let packedIds = new Set();
     setPackedMissing(false);
     setPackedNote(ordersRes.labelledError ? `Couldn't read orders with a label printed: ${ordersRes.labelledError}` : "");
-    if (labelledIds.length) {
-      const res = await loadPackedOrderIds(supabase(), labelledIds);
-      if (res.ok) packedIds = res.ids;
+
+    // ---- Round 2, all at once, once the orders are in: which are packed, the
+    // set names for their titles, and the PULLED cards they can mention.
+    const titles = [...new Set(rawLines.map((l) => l.title).filter(Boolean))];
+    const packedP = labelledIds.length ? timed("packed orders", loadPackedOrderIds(sb, labelledIds)) : Promise.resolve(null);
+    // Resolve each listing title to a catalogue set (name + code). eBay sends
+    // no item specifics with an order, so the set is read out of the title —
+    // it's what the variation picks get grouped and alphabetised by.
+    const setsP = titles.length
+      ? timed("set names", fetch("/api/catalog/match-sets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ titles })
+        }).then((r) => r.json()).catch(() => null))
+      : Promise.resolve(null);
+    // Asked about every line eBay returned, before the packed filter: a
+    // superset costs a few rows and can never miss one.
+    const pulledP = timed("pulled cards", readPulledFor(sb, rawLines, cuChoice));
+
+    const [packedRes, setsRes, pulledRes, shelfRes, stacksRes, labIds] = await Promise.all([packedP, setsP, pulledP, shelfP, stacksP, labP]);
+
+    let packedIds = new Set();
+    if (packedRes) {
+      if (packedRes.ok) packedIds = packedRes.ids;
       else {
         packedIds = null;
-        if (res.missing) setPackedMissing(true);
-        else setPackedNote(`Couldn't check which label-printed orders are packed: ${res.error}`);
+        if (packedRes.missing) setPackedMissing(true);
+        else setPackedNote(`Couldn't check which label-printed orders are packed: ${packedRes.error}`);
       }
     }
     // Read off storage, not state: on mount this closure holds the first
@@ -213,37 +252,23 @@ export default function PullSheet() {
     const lines = sheetLines(rawLines, packedIds, new Set(readDoneLog().flat()));
     setLabelled([...new Set(lines.filter((l) => l.labelPrinted && !packedIds?.has(String(l.orderId))).map((l) => l.orderId))]);
 
-    // Resolve each listing title to a catalogue set (name + code). eBay sends
-    // no item specifics with an order, so the set is read out of the title —
-    // it's what the variation picks get grouped and alphabetised by.
-    const titles = [...new Set(lines.map((l) => l.title).filter(Boolean))];
-    let setByTitle = new Map();
-    if (titles.length) {
-      try {
-        const res = await fetch("/api/catalog/match-sets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ titles })
-        }).then((r) => r.json());
-        if (res.ok && res.matches) setByTitle = new Map(Object.entries(res.matches));
-      } catch {
-        /* set names are a nicety — the sheet still works without them */
-      }
-    }
+    const setByTitle = setsRes?.ok && setsRes.matches ? new Map(Object.entries(setsRes.matches)) : new Map();
     const setInfo = (title) => {
       const hit = setByTitle.get(title || "");
       return hit ? { setName: hit.name, setCode: hit.code || "" } : { setName: fallbackSetName(title), setCode: "" };
     };
 
-    const sb = supabase();
-    const { data: stacks } = await sb.from("card_stacks").select("id,name");
+    // A stack read that failed is NOT an empty shelf: every pick would turn
+    // into a loose one and a committed line could take the next copy. Stop.
+    if (shelfRes.error || pulledRes.error) {
+      setError(`Couldn't read your stacks: ${(shelfRes.error || pulledRes.error).message || "unknown error"}. Nothing was changed — try again.`);
+      setLoading(false);
+      return;
+    }
+    const stacks = stacksRes?.data;
     const nameMap = new Map((stacks || []).map((s) => [s.id, s.name]));
-    const cards = await pagedSelect(() => sb.from("stack_cards").select("*"));
-    // Which order lines are lab sales (docs/LAB_FOLD.md). A lab listing has no
-    // SKU, so its item number is the only way to know; a failed read leaves
-    // the set empty, and those lines fall back to loose picks as before.
-    const { data: { user: me } } = await sb.auth.getUser();
-    const labIds = me ? (await liveLabItemIds(sb, me.id)).ids : new Set();
+    const cards = [...shelfRes.data, ...pulledRes.data];
+    setTiming({ total: performance.now() - t0, took, cards: cards.length });
 
     // A SKU maps to a QUEUE of copies, not to one card. One card per SKU is
     // still the ordinary case and behaves exactly as before — the queue is one
@@ -252,9 +277,7 @@ export default function PullSheet() {
     // (CS-…), and then WHICH copy goes matters. lib/pullmatch.js is the one
     // reading of that, and it remembers which card each line took, so a
     // reload never hands a committed line the next copy.
-    const cu = readCuPicks();
     setCuFile(cu);
-    const cuChoice = cu ? cuChoiceIndex(cu.rows) : null;
     const pulledSkus = new Set();
     const awaySkus = new Set(); // checked out to a show — physically not here
     const order = new Map();
@@ -733,6 +756,12 @@ export default function PullSheet() {
         </div>
       ) : null}
       {packedNote ? <p className="compfinder-error">{packedNote}</p> : null}
+      {timing && !loading ? (
+        <p className="hint hint-small" title="How long opening this sheet took, and which part was slowest. Reads started together finish at the time of the slowest.">
+          Opened in {(timing.total / 1000).toFixed(1)}s · {timing.cards.toLocaleString("en-GB")} stack cards read · slowest:{" "}
+          {Object.entries(timing.took).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)}s`).join(", ")}
+        </p>
+      ) : null}
       {packNote ? <p className="hint hint-small" style={{ color: "var(--conf-high)" }}>{packNote}</p> : null}
       {labelled.length > 0 ? (
         <div className="mine-banner">

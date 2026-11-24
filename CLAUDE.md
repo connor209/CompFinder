@@ -330,6 +330,13 @@ stream` (the relay, only while streaming).
   never guesses an unreserved lab sale, Reconcile never offers one, the Show
   Desk picker never lists one, `checkoutStackCard()` refuses one, and ＋ Deal,
   the stream button and ⤴ Show never appear on a lab listing.
+- `scripts/check-pullsheetread.mjs` — what the pull sheet reads
+  (`lib/pullsheet-read.js`): every card still on the shelf, plus only the
+  PULLED cards an open line can mention (by SKU, `pulled_line`, CardUploader
+  key or lab reservation), never every stack card ever made. Run against a
+  fake database, the matcher reaches the same answer for every open line as it
+  did over the full read; a missing column falls back to `*` rather than an
+  empty shelf; and a failed stack read stops the sheet.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
