@@ -6,8 +6,10 @@
 //   node scripts/check-labdraft.mjs
 import {
   mergeGroups, liveCopies, groupToSend, rowStatus, applyBulk, ladderUp, parsePrice,
-  filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, LISTABLE
+  filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, LISTABLE, isThin
 } from "../apps/app/lib/lab-draft.js";
+import { groupKey, keyForLanguage, groupsFromItems } from "../apps/app/lib/lab-copies.js";
+import { readFileSync } from "node:fs";
 
 let failed = 0;
 let n = 0;
@@ -91,6 +93,31 @@ eq("search by SKU", filterRows(mix, { q: "ka2" }, joinsOf).length, 4);
 eq("needs attention first: failed, then unpriced", sortRows(mix, "attention", joinsOf).map((r) => r.id).slice(0, 2), ["f", "n"]);
 const t = draftTotals(mix, joinsOf);
 eq("totals: new-listing value excludes joins (their price stays)", [t.rows, t.value], [4, 300 * 2 + 300 * 2]);
+
+// ---- language and the house-rule decision (CardCropper's, 2026-11-24) --------------
+eq("an English key is unchanged", groupKey({ cardName: "Pikachu", cardNumber: "25/102", set: "Base", condition: "NM", language: "English" }), "pikachu|25/102|base|NM");
+eq("…as is one with no language", groupKey({ cardName: "Pikachu", cardNumber: "25/102", set: "Base", condition: "NM" }), "pikachu|25/102|base|NM");
+eq("a Japanese key is its own", groupKey({ cardName: "Pikachu", cardNumber: "25/102", set: "Base", condition: "NM", language: "Japanese" }), "pikachu|25/102|base|NM|japanese");
+eq("re-keying replaces the language, never stacks it", keyForLanguage(keyForLanguage("a|b|c|NM", "Japanese"), "Korean"), "a|b|c|NM|korean");
+eq("…and back to English drops it", keyForLanguage("a|b|c|NM|japanese", "English"), "a|b|c|NM");
+const item = (sku, language) => ({ sku, cardName: "Pikachu", cardNumber: "25/102", set: "Base", condition: "NM", title: "Pikachu", images: [`https://x/${sku}.jpg`], language });
+const en = groupsFromItems([item("E1", "English")]).groups;
+const ja = groupsFromItems([item("J1", "Japanese")]).groups;
+const both = mergeGroups(mergeGroups([], en, "en.csv").rows, ja, "ja.csv", { anyLanguage: true }).rows;
+eq("a Japanese batch never joins the English row", both.map((r) => [r.language, r.copies.length, r.anyLanguage]), [["English", 1, false], ["Japanese", 1, true]]);
+const priced = { ...both[0], id: "p", comps: { pence: 349, decision: "apply" }, pricePence: 349 };
+const typed = { ...both[0], id: "t", comps: { pence: 349, decision: "apply" }, pricePence: 999 };
+const relang = applyBulk([priced, typed], ["p", "t"], { op: "language", language: "Japanese", anyLanguage: false });
+eq("changing language re-keys and drops the old language's comps", relang.map((r) => [r.language, r.key.endsWith("|japanese"), r.comps]), [["Japanese", true, null], ["Japanese", true, null]]);
+eq("…a price that only came from them goes, a typed one stays", relang.map((r) => r.pricePence), [null, 999]);
+eq("…and the listing's card says the new language", relang[0].card.language, "Japanese");
+eq("an unknown language is refused", applyBulk([priced], ["p"], { op: "language", language: "Klingon" })[0], priced);
+eq("Terapeak is check first", rowStatus(row({ pricePence: 599, comps: { pence: 599, decision: "terapeak", confidence: "high", flags: [] } })), "thin");
+eq("apply on few sales is not (the decision rules, not the confidence)", rowStatus(row({ pricePence: 349, comps: { pence: 349, decision: "apply", confidence: "low", flags: ["few_sales"] } })), "ready");
+eq("a failed lookup is check first", isThin(row({ comps: { error: "x", decision: "hold" } })), true);
+const page = readFileSync(new URL("../apps/app/app/panel/lab/add/LabAdd.js", import.meta.url), "utf8");
+eq("the page sends the batch's language and the every-language choice", [/any_language: Boolean\(r\.anyLanguage\)/.test(page), /language: r\.language/.test(page)], [true, true]);
+eq("the page stamps the batch language on every card it loads", /language: batchLang/.test(page), true);
 
 // ---- reload ------------------------------------------------------------------------------
 eq("the list survives a reload", restoreDraft(serialiseDraft(mix)).map((r) => [r.id, r.pricePence]), mix.map((r) => [r.id, r.pricePence]));

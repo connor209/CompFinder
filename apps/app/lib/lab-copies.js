@@ -38,7 +38,18 @@ const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").to
 
 /** One listing's key: the card, then its condition. Two conditions are two listings. */
 export function groupKey(item) {
-  return [norm(item?.cardName), norm(item?.cardNumber), norm(item?.set), String(item?.condition || "").toUpperCase()].join("|");
+  return keyForLanguage([norm(item?.cardName), norm(item?.cardNumber), norm(item?.set), String(item?.condition || "").toUpperCase()].join("|"), item?.language);
+}
+
+/**
+ * A card's key in a given language. English adds nothing, so every listing
+ * keyed before languages existed keeps its key; any other language is a
+ * fifth part, so a Japanese Pikachu 25/102 never joins the English listing.
+ */
+export function keyForLanguage(key, language) {
+  const base = String(key || "").split("|").slice(0, 4).join("|");
+  const lang = norm(language);
+  return lang && lang !== "english" ? `${base}|${lang}` : base;
 }
 
 /**

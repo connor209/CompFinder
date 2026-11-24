@@ -50,7 +50,7 @@ export async function GET() {
     auth: "the signed-in session cookie (call fetch() from a Comp Finder tab); the SoldComps key in Settings is used server-side",
     limits: { max_cards_per_request: MAX_CARDS, advice: "send ~50 cards per request, one request at a time — parallel requests share SoldComps' 60/min limit" },
     body: {
-      cards: "[{ sku, name, number, set, variant, condition, language, current_price, variant_keys? }] — or `csv` instead",
+      cards: "[{ sku, name, number, set, variant, condition, language, any_language?, game?, current_price, variant_keys? }] — or `csv` instead. any_language: true counts sales in every language; game (pokemon | yugioh | mtg) sets the floor",
       csv: "raw CardUploader CSV text (alternative to `cards`)",
       mode: "\"price\" (default) or \"check\": only cards whose suggestion differs from current_price by more than check.abs_pounds or check.pct",
       check: { abs_pounds: 1, pct: 30 },
@@ -67,7 +67,7 @@ export async function GET() {
       excluded_reasons: [...new Set(Object.values(REASON_CODES))],
       notes: "One SoldComps search per distinct title (identical titles share it; 429s are retried). No price is worked out and active listings are never used. excluded_detail is the engine's own reason, unmapped. condition_mismatch is never emitted: no rule excludes a sale on condition."
     },
-    output: "results[]: sku, query, matched, n_comps, last_sold, sales[], excluded[] (with reason), p40, suggested_price, confidence, flags{few_comps, variant_uncertain, wide_spread, no_uk_comps, price_held}; plus csv and summary"
+    output: "results[]: sku, query, matched, n_comps, last_sold, sales[], excluded[] (with reason), p40, suggested_price, confidence, flags{few_comps, few_sales, variant_uncertain, wide_spread, no_uk_comps, price_held, big_rise, big_drop, in_hand_check, put_back}, decision (apply | terapeak | keep | hold) and decision_reason; plus csv and summary"
   });
 }
 
@@ -191,7 +191,9 @@ export async function POST(request) {
         error: err.message || String(err),
         suggested_price: null,
         suggested_pence: null,
-        flags: { error: true },
+        decision: "hold",
+        decision_reason: "comp lookup failed — run it again",
+        flags: { error: true, lookup_failed: true },
         current_price: plan.card.currentPence == null ? null : plan.card.currentPence / 100
       };
     }

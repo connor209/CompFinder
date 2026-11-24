@@ -16,9 +16,11 @@
  */
 
 export const HOUSE_RULES = {
-  // Total = sold price + postage, postage capped. A seller charging £4.99 to
-  // post a £3 card is not evidence the card is worth £7.99.
-  postageCapPence: 150,
+  // Total = sold price + postage, postage capped. A seller charging £6.99 to
+  // post a £3 card is not evidence the card is worth £9.99. £4.00 since
+  // 2026-11-24, matching CardCropper's pricing standard (it was £1.50, which
+  // read every tracked-postage sale as a cheaper card than it sold as).
+  postageCapPence: 400,
   // Percentile of totals the price is set at. 40 sits a little under the
   // middle on purpose: priced to sell, not to sit.
   percentile: 40,
@@ -26,6 +28,9 @@ export const HOUSE_RULES = {
   minCompsForPercentile: 4,
   // Round UP onto the .49 / .99 ladder, never below the floor.
   floorPence: 249,
+  // The floor for each game: a Yu-Gi-Oh common sells under a Pokémon one.
+  // `floorPence` above is Pokémon's and the fallback for a game not named.
+  floorsPence: { pokemon: 249, yugioh: 199, mtg: 99 },
   ladderStepPence: 50,
   // NM is priced as LP. MP only takes its cut once the LP price is worth it.
   conditionMultipliers: { NM: 1, LP: 1, MP: 0.85, HP: 0.6, DMG: 0.4 },
@@ -49,6 +54,8 @@ export function resolveRules(overrides = {}) {
     percentile: num(o.percentile, HOUSE_RULES.percentile, { min: 0, max: 100 }),
     minCompsForPercentile: Math.round(num(o.minCompsForPercentile, HOUSE_RULES.minCompsForPercentile, { min: 1 })),
     floorPence: Math.round(num(o.floorPence, HOUSE_RULES.floorPence, { min: 0 })),
+    floorsPence: Object.fromEntries(Object.entries(HOUSE_RULES.floorsPence).map(([g, d]) =>
+      [g, Math.round(num(o.floorsPence?.[g], d, { min: 0 }))])),
     ladderStepPence: Math.round(num(o.ladderStepPence, HOUSE_RULES.ladderStepPence, { min: 1 })),
     conditionMultipliers: cm,
     mpMinLpPence: Math.round(num(o.mpMinLpPence, HOUSE_RULES.mpMinLpPence, { min: 0 }))
@@ -82,6 +89,23 @@ export function roundUpToLadder(pence, rules = HOUSE_RULES) {
   const p = Math.ceil(pence - 1e-9);
   if (p <= rules.floorPence) return rules.floorPence;
   return rules.floorPence + Math.ceil((p - rules.floorPence) / rules.ladderStepPence) * rules.ladderStepPence;
+}
+
+/** pokemon | yugioh | mtg from whatever a file or a caller wrote, or "" when it says nothing. */
+export function gameCode(g) {
+  const t = String(g || "").toLowerCase().replace(/[^a-z]/g, "");
+  if (!t) return "";
+  if (/pok/.test(t)) return "pokemon";
+  if (/yugi|ygo/.test(t)) return "yugioh";
+  if (/magic|mtg/.test(t)) return "mtg";
+  return "";
+}
+
+/** The rules with the floor of the card's game in force. */
+export function rulesForGame(rules = HOUSE_RULES, game) {
+  const code = gameCode(game);
+  const floor = code && rules.floorsPence ? rules.floorsPence[code] : null;
+  return floor == null ? rules : { ...rules, floorPence: floor };
 }
 
 /** Condition code, tolerant of the labels CardUploader and people write. */
@@ -128,4 +152,71 @@ export function housePrice(comps, condition = "NM", rules = HOUSE_RULES) {
     condition: cond,
     suggestedPence
   };
+}
+
+// ---------------------------------------------------------------------------
+// The decision — CardCropper's ladder (cardcropper/pricing.py `decide`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Thresholds for the decision. A rise or a drop is "big" past these ratios AND
+ * by at least `bigMovePence`, so a £2.49 card going to £4.99 is not a
+ * headline. Wide spread is p90/p10 of the totals over 4+ sales.
+ */
+export const DECISION_RULES = Object.freeze({
+  bigRise: 2.0,
+  bigDrop: 0.5,
+  bigMovePence: 200,
+  wideSpread: 3.0,
+  lowRiskPence: 100,
+  inHandPence: 1500
+});
+
+/** p90/p10 of the totals over a wide spread, the same reading CardCropper makes. */
+export function spreadTooWide(totals, ratio = DECISION_RULES.wideSpread) {
+  const s = (totals || []).filter((v) => Number.isFinite(v));
+  if (s.length < 4 || Math.min(...s) <= 0) return false;
+  return percentileOf(s, 90) / Math.max(percentileOf(s, 10), 1) > ratio;
+}
+
+/**
+ * What to do with a price, not just what it is:
+ *
+ *   apply     use the suggestion
+ *   terapeak  a person checks before it is used — ALWAYS for a rise on fewer
+ *             than minCompsForPercentile sales, and for a big rise or drop or
+ *             a wide spread; also when nothing priced the card and it has no
+ *             price to keep
+ *   keep      no fresh sales, and the card already has a price: it stays
+ *   hold      the lookup failed — run it again, decide nothing
+ *
+ * Flags ride along whatever the decision: few_sales, wide_spread, big_rise,
+ * big_drop, in_hand_check (NM at £15+: look at the card before it goes up at
+ * that), put_back (a sale counted that the engine had left out).
+ */
+export function decide({ status = "ok", nSales = 0, totals = [], suggestedPence = null, currentPence = null, condition = "NM", putBack = 0 }, rules = HOUSE_RULES, d = DECISION_RULES) {
+  if (status === "error" || status === "timeout") return { decision: "hold", reason: `comp lookup ${status === "timeout" ? "timed out" : "failed"}`, flags: ["lookup_failed"] };
+  const flags = [];
+  const cur = Number.isFinite(currentPence) && currentPence > 0 ? currentPence : null;
+  if (nSales < rules.minCompsForPercentile) flags.push("few_sales");
+  if (spreadTooWide(totals, d.wideSpread)) flags.push("wide_spread");
+  if (suggestedPence != null && cur) {
+    if (suggestedPence > cur * d.bigRise && suggestedPence - cur >= d.bigMovePence) flags.push("big_rise");
+    if (suggestedPence < cur * d.bigDrop && cur - suggestedPence >= d.bigMovePence) flags.push("big_drop");
+  }
+  if (conditionCode(condition) === "NM" && suggestedPence != null && suggestedPence >= d.inHandPence) flags.push("in_hand_check");
+  if (putBack > 0) flags.push("put_back");
+
+  if (suggestedPence == null) {
+    return cur
+      ? { decision: "keep", reason: "no fresh sales — the current price stays; check Terapeak", flags }
+      : { decision: "terapeak", reason: "no sales of this printing", flags };
+  }
+  const rise = cur != null && suggestedPence > cur;
+  const loud = flags.filter((f) => f === "big_rise" || f === "big_drop" || f === "wide_spread");
+  if (nSales < rules.minCompsForPercentile && rise) return { decision: "terapeak", reason: `a rise on ${nSales} sale${nSales === 1 ? "" : "s"}`, flags };
+  if (loud.length) return { decision: "terapeak", reason: loud.join(", ").replace(/_/g, " "), flags };
+  if (nSales < rules.minCompsForPercentile) return { decision: "apply", reason: `${nSales} sale${nSales === 1 ? "" : "s"}, not a rise`, flags };
+  const low = (cur != null && Math.abs(suggestedPence - cur) <= d.lowRiskPence) || suggestedPence === rules.floorPence;
+  return { decision: "apply", reason: low ? "low risk" : `${nSales >= 10 ? "10+" : "4-9"} sales`, flags };
 }

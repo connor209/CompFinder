@@ -11,14 +11,23 @@
  *   subtype        one of the saved subtypes, or ""
  *   skippedSkus    copies left out of this listing
  *   excluded       the whole row left out
- *   comps          what /api/batch-comps said ({ pence, n, confidence, flags, error })
+ *   language       the batch's language, chosen when it was loaded
+ *   anyLanguage    count sold comps in every language, not just this one
+ *   comps          what /api/batch-comps said ({ pence, n, confidence, flags,
+ *                  decision, reason, error }) — decision is CardCropper's
+ *                  apply | terapeak | keep | hold
  *   result         what listing it did ({ ok, itemId, joined, error })
  *   file           which export it came from
  *
  * Nothing here talks to eBay or the database.
  */
 
+import { keyForLanguage } from "./lab-copies.js";
+
 export const DRAFT_KEY = "cf-lab-add-draft-v1";
+
+/** The languages a batch can be. A batch is one language; "count every language" is a pricing choice on top. */
+export const LANGUAGES = ["English", "Japanese", "Korean", "Chinese", "German", "French", "Italian", "Spanish", "Portuguese"];
 
 /**
  * Add one file's groups to the list. Returns the WHOLE new list (never
@@ -26,7 +35,7 @@ export const DRAFT_KEY = "cf-lab-add-draft-v1";
  * A SKU already loaded from another file is refused; copies of a card and
  * condition already in the list join that row, unless it has been listed.
  */
-export function mergeGroups(existing, groups, file) {
+export function mergeGroups(existing, groups, file, { anyLanguage = false } = {}) {
   const list = (existing || []).map((r) => ({ ...r, copies: r.copies.slice() }));
   const have = new Set(list.flatMap((r) => r.copies.map((c) => String(c.sku).toLowerCase())));
   const refused = [];
@@ -44,6 +53,7 @@ export function mergeGroups(existing, groups, file) {
     if (same) { same.copies.push(...copies); continue; }
     list.push({
       ...g, copies, id: `${g.key}::${file}`, file,
+      language: g.language || "English", anyLanguage: Boolean(anyLanguage),
       pricePence: null, titleOverride: "", subtype: "", skippedSkus: [], excluded: false, comps: null, result: null
     });
   }
@@ -63,7 +73,22 @@ export function groupToSend(row) {
 }
 
 const THIN = new Set(["low", "none"]);
-export const isThin = (row) => Boolean(row.comps && (THIN.has(row.comps.confidence) || (row.comps.flags || []).length || row.comps.error));
+/**
+ * A price worth a second look. With a decision from the house rules (CardCropper's
+ * ladder), anything but "apply" — a rise on few sales, a big move, a wide
+ * spread, nothing found, a failed lookup. Without one (a list priced before
+ * the port), the engine's confidence and flags, as before.
+ */
+export const isThin = (row) => {
+  const c = row.comps;
+  if (!c) return false;
+  if (c.error) return true;
+  if (c.decision) return c.decision !== "apply";
+  return Boolean(THIN.has(c.confidence) || (c.flags || []).length);
+};
+
+/** What a decision says, for a row. */
+export const DECISION_TEXT = { apply: "Apply", terapeak: "Check Terapeak", keep: "Keep current", hold: "Lookup failed" };
 
 /**
  * Where a row stands. `joins` is the live listing it would join, or null —
@@ -81,7 +106,7 @@ export function rowStatus(row, joins) {
 }
 
 export const STATUS_TEXT = {
-  ready: "Ready", thin: "Ready · thin price", needsprice: "Needs a price", toolow: "Under £0.99",
+  ready: "Ready", thin: "Ready · check first", needsprice: "Needs a price", toolow: "Under £0.99",
   failed: "Failed", listed: "Listed", excluded: "Left out", nocopies: "Every copy left out"
 };
 /** Rows a "List" button may send: a thin price is the person's call, so it goes. */
@@ -118,6 +143,10 @@ export function parsePrice(v) {
  *   { op: "clear" }                      no price
  *   { op: "subtype", value }             set or clear the subtype
  *   { op: "exclude" } / { op: "include" }
+ *   { op: "language", language, anyLanguage }  the batch got the wrong language:
+ *                                        re-keyed, its sold comps dropped (they
+ *                                        were for the other language), and a
+ *                                        price that only came from them cleared
  * A row with no sold-comps price is left unchanged by the comps ops; listed
  * rows are never edited.
  */
@@ -137,13 +166,24 @@ export function applyBulk(rows, ids, action) {
       case "subtype": return { ...r, subtype: action.value || "" };
       case "exclude": return { ...r, excluded: true };
       case "include": return { ...r, excluded: false };
+      case "language": {
+        const language = LANGUAGES.includes(action.language) ? action.language : r.language || "English";
+        const anyLanguage = action.anyLanguage == null ? Boolean(r.anyLanguage) : Boolean(action.anyLanguage);
+        if (language === (r.language || "English") && anyLanguage === Boolean(r.anyLanguage)) return r;
+        const fromComps = r.comps?.pence != null && r.pricePence === r.comps.pence;
+        return {
+          ...r, language, anyLanguage, key: keyForLanguage(r.key, language),
+          card: r.card ? { ...r.card, language } : r.card,
+          comps: null, pricePence: fromComps ? null : r.pricePence
+        };
+      }
       default: return r;
     }
   });
 }
 
 export const FILTERS = [
-  ["all", "All"], ["needsprice", "Needs a price"], ["thin", "Thin or flagged"], ["joins", "Joins a live listing"],
+  ["all", "All"], ["needsprice", "Needs a price"], ["thin", "Check first (Terapeak / thin)"], ["joins", "Joins a live listing"],
   ["ready", "Ready"], ["failed", "Failed"], ["listed", "Listed"], ["excluded", "Left out"]
 ];
 
@@ -158,7 +198,7 @@ export function filterRows(rows, { filter = "all", q = "", file = "" } = {}, joi
       : filter === "thin" ? !(st === "thin" || (isThin(r) && st !== "listed"))
       : filter !== "all" && filter !== st) return false;
     if (!words.length) return true;
-    const hay = [r.title, r.titleOverride, r.cardName, r.cardNumber, r.set, r.condition, r.subtype, ...r.copies.map((c) => c.sku)]
+    const hay = [r.title, r.titleOverride, r.cardName, r.cardNumber, r.set, r.condition, r.subtype, r.language, ...r.copies.map((c) => c.sku)]
       .join(" ").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
     return words.every((w) => hay.includes(w));
   });

@@ -309,7 +309,8 @@ stream` (the relay, only while streaming).
   (BW33, never BW33/101), a promo's comps may say "promo", a base card drops
   every variant's sales and a variant requires its own, "1st Class postage" is
   not 1st Edition, the house rules (p40, postage cap, ladder, condition) as a
-  table, an unpriced card written 0.00 in the CSV, and greps keeping the
+  table, CardCropper's port (floors by game, lots that only list names, high
+  postage put back, any language, the decision ladder), an unpriced card written 0.00 in the CSV, and greps keeping the
   rules out of core and Quick Search on the same pre-filter.
 - `scripts/check-titlecomps.mjs` — `/api/batch-comps`'s title form ({ id,
   title } in, evidence out): what a title parses to, that every fetched sale
@@ -336,7 +337,11 @@ stream` (the relay, only while streaming).
   status, every bulk edit (one price, sold comps, comps ± %, the .49/.99
   ladder, clear, subtype, leave out) never touching a listed row, only rows
   ticked AND on screen acted on, left-out copies never sent, and the list
-  surviving a reload.
+  surviving a reload. And languages: a batch is loaded as one language, a
+  Japanese card never joins the English row or listing (the key gains the
+  language; English keys are unchanged), changing a row's language drops its
+  old comps and any price that only came from them, and the house decision —
+  not the engine's confidence — decides what is "check first".
 - `scripts/check-pullsheetread.mjs` — what the pull sheet reads
   (`lib/pullsheet-read.js`): every card still on the shelf, plus only the
   PULLED cards an open line can mention (by SKU, `pulled_line`, CardUploader
@@ -761,10 +766,26 @@ for the same contract as JSON.
 - **The engine still judges the comps**; `lib/batch-comps.js` adds the two
   app-side rules it was missing, then prices under the **house rules**
   (`lib/house-pricing.js`, every number a setting): total = price + postage
-  capped at £1.50, p40 of UK sold in 90 days, the lowest under four comps, up
-  onto the .49/.99 ladder off a £2.49 floor, NM = LP, MP ×0.85 once LP is £5+,
-  HP ×0.6, DMG ×0.4. Not the engine's figure — that is still on the row as
-  `engine_price`, and the Batch screen is unchanged.
+  capped at £4.00, p40 of UK sold in 90 days, the lowest under four comps, up
+  onto the .49/.99 ladder off the game's floor (Pokémon £2.49, Yu-Gi-Oh
+  £1.99, Magic £0.99), NM = LP, MP ×0.85 once LP is £5+, HP ×0.6, DMG ×0.4.
+  Not the engine's figure — that is still on the row as `engine_price`, and
+  the Batch screen is unchanged.
+- **CardCropper's method, ported 2026-11-24** (`cardcropper/pricing.py` in
+  connor209/CardCropper, which prices off the title form and keeps its own
+  copy). Postage cap £1.50 → **£4.00**; floors by game; a sale that only
+  LISTS cards ("Fearow, Cacturne, Cradily", £22.41, counted as a Fearow) goes
+  as `multiCardLot` unless it carries the card's own number — the card's own
+  name and "Black and White"-style set names are taken out first, and a card
+  with no number is never judged a list (`listsOtherCards`); a sale the
+  engine left out ONLY for `highPostage` is put back, since the total caps
+  postage anyway; `any_language` counts foreign-language sales. Every row
+  carries a **decision** (`decide()` in `house-pricing.js`): apply, terapeak
+  (a rise on under four sales ALWAYS, a big rise/drop, a p90/p10 spread over
+  3, or nothing found), keep (nothing found, a price already) or hold (the
+  lookup failed), plus `in_hand_check` for NM at £15+. Add copies shows it
+  and files anything but apply under **Check first**. CardCropper's seven
+  golden cards are the live acceptance test and need a real run.
 - **A promo is its code, and its comps say "promo"** (`lib/promo.js`). The
   catalogue carried "BW33/101", which finds nothing; and the engine drops any
   comp saying "promo", so eleven UK sales showed and one counted.

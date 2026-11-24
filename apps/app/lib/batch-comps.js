@@ -25,7 +25,7 @@ import CardUploaderCsv from "./carduploader.js";
 import { appNameTokens, applyNumberGuards, dropForeignPostage, settingsForText, stripNumberingPrefix } from "./matching.js";
 import { isPromoCard, promoNumber, promoNumberPattern, anyPromoOfPrefix } from "./promo.js";
 import { detectVariants, nameWithoutVariants, queryWordsFor, subjectTextFor, variantExclusion, variantLabel } from "./variants.js";
-import { housePrice, houseTotal, resolveRules, conditionCode } from "./house-pricing.js";
+import { housePrice, houseTotal, resolveRules, rulesForGame, conditionCode, decide, gameCode, spreadTooWide } from "./house-pricing.js";
 import { UNPRICED_PENCE } from "./zero-price.js";
 
 /** Most cards one request will take. A page of 50 is the normal batch. */
@@ -109,6 +109,10 @@ export function normaliseCard(raw = {}, index = 0) {
     variantKeys,
     condition: strip(pick("condition")),
     language: strip(pick("language")) || "English",
+    // Count sales in every language (CardCropper's "All languages"): a
+    // foreign-language copy is evidence about the card, not another card.
+    anyLanguage: raw.any_language === true || raw.anyLanguage === true || /^(any|all)(\s+languages?)?$/i.test(strip(pick("language"))),
+    game: gameCode(pick("game", "Game", "*C:Game", "category")),
     title: strip(pick("title")),
     currentPence: raw.current_pence != null ? Number(raw.current_pence) : parseMoneyPence(pick("current_price", "currentPrice", "price", "startPrice"))
   };
@@ -155,7 +159,7 @@ export function cardsFromCsv(csvText) {
  * the queries that will be sent, and the settings its comps are judged by.
  */
 export function planCard(card) {
-  const english = !card.language || /^english$/i.test(card.language);
+  const english = !card.language || /^english$/i.test(card.language) || /^(any|all)\b/i.test(card.language);
   const promo = isPromoCard({ number: card.number, set: card.set });
   const number = promo ? promoNumber(card.number) : strip(card.number);
   const { keys, unrecognised } = detectVariants({
@@ -187,6 +191,10 @@ export function planCard(card) {
   // itself (reverse, stamped) are written in so its reading and ours agree.
   const subjectText = [baseName, number, subjectTextFor(keys), card.title, langWord].filter(Boolean).join(" ");
   const settings = settingsForText(subjectText, { promo });
+  if (card.anyLanguage && settings.excludeKeywords?.foreignPrint) {
+    const { foreignPrint, ...rest } = settings.excludeKeywords; // eslint-disable-line no-unused-vars
+    settings.excludeKeywords = rest;
+  }
 
   const nameTokens = appNameTokens(
     CompFinderPricing.simplifyTitle([baseName, promo ? "" : stripNumberingPrefix(number)].filter(Boolean).join(" "), settings.stripWords)
@@ -204,7 +212,9 @@ export function planCard(card) {
     queries,
     settings,
     nameTokens,
-    condition: conditionCode(card.condition)
+    condition: conditionCode(card.condition),
+    game: card.game || "pokemon",
+    anyLanguage: !!card.anyLanguage
   };
 }
 
@@ -233,6 +243,42 @@ export function mergeComps(pages) {
 }
 
 /**
+ * Set and era names that carry "and" or "&" without being two cards.
+ */
+const JOINED_NAMES = /\b(?:black|sun|sword|scarlet|heart\s*gold|diamond|ruby|fire\s*red|x)\s*(?:&|and)\s*(?:white|moon|shield|violet|soul\s*silver|pearl|sapphire|leaf\s*green|y)\b/gi;
+
+const flat = (s) => plain(s).toLowerCase().replace(/[^a-z0-9&+,]+/g, " ").replace(/\s+/g, " ").trim();
+
+/** Whether a sale title carries the card's own number (zero padding ignored). */
+function namesOwnNumber(plan, title) {
+  if (plan.promo) { const rx = promoNumberPattern(plan.number); return rx ? rx.test(title) : false; }
+  const m = String(plan.number).match(/^([A-Z]{0,4})0*(\d{1,4})/i);
+  if (!m) return false;
+  return new RegExp(`(^|[^A-Z0-9])${m[1]}0*${m[2]}(?![0-9])`, "i").test(title);
+}
+
+/**
+ * A sale that lists several cards by name — "Fearow, Cacturne, Cradily" sold
+ * for £22.41 and was counted as a Fearow 36/100 comp (CardCropper, 21 Nov
+ * 2026). The engine catches lots that SAY they are lots; this catches the
+ * ones that only list. A title carrying the card's own number is the card
+ * whatever else it says, and the card's own name ("Pikachu & Zekrom GX") and
+ * set names ("Black and White", "Sun & Moon") are taken out before looking
+ * for a comma, an &, a + or an "and". A card with no number has nothing to
+ * tell its own sale from a list, so it is never judged this way.
+ */
+export function listsOtherCards(plan, title) {
+  if (!plan.number) return false;
+  if (namesOwnNumber(plan, title || "")) return false;
+  let t = ` ${flat(title).replace(JOINED_NAMES, " ")} `;
+  for (const own of [plan.baseName, plan.set].filter(Boolean)) {
+    const f = flat(own).replace(JOINED_NAMES, " ").trim();
+    if (f) t = t.split(` ${f} `).join("  ");
+  }
+  return /,|\s&\s|\s\+\s|\sand\s/.test(` ${t.replace(/\s+/g, " ")} `);
+}
+
+/**
  * The two app-side rules, ahead of the engine: the promo number and the
  * variant. Both return the comp with an `exclusionReason` rather than
  * dropping it, so nothing leaves quietly.
@@ -256,6 +302,10 @@ export function prefilterComps(plan, comps) {
           continue;
         }
       }
+    }
+    if (listsOtherCards(plan, t)) {
+      excluded.push({ ...c, exclusionReason: "multiCardLot", exclusionDetail: "lists other cards" });
+      continue;
     }
     const v = variantExclusion(t, plan.variantKeys, plan.baseName);
     if (v) {
@@ -289,15 +339,6 @@ function saleOut(c, rules) {
   };
 }
 
-function spreadIsWide(totals, ratio) {
-  if (totals.length < 2) return false;
-  const s = [...totals].sort((a, b) => a - b);
-  if (s.length < 4) return s[0] > 0 && s[s.length - 1] / s[0] >= ratio + 1;
-  const q1 = s[Math.floor(s.length * 0.25)];
-  const q3 = s[Math.floor(s.length * 0.75)];
-  return q1 > 0 && q3 / q1 >= ratio;
-}
-
 /**
  * A card's whole answer from the comps its searches returned.
  *
@@ -327,8 +368,16 @@ export function judgeComps(plan, comps) {
 }
 
 export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
-  const rules = resolveRules(rulesIn);
-  const { rec, pre, included, excluded: excludedAll } = judgeComps(plan, comps);
+  const rules = rulesForGame(resolveRules(rulesIn), plan.game);
+  const judged = judgeComps(plan, comps);
+  const { rec, pre } = judged;
+  // Put back: a sale the engine left out ONLY for its postage. The total caps
+  // postage anyway, so the sale is still evidence of what the card made. The
+  // engine marks highPostage after every name and printing test has passed,
+  // so a sale put back here is one it had already accepted as the card.
+  const putBack = judged.excluded.filter((c) => c.exclusionReason === "highPostage").map((c) => ({ ...c, putBack: true }));
+  const included = [...judged.included, ...putBack];
+  const excludedAll = judged.excluded.filter((c) => c.exclusionReason !== "highPostage");
   const nonUk = excludedAll.filter((c) => c.exclusionReason === "nonUkLocation").length;
 
   const held = !!rec.priceHeld;
@@ -351,7 +400,7 @@ export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
   const flags = {
     few_comps: n < rules.minCompsForPercentile,
     variant_uncertain: variantUncertain,
-    wide_spread: spreadIsWide(house.totals, CompFinderPricing.DEFAULT_SETTINGS.wideSpreadQ3Q1Ratio),
+    wide_spread: spreadTooWide(house.totals),
     no_uk_comps: n === 0,
     price_held: held
   };
@@ -362,6 +411,12 @@ export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
     notes.push(`${wrongVariant} sale(s) were a variant (${[...new Set(pre.excluded.filter((c) => c.exclusionReason === "wrongVariant").map((c) => c.exclusionDetail))].join(", ")}) — check this card isn't one.`);
   }
   if (held) notes.push(rec.note);
+  if (putBack.length) notes.push(`${putBack.length} sale(s) counted although their postage was high — the total caps postage at £${(rules.postageCapPence / 100).toFixed(2)}.`);
+  const verdict = decide({
+    nSales: n, totals: house.totals, suggestedPence, currentPence: plan.card.currentPence,
+    condition: plan.condition, putBack: putBack.length
+  }, rules);
+  for (const f of verdict.flags) if (!(f in flags)) flags[f] = true;
 
   return {
     index: plan.card.index,
@@ -388,7 +443,7 @@ export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
     fetched_at: fetch.fetchedAt || null,
     from_cache: fetch.cached ?? null,
     page_full: !!fetch.pageFull,
-    sales: included.map((c) => saleOut(c, rules)).sort((a, b) => String(b.date).localeCompare(String(a.date))),
+    sales: included.map((c) => ({ ...saleOut(c, rules), ...(c.putBack ? { put_back: true } : {}) })).sort((a, b) => String(b.date).localeCompare(String(a.date))),
     excluded: excludedAll.map((c) => ({
       ...saleOut(c, rules),
       reason: c.exclusionReason,
@@ -405,6 +460,11 @@ export function evaluateCard(plan, comps, fetch = {}, rulesIn) {
     },
     suggested_price: pounds(suggestedPence),
     suggested_pence: suggestedPence,
+    decision: verdict.decision,
+    decision_reason: verdict.reason,
+    game: plan.game,
+    any_language: plan.anyLanguage,
+    floor_price: pounds(rules.floorPence),
     engine_price: pounds(rec.finalPence),
     confidence: rec.confidence,
     flags,

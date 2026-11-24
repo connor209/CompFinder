@@ -6,7 +6,8 @@ import { groupsFromItems, listingForGroup, priceFromComps } from "@/lib/lab-copi
 import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
   DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
-  FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin
+  FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
+  LANGUAGES, DECISION_TEXT
 } from "@/lib/lab-draft.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
 
@@ -47,6 +48,12 @@ export default function LabAdd() {
   const [priceText, setPriceText] = useState("");
   const [pctText, setPctText] = useState("0");
   const [subtypePick, setSubtypePick] = useState("");
+  // The language of the NEXT file loaded. Batches are one language each, so
+  // it is chosen before loading and stamped on every card in the file.
+  const [batchLang, setBatchLang] = useState("English");
+  const [anyLang, setAnyLang] = useState(false);
+  const [langPick, setLangPick] = useState("English");
+  const [anyPick, setAnyPick] = useState(false);
   const [busy, setBusy] = useState(null);
   const [progress, setProgress] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -103,12 +110,13 @@ export default function LabAdd() {
     for (const f of picked) {
       try {
         const text = await f.text();
-        const items = CardUploaderCsv.extractItems(text);
+        // The batch's language beats whatever the file or a title said.
+        const items = CardUploaderCsv.extractItems(text).map((it) => ({ ...it, language: batchLang }));
         const raw = CardUploaderCsv.rowsToObjects(CardUploaderCsv.parseCsv(text))
           .filter((r) => (r["*C:Card Name"] || "").trim() && (r["*C:Card Number"] || "").trim());
         const extras = raw.map((r) => ({ finish: (r["*C:Finish"] || "").trim(), setCode: (r["*C:Set Code"] || r["C:Set Code"] || "").trim() }));
         const { groups, refused: rf } = groupsFromItems(items, extras.length === items.length ? extras : []);
-        const merged = mergeGroups(next, groups, f.name);
+        const merged = mergeGroups(next, groups, f.name, { anyLanguage: anyLang });
         next = merged.rows;
         added += merged.added;
         newRefused.push(...rf.map((x) => ({ ...x, file: f.name })), ...merged.refused.map((x) => ({ ...x, file: f.name })));
@@ -119,7 +127,7 @@ export default function LabAdd() {
     setRows(next);
     refreshView();
     setRefused((r) => [...r, ...newRefused]);
-    setMsg({ text: `${added} cop${added === 1 ? "y" : "ies"} loaded from ${picked.length} file${picked.length === 1 ? "" : "s"}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.` });
+    setMsg({ text: `${added} cop${added === 1 ? "y" : "ies"} loaded from ${picked.length} file${picked.length === 1 ? "" : "s"} as ${batchLang}${anyLang ? " (sold comps in every language)" : ""}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.` });
   }
 
   // ---- pricing -----------------------------------------------------------
@@ -134,7 +142,10 @@ export default function LabAdd() {
     for (let i = 0; i < todo.length; i += 50) {
       setProgress({ label: "Pricing from sold comps", done: i, total: todo.length });
       const chunk = todo.slice(i, i + 50);
-      const cards = chunk.map((r) => ({ sku: r.copies[0].sku, name: r.cardName, number: r.cardNumber, set: r.set, title: r.title, condition: r.condition, language: r.language }));
+      const cards = chunk.map((r) => ({
+        sku: r.copies[0].sku, name: r.cardName, number: r.cardNumber, set: r.set, title: r.title, condition: r.condition,
+        language: r.language || "English", any_language: Boolean(r.anyLanguage), game: r.card?.game || "", variant: r.card?.finish || ""
+      }));
       try {
         const res = await fetch("/api/batch-comps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards }) });
         const j = await res.json();
@@ -142,7 +153,12 @@ export default function LabAdd() {
         const bySku = new Map(j.results.map((x) => [String(x.sku), x]));
         for (const r of chunk) {
           const x = bySku.get(String(r.copies[0].sku));
-          got.set(r.id, { pence: priceFromComps(x), confidence: x?.confidence || null, n: x?.n_comps ?? null, flags: x?.flags ? Object.keys(x.flags).filter((k) => x.flags[k]) : [] });
+          got.set(r.id, {
+            pence: priceFromComps(x), confidence: x?.confidence || null, n: x?.n_comps ?? null,
+            flags: x?.flags ? Object.keys(x.flags).filter((k) => x.flags[k]) : [],
+            decision: x?.decision || (x?.error ? "hold" : null), reason: x?.decision_reason || x?.error || "",
+            ...(x?.error ? { error: x.error } : {})
+          });
         }
       } catch (e) {
         for (const r of chunk) got.set(r.id, { pence: null, error: e.message });
@@ -178,10 +194,12 @@ export default function LabAdd() {
     const fresh = go.filter((r) => !joinsOf(r));
     const copies = go.reduce((t, r) => t + liveCopies(r).length, 0);
     const value = fresh.reduce((t, r) => t + r.pricePence * liveCopies(r).length, 0);
+    const checkFirst = fresh.filter((r) => isThin(r)).length;
     if (!window.confirm(
       `List ${go.length} card${go.length === 1 ? "" : "s"} on eBay — LIVE.\n\n` +
       `${fresh.length} new listing${fresh.length === 1 ? "" : "s"}, ${gbp(value)} in all\n` +
       `${joins.length} joining a listing already live (its price stays)\n${copies} copies` +
+      (checkFirst ? `\n\n⚠ ${checkFirst} of the new listings ${checkFirst === 1 ? "is" : "are"} marked Check first (a Terapeak check, a thin or wide price, or a failed lookup).` : "") +
       (skipped ? `\n\n${skipped} ticked row${skipped === 1 ? " isn't" : "s aren't"} ready and will be left alone.` : "") + "\n\nGo?"
     )) return;
     setBusy("list");
@@ -237,8 +255,17 @@ export default function LabAdd() {
 
       {/* ---------------- Load ---------------- */}
       <div className="li-panel">
+        <label className="li-dim" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          Batch language
+          <select className="li-select" value={batchLang} disabled={!!busy} onChange={(e) => setBatchLang(e.target.value)}>
+            {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </label>
+        <label className="li-check li-dim" title="Count sold listings of this card in any language (CardCropper's All languages). Graded, other printings and lots stay out.">
+          <input type="checkbox" checked={anyLang} disabled={!!busy} onChange={(e) => setAnyLang(e.target.checked)} /> count sales in every language
+        </label>
         <label className="li-btn primary" style={{ cursor: "pointer" }}>
-          ＋ Load CardUploader export(s)
+          ＋ Load {batchLang} export(s)
           <input type="file" accept=".csv,text/csv" multiple style={{ display: "none" }} onChange={onFiles} disabled={!!busy} />
         </label>
         <span className="li-dim">
@@ -289,6 +316,7 @@ export default function LabAdd() {
           </button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "price" ? null : "price")}>Set price ▾</button>
           {subtypes.length > 0 && <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "subtype" ? null : "subtype")}>Subtype ▾</button>}
+          <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "language" ? null : "language")}>Language ▾</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "exclude" }, "Left out")}>Leave out</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "include" }, "Put back")}>Put back</button>
           <button className="li-chip primary-chip" disabled={!onScreen.length || !!busy} onClick={() => listRows(onScreen)}>
@@ -318,6 +346,19 @@ export default function LabAdd() {
             <button className="li-btn" onClick={() => bulk({ op: "clear" }, "Prices cleared")}>Clear prices</button>
             <span className="li-dim" style={{ flexBasis: "100%" }}>
               A row with no sold-comps price is left as it is by the sold-comps options. Rows joining a live listing keep that listing&apos;s price whatever is set here.
+            </span>
+          </div>
+        )}
+        {panel === "language" && (
+          <div className="li-panel inset">
+            <span>Language for {onScreen.length}:</span>
+            <select className="li-select" value={langPick} onChange={(e) => setLangPick(e.target.value)}>
+              {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+            <label className="li-check"><input type="checkbox" checked={anyPick} onChange={(e) => setAnyPick(e.target.checked)} /> count sales in every language</label>
+            <button className="li-btn" onClick={() => bulk({ op: "language", language: langPick, anyLanguage: anyPick }, `Language set to ${langPick}${anyPick ? ", every language counted" : ""}`)}>Set</button>
+            <span className="li-dim" style={{ flexBasis: "100%" }}>
+              Changing it drops those rows&apos; sold comps (they were for the other language) and any price that only came from them. Price them again after.
             </span>
           </div>
         )}
@@ -369,12 +410,12 @@ export default function LabAdd() {
                           <span>
                             <b>{t.text}</b>
                             <small>
-                              {[r.set, r.cardNumber, r.subtype].filter(Boolean).join(" · ")}
+                              {[r.set, r.cardNumber, r.subtype, r.language && r.language !== "English" ? r.language : "", r.anyLanguage ? "every language" : ""].filter(Boolean).join(" · ")}
                               {t.own ? " · your title" : ""}{t.cut ? <span className="li-warn"> · cut at 80</span> : null}
                             </small>
                             <small className="sm-only">
                               <span className={`li-status ${STATUS_CLASS[st]}`}>{STATUS_TEXT[st]}</span> ×{live.length} · {r.condition}
-                              {r.comps?.pence != null ? ` · comps ${gbp(r.comps.pence)}` : ""}{j && !done ? " · joins a listing" : ""}
+                              {r.comps?.pence != null ? ` · comps ${gbp(r.comps.pence)}` : ""}{r.comps?.decision && r.comps.decision !== "apply" ? ` · ${DECISION_TEXT[r.comps.decision]}` : ""}{j && !done ? " · joins a listing" : ""}
                             </small>
                           </span>
                         </div>
@@ -387,9 +428,11 @@ export default function LabAdd() {
                       </td>
                       <td className="mono sm-hide">{live.length}{live.length !== r.copies.length ? <small>of {r.copies.length}</small> : null}</td>
                       <td className="sm-hide"><b>{r.condition}</b></td>
-                      <td className="r sm-hide" title={r.comps?.error || (r.comps ? `${r.comps.n ?? "?"} comps · ${r.comps.confidence || "?"} confidence${r.comps.flags?.length ? ` · ${r.comps.flags.join(", ").replace(/_/g, " ")}` : ""}` : "Not priced from sold comps yet")}>
+                      <td className="r sm-hide" title={r.comps?.error || (r.comps ? `${r.comps.n ?? "?"} sales · ${r.comps.confidence || "?"} confidence${r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}${r.comps.reason ? ` (${r.comps.reason})` : ""}` : ""}${r.comps.flags?.length ? ` · ${r.comps.flags.join(", ").replace(/_/g, " ")}` : ""}` : "Not priced from sold comps yet")}>
                         {r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(r.comps?.pence ?? null)}
-                        {r.comps && !r.comps.error && <small className={isThin(r) ? "li-warn" : ""}>{r.comps.n ?? "?"} comps · {r.comps.confidence || "?"}</small>}
+                        {r.comps && !r.comps.error && <small className={isThin(r) ? "li-warn" : ""}>{r.comps.n ?? "?"} sale{r.comps.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
+                        {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}
+                        {r.comps?.flags?.includes("in_hand_check") && <small className="li-warn">check in hand</small>}
                       </td>
                       <td className="r">
                         {j ? <span className="li-dim">{gbp(j.price_pence)}<small>listing&apos;s price</small></span> : (

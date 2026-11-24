@@ -70,6 +70,18 @@ four), `pricing.lp_price` is that rounded up onto .49/.99, and the condition
 multiplier is applied to `lp_price` and rounded up again. Read `excluded[]`
 before trusting a thin row — the reason is on every sale.
 
+Postage is capped at £4.00 (CardCropper's standard, since 2026-11-24). A sale
+marked `put_back` is one the engine left out only for its postage — it counts,
+with its postage capped. The floor is the card's `game`'s (`floor_price`):
+Pokémon £2.49, Yu-Gi-Oh £1.99, Magic £0.99.
+
+`decision` says what to do with the price: `apply`; `terapeak` — a person
+checks first (always for a rise on fewer than four sales, and for a big rise or
+drop, a p90/p10 spread over 3, or no sales of this printing); `keep` — nothing
+found and the card already has a price; `hold` — the lookup failed.
+`decision_reason` says which. Send `current_price` for the rise and drop tests
+to mean anything. `any_language: true` counts sales in every language.
+
 ## The title form: the evidence, no price
 
 For when the caller applies the house rules itself. Send cards as an `id` and a

@@ -19,8 +19,8 @@
 import { readFileSync } from "node:fs";
 import { isPromoCard, promoNumber, textLooksPromo } from "../apps/app/lib/promo.js";
 import { compVariants, detectVariants, nameWithoutVariants, variantExclusion } from "../apps/app/lib/variants.js";
-import { housePrice, percentileOf, resolveRules, roundUpToLadder, HOUSE_RULES } from "../apps/app/lib/house-pricing.js";
-import { cardsFromCsv, evaluateCard, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
+import { housePrice, percentileOf, resolveRules, roundUpToLadder, rulesForGame, gameCode, decide, spreadTooWide, HOUSE_RULES } from "../apps/app/lib/house-pricing.js";
+import { cardsFromCsv, evaluateCard, listsOtherCards, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
 import { settingsForText } from "../apps/app/lib/matching.js";
 
 let failed = 0;
@@ -97,8 +97,11 @@ eq("up to the next .99", roundUpToLadder(1250), 1299);
 eq("a rung stays a rung", roundUpToLadder(1249), 1249);
 eq("the floor", roundUpToLadder(50), 249);
 const totalsOf = (list) => list.map(([p, s]) => comp("x", p, s));
-// Postage capped at £1.50: a £3.50 card with £3.95 postage totals £5.00.
-eq("postage cap", housePrice(totalsOf([[3.5, 3.95]])).totals, [500]);
+// Postage capped at £4.00 (CardCropper's standard, 2026-11-24): a £3.50 card
+// with £6.95 postage totals £7.50, and £3.95 postage counts in full.
+eq("postage cap", housePrice(totalsOf([[3.5, 6.95]])).totals, [750]);
+eq("postage under the cap counts in full", housePrice(totalsOf([[3.5, 3.95]])).totals, [745]);
+eq("the cap is £4.00", HOUSE_RULES.postageCapPence, 400);
 eq("under 4 comps, the lowest", housePrice(totalsOf([[20, 0], [30, 0], [40, 0]])).method, "lowest");
 eq("…priced at it", housePrice(totalsOf([[20, 0], [30, 0], [40, 0]])).suggestedPence, 2049);
 const four = totalsOf([[10, 0], [12, 0], [14, 0], [30, 0]]);
@@ -177,6 +180,76 @@ const nr = evaluateCard(numel, [
   comp("Numel 013/078 Pokemon GO", 0.5, 0.85)
 ]);
 eq("Numel keeps the Ditto copies", nr.n_comps, 4);
+
+
+// --- 4b. CardCropper's rules, ported 2026-11-24 ---------------------------------
+
+// Floors by game.
+eq("game codes", ["Pokémon", "Yu-Gi-Oh!", "Magic: The Gathering", "YGO", "", "Lorcana"].map(gameCode), ["pokemon", "yugioh", "mtg", "yugioh", "", ""]);
+eq("a Yu-Gi-Oh floor", housePrice(totalsOf([[0.5, 0]]), "NM", rulesForGame(resolveRules(), "yugioh")).suggestedPence, 199);
+eq("a Magic floor", housePrice(totalsOf([[0.5, 0]]), "NM", rulesForGame(resolveRules(), "mtg")).suggestedPence, 99);
+eq("an unnamed game is Pokémon's floor", housePrice(totalsOf([[0.5, 0]]), "NM", rulesForGame(resolveRules(), "")).suggestedPence, 249);
+eq("the ladder steps off the game's floor", roundUpToLadder(210, rulesForGame(resolveRules(), "yugioh")), 249);
+
+// Lots that only LIST their cards.
+const fearow = planCard(normaliseCard({ name: "Fearow", number: "36/100", set: "Majestic Dawn" }));
+ok("the Fearow list is a lot", listsOtherCards(fearow, "Fearow, Cacturne, Cradily Majestic Dawn Pokemon"));
+ok("…& is a list", listsOtherCards(fearow, "Fearow & Pidgeot Pokemon cards"));
+ok("…'and' is a list", listsOtherCards(fearow, "Fearow and Spearow Majestic Dawn"));
+ok("a title with the card's number is the card", !listsOtherCards(fearow, "Fearow 36/100, Majestic Dawn, NM"));
+ok("…zero-padded too", !listsOtherCards(fearow, "Fearow 036/100 Majestic Dawn & more"));
+ok("a plain title is not a list", !listsOtherCards(fearow, "Fearow Majestic Dawn Pokemon Card Uncommon"));
+const tag = planCard(normaliseCard({ name: "Pikachu & Zekrom GX", number: "33/181", set: "Team Up" }));
+ok("a tag team's own & is not a list", !listsOtherCards(tag, "Pikachu & Zekrom GX Team Up Pokemon"));
+const bw = planCard(normaliseCard({ name: "Riolu", number: "BW33", set: "Black and White Promos" }));
+ok("'Black and White' is a set, not a list", !listsOtherCards(bw, "Riolu Black and White Promo Holo"));
+ok("'Sun & Moon' is an era, not a list", !listsOtherCards(fearow, "Fearow Sun & Moon era Pokemon"));
+ok("a card with no number is never judged a list", !listsOtherCards(planCard(normaliseCard({ name: "Fearow" })), "Fearow, Pidgeot"));
+const fr = evaluateCard(fearow, [
+  comp("Fearow 36/100 Majestic Dawn", 2, 1), comp("Fearow 36/100 Majestic Dawn NM", 2.2, 1),
+  comp("Fearow Majestic Dawn 36/100 Uncommon", 1.8, 1), comp("Fearow, Cacturne, Cradily Majestic Dawn", 22.41, 1)
+]);
+ok("the listed lot never reaches the price", fr.sales.every((x) => x.price < 20));
+ok("…and goes as a multi-card lot, saying why", fr.excluded.some((e) => e.reason === "multiCardLot" && e.detail === "lists other cards"));
+
+// High postage is put back: the total caps it.
+const pb = evaluateCard(fearow, [
+  ...[10, 10.5, 11, 11.5, 12, 12.5, 13].map((p) => comp("Fearow 36/100 Majestic Dawn", p, 1)),
+  comp("Fearow 36/100 Majestic Dawn", 16, 12) // £12 postage: the engine's highPostage
+]);
+ok("a sale left out only for postage counts", pb.sales.some((x) => x.put_back));
+ok("…not as excluded", !pb.excluded.some((e) => e.reason === "highPostage"));
+ok("…flagged put_back", pb.flags.put_back);
+ok("…with its total capped at £4 of postage", pb.sales.find((x) => x.put_back)?.total === 20);
+
+// Any language.
+const jp = planCard(normaliseCard({ name: "Pikachu", number: "25/102", set: "Base Set" }));
+const anyL = planCard(normaliseCard({ name: "Pikachu", number: "25/102", set: "Base Set", any_language: true }));
+ok("an English card leaves foreign prints out", "foreignPrint" in jp.settings.excludeKeywords);
+ok("any language counts them", !("foreignPrint" in anyL.settings.excludeKeywords));
+eq("…and searches as the English card", anyL.queries[0], jp.queries[0]);
+ok("'All languages' reads as any", normaliseCard({ name: "x", language: "All languages" }).anyLanguage);
+const japanese = planCard(normaliseCard({ name: "Pikachu", number: "25/102", set: "Base Set", language: "Japanese" }));
+ok("a Japanese card searches as Japanese", /Japanese/.test(japanese.queries[0]));
+
+// The decision.
+eq("a rise on 2 sales goes to a person", decide({ nSales: 2, totals: [500, 600], suggestedPence: 599, currentPence: 249 }).decision, "terapeak");
+eq("2 sales, not a rise, applies", decide({ nSales: 2, totals: [200, 220], suggestedPence: 249, currentPence: 349 }).decision, "apply");
+eq("a new card on 2 sales applies (nothing to rise from)", decide({ nSales: 2, totals: [500, 600], suggestedPence: 549 }).decision, "apply");
+eq("a big rise", decide({ nSales: 6, totals: [900, 950, 1000, 1000, 1100, 1200], suggestedPence: 999, currentPence: 299 }).decision, "terapeak");
+ok("…flagged", decide({ nSales: 6, totals: [900, 950, 1000, 1000, 1100, 1200], suggestedPence: 999, currentPence: 299 }).flags.includes("big_rise"));
+eq("under double is not a big rise", decide({ nSales: 6, totals: [430, 440, 450, 460, 470, 480], suggestedPence: 449, currentPence: 249 }).decision, "apply");
+eq("double but under £2 of difference is not either", decide({ nSales: 6, totals: [200, 210, 220, 230, 240, 250], suggestedPence: 249, currentPence: 99 }).decision, "apply");
+eq("a big drop", decide({ nSales: 6, totals: [200, 210, 220, 230, 240, 250], suggestedPence: 249, currentPence: 1299 }).decision, "terapeak");
+ok("wide spread is p90/p10 over 3", spreadTooWide([100, 120, 130, 140, 900, 1000]) && !spreadTooWide([100, 120, 130, 140, 200, 250]));
+eq("…and goes to a person", decide({ nSales: 6, totals: [100, 120, 130, 140, 900, 1000], suggestedPence: 249 }).decision, "terapeak");
+eq("no sales, no price → Terapeak", decide({ nSales: 0, totals: [], suggestedPence: null }).decision, "terapeak");
+eq("no sales, a price already → keep it", decide({ nSales: 0, totals: [], suggestedPence: null, currentPence: 499 }).decision, "keep");
+eq("a failed lookup holds", decide({ status: "timeout" }).decision, "hold");
+ok("NM at £15+ is checked in hand", decide({ nSales: 8, totals: [1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500], suggestedPence: 1549, condition: "NM" }).flags.includes("in_hand_check"));
+ok("…LP is not", !decide({ nSales: 8, totals: [1500, 1500, 1500, 1500, 1500, 1500, 1500, 1500], suggestedPence: 1549, condition: "LP" }).flags.includes("in_hand_check"));
+eq("a result carries its decision", typeof fr.decision, "string");
+eq("…and its floor", fr.floor_price, 2.49);
 
 // --- 5. output ---------------------------------------------------------------
 
