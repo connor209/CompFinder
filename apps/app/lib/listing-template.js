@@ -120,16 +120,36 @@ export function descriptionProblem(html) {
 }
 
 /**
+ * Is this template PLAIN TEXT rather than HTML? No tag anywhere in it. A
+ * stray "<4" or "<£10" is not a tag (a tag starts with a letter or "/"), so
+ * "Card amounts <4 and … <£10" — the house description, word for word — is
+ * plain text, which is what it is.
+ */
+export function isPlainTextTemplate(text) {
+  return !/<\/?[a-z][^>]*>/i.test(String(text || ""));
+}
+
+/**
  * The description for one card: placeholders filled (escaped — a card name
  * is data, not markup), unknown ones reported, and the photo promise
  * appended, always.
+ *
+ * A PLAIN-TEXT template keeps its line breaks. HTML ignores them, so the
+ * house description — pasted from CardUploader with a blank line between
+ * each section — went up as one paragraph (caught in the preview,
+ * 2026-11-24). CardUploader turns a line break into <br>; so does this, after
+ * escaping the text, so its "<4" and "<£10" read as written. A template that
+ * IS HTML is left exactly as typed: its author decided where the breaks go.
  */
 export function renderDescription(html, card, { abbreviateCondition = false } = {}) {
   const unknown = new Set();
-  const body = String(html || "").replace(/\{([a-zA-Z]+)\}/g, (m, key) => {
+  const plain = isPlainTextTemplate(html);
+  const source = plain ? escapeHtml(String(html || "")) : String(html || "");
+  let body = source.replace(/\{([a-zA-Z]+)\}/g, (m, key) => {
     if (!FIELD_KEYS.has(key)) { unknown.add(key); return m; }
     return escapeHtml(fieldValue(card, key, { abbreviateCondition }));
   });
+  if (plain) body = body.replace(/\r\n?/g, "\n").trim().replace(/\n/g, "<br>");
   return { html: `${body}\n<p>${escapeHtml(PHOTO_PROMISE)}</p>`, unknown: [...unknown] };
 }
 

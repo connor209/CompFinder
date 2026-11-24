@@ -173,6 +173,15 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("scripts are refused at save", /Scripts/.test(T.descriptionProblem("<script>x</script>") || ""), true);
   eq("event handlers are refused", /Event handlers/.test(T.descriptionProblem('<img src=x onerror="a()">') || ""), true);
   eq("plain HTML is fine", T.descriptionProblem("<p><b>Thanks</b> for looking</p>"), null);
+  // The house description, pasted from CardUploader: plain text, blank lines
+  // between sections, and "<4" / "<£10" that are not tags.
+  const house = "Thank you for looking at our listing.\n\nListing Images\nThe images are the exact card.\n\nCard amounts <4 and with a total value <£10 will be sleeved.";
+  eq("a plain-text template is recognised, '<4' and '<£10' notwithstanding", T.isPlainTextTemplate(house), true);
+  const hr = T.renderDescription(house, card).html;
+  eq("plain text keeps its line breaks", hr.startsWith("Thank you for looking at our listing.<br><br>Listing Images<br>"), true);
+  eq("…and its '<' signs read as written, escaped", hr.includes("Card amounts &lt;4 and with a total value &lt;£10"), true);
+  eq("an HTML template is left as typed — no breaks added", T.renderDescription("<p>A</p>\n<p>B</p>", card).html.startsWith("<p>A</p>\n<p>B</p>"), true);
+  eq("placeholders still fill in plain text", T.renderDescription("Card: {name}\nSet: {set}", card).html.startsWith("Card: Mareep<br>Set: Zeraora Deck"), true);
   eq("shop images go first, after the first scan, and last", T.arrangePictures(["s1", "s2"], [{ url: "L", position: "last" }, { url: "F", position: "first" }, { url: "S", position: "second" }, { url: "off", enabled: false }]), ["F", "s1", "S", "s2", "L"]);
   const many = T.arrangePictures(Array.from({ length: 20 }, (_, i) => `s${i}`), Array.from({ length: 6 }, (_, i) => ({ url: `shop${i}`, position: "last" })));
   eq("over 24 pictures drops shop images, never scans", [many.length, many.filter((u) => /^s\d+$/.test(u)).length], [24, 20]);

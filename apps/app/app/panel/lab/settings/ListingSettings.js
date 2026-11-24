@@ -250,7 +250,10 @@ export default function ListingSettings() {
           <iframe title="Description preview" sandbox="" style={{ width: "100%", minHeight: 320, marginTop: 8, background: "#fff", borderRadius: 8, border: "1px solid var(--line)" }}
             srcDoc={`<!doctype html><meta charset="utf-8"><body style="font-family:Arial,sans-serif;font-size:14px;color:#111;padding:12px">${rendered?.html || ""}</body>`} />
         )}
-        <p style={small}>Plain HTML, no scripts. The lab always adds this line at the end: <em>{PHOTO_PROMISE}</em></p>
+        <p style={small}>
+          Plain text keeps its line breaks, as CardUploader does. Or write HTML (no scripts), and the breaks are yours to place.
+          The lab always adds this line at the end: <em>{PHOTO_PROMISE}</em>
+        </p>
       </section>
 
       {/* ---------------- B. Shop images ---------------- */}
