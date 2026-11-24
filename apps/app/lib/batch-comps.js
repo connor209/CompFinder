@@ -184,7 +184,12 @@ export function planCard(card) {
   const setUsable = card.set && !GENERIC_SET.has(card.set.toLowerCase());
   // A promo's code already names its set, and "Black and White Promos" is
   // nowhere in how anybody titles one — in the query it only shrinks the page.
-  const setForQuery = setUsable && !promo ? plain(card.set) : "";
+  // Nor does a non-English set name: CardUploader writes Cardmarket's
+  // ("Pokemon Card 151", "Shiny Treasure ex") and sellers of Japanese cards
+  // write the code ("sv2a") or nothing. eBay needs every word, so the set cost
+  // 4 of 5 UK Geodude Master Ball sales (TEST3, 2026-11-24). Name, number and
+  // language already pin a Japanese card.
+  const setForQuery = setUsable && !promo && english ? plain(card.set) : "";
   const langWord = english ? "" : card.language;
 
   const compose = (withSet) =>

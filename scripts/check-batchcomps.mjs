@@ -256,7 +256,16 @@ eq("…and its floor", fr.floor_price, 2.49);
 // sale titled "Geodude Master Ball Holo 074/165" never counted.
 const geo = planCard(normaliseCard({ name: "Geodude (Master Ball Pattern)", number: "074/165", set: "Pokemon Card 151", language: "Japanese" }));
 eq("a pattern is a variant, not name words", [geo.variantKeys, geo.nameTokens], [["masterBall"], ["Geodude"]]);
-eq("…and the search asks for it", geo.queries[0], "Geodude Master Ball 074/165 Pokemon Card 151 Japanese");
+eq("…and the search asks for it — without Cardmarket's Japanese set name, one search", geo.queries, ["Geodude Master Ball 074/165 Japanese"]);
+// The five UK sales eBay shows for it (2026-11-24): every one has every word.
+const words = geo.queries[0].toLowerCase().split(" ");
+eq("every UK sale of it matches the search", [
+  "Geodude 074/165 Master Ball - 151 sv2a Japanese Mint - Pokémon Card Game",
+  "Geodude Master Ball 074/165 sv2a Japanese Mint Condition Pokemon TCG Card",
+  "2023 Japanese Pokemon SV2a 151 Geodude Master Ball Reverse Holo 074/165",
+  "Geodude 074/165 Master Ball 2023 Pokemon - Japanese Scarlet & Violet 151 - MINT"
+].filter((t) => words.every((w) => t.toLowerCase().includes(w))).length, 4);
+eq("an English card still searches with its set", planCard(normaliseCard({ name: "Geodude", number: "074/165", set: "151" })).queries[0], "Geodude 074/165 151");
 const gr = evaluateCard(geo, [
   comp("Geodude (Master Ball Pattern) 074/165 SV2a Pokemon Card 151 Holo Japanese", 6),
   comp("Geodude Master Ball Holo 074/165 Japanese 151", 7),
@@ -277,7 +286,7 @@ const ball = planCard(normaliseCard({ name: "Master Ball", number: "153/165", se
 eq("the Master Ball TRAINER is not a pattern card", ball.variantKeys, []);
 eq("…and its own sales count", evaluateCard(ball, [comp("Master Ball 153/165 151 Trainer", 1), comp("Master Ball 153/165 Pokemon", 1.2)]).n_comps, 2);
 const lum = planCard(normaliseCard({ name: "Luminous Energy (Mirror Holofoil)", number: "190/190", set: "Shiny Treasure ex", language: "Japanese" }));
-eq("mirror is recognised but soft: no name word, no query word", [lum.variantKeys, lum.nameTokens, lum.queries[0]], [["mirror"], ["Luminous", "Energy"], "Luminous Energy 190/190 Shiny Treasure ex Japanese"]);
+eq("mirror is recognised but soft: no name word, no query word", [lum.variantKeys, lum.nameTokens, lum.queries[0]], [["mirror"], ["Luminous", "Energy"], "Luminous Energy 190/190 Japanese"]);
 eq("…and a sale need not say mirror", evaluateCard(lum, [comp("Luminous Energy 190/190 Shiny Treasure ex Japanese", 2), comp("Luminous Energy Mirror Holo 190/190 sv4a", 2.5)]).n_comps, 2);
 eq("an unplaced bracket is never a required word", planCard(normaliseCard({ name: "Pikachu (Rainbow Swirl Foil)", number: "025/165" })).nameTokens, ["Pikachu"]);
 eq("…but Unown keeps its letter", planCard(normaliseCard({ name: "Unown (E)", number: "E/28" })).baseName, "Unown (E)");
