@@ -11,6 +11,8 @@ import { queueOf, displayOrder, pilePositions, pileOf } from "./lab-copies.js";
 import { renderListing } from "./listing-template.js";
 
 export const PAGE_SIZE = 50;
+/** Page sizes on offer; 0 is "all", for a run small enough to want on one screen. */
+export const PAGE_SIZES = [25, 50, 100, 200, 0];
 
 export const STATUSES = [
   ["live", "Live"],
@@ -114,11 +116,50 @@ export function matchesSearch(row, q) {
   return words.every((w) => row.search.includes(w));
 }
 
-export const EMPTY_FILTERS = { q: "", status: "", condition: "", pile: "", language: "", subtype: "", waiting: false };
+export const EMPTY_FILTERS = {
+  q: "", status: "", condition: "", pile: "", language: "", subtype: "", waiting: false,
+  set: "", minPrice: "", maxPrice: "", vsMarket: "", multi: false, added: "", game: ""
+};
 
-export function filterRows(rows, f = EMPTY_FILTERS) {
+/** Price against the sold-comps figure: the question a repricing pass starts from. */
+export const VS_MARKET = [
+  ["under", "Priced under market"],
+  ["over", "Priced over market"],
+  ["match", "At market (±10%)"],
+  ["none", "No market figure"]
+];
+export const ADDED = [["1d", "Today"], ["7d", "Last 7 days"], ["30d", "Last 30 days"]];
+const ADDED_MS = { "1d": 86400e3, "7d": 7 * 86400e3, "30d": 30 * 86400e3 };
+
+/** Price less market, in pence and as a share of market — or null when either is missing. */
+export function marketGap(row) {
+  if (row?.pricePence == null || row?.marketPence == null || row.marketPence <= 0) return null;
+  const pence = row.pricePence - row.marketPence;
+  return { pence, pct: Math.round((pence / row.marketPence) * 100) };
+}
+
+function vsMarketOf(row) {
+  const g = marketGap(row);
+  if (!g) return "none";
+  if (Math.abs(g.pct) <= 10) return "match";
+  return g.pence < 0 ? "under" : "over";
+}
+
+/** A row's game, as the TCG column reads it. */
+export const gameOf = (row) => [row.listing?.card?.game, row.language].filter(Boolean).join(" ");
+
+export function filterRows(rows, f = EMPTY_FILTERS, now = Date.now()) {
+  const min = parsePence(f.minPrice);
+  const max = parsePence(f.maxPrice);
   return (rows || []).filter((r) =>
     matchesSearch(r, f.q) &&
+    (!f.set || r.set === f.set) &&
+    (!f.game || gameOf(r) === f.game) &&
+    (min == null || (r.pricePence != null && r.pricePence >= min)) &&
+    (max == null || (r.pricePence != null && r.pricePence <= max)) &&
+    (!f.vsMarket || vsMarketOf(r) === f.vsMarket) &&
+    (!f.multi || r.total > 1) &&
+    (!f.added || (r.addedAt && now - Date.parse(r.addedAt) <= (ADDED_MS[f.added] || Infinity))) &&
     (!f.status || r.status === f.status) &&
     (!f.condition || r.condition === f.condition) &&
     (!f.pile || r.piles.includes(f.pile)) &&
@@ -128,11 +169,38 @@ export function filterRows(rows, f = EMPTY_FILTERS) {
   );
 }
 
-/** Sort. A row with no price sorts LAST in both price directions — never as £0. */
+const CONDITION_RANK = { NM: 0, LP: 1, MP: 2, HP: 3, DMG: 4 };
+/** "074/165" → [74, 165], "SV-P 12" → [12, 0]: a number that sorts as a number. */
+const numberKey = (n) => { const m = String(n || "").match(/(\d+)(?:\D+(\d+))?/); return m ? Number(m[1]) * 10000 + Number(m[2] || 0) : null; };
+
+/**
+ * The sorts the screen offers, by column. Text sorts natural ("TEST5-2" before
+ * "TEST5-10"); set sorts by set, then by number within it.
+ */
+export const SORT_FIELDS = [
+  ["added", "Date added"], ["name", "Name"], ["set", "Set & number"], ["sku", "SKU"], ["condition", "Condition"],
+  ["price", "Price"], ["market", "Market"], ["gap", "Price vs market (£)"], ["gappct", "Price vs market (%)"], ["forsale", "Quantity"]
+];
+
+/** Sort. A row with no value (no price, no market) sorts LAST in both directions — never as 0. */
 export function sortRows(rows, key = "added-desc") {
   const [field, dir] = String(key).split("-");
   const sign = dir === "asc" ? 1 : -1;
-  const val = (r) => (field === "price" ? r.pricePence : field === "added" ? r.addedAt : field === "name" ? r.title : field === "forsale" ? r.forSale : null);
+  const val = (r) => {
+    switch (field) {
+      case "price": return r.pricePence;
+      case "market": return r.marketPence;
+      case "gap": return marketGap(r)?.pence ?? null;
+      case "gappct": return marketGap(r)?.pct ?? null;
+      case "added": return r.addedAt;
+      case "name": return r.name || r.title;
+      case "set": return r.set ? `${r.set}\u0000${String(numberKey(r.number) ?? "").padStart(12, "0")}` : null;
+      case "sku": return r.copies?.[0]?.sku ?? null;
+      case "condition": return CONDITION_RANK[r.condition] ?? null;
+      case "forsale": return r.forSale;
+      default: return null;
+    }
+  };
   return (rows || []).slice().sort((a, b) => {
     const va = val(a);
     const vb = val(b);
@@ -145,6 +213,7 @@ export function sortRows(rows, key = "added-desc") {
 }
 
 export function pageOf(rows, page, size = PAGE_SIZE) {
+  if (!size) return { rows: rows || [], page: 1, pages: 1, total: (rows || []).length };
   const pages = Math.max(1, Math.ceil((rows || []).length / size));
   const p = Math.min(Math.max(1, page || 1), pages);
   return { rows: rows.slice((p - 1) * size, p * size), page: p, pages, total: rows.length };
@@ -159,6 +228,63 @@ export function facets(rows) {
     languages: uniq(rows.map((r) => r.language)),
     subtypes: uniq(rows.map((r) => r.subtype))
   };
+}
+
+/**
+ * Filter options WITH counts, for the dropdowns ("TEST5 (46)"). Counted over
+ * the rows given — the screen passes the rows every OTHER filter already
+ * allows, so a count says what picking that option would show.
+ */
+export function facetCounts(rows) {
+  const count = (vals) => {
+    const m = new Map();
+    for (const v of vals) if (v) m.set(v, (m.get(v) || 0) + 1);
+    return [...m.entries()].sort((a, b) => String(a[0]).localeCompare(String(b[0]), undefined, { numeric: true }));
+  };
+  return {
+    sets: count(rows.map((r) => r.set)),
+    conditions: count(rows.map((r) => r.condition)).sort((a, b) => (CONDITION_RANK[a[0]] ?? 9) - (CONDITION_RANK[b[0]] ?? 9)),
+    piles: count(rows.flatMap((r) => r.piles)),
+    languages: count(rows.map((r) => r.language)),
+    subtypes: count(rows.map((r) => r.subtype)),
+    games: count(rows.map(gameOf)),
+    vsMarket: count(rows.map(vsMarketOf))
+  };
+}
+
+/** What the rows on screen add up to: listings, copies for sale, and their worth at price and at market. */
+export function viewTotals(rows) {
+  const t = { listings: 0, copies: 0, price: 0, market: 0, unmarketed: 0, unpriced: 0 };
+  for (const r of rows || []) {
+    t.listings += 1;
+    t.copies += r.forSale;
+    if (r.pricePence == null) t.unpriced += 1; else t.price += r.pricePence * r.forSale;
+    if (r.marketPence == null) { if (r.forSale > 0) t.unmarketed += 1; } else t.market += r.marketPence * r.forSale;
+  }
+  return t;
+}
+
+/** Columns worth showing: one that says the same thing on every row says nothing. */
+export function columnsFor(rows) {
+  const distinct = (f) => new Set((rows || []).map(f).filter((v) => v && v !== "—")).size;
+  return {
+    variant: distinct((r) => r.listing?.card?.finish) > 0,
+    tcg: distinct(gameOf) > 1,
+    subtype: distinct((r) => r.subtype) > 0
+  };
+}
+
+/** The filters in force, each as a chip with how to clear it. */
+export function activeChips(f) {
+  const chips = [];
+  const label = { status: "Status", condition: "Condition", pile: "Pile", language: "Language", subtype: "Subtype", set: "Set", game: "TCG" };
+  for (const k of Object.keys(label)) if (f[k]) chips.push({ key: k, text: `${label[k]}: ${k === "status" ? (STATUSES.find(([v]) => v === f[k])?.[1] || f[k]) : f[k]}`, clear: { [k]: "" } });
+  if (f.minPrice || f.maxPrice) chips.push({ key: "price", text: `Price ${f.minPrice ? `£${f.minPrice}` : "any"}–${f.maxPrice ? `£${f.maxPrice}` : "any"}`, clear: { minPrice: "", maxPrice: "" } });
+  if (f.vsMarket) chips.push({ key: "vsMarket", text: VS_MARKET.find(([v]) => v === f.vsMarket)?.[1] || f.vsMarket, clear: { vsMarket: "" } });
+  if (f.added) chips.push({ key: "added", text: `Added: ${ADDED.find(([v]) => v === f.added)?.[1] || f.added}`, clear: { added: "" } });
+  if (f.multi) chips.push({ key: "multi", text: "2+ copies", clear: { multi: false } });
+  if (f.waiting) chips.push({ key: "waiting", text: "Sold, to pick", clear: { waiting: false } });
+  return chips;
 }
 
 /**

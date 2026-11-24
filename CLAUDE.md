@@ -323,7 +323,11 @@ stream` (the relay, only while streaming).
   shows next, a buyer shown a different copy flagged, notifications and the
   sweep touching only listings that changed, templates (the photo promise
   always appended, CardUploader's `/catalog/` database image never a scan),
-  the inventory view, and greps that nothing outside the lab reads its tables.
+  the inventory view (filters by set, price range, price against market, 2+
+  copies and date added; sorts by set-then-number, natural SKU, condition and
+  the gap to market, a missing value last both ways; facet counts, on-screen
+  totals, and a column that says the same on every row hidden), and greps
+  that nothing outside the lab reads its tables.
 - `scripts/check-labstacks.mjs` — the lab folded into the stacks
   (`docs/LAB_FOLD.md`): a lab copy is a stack card with `lab_listing_id`, in a
   `LAB-<pile>` stack no filing plan may choose; the move is idempotent, adopts

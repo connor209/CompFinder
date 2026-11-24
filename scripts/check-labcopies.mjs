@@ -235,6 +235,35 @@ const line = (id, item, qty, date) => ({ line_item_id: id, order_id: `o-${id}`, 
   eq("one price for all: same price is left alone", I.pricePlan([rows[0]], { mode: "exact", pence: 249 })[0].skip, "already that price");
   eq("a typed price reads as pence; junk and zero don't", [I.parsePence("£12.49"), I.parsePence("12"), I.parsePence("0"), I.parsePence("1.234")], [1249, 1200, null, null]);
   eq("filter options are built from the rows", I.facets(rows).languages, ["English", "Japanese"]);
+  // ---- the inventory's filters and sorts, 2026-11-24 ----
+  const R = (id, o) => ({ id, title: o.name || id, name: o.name || id, number: o.number || "", set: o.set || "", language: o.language || "Japanese", condition: o.condition || "NM",
+    subtype: "", status: "live", forSale: o.forSale ?? 1, waiting: 0, picked: 0, total: o.total ?? 1, pricePence: o.price ?? null, marketPence: o.market ?? null,
+    addedAt: o.addedAt || "2026-11-24T10:00:00Z", piles: ["TEST5"], copies: [{ sku: o.sku || `${id}-1` }], listing: { card: { game: o.game || "Pokémon TCG" } }, search: (o.name || id).toLowerCase() });
+  const inv = [
+    R("a", { name: "Zubat", set: "Dark Phantasma", number: "041/071", price: 249, market: 399, sku: "TEST5-10", condition: "LP" }),
+    R("b", { name: "Entei", set: "Shiny Treasure ex", number: "028/190", price: 499, market: 249, sku: "TEST5-2" }),
+    R("c", { name: "Palafin", set: "Shiny Treasure ex", number: "047/190", price: 249, market: 249, sku: "TEST5-1", total: 2, forSale: 2 }),
+    R("d", { name: "Honchkrow", set: "Dark Phantasma", number: "045/071", price: 249, market: null, sku: "TEST5-11", addedAt: "2026-10-01T10:00:00Z" })
+  ];
+  const NOWI = Date.parse("2026-11-24T12:00:00Z");
+  const F = (patch) => I.filterRows(inv, { ...I.EMPTY_FILTERS, ...patch }, NOWI).map((r) => r.id);
+  eq("filter: a set", F({ set: "Dark Phantasma" }), ["a", "d"]);
+  eq("filter: a price range, unpriced never inside one", [F({ minPrice: "3" }), F({ maxPrice: "2.49" })], [["b"], ["a", "c", "d"]]);
+  eq("filter: price against market", [F({ vsMarket: "under" }), F({ vsMarket: "over" }), F({ vsMarket: "match" }), F({ vsMarket: "none" })], [["a"], ["b"], ["c"], ["d"]]);
+  eq("filter: 2+ copies, added this week", [F({ multi: true }), F({ added: "7d" })], [["c"], ["a", "b", "c"]]);
+  eq("the gap: price less market, and as a share of it", [I.marketGap(inv[0]), I.marketGap(inv[3])], [{ pence: -150, pct: -38 }, null]);
+  const S = (k) => I.sortRows(inv, k).map((r) => r.id);
+  eq("sort: set, then number within it", S("set-asc"), ["a", "d", "b", "c"]);
+  eq("sort: SKU, naturally (TEST5-2 before TEST5-10)", S("sku-asc"), ["c", "b", "a", "d"]);
+  eq("sort: furthest under market first; no market last both ways", [S("gappct-asc"), S("gappct-desc")], [["a", "c", "b", "d"], ["b", "c", "a", "d"]]);
+  eq("sort: condition, best first", S("condition-asc")[3], "a");
+  eq("facet counts", I.facetCounts(inv).sets, [["Dark Phantasma", 2], ["Shiny Treasure ex", 2]]);
+  eq("what the rows on screen come to", I.viewTotals(inv), { listings: 4, copies: 5, price: 249 + 499 + 498 + 249, market: 399 + 249 + 498, unmarketed: 1, unpriced: 0 });
+  eq("a column that says the same on every row is hidden", I.columnsFor(inv), { variant: false, tcg: false, subtype: false });
+  eq("…and shown when it tells rows apart", I.columnsFor([...inv, R("e", { game: "Yu-Gi-Oh!" })]).tcg, true);
+  eq("the filters in force, as chips", I.activeChips({ ...I.EMPTY_FILTERS, set: "Dark Phantasma", minPrice: "3", vsMarket: "under", multi: true }).map((c) => c.text),
+    ["Set: Dark Phantasma", "Price £3–any", "Priced under market", "2+ copies"]);
+  eq("all on one page", I.pageOf(inv, 1, 0).rows.length, 4);
 }
 
 // ---- apply template, all copies, the CSV -------------------------------------------------

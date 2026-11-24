@@ -2,8 +2,9 @@
 
 import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import {
-  inventoryRows, filterRows, sortRows, pageOf, facets, actionable, parsePence, pricePlan, templatePlan,
-  copyRows, isEmptyRow, inventoryCsv, EMPTY_FILTERS, STATUSES, PAGE_SIZE
+  inventoryRows, filterRows, sortRows, pageOf, actionable, parsePence, pricePlan, templatePlan,
+  copyRows, isEmptyRow, inventoryCsv, EMPTY_FILTERS, STATUSES, PAGE_SIZES, SORT_FIELDS,
+  facetCounts, viewTotals, columnsFor, activeChips, marketGap, VS_MARKET, ADDED, gameOf
 } from "@/lib/lab-inventory.js";
 import { removeBlocker } from "@/lib/lab-copies.js";
 import { LAB_TABLE_CSS as CSS } from "../labTableCss";
@@ -19,7 +20,11 @@ const gbp = (p) => (p == null ? "—" : `£${(p / 100).toFixed(2)}`);
 const gbpBig = (p) => `£${(p / 100).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const STATUS_LABEL = { live: "Live", soldout: "Sold out", ended: "Ended" };
 const STATE_LABEL = { next: "Next to sell", queued: "Queued", sold: "Sold · to pick", picked: "Picked" };
-const SORT_FIELDS = [["added", "Date added"], ["price", "Price"], ["name", "Name"], ["forsale", "Quantity"]];
+/** The screen's own choices, remembered on this device: filters, sort, view, page size. */
+const VIEW_KEY = "cf-lab-inventory-view-v1";
+function loadView() {
+  try { return JSON.parse(localStorage.getItem(VIEW_KEY) || "null") || {}; } catch { return {}; }
+}
 
 function ago(iso) {
   if (!iso) return "—";
@@ -43,6 +48,9 @@ export default function LabInventory() {
   const [hideEmpty, setHideEmpty] = useState(true);
   const [grouped, setGrouped] = useState(true);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [viewLoaded, setViewLoaded] = useState(false);
+  const searchRef = useRef(null);
   const [open, setOpen] = useState(() => new Set());
   const [ticked, setTicked] = useState(() => new Set());
   const [panel, setPanel] = useState(null); // null | "filter" | "price" | "template"
@@ -59,6 +67,31 @@ export default function LabInventory() {
 
   const reload = useCallback(async () => setLab(await api()), []);
   useEffect(() => { reload(); }, [reload]);
+  // Remembered between visits on this device — the search box is not.
+  useEffect(() => {
+    const v = loadView();
+    if (v.f) setF({ ...EMPTY_FILTERS, ...v.f, q: "" });
+    if (v.sortField && SORT_FIELDS.some(([k]) => k === v.sortField)) setSortField(v.sortField);
+    if (v.sortDir === "asc" || v.sortDir === "desc") setSortDir(v.sortDir);
+    if (typeof v.hideEmpty === "boolean") setHideEmpty(v.hideEmpty);
+    if (typeof v.grouped === "boolean") setGrouped(v.grouped);
+    if (PAGE_SIZES.includes(v.pageSize)) setPageSize(v.pageSize);
+    setViewLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!viewLoaded) return;
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ f: { ...f, q: "" }, sortField, sortDir, hideEmpty, grouped, pageSize })); } catch { /* blocked: nothing remembered */ }
+  }, [viewLoaded, f, sortField, sortDir, hideEmpty, grouped, pageSize]);
+  // "/" puts you in the search box, as it does on most tables.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "/" || /^(input|textarea|select)$/i.test(e.target?.tagName || "")) return;
+      e.preventDefault();
+      searchRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
   useEffect(() => {
     if (!menu) return undefined;
     const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(null); };
@@ -73,8 +106,25 @@ export default function LabInventory() {
     rows = sortRows(rows, `${sortField}-${sortDir}`);
     return grouped ? rows : copyRows(rows);
   }, [all, f, q, hideEmpty, grouped, sortField, sortDir]);
-  const view = pageOf(matched, page);
-  const fc = useMemo(() => facets(all), [all]);
+  const view = pageOf(matched, page, pageSize);
+  // Each dropdown's counts are over the rows every OTHER filter allows, so a
+  // count says exactly what picking that option would show.
+  const base = useMemo(() => (hideEmpty ? all.filter((r) => !isEmptyRow(r)) : all), [all, hideEmpty]);
+  const fc = useMemo(() => {
+    const without = (keys) => filterRows(base, { ...f, q, ...Object.fromEntries(keys.map((k) => [k, EMPTY_FILTERS[k]])) });
+    return {
+      sets: facetCounts(without(["set"])).sets,
+      conditions: facetCounts(without(["condition"])).conditions,
+      piles: facetCounts(without(["pile"])).piles,
+      languages: facetCounts(without(["language"])).languages,
+      subtypes: facetCounts(without(["subtype"])).subtypes,
+      games: facetCounts(without(["game"])).games,
+      vsMarket: Object.fromEntries(facetCounts(without(["vsMarket"])).vsMarket)
+    };
+  }, [base, f, q]);
+  const cols = useMemo(() => columnsFor(all), [all]);
+  const chips = activeChips(f);
+  const vt = useMemo(() => viewTotals(grouped ? matched : [...new Map(matched.map((r) => [r.listingRowId, all.find((a) => a.id === r.listingRowId)])).values()].filter(Boolean)), [matched, grouped, all]);
   // Bulk actions are on LISTINGS, and only in grouped view: a copy row stands
   // for one card, and "end listing" from a ticked copy would end its siblings.
   const onScreen = grouped ? actionable(ticked, view.rows) : [];
@@ -82,7 +132,7 @@ export default function LabInventory() {
   const settings = lab?.listingSettings || null;
   const settingsSaved = Boolean(lab?.listingSettingsSaved);
 
-  useEffect(() => { setPage(1); }, [q, f.status, f.condition, f.pile, f.language, f.subtype, f.waiting, sortField, sortDir, hideEmpty, grouped]);
+  useEffect(() => { setPage(1); }, [q, f, sortField, sortDir, hideEmpty, grouped, pageSize]);
 
   const totals = useMemo(() => {
     const live = all.filter((r) => r.status !== "ended");
@@ -105,7 +155,18 @@ export default function LabInventory() {
   const tick = (id, on) => setTicked((t) => { const n = new Set(t); if (on) n.add(String(id)); else n.delete(String(id)); return n; });
   const toggleOpen = (id) => setOpen((o) => { const n = new Set(o); if (n.has(String(id))) n.delete(String(id)); else n.add(String(id)); return n; });
   const allOnPage = grouped && view.rows.length > 0 && view.rows.every((r) => ticked.has(String(r.id)));
-  const activeFilters = ["status", "condition", "pile", "language", "subtype"].filter((k) => f[k]).length + (f.waiting ? 1 : 0);
+  const activeFilters = chips.length;
+  // Clicking a column heading sorts by it; clicking it again turns it round.
+  const sortBy = (field, firstDir = "asc") => {
+    if (sortField === field) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortField(field); setSortDir(firstDir); }
+  };
+  const Th = ({ field, children, className = "", firstDir = "asc", title }) => (
+    <th className={`${className} li-sortable ${sortField === field ? "on" : ""}`} aria-sort={sortField === field ? (sortDir === "asc" ? "ascending" : "descending") : "none"} title={title}>
+      <button onClick={() => sortBy(field, firstDir)}>{children}<span className="li-arrow">{sortField === field ? (sortDir === "asc" ? "↑" : "↓") : "↕"}</span></button>
+    </th>
+  );
+  const ncols = 11 + (cols.variant ? 1 : 0) + (cols.tcg ? 1 : 0);
 
   function finish(r, verb) {
     if (!r.ok) { setMsg({ bad: true, text: r.error || "That didn't work." }); return; }
@@ -186,12 +247,15 @@ export default function LabInventory() {
       <button className="li-icon" disabled={view.page <= 1} onClick={() => setPage(view.page - 1)} aria-label="Previous page">‹</button>
       Page {view.page} of {view.pages}
       <button className="li-icon" disabled={view.page >= view.pages} onClick={() => setPage(view.page + 1)} aria-label="Next page">›</button>
+      <select className="li-select li-small" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} aria-label="Rows a page">
+        {PAGE_SIZES.map((n) => <option key={n} value={n}>{n ? `${n} a page` : "All"}</option>)}
+      </select>
     </span>
   );
 
   return (
     <main className="li-wrap">
-      <style>{CSS}</style>
+      <style>{CSS + INV_CSS}</style>
 
       {/* ---------------- Header ---------------- */}
       <div className="li-head">
@@ -215,7 +279,13 @@ export default function LabInventory() {
 
       {/* ---------------- Toolbar ---------------- */}
       <div className="li-toolbar">
-        <input className="li-search" placeholder="Search name, title, SKU, set, eBay item…" value={f.q} onChange={(e) => setFilter({ q: e.target.value })} />
+        <input ref={searchRef} className="li-search" placeholder="Search name, set, number, SKU, eBay item…  ( / )" value={f.q} onChange={(e) => setFilter({ q: e.target.value })} />
+        {fc.sets.length > 1 && (
+          <select className="li-select" value={f.set} onChange={(e) => setFilter({ set: e.target.value })} aria-label="Set">
+            <option value="">Set: All</option>
+            {fc.sets.map(([v, n]) => <option key={v} value={v}>{v} ({n})</option>)}
+          </select>
+        )}
         <select className="li-select" value={f.status} onChange={(e) => setFilter({ status: e.target.value })}>
           <option value="">Status: All</option>
           {STATUSES.map(([k, l]) => <option key={k} value={k}>Status: {l}</option>)}
@@ -239,37 +309,70 @@ export default function LabInventory() {
       </div>
 
       {panel === "filter" && (
-        <div className="li-panel">
+        <div className="li-panel li-filters">
           {fc.conditions.length > 0 && (
             <label>Condition
               <select value={f.condition} onChange={(e) => setFilter({ condition: e.target.value })}>
-                <option value="">Any</option>{fc.conditions.map((c) => <option key={c}>{c}</option>)}
+                <option value="">Any</option>{fc.conditions.map(([v, n]) => <option key={v} value={v}>{v} ({n})</option>)}
               </select>
             </label>
           )}
           {fc.piles.length > 0 && (
             <label>Pile
               <select value={f.pile} onChange={(e) => setFilter({ pile: e.target.value })}>
-                <option value="">Any</option>{fc.piles.map((c) => <option key={c}>{c}</option>)}
+                <option value="">Any</option>{fc.piles.map(([v, n]) => <option key={v} value={v}>{v} ({n})</option>)}
               </select>
             </label>
           )}
           {fc.languages.length > 0 && (
             <label>Language
               <select value={f.language} onChange={(e) => setFilter({ language: e.target.value })}>
-                <option value="">Any</option>{fc.languages.map((c) => <option key={c}>{c}</option>)}
+                <option value="">Any</option>{fc.languages.map(([v, n]) => <option key={v} value={v}>{v} ({n})</option>)}
+              </select>
+            </label>
+          )}
+          {fc.games.length > 1 && (
+            <label>TCG
+              <select value={f.game} onChange={(e) => setFilter({ game: e.target.value })}>
+                <option value="">Any</option>{fc.games.map(([v, n]) => <option key={v} value={v}>{v} ({n})</option>)}
               </select>
             </label>
           )}
           {fc.subtypes.length > 0 && (
             <label>Subtype
               <select value={f.subtype} onChange={(e) => setFilter({ subtype: e.target.value })}>
-                <option value="">Any</option>{fc.subtypes.map((c) => <option key={c}>{c}</option>)}
+                <option value="">Any</option>{fc.subtypes.map(([v, n]) => <option key={v} value={v}>{v} ({n})</option>)}
               </select>
             </label>
           )}
+          <label>Price
+            <span className="li-range">
+              <input className="li-num" inputMode="decimal" placeholder="£ min" value={f.minPrice} onChange={(e) => setFilter({ minPrice: e.target.value })} />
+              <span>–</span>
+              <input className="li-num" inputMode="decimal" placeholder="£ max" value={f.maxPrice} onChange={(e) => setFilter({ maxPrice: e.target.value })} />
+            </span>
+          </label>
+          <label>vs market
+            <select value={f.vsMarket} onChange={(e) => setFilter({ vsMarket: e.target.value })}>
+              <option value="">Any</option>
+              {VS_MARKET.map(([k, l]) => <option key={k} value={k}>{l} ({fc.vsMarket[k] || 0})</option>)}
+            </select>
+          </label>
+          <label>Added
+            <select value={f.added} onChange={(e) => setFilter({ added: e.target.value })}>
+              <option value="">Any time</option>
+              {ADDED.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            </select>
+          </label>
+          <label className="li-check"><input type="checkbox" checked={f.multi} onChange={(e) => setFilter({ multi: e.target.checked })} /> 2+ copies</label>
           <label className="li-check"><input type="checkbox" checked={f.waiting} onChange={(e) => setFilter({ waiting: e.target.checked })} /> Sold, waiting to be picked</label>
-          {activeFilters > 0 && <button className="li-btn" onClick={() => setF({ ...EMPTY_FILTERS, q: f.q })}>Clear filters</button>}
+        </div>
+      )}
+
+      {chips.length > 0 && (
+        <div className="li-chips">
+          {chips.map((c) => <button key={c.key} className="li-fchip" onClick={() => setFilter(c.clear)} title="Remove this filter">{c.text} ✕</button>)}
+          <button className="li-link" onClick={() => setF({ ...EMPTY_FILTERS, q: f.q })}>Clear all</button>
         </div>
       )}
 
@@ -289,7 +392,10 @@ export default function LabInventory() {
             </>
           ) : <span className="li-dim">One row per copy. Switch to Grouped to change listings.</span>}
           <span className="li-spacer" />
-          <span className="li-dim">{view.total.toLocaleString("en-GB")} {grouped ? "listing" : "cop"}{grouped ? (view.total === 1 ? "" : "s") : view.total === 1 ? "y" : "ies"}</span>
+          <span className="li-dim li-viewtot" title="What the rows matching your search and filters add up to, across every page">
+            {view.total.toLocaleString("en-GB")} {grouped ? "listing" : "cop"}{grouped ? (view.total === 1 ? "" : "s") : view.total === 1 ? "y" : "ies"}
+            {grouped && <> · {vt.copies} for sale · <b>{gbpBig(vt.price)}</b> at price · {gbpBig(vt.market)} at market{vt.unmarketed ? "*" : ""}</>}
+          </span>
           <Pager />
         </div>
 
@@ -344,23 +450,24 @@ export default function LabInventory() {
             <thead>
               <tr>
                 <th className="li-cb">{grouped && <input type="checkbox" checked={allOnPage} aria-label="Tick this page" onChange={(e) => setTicked((t) => { const n = new Set(t); for (const r of view.rows) { if (e.target.checked) n.add(String(r.id)); else n.delete(String(r.id)); } return n; })} />}</th>
-                <th>Card</th>
+                <Th field="name">Card</Th>
                 <th className="sm-hide">Status</th>
-                <th>SKU</th>
+                <Th field="sku">SKU</Th>
                 <th className="sm-hide">eBay item</th>
-                <th>Condition</th>
-                <th className="sm-hide">Variant</th>
-                <th className="sm-hide">TCG</th>
-                <th className="r">Price</th>
-                <th className="r sm-hide">Market</th>
-                <th className="r">Qty</th>
-                <th className="sm-hide">Added</th>
+                <Th field="condition">Cond.</Th>
+                {cols.variant && <th className="sm-hide">Variant</th>}
+                {cols.tcg && <th className="sm-hide">TCG</th>}
+                <Th field="price" className="r" firstDir="desc">Price</Th>
+                <Th field="market" className="r sm-hide" firstDir="desc">Market</Th>
+                <Th field="gappct" className="r sm-hide" title="Your price against the sold-comps figure. Red: under market. Click to sort.">vs mkt</Th>
+                <Th field="forsale" className="r" firstDir="desc">Qty</Th>
+                <Th field="added" className="sm-hide" firstDir="desc">Added</Th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {view.rows.length === 0 && (
-                <tr><td colSpan={13} className="li-empty">{all.length ? "Nothing matches." : "No lab listings yet."}</td></tr>
+                <tr><td colSpan={ncols} className="li-empty">{all.length ? <>Nothing matches. {chips.length > 0 && <button className="li-link" onClick={() => setF({ ...EMPTY_FILTERS })}>Clear the search and filters</button>}</> : "No lab listings yet."}</td></tr>
               )}
               {view.rows.map((r) => {
                 const c1 = grouped ? null : r.copy;
@@ -368,7 +475,8 @@ export default function LabInventory() {
                 const isOpen = open.has(String(r.id));
                 const pic = c1 ? c1.scan_urls?.[0] : r.picture;
                 const variant = r.listing?.card?.finish || "—";
-                const tcg = [r.listing?.card?.game, r.language].filter(Boolean).join(" ") || "—";
+                const tcg = gameOf(r) || "—";
+                const gap = marketGap(r);
                 return (
                   <Fragment key={r.id}>
                   <tr className={r.status === "ended" ? "ended" : ""}>
@@ -400,10 +508,14 @@ export default function LabInventory() {
                     </td>
                     <td className="mono sm-hide">{r.itemId ? <a href={`https://www.ebay.co.uk/itm/${r.itemId}`} target="_blank" rel="noreferrer">{r.itemId}</a> : "—"}</td>
                     <td><b>{r.condition}</b></td>
-                    <td className="sm-hide">{variant}</td>
-                    <td className="sm-hide">{tcg}</td>
+                    {cols.variant && <td className="sm-hide">{variant}</td>}
+                    {cols.tcg && <td className="sm-hide">{tcg}</td>}
                     <td className="r price">{gbp(r.pricePence)}</td>
                     <td className="r sm-hide" title={r.marketAt ? `Sold comps, ${new Date(r.marketAt).toLocaleDateString("en-GB")}` : "No sold-comps price recorded"}>{gbp(r.marketPence)}</td>
+                    <td className={`r sm-hide li-gap ${gap ? (Math.abs(gap.pct) <= 10 ? "even" : gap.pence < 0 ? "under" : "over") : ""}`}
+                      title={gap ? `${gap.pence < 0 ? "Under" : "Over"} market by £${(Math.abs(gap.pence) / 100).toFixed(2)}` : "No market figure to compare"}>
+                      {gap ? `${gap.pct > 0 ? "+" : ""}${gap.pct}%` : "—"}
+                    </td>
                     <td className="r">
                       {c1 ? (c1.state === "next" || c1.state === "queued" ? 1 : 0) : r.forSale}
                       {!c1 && r.waiting > 0 && <small className="li-warn">{r.waiting} to pick</small>}
@@ -437,7 +549,7 @@ export default function LabInventory() {
                       </td>
                       <td className="sm-hide"><span className={`li-status s-${c.state}`}>{c.onShow ? "On eBay now" : STATE_LABEL[c.state]}</span></td>
                       <td className="mono">{c.sku}<small>{c.position ? `pile ${c.pile} #${c.position}` : `pile ${c.pile}`}</small></td>
-                      <td className="sm-hide" /><td /><td className="sm-hide" /><td className="sm-hide" /><td /><td className="sm-hide" /><td /><td className="sm-hide" />
+                      <td className="sm-hide" /><td />{cols.variant && <td className="sm-hide" />}{cols.tcg && <td className="sm-hide" />}<td /><td className="sm-hide" /><td className="sm-hide" /><td /><td className="sm-hide" />
                       <td className="li-menucell">
                         {!removeBlocker(c, r.listing, lab.copies) && <button className="li-chip" disabled={busy} onClick={() => removeCopy(r, c)}>✕ Remove</button>}
                         {c.state === "sold" && <button className="li-chip" disabled={busy} onClick={() => releaseCopy(c)} title="Only for a CANCELLED order: the copy goes back into its queue">Release</button>}
@@ -450,8 +562,28 @@ export default function LabInventory() {
             </tbody>
           </table>
         </div>
-        {view.pages > 1 && <div className="li-foot"><span className="li-dim">{PAGE_SIZE} a page</span><Pager /></div>}
+        {view.pages > 1 && <div className="li-foot"><span className="li-dim">{view.total} in all</span><Pager /></div>}
       </div>
     </main>
   );
 }
+
+const INV_CSS = `
+.li-sortable button { font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit; background: none; border: 0; padding: 0; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; }
+.li-sortable.r button { justify-content: flex-end; width: 100%; }
+.li-sortable.on { color: var(--ink); }
+.li-arrow { opacity: .35; font-size: 10px; }
+.li-sortable.on .li-arrow { opacity: 1; color: var(--accent); }
+.li-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.li-fchip { font: inherit; font-size: 12px; border: 1px solid var(--accent); color: var(--accent); background: transparent; border-radius: 999px; padding: 3px 10px; cursor: pointer; }
+.li-fchip:hover { background: var(--accent); color: var(--accent-ink, #000); }
+.li-filters { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-end; }
+.li-range { display: inline-flex; gap: 6px; align-items: center; }
+.li-range .li-num { width: 74px; }
+.li-small { padding: 3px 6px; font-size: 12px; margin-left: 8px; }
+.li-gap { font-variant-numeric: tabular-nums; }
+.li-gap.under { color: var(--bad); font-weight: 600; }
+.li-gap.over { color: var(--good, #3fb68b); }
+.li-gap.even { color: var(--ink-soft); }
+.li-viewtot b { color: var(--ink); }
+`;
