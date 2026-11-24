@@ -251,6 +251,37 @@ ok("…LP is not", !decide({ nSales: 8, totals: [1500, 1500, 1500, 1500, 1500, 1
 eq("a result carries its decision", typeof fr.decision, "string");
 eq("…and its floor", fr.floor_price, 2.49);
 
+// --- 4c. Cardmarket's bracketed printings (TEST3, 2026-11-24) ------------------
+// "(Master Ball Pattern)" made Master, Ball AND Pattern required words, so a
+// sale titled "Geodude Master Ball Holo 074/165" never counted.
+const geo = planCard(normaliseCard({ name: "Geodude (Master Ball Pattern)", number: "074/165", set: "Pokemon Card 151", language: "Japanese" }));
+eq("a pattern is a variant, not name words", [geo.variantKeys, geo.nameTokens], [["masterBall"], ["Geodude"]]);
+eq("…and the search asks for it", geo.queries[0], "Geodude Master Ball 074/165 Pokemon Card 151 Japanese");
+const gr = evaluateCard(geo, [
+  comp("Geodude (Master Ball Pattern) 074/165 SV2a Pokemon Card 151 Holo Japanese", 6),
+  comp("Geodude Master Ball Holo 074/165 Japanese 151", 7),
+  comp("Geodude Masterball reverse 074/165 sv2a", 8),
+  comp("Geodude 074/165 Pokemon Card 151 Japanese", 0.2)
+]);
+eq("every way of writing it counts; the plain copy doesn't", gr.n_comps, 3);
+ok("…'reverse' on a pattern sale is this card, and it keeps its own title", gr.sales.some((x) => x.title === "Geodude Masterball reverse 074/165 sv2a"));
+ok("…which goes as missingVariant", gr.excluded.some((e) => e.reason === "missingVariant"));
+const plainGeo = evaluateCard(planCard(normaliseCard({ name: "Geodude", number: "074/165", set: "Pokemon Card 151", language: "Japanese" })), [
+  comp("Geodude Master Ball Holo 074/165 Japanese", 7), comp("Geodude Poke Ball 074/165 Japanese", 1.5), comp("Geodude 074/165 Japanese", 0.2)
+]);
+eq("a plain card drops both patterns", plainGeo.n_comps, 1);
+eq("Poke Ball pattern", planCard(normaliseCard({ name: "Machamp (Poke Ball Pattern)", number: "068/165" })).variantKeys, ["pokeBall"]);
+eq("Energy symbol pattern", planCard(normaliseCard({ name: "Team Rocket's Tarountula (Energy Symbol Pattern)", number: "015/193" })).variantKeys, ["energyPattern"]);
+ok("…but an energy card's 'Reverse Holo' is not an energy pattern", !compVariants("Lightning Energy Reverse Holo 091/091").includes("energyPattern"));
+const ball = planCard(normaliseCard({ name: "Master Ball", number: "153/165", set: "151" }));
+eq("the Master Ball TRAINER is not a pattern card", ball.variantKeys, []);
+eq("…and its own sales count", evaluateCard(ball, [comp("Master Ball 153/165 151 Trainer", 1), comp("Master Ball 153/165 Pokemon", 1.2)]).n_comps, 2);
+const lum = planCard(normaliseCard({ name: "Luminous Energy (Mirror Holofoil)", number: "190/190", set: "Shiny Treasure ex", language: "Japanese" }));
+eq("mirror is recognised but soft: no name word, no query word", [lum.variantKeys, lum.nameTokens, lum.queries[0]], [["mirror"], ["Luminous", "Energy"], "Luminous Energy 190/190 Shiny Treasure ex Japanese"]);
+eq("…and a sale need not say mirror", evaluateCard(lum, [comp("Luminous Energy 190/190 Shiny Treasure ex Japanese", 2), comp("Luminous Energy Mirror Holo 190/190 sv4a", 2.5)]).n_comps, 2);
+eq("an unplaced bracket is never a required word", planCard(normaliseCard({ name: "Pikachu (Rainbow Swirl Foil)", number: "025/165" })).nameTokens, ["Pikachu"]);
+eq("…but Unown keeps its letter", planCard(normaliseCard({ name: "Unown (E)", number: "E/28" })).baseName, "Unown (E)");
+
 // --- 5. output ---------------------------------------------------------------
 
 eq("check mode: within £1 and 30% is not a difference", priceDiffers({ suggested_price: 10.49, current_price: 9.99 }).differs, false);

@@ -24,7 +24,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import CardUploaderCsv from "./carduploader.js";
 import { appNameTokens, applyNumberGuards, dropForeignPostage, settingsForText, stripNumberingPrefix } from "./matching.js";
 import { isPromoCard, promoNumber, promoNumberPattern, anyPromoOfPrefix } from "./promo.js";
-import { detectVariants, nameWithoutVariants, queryWordsFor, subjectTextFor, variantExclusion, variantLabel } from "./variants.js";
+import { detectVariants, isReverseKind, nameWithoutVariants, queryWordsFor, subjectTextFor, variantExclusion, variantLabel, withoutReverseWords } from "./variants.js";
 import { housePrice, houseTotal, resolveRules, rulesForGame, conditionCode, decide, gameCode, spreadTooWide } from "./house-pricing.js";
 import { UNPRICED_PENCE } from "./zero-price.js";
 
@@ -173,7 +173,14 @@ export function planCard(card) {
   // The name as eBay sellers write it: no Cardmarket brackets, no variant
   // words (those go into the query on their own terms, and into the filter as
   // a REQUIRED variant rather than a required literal token).
-  const baseName = nameWithoutVariants(card.name).replace(/\[[^\]]*\]/g, " ").replace(/\s{2,}/g, " ").trim() || card.name;
+  // A bracketed aside the variant table could not place ("(Rainbow Foil)")
+  // comes out too: it is reported as unrecognised, and left in it would make
+  // every word in it a REQUIRED name token — "(Master Ball Pattern)" demanded
+  // "Pattern" of every sale and found none. "Unown (E)" keeps its letter.
+  const baseName = nameWithoutVariants(card.name)
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\(([^()]*)\)/g, (m, inner) => (/^[A-Z0-9!?]{1,2}$/i.test(inner.trim()) ? m : " "))
+    .replace(/\s{2,}/g, " ").trim() || card.name;
   const setUsable = card.set && !GENERIC_SET.has(card.set.toLowerCase());
   // A promo's code already names its set, and "Black and White Promos" is
   // nowhere in how anybody titles one — in the query it only shrinks the page.
@@ -357,13 +364,19 @@ function saleOut(c, rules) {
 export function judgeComps(plan, comps) {
   const pre = prefilterComps(plan, comps);
   const guarded = numberGuards(plan, pre.kept);
-  const forEngine = dropForeignPostage(guarded.kept).comps;
+  let forEngine = dropForeignPostage(guarded.kept).comps;
+  // A pattern reverse (Master Ball, Poké Ball): the engine must not read
+  // "reverse" in a sale as another printing. It sees the title without those
+  // words; every comp comes back out with its own title.
+  const pattern = isReverseKind(plan.variantKeys);
+  if (pattern) forEngine = forEngine.map((c) => ({ ...c, _title: c.title, title: withoutReverseWords(c.title) }));
   const rec = CompFinderPricing.recommend(forEngine, plan.settings, plan.nameTokens, "sold", plan.number || null, plan.set);
+  const own = (c) => (pattern && c._title != null ? (({ _title, ...rest }) => ({ ...rest, title: _title }))(c) : c);
   return {
     rec,
     pre,
-    included: rec.included || [],
-    excluded: [...pre.excluded, ...guarded.excluded, ...(rec.excluded || [])]
+    included: (rec.included || []).map(own),
+    excluded: [...pre.excluded, ...guarded.excluded, ...(rec.excluded || []).map(own)]
   };
 }
 

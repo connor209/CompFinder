@@ -33,6 +33,10 @@
  *            comp and a seller spells things every way.
  *   query    words added to the SoldComps search for a card that IS this
  *   engine   core already reads it off the subject text (see above)
+ *   reverseKind  the printing IS a reverse holo, so a sale calling it
+ *            "reverse" is describing this card, not another printing
+ *   soft     a sale need not SAY it (sellers mostly don't); a plain card
+ *            still drops a sale that does
  *   says     the word written into the subject text so core reads it too
  */
 export const VARIANTS = [
@@ -125,6 +129,50 @@ export const VARIANTS = [
     comp: /\bmc\s*donald'?s?\b|\bhappy\s*meal\b|\bmcd\b/i,
     query: "McDonalds"
   },
+  // Pattern reverse holos (151, Prismatic Evolutions, MEGA Dream ex):
+  // Cardmarket writes "(Master Ball Pattern)", "(Poke Ball Pattern)", sellers
+  // write "Master Ball Holo", "Masterball Reverse", "Pokeball". A plain copy
+  // goes for pennies beside a Master Ball one, so both directions matter: the
+  // pattern card requires its pattern, a plain card drops every pattern sale.
+  // "Master Ball" and "Poké Ball" are also TRAINER cards; variantExclusion's
+  // cardName guard stands a variant down when it is the card's own name.
+  {
+    key: "masterBall",
+    reverseKind: true,
+    label: "Master Ball pattern",
+    subject: /\bmaster[\s-]*ball[\s-]*(?:pattern|reverse|holo(?:foil)?|foil|mirror)\b/i,
+    comp: /\bmaster[\s-]*ball\b|\bmasterball\b/i,
+    query: "Master Ball"
+  },
+  {
+    key: "pokeBall",
+    reverseKind: true,
+    label: "Poké Ball pattern",
+    subject: /\bpok[eé][\s-]*ball[\s-]*(?:pattern|reverse|holo(?:foil)?|foil|mirror)\b/i,
+    comp: /\bpok[eé][\s-]*ball\b|\bpokeball\b/i,
+    query: "Poke Ball"
+  },
+  {
+    key: "energyPattern",
+    reverseKind: true,
+    label: "Energy symbol pattern",
+    subject: /\benergy[\s-]*symbol[\s-]*pattern\b/i,
+    // Never bare "energy reverse": "Lightning Energy Reverse Holo" is an energy card.
+    comp: /\benergy[\s-]*(?:symbol|pattern)\b/i,
+    query: "Energy Pattern"
+  },
+  // Japanese "Mirror Holofoil" (Shiny Star V, Shiny Treasure ex, VSTAR
+  // Universe): recognised, so it never becomes a required NAME word, but
+  // SOFT — a sale is not required to say "mirror", because most don't. A plain
+  // card still drops a sale that does.
+  {
+    key: "mirror",
+    label: "Mirror holo",
+    subject: /\bmirror[\s-]*(?:holo(?:foil)?|foil)?\b/i,
+    comp: /\bmirror\b/i,
+    query: "",
+    soft: true
+  },
   {
     key: "ditto",
     label: "Peelable Ditto",
@@ -204,7 +252,7 @@ export function subjectTextFor(keys) {
 
 /** Query words for a card that is these variants. */
 export function queryWordsFor(keys) {
-  return keys.map((k) => BY_KEY[k]).filter(Boolean).map((v) => v.query).join(" ");
+  return keys.map((k) => BY_KEY[k]).filter(Boolean).map((v) => v.query).filter(Boolean).join(" ");
 }
 
 export function variantLabel(key) {
@@ -232,7 +280,7 @@ export function compVariants(title) {
 export function variantExclusion(title, subjectKeys, cardName = "") {
   const named = compVariants(title);
   for (const k of subjectKeys) {
-    if (BY_KEY[k]?.engine) continue;
+    if (BY_KEY[k]?.engine || BY_KEY[k]?.soft) continue;
     if (!named.includes(k)) return { reason: "missingVariant", variant: k };
   }
   for (const k of named) {
@@ -242,4 +290,19 @@ export function variantExclusion(title, subjectKeys, cardName = "") {
     return { reason: "wrongVariant", variant: k };
   }
   return null;
+}
+
+/** Whether a card of these variants is a kind of reverse holo (a pattern). */
+export function isReverseKind(keys) {
+  return (keys || []).some((k) => BY_KEY[k]?.reverseKind);
+}
+
+/**
+ * A comp title with its reverse-holo words taken out, for the ENGINE's eyes
+ * only when the card is a pattern reverse: "Geodude Masterball Reverse Holo"
+ * is this card, and core would otherwise drop it as the reverse printing of a
+ * plain card. The pattern itself is still required by variantExclusion.
+ */
+export function withoutReverseWords(title) {
+  return String(title || "").replace(/\brev(?:erse)?\b[\s.\-]*(?:holo(?:foil)?|foil)?\b/gi, " ").replace(/\s{2,}/g, " ").trim();
 }
