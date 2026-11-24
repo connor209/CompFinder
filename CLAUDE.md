@@ -2999,7 +2999,7 @@ emptied the sheet of exactly the orders about to be packed.
 eBay's dispatched is now read as **label printed**, and done is ours: a pile
 completed on **Pack** writes its orders to `packed_orders` (migration 033,
 named only in `apps/app/lib/packed-store.js`). `fetchPendingOrders` also asks
-for FULFILLED orders touched in the last `LABELLED_WINDOW_DAYS` (7), marked
+for FULFILLED orders touched in the last `LABELLED_WINDOW_DAYS` (3 since 2026-11-24, was 7), marked
 `labelPrinted`, and `sheetLines()` keeps each until it is packed.
 
 - **Unknown is the old behaviour, not a flood.** Migration pending or the read

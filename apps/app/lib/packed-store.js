@@ -21,9 +21,12 @@
  */
 
 /** How far back a label-printed order is still asked about. Labels are printed
- *  the day the piles are made, or the day before; a week covers a weekend away
- *  and keeps the first run after this shipped from dredging up a month. */
-export const LABELLED_WINDOW_DAYS = 7;
+ *  the day the piles are made, or the day before. Three days, not the week it
+ *  was (decided 2026-11-24): this is the pull sheet's slowest eBay read, 3.1–
+ *  3.5s at seven days, and it grows with every day in the window. Three still
+ *  covers a label printed on a Friday and packed on Monday morning; a label
+ *  older than that drops off the sheet, as all of them did before 033. */
+export const LABELLED_WINDOW_DAYS = 3;
 
 /** A packed row is only needed while eBay still hands its order back in that
  *  window. Older rows are swept on the next write. */
