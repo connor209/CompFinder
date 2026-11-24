@@ -10,6 +10,7 @@ import {
   LANGUAGES, DECISION_TEXT, unreadableRows, settleSent
 } from "@/lib/lab-draft.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
+import { PRICING_KEY } from "@/lib/lab-overview.js";
 import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer } from "@/lib/lab-evidence.js";
 
 /**
@@ -164,7 +165,11 @@ export default function LabAdd() {
     const PER_REQUEST = 3;
     const startedAt = Date.now();
     const tally = { done: 0, priced: 0, noPrice: 0, failed: 0, searches: 0, cacheHits: 0 };
-    const show = (current) => setProgress({ ...tally, total: todo.length, startedAt, current });
+    const show = (current) => {
+      setProgress({ ...tally, total: todo.length, startedAt, current });
+      // The lab's overview reads this, in this tab or another.
+      try { localStorage.setItem(PRICING_KEY, JSON.stringify({ done: tally.done, total: todo.length, startedAt, updatedAt: Date.now() })); } catch { /* blocked: the bar here still works */ }
+    };
     for (let i = 0; i < todo.length; i += PER_REQUEST) {
       if (stopRef.current) break;
       const chunk = todo.slice(i, i + PER_REQUEST);
@@ -217,6 +222,7 @@ export default function LabAdd() {
     const stopped = stopRef.current && tally.done < todo.length;
     setPricingIds(new Set());
     setProgress(null);
+    try { localStorage.removeItem(PRICING_KEY); } catch { /* nothing to clear */ }
     setBusy(null);
     refreshView();
     const mins = Math.max(1, Math.round((Date.now() - startedAt) / 60000));

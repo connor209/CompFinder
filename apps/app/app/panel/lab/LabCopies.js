@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import LabOverview from "./LabOverview";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { renderListing } from "@/lib/listing-template.js";
 import { groupsFromItems, desiredFor, pickList, pilePositions, displayOrder, listingForGroup, priceFromComps, listBlockers, removeBlocker, PHOTO_PROMISE } from "@/lib/lab-copies.js";
@@ -315,6 +316,8 @@ export default function LabCopies() {
         A side build. One listing per card and condition at quantity N, showing the copy that goes next. It has its
         own tables, and nothing else in the app reads them. See <code>docs/LAB_COPIES.md</code>.
       </p>
+
+      <LabOverview lab={lab} onReload={reload} />
 
       {/* ---------------- The scorecard: what the test is judged on ---------------- */}
       <section style={box}>

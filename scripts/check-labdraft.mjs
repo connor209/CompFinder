@@ -10,6 +10,7 @@ import {
 } from "../apps/app/lib/lab-draft.js";
 import { groupKey, keyForLanguage, groupsFromItems } from "../apps/app/lib/lab-copies.js";
 import { readFileSync } from "node:fs";
+import { labOverview, PRICING_STALE_MS, JOB_STALE_MS } from "../apps/app/lib/lab-overview.js";
 import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer, EVIDENCE_CAP } from "../apps/app/lib/lab-evidence.js";
 
 let failed = 0;
@@ -206,6 +207,43 @@ eq("…the very same array (it is React state)", settleSent(unchanged, labNow) =
 const route = readFileSync(new URL("../apps/app/app/api/lab/route.js", import.meta.url), "utf8");
 eq("the server lists in after(), with the admin client, and logs each card", [/after\(async/.test(route), /createAdminClient\(\)/.test(route), /"bulk_listed" : "bulk_failed"/.test(route), /"bulk_done"/.test(route)], [true, true, true, true]);
 eq("the page sends jobs, not one request per card", [/action: "createMany"/.test(pageSrc), /action: "create",/.test(pageSrc)], [true, false]);
+
+// ---- the lab overview -------------------------------------------------------------------
+{
+  const NOW = Date.parse("2026-11-24T12:00:00Z");
+  const ago = (min) => new Date(NOW - min * 60000).toISOString();
+  const list = [
+    row({ id: "np" }),                                                   // needs a price, not priced
+    row({ id: "th", pricePence: 349, comps: { pence: 349, decision: "terapeak" } }),
+    row({ id: "rd", pricePence: 349, comps: { pence: 349, decision: "apply" } }),
+    row({ id: "sd", pricePence: 349, result: { pending: true, job: "j-0", sentAt: NOW } }),
+    row({ id: "fl", pricePence: 349, result: { ok: false, error: "x" } }),
+    row({ id: "ls", result: { ok: true } }),
+    row({ id: "ex", excluded: true })
+  ];
+  const lab = {
+    listings: [{ id: "L1", ebay_item_id: "1" }, { id: "L2", ebay_item_id: "2", ended_at: ago(5) }],
+    copies: [{ sku: "A", listing_id: "L1" }, { sku: "B", listing_id: "L1", reserved_line: "x#1" }, { sku: "C", listing_id: "L1", pulled_at: ago(1) }],
+    events: [
+      { kind: "bulk_listed", at: ago(2), detail: { job: "j-0" } }, { kind: "bulk_failed", at: ago(1), detail: { job: "j-0" } },
+      { kind: "bulk_listed", at: ago(30), detail: { job: "j-old" } }, { kind: "bulk_done", at: ago(29), detail: { job: "j-old" } },
+      { kind: "bulk_listed", at: ago(60), detail: { job: "j-stale" } },
+      { kind: "listed", at: ago(3) }, { kind: "joined", at: ago(40) }, { kind: "listed", at: ago(60 * 30) },
+      { kind: "reserved", at: ago(10) }, { kind: "error", at: ago(4) }
+    ]
+  };
+  const o = labOverview({ rows: list, lab, pricing: { done: 3, total: 12, startedAt: NOW - 60000, updatedAt: NOW - 5000 }, now: NOW });
+  eq("the list, by where each card is", [o.draft.rows, o.draft.needsPrice, o.draft.checkFirst, o.draft.ready, o.draft.sending, o.draft.failed, o.draft.listed, o.draft.leftOut, o.draft.toList],
+    [7, 1, 1, 1, 1, 1, 1, 1, 2]);
+  eq("a pricing run in progress, with time left", [o.pricing.done, o.pricing.total, o.pricing.left], [3, 12, 180]);
+  eq("…a stale note is a closed tab, not a run", labOverview({ rows: [], lab, pricing: { done: 1, total: 9, updatedAt: NOW - PRICING_STALE_MS - 1 }, now: NOW }).pricing, null);
+  eq("jobs running: not done, heard from lately", [o.ebay.jobsRunning, o.ebay.jobsListedSoFar], [1, 1]);
+  eq("eBay over the last day", [o.ebay.listed24h, o.ebay.failed24h, o.ebay.liveListings, o.ebay.forSale, o.ebay.awaitingPull, o.ebay.sold24h, o.ebay.errors24h], [2, 1, 1, 1, 1, 1, 1]);
+  ok("JOB_STALE_MS is minutes, not hours", JOB_STALE_MS <= 15 * 60000);
+  const labPage = readFileSync(new URL("../apps/app/app/panel/lab/LabCopies.js", import.meta.url), "utf8");
+  ok("the lab page shows it", /<LabOverview lab=\{lab\}/.test(labPage));
+  ok("Add copies writes pricing progress for it, and clears it", /setItem\(PRICING_KEY/.test(pageSrc) && /removeItem\(PRICING_KEY\)/.test(pageSrc));
+}
 
 // ---- reload ------------------------------------------------------------------------------
 eq("the list survives a reload", restoreDraft(serialiseDraft(mix)).map((r) => [r.id, r.pricePence]), mix.map((r) => [r.id, r.pricePence]));
