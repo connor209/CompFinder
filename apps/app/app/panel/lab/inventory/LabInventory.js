@@ -101,23 +101,27 @@ export default function LabInventory() {
 
   // Cardmarket's price guide for each listing's card, read from what the
   // nightly job stored — reference only, beside the sold-comps market.
-  const [cm, setCm] = useState({ byId: {}, rate: null });
+  const [cm, setCm] = useState({ byId: {}, rate: null, error: null, loading: false, matched: 0, asked: 0 });
   useEffect(() => {
     if (!lab?.ok) return;
     const cards = (lab.listings || []).filter((l) => l.card?.set).map((l) => ({ id: l.id, name: l.card.name, number: l.card.number, set: l.card.set, finish: l.card.finish || "", title: l.title }));
-    if (!cards.length) return;
+    if (!cards.length) { setCm((x) => ({ ...x, error: "No listing has its card's set stored, so there is nothing to look up." })); return; }
     let gone = false;
+    setCm((x) => ({ ...x, loading: true, error: null }));
     (async () => {
       const byId = {};
       let rate = null;
+      let error = null;
       for (let i = 0; i < cards.length; i += 400) {
         try {
           const res = await fetch("/api/cardmarket/prices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards: cards.slice(i, i + 400) }) });
-          const j = await res.json();
+          const j = await res.json().catch(() => ({ ok: false, error: `the server answered ${res.status}` }));
           if (j.ok) { Object.assign(byId, j.results || {}); rate = { rate: j.rate, asOf: j.rateAsOf, fallback: j.rateFallback }; }
-        } catch { /* reference only */ }
+          else error = j.error || `the server answered ${res.status}`;
+        } catch (e) { error = e.message || "the request failed"; }
       }
-      if (!gone) setCm({ byId, rate });
+      const matched = Object.values(byId).filter((r) => r.pence != null).length;
+      if (!gone) setCm({ byId, rate, error, loading: false, matched, asked: cards.length });
     })();
     return () => { gone = true; };
   }, [lab]);
@@ -145,7 +149,9 @@ export default function LabInventory() {
       vsCm: Object.fromEntries(facetCounts(without(["vsCm"])).vsCm)
     };
   }, [base, f, q]);
-  const cols = useMemo(() => columnsFor(all), [all]);
+  // The CM column is always there once the lab has loaded: an empty column
+  // with a reason says more than a column that silently isn't drawn.
+  const cols = useMemo(() => ({ ...columnsFor(all), cm: true }), [all]);
   const chips = activeChips(f);
   const vt = useMemo(() => viewTotals(grouped ? matched : [...new Map(matched.map((r) => [r.listingRowId, all.find((a) => a.id === r.listingRowId)])).values()].filter(Boolean)), [matched, grouped, all]);
   // Bulk actions are on LISTINGS, and only in grouped view: a copy row stands
@@ -407,6 +413,9 @@ export default function LabInventory() {
         </div>
       )}
 
+      {cm.loading && <div className="li-msg">Looking up Cardmarket prices…</div>}
+      {!cm.loading && cm.error && <div className="li-msg bad">Cardmarket prices couldn&apos;t be read: {cm.error}</div>}
+      {!cm.loading && !cm.error && cm.asked > 0 && cm.matched === 0 && <div className="li-msg bad">No card matched a Cardmarket price ({cm.asked} looked up). Hover a — in the CM column to see why.</div>}
       {msg && <div className={msg.bad ? "li-msg bad" : "li-msg"}>{msg.text}</div>}
       {failures.map((x, i) => <div key={i} className="li-msg bad">✗ {x.title} — {x.error}</div>)}
 
