@@ -129,6 +129,19 @@ const skippedRows = unreadableRows([
 eq("a row with no name or number is named", skippedRows.map((x) => x.sku), ["KA2", "row 4"]);
 eq("…saying what is missing", skippedRows.map((x) => x.why.split(" on ")[0]), ["no card name", "no card number"]);
 eq("a blank line is not a row", skippedRows.length, 2);
+eq("on Add copies a card with no number is listable (TEST3-16, a Golden Box energy)",
+  unreadableRows([{ CustomLabel: "T16", "*C:Card Name": "Lightning Energy", "*C:Card Number": "" }], { needNumber: false }), []);
+eq("…a card with no NAME is still named", unreadableRows([{ CustomLabel: "T17", "*C:Card Name": "", "*C:Card Number": "" , "*Title": "x" }], { needNumber: false }).map((x) => x.sku), ["T17"]);
+{
+  const csv = ["CustomLabel,*Title,*C:Card Name,*C:Card Number,*C:Set,C:Card Condition,PicURL",
+    "T15,Pikachu,Pikachu,001/025,Golden Box,Near Mint or Better,https://x/a.jpg",
+    "T16,Lightning Energy,Lightning Energy,,Golden Box,Near Mint or Better,https://x/b.jpg"].join("\n");
+  const CU = (await import("../apps/app/lib/carduploader.js")).default;
+  eq("everywhere else a numberless row is still left out", CU.extractItems(csv).map((i) => i.sku), ["T15"]);
+  const numberless = CU.extractItems(csv, { allowNoNumber: true });
+  eq("…Add copies reads it", numberless.map((i) => i.sku), ["T15", "T16"]);
+  eq("…and it becomes a listable group", groupsFromItems(numberless).groups.map((g) => g.copies[0].sku), ["T15", "T16"]);
+}
 
 // ---- reload ------------------------------------------------------------------------------
 eq("the list survives a reload", restoreDraft(serialiseDraft(mix)).map((r) => [r.id, r.pricePence]), mix.map((r) => [r.id, r.pricePence]));

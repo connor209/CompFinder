@@ -172,10 +172,14 @@ const CardUploaderCsv = (() => {
 
   // ---- Extract clean items from a raw CardUploader CSV string ----
 
-  function extractItems(csvText) {
+  // `allowNoNumber` keeps a row that has a card name but no number. The lab's
+  // Add copies screen lists such cards (an energy from a Japanese box has no
+  // collector number at all); every other reader still needs one, because a
+  // search with no number is the weakest the engine makes.
+  function extractItems(csvText, { allowNoNumber = false } = {}) {
     const raw = rowsToObjects(parseCsv(csvText));
     return raw
-      .filter((r) => (r["*C:Card Name"] || "").trim() && (r["*C:Card Number"] || "").trim())
+      .filter((r) => (r["*C:Card Name"] || "").trim() && (allowNoNumber || (r["*C:Card Number"] || "").trim()))
       .map((r) => {
         const rawCardNumber = (r["*C:Card Number"] || "").trim();
         const cardNumber = repairExcelDateMangling(rawCardNumber);

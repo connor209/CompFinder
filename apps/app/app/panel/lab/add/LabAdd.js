@@ -112,11 +112,12 @@ export default function LabAdd() {
       try {
         const text = await f.text();
         // The batch's language beats whatever the file or a title said.
-        const items = CardUploaderCsv.extractItems(text).map((it) => ({ ...it, language: batchLang }));
+        const items = CardUploaderCsv.extractItems(text, { allowNoNumber: true }).map((it) => ({ ...it, language: batchLang }));
         const allRows = CardUploaderCsv.rowsToObjects(CardUploaderCsv.parseCsv(text));
-        const skipped = unreadableRows(allRows);
+        const skipped = unreadableRows(allRows, { needNumber: false });
         rowsRead += allRows.length - allRows.filter((r) => !Object.values(r || {}).some((v) => String(v ?? "").trim())).length;
-        const raw = allRows.filter((r) => (r["*C:Card Name"] || "").trim() && (r["*C:Card Number"] || "").trim());
+        // Same rows extractItems kept (a name; a number is optional here), so the extras line up.
+        const raw = allRows.filter((r) => (r["*C:Card Name"] || "").trim());
         const extras = raw.map((r) => ({ finish: (r["*C:Finish"] || "").trim(), setCode: (r["*C:Set Code"] || r["C:Set Code"] || "").trim() }));
         const { groups, refused: rf } = groupsFromItems(items, extras.length === items.length ? extras : []);
         const merged = mergeGroups(next, groups, f.name, { anyLanguage: anyLang });
