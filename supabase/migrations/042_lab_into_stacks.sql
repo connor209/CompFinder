@@ -18,6 +18,10 @@
 --
 -- Run once in the Supabase SQL editor. Purely additive.
 
+-- copy_seq first: it belongs to migration 027, which a database may never have
+-- had applied, and the move writes it. Found the hard way on 2026-11-24 — every
+-- copy refused with "Could not find the 'copy_seq' column".
+alter table public.stack_cards add column if not exists copy_seq integer;
 alter table public.stack_cards add column if not exists lab_listing_id uuid references public.lab_listings(id) on delete set null;
 alter table public.stack_cards add column if not exists scan_urls text[];
 alter table public.stack_cards add column if not exists reserved_line text;
@@ -29,3 +33,6 @@ create index if not exists stack_cards_lab_listing_idx on public.stack_cards (la
 create unique index if not exists stack_cards_reserved_line_uq on public.stack_cards (user_id, reserved_line) where reserved_line is not null;
 
 alter table public.lab_copies add column if not exists stack_card_id uuid references public.stack_cards(id) on delete set null;
+
+-- Tell PostgREST about the new columns now rather than on its next reload.
+notify pgrst, 'reload schema';
