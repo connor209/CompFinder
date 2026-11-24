@@ -173,6 +173,16 @@ export const VARIANTS = [
     query: "",
     soft: true
   },
+  // A jumbo / oversized card shares the name and often the number, and is a
+  // different object at a different price. Symmetric like the rest: a normal
+  // card drops jumbo sales, a jumbo card requires them.
+  {
+    key: "jumbo",
+    label: "Jumbo / oversized",
+    subject: /\bjumbo\b|\boversi[sz]ed?\b/i,
+    comp: /\bjumbo\b|\boversi[sz]ed?\b|\bxl\s+card\b/i,
+    query: "Jumbo"
+  },
   {
     key: "ditto",
     label: "Peelable Ditto",

@@ -10,9 +10,11 @@ import {
 } from "../apps/app/lib/lab-draft.js";
 import { groupKey, keyForLanguage, groupsFromItems } from "../apps/app/lib/lab-copies.js";
 import { readFileSync } from "node:fs";
+import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer, EVIDENCE_CAP } from "../apps/app/lib/lab-evidence.js";
 
 let failed = 0;
 let n = 0;
+function ok(name, cond) { n += 1; if (!cond) { failed += 1; console.log(`✗ ${name}`); } }
 function eq(name, got, want) {
   n += 1;
   const g = JSON.stringify(got), w = JSON.stringify(want);
@@ -142,6 +144,42 @@ eq("…a card with no NAME is still named", unreadableRows([{ CustomLabel: "T17"
   eq("…Add copies reads it", numberless.map((i) => i.sku), ["T15", "T16"]);
   eq("…and it becomes a listable group", groupsFromItems(numberless).groups.map((g) => g.copies[0].sku), ["T15", "T16"]);
 }
+
+// ---- the sales behind a price, to pick from ----------------------------------------
+const result = {
+  sales: [
+    { title: "Geodude Master Ball 074/165 Japanese", price: 6, postage: 1, total: 7, date: "2026-11-01", item_id: "a" },
+    { title: "Geodude Masterball 074/165 sv2a", price: 5, postage: 0, total: 5, date: "2026-10-20", item_id: "b", put_back: true, put_back_reason: "nonUkLocation" }
+  ],
+  excluded: [
+    { title: "Geodude 074/165 Japanese", price: 0.2, postage: 1, total: 1.2, date: "2026-10-10", item_id: "c", reason: "missingVariant", detail: "Master Ball pattern" },
+    { title: "Geodude Master Ball 074/165 x4 lot", price: 22, postage: 2, total: 24, date: "2026-10-01", item_id: "d", reason: "bundle" },
+    { title: "Geodude Master Ball 074/165 Japanese", price: 8, postage: 1, total: 9, date: "2026-09-30", item_id: "e", reason: "nonUkLocation" }
+  ]
+};
+const ev = evidenceFrom(result);
+eq("every sale fetched, counted first, each with why", ev.map((e) => [e.id, e.counted, e.reason]), [
+  ["a", true, ""], ["b", true, "overseas, counted"], ["c", false, "doesn't say printing (Master Ball pattern)"], ["d", false, "lot"], ["e", false, "overseas seller"]
+]);
+eq("the row's one line", evidenceSummary(ev), "found 5 · counted 2 · 1 doesn't say printing · 1 lot · 1 overseas seller");
+eq("no picks: the price is over what the filter counted", [chosenSales(ev, null).map((e) => e.id), evidencePrice(ev, null).suggestedPence], [["a", "b"], 549]);
+eq("…your picks: the overseas £9 sale is plainly the card", evidencePrice(ev, ["a", "b", "e"]).suggestedPence, 549);
+eq("…four picks reach the percentile", evidencePrice(ev, ["a", "b", "e", "c"]).method, "p40");
+eq("the house rules: postage capped at £4, the game's floor, the condition step", [
+  evidencePrice([{ id: "x", price: 3, postage: 20, counted: true }], null).totals,
+  evidencePrice([{ id: "x", price: 0.5, postage: 0, counted: true }], null, { game: "yugioh" }).suggestedPence,
+  evidencePrice([{ id: "x", price: 20, postage: 0, counted: true }], null, { condition: "HP" }).suggestedPence
+], [[700], 199, 1249]);
+eq("nothing picked prices nothing", evidencePrice(ev, []).suggestedPence, null);
+eq("picks that equal the counted set are not 'your picks'", [picksDiffer(ev, ["b", "a"]), picksDiffer(ev, ["a"]), picksDiffer(ev, null)], [false, true, false]);
+const many = evidenceFrom({ sales: [{ title: "k", price: 1, postage: 0, total: 1, item_id: "k" }], excluded: Array.from({ length: 300 }, (_, i) => ({ title: `x${i}`, price: 1, postage: 0, total: 1, item_id: `x${i}`, reason: "nameMismatch" })) });
+eq("capped, never cutting a counted sale", [many.length, many[0].id], [EVIDENCE_CAP, "k"]);
+eq("a sale found twice is one row", evidenceFrom({ sales: [{ title: "a", total: 1, price: 1, item_id: "z" }], excluded: [{ title: "a", total: 1, price: 1, item_id: "z", reason: "duplicate" }] }).length, 1);
+const relangPicks = applyBulk([{ ...priced, picks: ["a"] }], ["p"], { op: "language", language: "Japanese", overseas: true });
+eq("changing language or sellers drops your picks with the old sales", [relangPicks[0].picks, relangPicks[0].overseas], [null, true]);
+const pageSrc = readFileSync(new URL("../apps/app/app/panel/lab/add/LabAdd.js", import.meta.url), "utf8");
+eq("the page sends the overseas choice and keeps the sales", [/overseas: Boolean\(r\.overseas\)/.test(pageSrc), /evidence: evidenceFrom\(x\)/.test(pageSrc), /picks: null, pricePence/.test(pageSrc)], [true, true, true]);
+ok("…and prices your picks through lab-evidence, not a copy of the rules", /evidencePrice\(ev, row\.picks/.test(pageSrc) && !/percentileOf|roundUpToLadder/.test(pageSrc));
 
 // ---- reload ------------------------------------------------------------------------------
 eq("the list survives a reload", restoreDraft(serialiseDraft(mix)).map((r) => [r.id, r.pricePence]), mix.map((r) => [r.id, r.pricePence]));

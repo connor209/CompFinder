@@ -194,7 +194,7 @@ export function spreadTooWide(totals, ratio = DECISION_RULES.wideSpread) {
  * big_drop, in_hand_check (NM at £15+: look at the card before it goes up at
  * that), put_back (a sale counted that the engine had left out).
  */
-export function decide({ status = "ok", nSales = 0, totals = [], suggestedPence = null, currentPence = null, condition = "NM", putBack = 0 }, rules = HOUSE_RULES, d = DECISION_RULES) {
+export function decide({ status = "ok", nSales = 0, totals = [], suggestedPence = null, currentPence = null, condition = "NM", putBack = 0, unrecognised = [], numberless = false }, rules = HOUSE_RULES, d = DECISION_RULES) {
   if (status === "error" || status === "timeout") return { decision: "hold", reason: `comp lookup ${status === "timeout" ? "timed out" : "failed"}`, flags: ["lookup_failed"] };
   const flags = [];
   const cur = Number.isFinite(currentPence) && currentPence > 0 ? currentPence : null;
@@ -211,6 +211,17 @@ export function decide({ status = "ok", nSales = 0, totals = [], suggestedPence 
     return cur
       ? { decision: "keep", reason: "no fresh sales — the current price stays; check Terapeak", flags }
       : { decision: "terapeak", reason: "no sales of this printing", flags };
+  }
+  // Two things the sales cannot settle, whatever they say: a printing the app
+  // does not recognise (it may be pooling two products), and a card with no
+  // collector number (name and set are all that tie a sale to it).
+  if (unrecognised && unrecognised.length) {
+    flags.push("printing_unrecognised");
+    return { decision: "terapeak", reason: `printing not recognised: ${unrecognised.join(", ")}`, flags };
+  }
+  if (numberless) {
+    flags.push("no_number");
+    return { decision: "terapeak", reason: "no collector number — check the sales before listing", flags };
   }
   const rise = cur != null && suggestedPence > cur;
   const loud = flags.filter((f) => f === "big_rise" || f === "big_drop" || f === "wide_spread");

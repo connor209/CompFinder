@@ -13,6 +13,9 @@
  *   excluded       the whole row left out
  *   language       the batch's language, chosen when it was loaded
  *   anyLanguage    count sold comps in every language, not just this one
+ *   overseas       count sales from sellers outside the UK
+ *   picks          the sales YOU chose to price from (ids), or null for the
+ *                  filter's own choice — see lab-evidence.js
  *   comps          what /api/batch-comps said ({ pence, n, confidence, flags,
  *                  decision, reason, error }) — decision is CardCropper's
  *                  apply | terapeak | keep | hold
@@ -35,7 +38,7 @@ export const LANGUAGES = ["English", "Japanese", "Korean", "Chinese", "German", 
  * A SKU already loaded from another file is refused; copies of a card and
  * condition already in the list join that row, unless it has been listed.
  */
-export function mergeGroups(existing, groups, file, { anyLanguage = false } = {}) {
+export function mergeGroups(existing, groups, file, { anyLanguage = false, overseas = false } = {}) {
   const list = (existing || []).map((r) => ({ ...r, copies: r.copies.slice() }));
   const have = new Set(list.flatMap((r) => r.copies.map((c) => String(c.sku).toLowerCase())));
   const refused = [];
@@ -53,7 +56,7 @@ export function mergeGroups(existing, groups, file, { anyLanguage = false } = {}
     if (same) { same.copies.push(...copies); continue; }
     list.push({
       ...g, copies, id: `${g.key}::${file}`, file,
-      language: g.language || "English", anyLanguage: Boolean(anyLanguage),
+      language: g.language || "English", anyLanguage: Boolean(anyLanguage), overseas: Boolean(overseas), picks: null,
       pricePence: null, titleOverride: "", subtype: "", skippedSkus: [], excluded: false, comps: null, result: null
     });
   }
@@ -164,7 +167,8 @@ export function parsePrice(v) {
  *   { op: "clear" }                      no price
  *   { op: "subtype", value }             set or clear the subtype
  *   { op: "exclude" } / { op: "include" }
- *   { op: "language", language, anyLanguage }  the batch got the wrong language:
+ *   { op: "language", language, anyLanguage, overseas }  the batch got the wrong language
+ *                                        or which sales count changed:
  *                                        re-keyed, its sold comps dropped (they
  *                                        were for the other language), and a
  *                                        price that only came from them cleared
@@ -190,12 +194,13 @@ export function applyBulk(rows, ids, action) {
       case "language": {
         const language = LANGUAGES.includes(action.language) ? action.language : r.language || "English";
         const anyLanguage = action.anyLanguage == null ? Boolean(r.anyLanguage) : Boolean(action.anyLanguage);
-        if (language === (r.language || "English") && anyLanguage === Boolean(r.anyLanguage)) return r;
+        const overseas = action.overseas == null ? Boolean(r.overseas) : Boolean(action.overseas);
+        if (language === (r.language || "English") && anyLanguage === Boolean(r.anyLanguage) && overseas === Boolean(r.overseas)) return r;
         const fromComps = r.comps?.pence != null && r.pricePence === r.comps.pence;
         return {
-          ...r, language, anyLanguage, key: keyForLanguage(r.key, language),
+          ...r, language, anyLanguage, overseas, key: keyForLanguage(r.key, language),
           card: r.card ? { ...r.card, language } : r.card,
-          comps: null, pricePence: fromComps ? null : r.pricePence
+          comps: null, picks: null, pricePence: fromComps ? null : r.pricePence
         };
       }
       default: return r;

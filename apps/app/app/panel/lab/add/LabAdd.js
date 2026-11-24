@@ -10,6 +10,7 @@ import {
   LANGUAGES, DECISION_TEXT, unreadableRows
 } from "@/lib/lab-draft.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
+import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer } from "@/lib/lab-evidence.js";
 
 /**
  * Add copies: the working list between a CardUploader export and eBay.
@@ -54,6 +55,9 @@ export default function LabAdd() {
   const [anyLang, setAnyLang] = useState(false);
   const [langPick, setLangPick] = useState("English");
   const [anyPick, setAnyPick] = useState(false);
+  // Sales from sellers outside the UK: per batch, like the language.
+  const [overseas, setOverseas] = useState(false);
+  const [overseasPick, setOverseasPick] = useState(false);
   const [busy, setBusy] = useState(null);
   const [progress, setProgress] = useState(null);
   const [msg, setMsg] = useState(null);
@@ -120,7 +124,7 @@ export default function LabAdd() {
         const raw = allRows.filter((r) => (r["*C:Card Name"] || "").trim());
         const extras = raw.map((r) => ({ finish: (r["*C:Finish"] || "").trim(), setCode: (r["*C:Set Code"] || r["C:Set Code"] || "").trim() }));
         const { groups, refused: rf } = groupsFromItems(items, extras.length === items.length ? extras : []);
-        const merged = mergeGroups(next, groups, f.name, { anyLanguage: anyLang });
+        const merged = mergeGroups(next, groups, f.name, { anyLanguage: anyLang, overseas });
         next = merged.rows;
         added += merged.added;
         newRefused.push(...skipped.map((x) => ({ ...x, file: f.name })), ...rf.map((x) => ({ ...x, file: f.name })), ...merged.refused.map((x) => ({ ...x, file: f.name })));
@@ -131,7 +135,7 @@ export default function LabAdd() {
     setRows(next);
     refreshView();
     setRefused((r) => [...r, ...newRefused]);
-    setMsg({ text: `${rowsRead} row${rowsRead === 1 ? "" : "s"} read, ${added} cop${added === 1 ? "y" : "ies"} loaded from ${picked.length} file${picked.length === 1 ? "" : "s"} as ${batchLang}${anyLang ? " (sold comps in every language)" : ""}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.` });
+    setMsg({ text: `${rowsRead} row${rowsRead === 1 ? "" : "s"} read, ${added} cop${added === 1 ? "y" : "ies"} loaded from ${picked.length} file${picked.length === 1 ? "" : "s"} as ${batchLang}${anyLang ? " (sold comps in every language)" : ""}${overseas ? " (overseas sellers counted)" : ""}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.` });
   }
 
   // ---- pricing -----------------------------------------------------------
@@ -152,7 +156,7 @@ export default function LabAdd() {
       const chunk = todo.slice(i, i + PER_REQUEST);
       const cards = chunk.map((r) => ({
         sku: r.copies[0].sku, name: r.cardName, number: r.cardNumber, set: r.set, title: r.title, condition: r.condition,
-        language: r.language || "English", any_language: Boolean(r.anyLanguage), game: r.card?.game || "", variant: r.card?.finish || "",
+        language: r.language || "English", any_language: Boolean(r.anyLanguage), overseas: Boolean(r.overseas), game: r.card?.game || "", variant: r.card?.finish || "",
         set_code: r.card?.setCode || ""
       }));
       try {
@@ -168,6 +172,10 @@ export default function LabAdd() {
             decision: x?.decision || (x?.error ? "hold" : null), reason: x?.decision_reason || x?.error || "",
             searches: Array.isArray(x?.search) ? x.search.length : null,
             fetched: Array.isArray(x?.search) ? x.search.reduce((t, s) => t + (s.added || 0), 0) : null,
+            // Every sale fetched, counted or not and why — the Sales found table.
+            evidence: evidenceFrom(x), setCode: x?.set_code || null,
+            search: Array.isArray(x?.search) ? x.search.map((s) => ({ rung: s.rung, query: s.query, fetched: s.fetched ?? null, added: s.added ?? null, error: s.error || null })) : [],
+            condition: r.condition, game: r.card?.game || "",
             ...(x?.error ? { error: x.error } : {})
           });
         }
@@ -179,7 +187,8 @@ export default function LabAdd() {
     setRows((rs) => rs.map((r) => {
       const c = got.get(r.id);
       if (!c) return r;
-      return { ...r, comps: c, pricePence: r.pricePence != null ? r.pricePence : c.pence };
+      // New sales, so any sales you had picked from the old ones are gone.
+      return { ...r, comps: c, picks: null, pricePence: r.pricePence != null ? r.pricePence : c.pence };
     }));
     setProgress(null);
     setBusy(null);
@@ -275,6 +284,9 @@ export default function LabAdd() {
         <label className="li-check li-dim" title="Count sold listings of this card in any language (CardCropper's All languages). Graded, other printings and lots stay out.">
           <input type="checkbox" checked={anyLang} disabled={!!busy} onChange={(e) => setAnyLang(e.target.checked)} /> count sales in every language
         </label>
+        <label className="li-check li-dim" title="Count sales from sellers outside the UK. Postage is capped at £4 in the price either way. Mostly worth it for Japanese cards with little UK supply.">
+          <input type="checkbox" checked={overseas} disabled={!!busy} onChange={(e) => setOverseas(e.target.checked)} /> count overseas sellers
+        </label>
         <label className="li-btn primary" style={{ cursor: "pointer" }}>
           ＋ Load {batchLang} export(s)
           <input type="file" accept=".csv,text/csv" multiple style={{ display: "none" }} onChange={onFiles} disabled={!!busy} />
@@ -327,7 +339,7 @@ export default function LabAdd() {
           </button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "price" ? null : "price")}>Set price ▾</button>
           {subtypes.length > 0 && <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "subtype" ? null : "subtype")}>Subtype ▾</button>}
-          <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "language" ? null : "language")}>Language ▾</button>
+          <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "language" ? null : "language")}>Language &amp; sellers ▾</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "exclude" }, "Left out")}>Leave out</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "include" }, "Put back")}>Put back</button>
           <button className="li-chip primary-chip" disabled={!onScreen.length || !!busy} onClick={() => listRows(onScreen)}>
@@ -367,7 +379,8 @@ export default function LabAdd() {
               {LANGUAGES.map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
             <label className="li-check"><input type="checkbox" checked={anyPick} onChange={(e) => setAnyPick(e.target.checked)} /> count sales in every language</label>
-            <button className="li-btn" onClick={() => bulk({ op: "language", language: langPick, anyLanguage: anyPick }, `Language set to ${langPick}${anyPick ? ", every language counted" : ""}`)}>Set</button>
+            <label className="li-check"><input type="checkbox" checked={overseasPick} onChange={(e) => setOverseasPick(e.target.checked)} /> count overseas sellers</label>
+            <button className="li-btn" onClick={() => bulk({ op: "language", language: langPick, anyLanguage: anyPick, overseas: overseasPick }, `Language set to ${langPick}${anyPick ? ", every language counted" : ""}${overseasPick ? ", overseas sellers counted" : ""}`)}>Set</button>
             <span className="li-dim" style={{ flexBasis: "100%" }}>
               Changing it drops those rows&apos; sold comps (they were for the other language) and any price that only came from them. Price them again after.
             </span>
@@ -421,7 +434,7 @@ export default function LabAdd() {
                           <span>
                             <b>{t.text}</b>
                             <small>
-                              {[r.set, r.cardNumber, r.subtype, r.language && r.language !== "English" ? r.language : "", r.anyLanguage ? "every language" : ""].filter(Boolean).join(" · ")}
+                              {[r.set, r.cardNumber, r.subtype, r.language && r.language !== "English" ? r.language : "", r.anyLanguage ? "every language" : "", r.overseas ? "overseas sellers" : ""].filter(Boolean).join(" · ")}
                               {t.own ? " · your title" : ""}{t.cut ? <span className="li-warn"> · cut at 80</span> : null}
                             </small>
                             <small className="sm-only">
@@ -444,6 +457,13 @@ export default function LabAdd() {
                         {r.comps && !r.comps.error && <small className={isThin(r) ? "li-warn" : ""}>{r.comps.n ?? "?"} sale{r.comps.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
                         {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}
                         {r.comps?.flags?.includes("in_hand_check") && <small className="li-warn">check in hand</small>}
+                        {r.comps?.evidence && <small className="li-dim" style={{ whiteSpace: "normal", maxWidth: 220 }}>{evidenceSummary(r.comps.evidence)}</small>}
+                        {r.comps?.evidence?.length > 0 && (
+                          <button className="li-link" onClick={() => setOpen((o) => new Set(o).add(r.id))}>
+                            {picksDiffer(r.comps.evidence, r.picks) ? "🔍 your picks" : "🔍 see sales"}
+                          </button>
+                        )}
+                        {r.comps && !r.comps.error && r.language && r.language !== "English" && !r.comps.setCode && <small className="li-dim">no set code</small>}
                       </td>
                       <td className="r">
                         {j ? <span className="li-dim">{gbp(j.price_pence)}<small>listing&apos;s price</small></span> : (
@@ -473,6 +493,11 @@ export default function LabAdd() {
                               )}
                               <label className="li-check"><input type="checkbox" checked={!r.excluded} disabled={done} onChange={(e) => setRow(r.id, { excluded: !e.target.checked })} /> List this card</label>
                             </div>
+                            {r.comps?.evidence?.length > 0 && (
+                              <SalesFound row={r} disabled={done || !!busy}
+                                onPicks={(picks) => setRow(r.id, { picks })}
+                                onUse={(pence) => { setRow(r.id, { pricePence: pence }); setMsg({ text: `${r.title}: price set to ${gbp(pence)} from the sales you picked.` }); }} />
+                            )}
                             <div className="la-copies">
                               {r.copies.map((c, i) => {
                                 const skip = (r.skippedSkus || []).map((x) => x.toLowerCase()).includes(String(c.sku).toLowerCase());
@@ -506,6 +531,73 @@ export default function LabAdd() {
   );
 }
 
+/**
+ * Every sale a card's searches found, counted or left out and why, to pick
+ * from. Ticks start on what the filter counted; tick a left-out sale that is
+ * plainly the card, untick a counted one that isn't, and the price below is
+ * worked out from your picks by the same house rules as the server's. Nothing
+ * changes until "Use this price".
+ */
+function SalesFound({ row, onPicks, onUse, disabled }) {
+  const [showOut, setShowOut] = useState(false);
+  const [showSearches, setShowSearches] = useState(false);
+  const ev = row.comps.evidence;
+  const chosen = new Set(chosenSales(ev, row.picks).map((e) => String(e.id)));
+  const toggle = (id, on) => {
+    const next = new Set(chosen);
+    if (on) next.add(String(id)); else next.delete(String(id));
+    onPicks([...next]);
+  };
+  const p = evidencePrice(ev, row.picks, { condition: row.comps.condition || row.condition, game: row.comps.game || row.card?.game || "" });
+  const changed = picksDiffer(ev, row.picks);
+  const shown = ev.filter((e) => showOut || e.counted || chosen.has(String(e.id)));
+  const outCount = ev.filter((e) => !e.counted).length;
+  return (
+    <div className="la-sales">
+      <div className="la-sales-head">
+        <b>Sales found</b>
+        <span className="li-dim">{evidenceSummary(ev)}</span>
+        <span className="li-spacer" />
+        {outCount > 0 && <label className="li-check"><input type="checkbox" checked={showOut} onChange={(e) => setShowOut(e.target.checked)} /> show the {outCount} left out</label>}
+        {row.comps.search?.length > 0 && <button className="li-link" onClick={() => setShowSearches((v) => !v)}>{showSearches ? "hide" : "show"} the {row.comps.search.length} searches</button>}
+      </div>
+      {showSearches && (
+        <div className="li-plan">
+          {row.comps.search.map((s, i) => <div key={i}><span className="mono">{s.query}</span> <span className="li-dim">— {s.error ? `failed: ${s.error}` : `found ${s.fetched ?? "?"}, new ${s.added ?? "?"}`}</span></div>)}
+        </div>
+      )}
+      <div className="li-scroll" style={{ maxHeight: 360 }}>
+        <table className="li-table la-sales-table">
+          <thead><tr><th className="li-cb">Use</th><th>Sold listing</th><th className="r">Total</th><th className="sm-hide">Sold</th><th className="sm-hide">Filter</th></tr></thead>
+          <tbody>
+            {shown.map((e) => (
+              <tr key={e.id} className={chosen.has(String(e.id)) ? "" : "ended"}>
+                <td className="li-cb"><input type="checkbox" disabled={disabled} checked={chosen.has(String(e.id))} onChange={(x) => toggle(e.id, x.target.checked)} aria-label={`Use ${e.title}`} /></td>
+                <td style={{ whiteSpace: "normal" }}>
+                  {e.url ? <a href={e.url} target="_blank" rel="noreferrer">{e.title}</a> : e.title}
+                  <small className="sm-only">{e.date ? String(e.date).slice(0, 10) : ""} · {e.counted ? "counted" : e.reason}</small>
+                </td>
+                <td className="r mono">£{Number(e.total).toFixed(2)}<small>£{Number(e.price).toFixed(2)} + £{Number(e.postage || 0).toFixed(2)}</small></td>
+                <td className="mono sm-hide">{e.date ? String(e.date).slice(0, 10) : "—"}</td>
+                <td className={`sm-hide ${e.counted ? "" : "li-dim"}`} style={{ whiteSpace: "normal", maxWidth: 200 }}>{e.counted ? (e.reason || "counted") : e.reason}</td>
+              </tr>
+            ))}
+            {shown.length === 0 && <tr><td colSpan={5} className="li-empty">Nothing counted. Tick &quot;show the left out&quot; to pick from what was found.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="la-sales-foot">
+        <span>{changed ? "Your picks" : "As counted"}: <b>{p.n}</b> sale{p.n === 1 ? "" : "s"}
+          {p.suggestedPence != null ? <> → {p.method === "lowest" ? "the lowest" : "40th percentile"} £{(p.basisPence / 100).toFixed(2)} → <b>£{(p.suggestedPence / 100).toFixed(2)}</b>{row.comps.condition && row.comps.condition !== "NM" ? ` (${row.comps.condition})` : ""}</> : " — nothing to price from"}
+        </span>
+        <span className="li-spacer" />
+        {changed && <button className="li-btn" disabled={disabled} onClick={() => onPicks(null)}>Reset picks</button>}
+        <button className="li-btn primary" disabled={disabled || p.suggestedPence == null || p.suggestedPence === row.pricePence} onClick={() => onUse(p.suggestedPence)}>Use this price</button>
+      </div>
+    </div>
+  );
+}
+
 /** A price box that commits on blur or Enter, so typing "1" on the way to "12.49" doesn't flash a status. */
 function PriceBox({ value, onSet, disabled }) {
   const [text, setText] = useState(value == null ? "" : (value / 100).toFixed(2));
@@ -531,6 +623,10 @@ const EXTRA_CSS = `
 .la-fields input:not([type=checkbox]), .la-fields select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); min-width: 320px; max-width: 100%; }
 .la-fields .li-check { flex-direction: row; }
 .la-copies { display: flex; flex-wrap: wrap; gap: 10px; }
+.la-sales { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.la-sales-head, .la-sales-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
+.la-sales-table td, .la-sales-table th { font-size: 12.5px; }
+.la-sales-table tr.ended td { opacity: .55; }
 .la-copy { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 104px; font-size: 12px; text-align: center; }
 .la-copy img { width: 84px; height: 116px; object-fit: contain; background: var(--surface-sink); border-radius: 6px; }
 .la-copy.off img { opacity: .35; }

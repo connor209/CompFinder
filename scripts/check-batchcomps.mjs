@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { isPromoCard, promoNumber, textLooksPromo } from "../apps/app/lib/promo.js";
 import { compVariants, detectVariants, nameWithoutVariants, variantExclusion } from "../apps/app/lib/variants.js";
 import { housePrice, percentileOf, resolveRules, roundUpToLadder, rulesForGame, gameCode, decide, spreadTooWide, HOUSE_RULES } from "../apps/app/lib/house-pricing.js";
-import { cardsFromCsv, evaluateCard, languageMarker, searchLadder, listsOtherCards, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
+import { cardsFromCsv, coreNameOf, engineTitle, evaluateCard, languageMarker, parseJpPromo, searchLadder, listsOtherCards, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
 import { settingsForText } from "../apps/app/lib/matching.js";
 
 let failed = 0;
@@ -342,6 +342,52 @@ const rose = (titles) => run({ name: "Rose Tower (Mirror Holofoil)", number: "18
 eq("mirror: one sale saying it is not a market telling them apart", rose([["Rose Tower 182/190 Mirror Holo s4a Japanese", 3], ["Rose Tower 182/190 s4a Japanese", 0.6]]).n_comps, 2);
 const roseHard = rose([["Rose Tower 182/190 Mirror Holo s4a Japanese", 3], ["Rose Tower Mirror 182/190 Japanese", 3.2], ["Rose Tower 182/190 s4a Japanese", 0.6]]);
 eq("…two are: the plain copy goes, and the mirror is priced on its own", [roseHard.n_comps, roseHard.suggested_price > 2.49], [2, true]);
+
+// --- 4f. the gaps, filled (2026-11-24) ---------------------------------------------
+// Overseas sellers, on the card's say-so only.
+const usSale = (t, p) => ({ ...comp(t, p, 1), itemLocation: "US" });
+const ukOnly = evaluateCard(planCard(normaliseCard({ name: "Geodude (Master Ball Pattern)", number: "074/165", set: "Pokemon Card 151", language: "Japanese" })),
+  [comp("Geodude Master Ball 074/165 Japanese", 6), usSale("Geodude Master Ball 074/165 sv2a Japanese", 9)]);
+const withOverseas = evaluateCard(planCard(normaliseCard({ name: "Geodude (Master Ball Pattern)", number: "074/165", set: "Pokemon Card 151", language: "Japanese", overseas: true })),
+  [comp("Geodude Master Ball 074/165 Japanese", 6), usSale("Geodude Master Ball 074/165 sv2a Japanese", 9)]);
+eq("UK only by default", [ukOnly.n_comps, ukOnly.excluded.map((e) => e.reason)], [1, ["nonUkLocation"]]);
+eq("overseas counts the overseas sale, marked", [withOverseas.n_comps, withOverseas.sales.filter((x) => x.put_back_reason === "nonUkLocation").length], [2, 1]);
+
+// Possessives and owner prefixes.
+const tr = planCard(normaliseCard({ name: "Team Rocket's Moltres EX", number: "015/098", set: "Glory of the Rocket Gang", language: "Japanese" }));
+eq("'Team Rockets' and 'TR' read as Team Rocket's", [engineTitle(tr, "Team Rockets Moltres EX 015/098 Japanese"), engineTitle(tr, "TR Moltres ex 015/098 sv10")],
+  ["Team Rocket's Moltres EX 015/098 Japanese", "Team Rocket's Moltres ex 015/098 sv10"]);
+eq("…so those sales count", evaluateCard(tr, [comp("Team Rockets Moltres EX 015/098 Japanese", 4), comp("TR Moltres ex 015/098 sv10", 5), comp("Team Rocket's Moltres ex 015/098 Japanese", 4.5)]).n_comps, 3);
+eq("…and keep their own titles", evaluateCard(tr, [comp("TR Moltres ex 015/098 sv10", 5)]).sales[0].title, "TR Moltres ex 015/098 sv10");
+eq("the core name", [coreNameOf("Team Rocket's Moltres EX"), coreNameOf("Cynthia's Roserade"), coreNameOf("Charizard VSTAR"), coreNameOf("Pikachu")], ["Moltres", "Roserade", "Charizard", ""]);
+ok("…is a search rung, anchored on the number", tr.ladder.some((r) => r.rung === "corename" && r.query === "Moltres 015/098 Japanese"));
+eq("…and what it finds counts, when it carries the card's number", evaluateCard(tr, [comp("Moltres ex 015/098 sv10 Japanese", 4), comp("Moltres ex Japanese 151", 9), comp("Moltres 016/098 Japanese", 2)]).n_comps, 1);
+eq("Hoopa 029/062 is Hoopa EX 029/062", evaluateCard(planCard(normaliseCard({ name: "Hoopa EX", number: "029/062", set: "Raging Surf", language: "Japanese" })), [comp("Hoopa 029/062 sv3a Japanese", 3), comp("Hoopa EX 029/062 Japanese", 3.5)]).n_comps, 2);
+ok("…never on a bare number", !planCard(normaliseCard({ name: "Metal Energy", number: "38", set: "x" })).ladder.some((r) => r.rung === "corename"));
+
+// Jumbo.
+const plainPika = planCard(normaliseCard({ name: "Pikachu", number: "025/165", set: "151" }));
+eq("a normal card drops a jumbo sale", evaluateCard(plainPika, [comp("Pikachu 025/165 151 Jumbo Oversized promo", 9), comp("Pikachu 025/165 151", 1)]).n_comps, 1);
+eq("a jumbo card is one", planCard(normaliseCard({ name: "Pikachu (Jumbo)", number: "025/165" })).variantKeys, ["jumbo"]);
+
+// Check first, whatever the sales say.
+eq("an unrecognised printing goes to a person", decide({ nSales: 8, totals: [300, 300, 300, 300, 300, 300, 300, 300], suggestedPence: 349, unrecognised: ["Rainbow Swirl"] }).decision, "terapeak");
+eq("…so does a card with no number", decide({ nSales: 8, totals: [300, 300, 300, 300, 300, 300, 300, 300], suggestedPence: 349, numberless: true }).decision, "terapeak");
+eq("…end to end", evaluateCard(planCard(normaliseCard({ name: "Pikachu (Rainbow Swirl)", number: "025/165", set: "151" })), [1, 2, 3, 4].map((i) => comp("Pikachu 025/165 151", 1 + i / 10))).decision, "terapeak");
+
+// Japanese promos.
+eq("promo numbers", [parseJpPromo("001/SV-P"), parseJpPromo("SV-P 12"), parseJpPromo("7", "SV-P Promotional cards"), parseJpPromo("025/165"), parseJpPromo("12", "Shiny Treasure ex")],
+  [{ digits: "001", code: "SV-P" }, { digits: "012", code: "SV-P" }, { digits: "007", code: "SV-P" }, null, null]);
+const jpp = planCard(normaliseCard({ name: "Pikachu", number: "001/SV-P", set: "SV-P Promotional cards", language: "Japanese" }));
+eq("a Japanese promo is a promo, searched as sellers write it", [jpp.promo, jpp.nameTokens, jpp.ladder.map((r) => r.query)],
+  [true, ["Pikachu"], ["Pikachu 001/SV-P Japanese", "Pikachu SV-P 001 Japanese", "Pikachu 001 SV-P promo", "Pikachu 001/SV-P"]]);
+const jppr = evaluateCard(jpp, [comp("Pikachu 001/SV-P Japanese promo", 5), comp("Pikachu SV-P 001 Japanese", 6), comp("Pikachu 002/SV-P Japanese promo", 20), comp("Pikachu 025/165 Japanese", 1)]);
+eq("…another promo number, or a set card, is not it", [jppr.n_comps, jppr.excluded.map((e) => e.reason).sort()], [2, ["wrongNumber", "wrongNumber"]]);
+
+// Set codes, more of them.
+eq("Sun & Moon and Sword & Shield era codes", ["Dream League", "Tag Bolt", "Rebellion Crash", "Blue Sky Stream"].map((n) => planCard(normaliseCard({ name: "x", number: "1/2", set: n, language: "Japanese" })).setCode), ["sm11b", "sm9", "s2", "s7R"]);
+ok("a result says which set code it searched", jpp && evaluateCard(planCard(normaliseCard({ name: "Geodude", number: "074/165", set: "Pokemon Card 151", language: "Japanese" })), []).set_code === "sv2a");
+ok("page 2 is cached under its own key, never over page 1", /::page\$\{page\}/.test(routeSrc) && /getComps\(rungs\[0\]\.query, 2\)/.test(routeSrc));
 
 // --- 5. output ---------------------------------------------------------------
 

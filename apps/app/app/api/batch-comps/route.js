@@ -122,14 +122,19 @@ export async function POST(request) {
   // One fetch per distinct query in this batch: two copies of a card in one
   // file are one search, not two.
   const inflight = new Map();
-  const getComps = (query) => {
-    if (!inflight.has(query)) inflight.set(query, fetchOne(query));
-    return inflight.get(query);
+  const getComps = (query, page = 1) => {
+    const k = `${page}|${query}`;
+    if (!inflight.has(k)) inflight.set(k, fetchOne(query, page));
+    return inflight.get(k);
   };
 
-  async function fetchOne(query) {
+  // The cache key has no page in it, so a later page is cached under its own
+  // query string — never over page 1.
+  const cacheQuery = (query, page) => (page > 1 ? `${query} ::page${page}` : query);
+
+  async function fetchOne(query, page = 1) {
     if (!fresh) {
-      const hit = await readCache(supabase, query, options);
+      const hit = await readCache(supabase, cacheQuery(query, page), options);
       if (hit) {
         stats.cacheHits++;
         return { comps: hit.comps || [], pageFull: !!hit.hasNextPage, fetchedAt: hit.fetchedAt, cached: true };
@@ -141,8 +146,8 @@ export async function POST(request) {
       if (fatal) throw fatal;
       stats.requests++;
       try {
-        const res = await fetchSoldComps(profile.soldcomps_api_key, query, options);
-        if (res.comps.length > 0) await writeCache(supabase, query, options, res);
+        const res = await fetchSoldComps(profile.soldcomps_api_key, query, { ...options, page });
+        if (res.comps.length > 0) await writeCache(supabase, cacheQuery(query, page), options, res);
         return { comps: res.comps, pageFull: !!res.hasNextPage, fetchedAt: new Date().toISOString(), cached: false };
       } catch (err) {
         if (err.isAuthError || err.isQuotaExceeded) {
@@ -172,9 +177,20 @@ export async function POST(request) {
       if (depth === 3) {
         // Every rung at once (the gate still paces them); a failed rung costs
         // that rung, never the card, unless every rung failed.
-        const rungs = plan.ladder;
+        const rungs = [...plan.ladder];
         const got = await Promise.all(rungs.map((r) => getComps(r.query).then((x) => ({ ok: true, ...x }), (err) => ({ ok: false, err }))));
         if (fatal && got.every((g) => !g.ok)) throw fatal;
+        // A full first page on the exact search means older sales are waiting
+        // behind it: read page 2 once, so a fast card's 90 days are not cut short.
+        if (got[0]?.ok && got[0].pageFull) {
+          try {
+            const p2 = await getComps(rungs[0].query, 2);
+            rungs.push({ rung: "exact p2", query: rungs[0].query });
+            got.push({ ok: true, ...p2 });
+          } catch (err) {
+            if (fatal) throw fatal;
+          }
+        }
         const okOnes = got.filter((g) => g.ok);
         if (!okOnes.length) throw got[0].err;
         const seen = new Set();

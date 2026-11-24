@@ -343,7 +343,9 @@ stream` (the relay, only while streaming).
   Japanese card never joins the English row or listing (the key gains the
   language; English keys are unchanged), changing a row's language drops its
   old comps and any price that only came from them, and the house decision —
-  not the engine's confidence — decides what is "check first".
+  not the engine's confidence — decides what is "check first". And the sales
+  table (`lib/lab-evidence.js`): every sale found with why, capped without
+  cutting a counted one, priced from your picks by house-pricing.js itself.
 - `scripts/check-pullsheetread.mjs` — what the pull sheet reads
   (`lib/pullsheet-read.js`): every card still on the shelf, plus only the
   PULLED cards an open line can mention (by SKU, `pulled_line`, CardUploader
@@ -811,6 +813,21 @@ for the same contract as JSON.
   an era; "x10", "4x", "lot of", "playset" are lots; and the soft mirror
   variant HARDENS once two sales say it, because then the market is telling
   mirror and plain apart.
+- **The gaps, filled (2026-11-24).** `overseas: true` (a per-batch tickbox on
+  Add copies) puts back sales left out only for the seller's country;
+  possessives and owner prefixes are read the card's way for the engine
+  ("Team Rockets", "TR" → "Team Rocket's") and a `corename` rung searches
+  "Moltres 015/098", whose sales count when they carry the number; a jumbo
+  card is a variant; an unrecognised printing or a card with no number always
+  goes to a person (`decide()`); a Japanese promo ("001/SV-P") is a promo
+  code (`parseJpPromo`); `lib/japanese-sets.js` covers Sun & Moon and Sword &
+  Shield too; a full first page reads page 2, cached under its own key.
+- **The sales behind a price can be picked from** (Add copies → 🔍 see
+  sales). Every sale a card's searches found, counted or left out and why,
+  is kept on the row (`lib/lab-evidence.js`); tick the ones that are the
+  card and the price follows by the SAME house rules (`evidencePrice` runs
+  `housePrice`, never a copy), applied only on "Use this price". New sales
+  drop old picks.
 - **A promo is its code, and its comps say "promo"** (`lib/promo.js`). The
   catalogue carried "BW33/101", which finds nothing; and the engine drops any
   comp saying "promo", so eleven UK sales showed and one counted.
