@@ -71,6 +71,14 @@ export default function LabAdd() {
 
   const reloadLab = useCallback(async () => setLab(await api()), []);
   useEffect(() => { reloadLab(); setRows(loadDraft()); setLoaded(true); }, [reloadLab]);
+  // Listing and pricing run from this tab, one card at a time: closing or
+  // reloading it stops the run after the card in flight. Ask first.
+  useEffect(() => {
+    if (busy !== "list" && busy !== "price") return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [busy]);
   // Kept on this device as you go: a typed price survives a reload.
   useEffect(() => {
     if (!loaded) return;
@@ -343,7 +351,7 @@ export default function LabAdd() {
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "exclude" }, "Left out")}>Leave out</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "include" }, "Put back")}>Put back</button>
           <button className="li-chip primary-chip" disabled={!onScreen.length || !!busy} onClick={() => listRows(onScreen)}>
-            {busy === "list" ? "Listing…" : `List ticked (${onScreen.length})`}
+            {busy === "list" ? "Listing… keep this tab open" : `List ticked (${onScreen.length})`}
           </button>
           <span className="li-dim">{onScreen.length ? `${onScreen.length} ticked` : "Tick rows to edit or list them"}</span>
           {hiddenTicks > 0 && <span className="li-warn">{hiddenTicks} ticked off screen — not acted on <button className="li-link" onClick={() => setTicked(new Set())}>untick</button></span>}
