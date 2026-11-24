@@ -2,10 +2,13 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { matchCatalog, cmFigures, isReverse } from "@/lib/cm-match";
 import { loadEurGbp } from "@/lib/fx";
+import { catalogRowsForSets } from "@/lib/catalog-read";
 
 /**
  * POST /api/cardmarket/prices — Cardmarket's price guide for our cards, in
- * pounds. Body: { cards: [{ id, name, number, set, finish?, title? }] }.
+ * pounds. Body: { cards: [{ id, name, number, set, finish?, title?, cardmarketId? }] }.
+ * A card already linked to its product (migration 045, lib/card-identity.js)
+ * sends `cardmarketId` and is not matched again.
  * Answers { ok, rate, rateAsOf, rateFallback, results: { [id]: { cardmarketId,
  * pence, avg7Pence, avg30Pence, lowPence, eurTrend, reverse, dir, asOf } |
  * { why } } }.
@@ -23,21 +26,19 @@ export async function POST(request) {
   if (!user) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
   let body;
   try { body = await request.json(); } catch { return NextResponse.json({ ok: false, error: "Bad request." }, { status: 400 }); }
-  const cards = (Array.isArray(body?.cards) ? body.cards : []).filter((c) => c && c.id != null && c.set).slice(0, MAX_CARDS);
+  const cards = (Array.isArray(body?.cards) ? body.cards : []).filter((c) => c && c.id != null && (c.set || c.cardmarketId)).slice(0, MAX_CARDS);
   if (!cards.length) return NextResponse.json({ ok: true, results: {} });
 
-  // One catalogue read per set, by Cardmarket's own set name.
-  const sets = [...new Set(cards.map((c) => String(c.set).trim()).filter(Boolean))];
-  const bySet = new Map();
-  const escape = (s) => s.replace(/[\\%_]/g, (m) => `\\${m}`);
-  await Promise.all(sets.map(async (set) => {
-    const { data, error } = await sb.from("card_catalog").select("cardmarket_id,name,collector_number,expansion").ilike("expansion", escape(set)).limit(3000);
-    bySet.set(set.toLowerCase(), error ? { error: error.message } : data || []);
-  }));
+  // A linked card is its product already; the rest are matched, one
+  // catalogue read per set, by Cardmarket's own set name.
+  const linked = cards.filter((c) => /^\d+$/.test(String(c.cardmarketId ?? "")));
+  const toMatch = cards.filter((c) => !linked.includes(c));
+  const bySet = await catalogRowsForSets(sb, toMatch.map((c) => c.set));
 
   const results = {};
   const wanted = new Map();
-  for (const c of cards) {
+  for (const c of linked) wanted.set(c.id, { card: c, id: String(c.cardmarketId), name: c.name || "" });
+  for (const c of toMatch) {
     const rows = bySet.get(String(c.set).trim().toLowerCase());
     if (!rows || rows.error) { results[c.id] = { why: rows?.error ? `catalogue read failed: ${rows.error}` : "set not in the catalogue" }; continue; }
     const m = matchCatalog(c, rows);

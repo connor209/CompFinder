@@ -11,6 +11,8 @@
  * the lab refuses to act — there is never a moment with two records of a card.
  */
 import { liveRanks } from "./stackpos.js";
+import { matchCatalog } from "./cm-match.js";
+import { catalogRowsForSets } from "./catalog-read.js";
 import { movePlan, stackRowFrom, asLabCopy, labStackNameFor } from "./lab-stacks.js";
 
 export const LAB_TABLES = { listings: "lab_listings", copies: "lab_copies", events: "lab_events", settings: "listing_settings" };
@@ -198,6 +200,42 @@ export async function setCardCosts(sb, userId, entries) {
     }
   }
   return { ok: true, saved };
+}
+
+/**
+ * Link lab cards to the Cardmarket product they are (migration 045,
+ * card-identity.js): each listing's card is matched ONCE against the
+ * catalogue (cm-match.js, the same matcher the price guide uses) and the
+ * product id written on its copies that don't carry one yet. A card that
+ * can't be pinned to one product is left unlinked and named with why —
+ * a product for the wrong card is worse than none.
+ *
+ * `listings` are lab listing rows (with `card`); `copies` the lab's copies.
+ * Returns { ok, linked, already, unmatched: [{ listingId, title, why }] },
+ * or { ok: false, missing: true } before 045.
+ */
+export async function linkCatalog(sb, userId, listings, copies) {
+  const need = (listings || []).filter((l) => (copies || []).some((c) => String(c.listing_id) === String(l.id) && c.cardmarket_id == null));
+  const already = (listings || []).length - need.length;
+  if (!need.length) return { ok: true, linked: 0, already, unmatched: [] };
+  const bySet = await catalogRowsForSets(sb, need.map((l) => l.card?.set));
+  let linked = 0;
+  const unmatched = [];
+  for (const l of need) {
+    const card = l.card || {};
+    const rows = bySet.get(String(card.set || "").trim().toLowerCase());
+    if (!rows || rows.error) { unmatched.push({ listingId: l.id, title: l.title, why: rows?.error ? `catalogue read failed: ${rows.error}` : "set not in the catalogue" }); continue; }
+    const m = matchCatalog({ name: card.name, number: card.number, set: card.set }, rows);
+    if (!m.row) { unmatched.push({ listingId: l.id, title: l.title, why: m.why }); continue; }
+    const { data, error } = await sb.from(CARDS).update({ cardmarket_id: m.row.cardmarket_id })
+      .eq("user_id", userId).eq("lab_listing_id", l.id).is("cardmarket_id", null).select("id");
+    if (error) {
+      if (/cardmarket_id/.test(error.message || "")) return { ok: false, missing: true, error: "Run migration 045 in Supabase first — cards have nowhere to keep their catalogue link yet." };
+      return { ok: false, error: error.message, linked, unmatched };
+    }
+    linked += (data || []).length;
+  }
+  return { ok: true, linked, already, unmatched };
 }
 
 /** Undo insertCopies: delete what it inserted, give back what it adopted. */

@@ -121,6 +121,8 @@ export function asLabCopy(card, { ranks, names } = {}) {
     checked_out_at: card.checked_out_at || null,
     // What this copy cost us (migration 044); null is unknown, never free.
     cost_pence: card.cost_pence ?? null,
+    // The Cardmarket product this card is (migration 045, card-identity.js).
+    cardmarket_id: card.cardmarket_id ?? null,
     stack_id: card.stack_id,
     pile: names?.get(card.stack_id) || null,
     live_position: ranks?.get(card.id) || null

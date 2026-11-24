@@ -7,6 +7,7 @@ import {
   facetCounts, viewTotals, columnsFor, activeChips, marketGap, cmGap, VS_MARKET, VS_CM, ADDED, gameOf, whereOf, whereText, costPlan
 } from "@/lib/lab-inventory.js";
 import { parseCostPence } from "@/lib/card-costs.js";
+import { duplicateListings, isLinked } from "@/lib/card-identity.js";
 import { removeBlocker } from "@/lib/lab-copies.js";
 import { LAB_TABLE_CSS as CSS } from "../labTableCss";
 
@@ -108,7 +109,11 @@ export default function LabInventory() {
   const [cm, setCm] = useState({ byId: {}, rate: null, error: null, loading: false, matched: 0, asked: 0 });
   useEffect(() => {
     if (!lab?.ok) return;
-    const cards = (lab.listings || []).filter((l) => l.card?.set).map((l) => ({ id: l.id, name: l.card.name, number: l.card.number, set: l.card.set, finish: l.card.finish || "", title: l.title }));
+    // A listing whose copies are linked to their Cardmarket product sends the
+    // product (card-identity.js) and is not matched again by name.
+    const productOf = new Map();
+    for (const c of lab.copies || []) if (c.cardmarket_id != null && !productOf.has(String(c.listing_id))) productOf.set(String(c.listing_id), c.cardmarket_id);
+    const cards = (lab.listings || []).filter((l) => l.card?.set || productOf.has(String(l.id))).map((l) => ({ id: l.id, name: l.card?.name, number: l.card?.number, set: l.card?.set, finish: l.card?.finish || "", title: l.title, cardmarketId: productOf.get(String(l.id)) ?? undefined }));
     if (!cards.length) { setCm((x) => ({ ...x, error: "No listing has its card's set stored, so there is nothing to look up." })); return; }
     let gone = false;
     setCm((x) => ({ ...x, loading: true, error: null }));
@@ -156,6 +161,10 @@ export default function LabInventory() {
   // The CM column is always there once the lab has loaded: an empty column
   // with a reason says more than a column that silently isn't drawn.
   const cols = useMemo(() => ({ ...columnsFor(all), cm: true }), [all]);
+  // The same card in the same condition live on two listings: the copies
+  // belong on one (card-identity.js). And how many cards aren't linked yet.
+  const dups = useMemo(() => duplicateListings(all), [all]);
+  const unlinked = useMemo(() => all.filter((r) => r.status !== "ended" && !isLinked(r.identity)).length, [all]);
   const chips = activeChips(f);
   const vt = useMemo(() => viewTotals(grouped ? matched : [...new Map(matched.map((r) => [r.listingRowId, all.find((a) => a.id === r.listingRowId)])).values()].filter(Boolean)), [matched, grouped, all]);
   // Bulk actions are on LISTINGS, and only in grouped view: a copy row stands
@@ -242,6 +251,19 @@ export default function LabInventory() {
     if (r.ok) { setPanel(null); setTicked(new Set()); reload(); }
   }
 
+  /** Link every unlinked card to its Cardmarket product — once, then kept. */
+  async function linkCards() {
+    setBusy(true);
+    setMsg(null);
+    const r = await api({ action: "linkCatalog" });
+    setBusy(false);
+    if (!r.ok) { setMsg({ bad: true, text: r.error || "Linking failed." }); return; }
+    const un = r.unmatched || [];
+    setFailures(un.map((x) => ({ title: x.title, error: `not linked — ${x.why}` })));
+    setMsg({ bad: un.length > 0, text: `${r.linked} card${r.linked === 1 ? "" : "s"} linked to the catalogue${un.length ? `, ${un.length} listing${un.length === 1 ? "" : "s"} couldn't be pinned to one product (below)` : ""}.` });
+    reload();
+  }
+
   function editCopyCost(c) {
     const typed = window.prompt(`What did ${c.sku} cost you? (blank to clear)`, c.cost_pence != null ? (c.cost_pence / 100).toFixed(2) : "");
     if (typed == null) return;
@@ -321,6 +343,8 @@ export default function LabInventory() {
               Market <b>{gbpBig(totals.market)}</b>{totals.unmarketed ? "*" : ""}
             </span>
             {totals.waiting > 0 && <span className="li-warn">{totals.waiting} to pick</span>}
+            {unlinked > 0 && <button className="li-link" disabled={busy} onClick={linkCards} title="Match each card to its Cardmarket product once and keep it, so prices and duplicates are read off the product rather than re-matched by name">🔗 {unlinked} not linked to the catalogue — link</button>}
+            {dups.size > 0 && <span className="li-warn" title="The same card in the same condition is live on more than one listing — its copies belong on one">⚠ {dups.size} listings share a card</span>}
           </span>
         </div>
         <div className="li-headbtns">
@@ -578,6 +602,12 @@ export default function LabInventory() {
                         <span>
                           <b>{r.name || r.title}</b>
                           <small>{[r.set, r.number, r.subtype].filter(Boolean).join(" · ")}</small>
+                          {(() => {
+                            const others = dups.get(grouped ? r.id : r.listingRowId);
+                            if (!others || !others.length) return null;
+                            const names = others.map((id) => all.find((x) => x.id === id)).filter(Boolean).map((x) => `eBay ${x.itemId || "?"}`).join(", ");
+                            return <small className="li-warn" title="The same card in the same condition is live on another listing — its copies belong on one listing">⚠ also listed: {names}</small>;
+                          })()}
                           <span className={`li-status sm-only s-${c1 ? c1.state : r.status}`}>{c1 ? (c1.onShow ? "On eBay now" : STATE_LABEL[c1.state]) : `${many ? `×${r.copies.length} ` : ""}${STATUS_LABEL[r.status]}`}</span>
                         </span>
                       </div>

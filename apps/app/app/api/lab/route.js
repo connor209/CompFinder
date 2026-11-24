@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, fetchItemQuantity, reviseItemQuantity, reviseItemPrice, endListing } from "@/lib/ebay";
 import { desiredFor, listingForGroup, nextCopySeqs, removeBlocker, queueOf, LISTABLE_CONDITIONS, MAX_SCANS } from "@/lib/lab-copies";
-import { setCardCosts,
+import { setCardCosts, linkCatalog,
   loadLab, loadListingSettings, saveListingSettings, logEvent, insertListing, insertCopies, undoCopies, moveLabCopies, updateListing, deleteListing, markPulled, releaseCopy, removeCopy
 } from "@/lib/lab-store";
 import { addLabListing, scanLoads, reviseLabText } from "@/lib/lab-ebay";
@@ -104,6 +104,7 @@ export async function POST(request) {
       case "remove": return json(await remove(sb, user, lab, body.copyId));
       case "setPrices": return json(await setPrices(sb, user, lab, body.changes));
       case "setCosts": return json(await setCosts(sb, user, lab, body.costs));
+      case "linkCatalog": return json(await linkCatalog(sb, user.id, lab.listings.filter((l) => !Array.isArray(body.listingIds) || body.listingIds.includes(l.id)), lab.copies));
       case "endMany": return json(await endMany(sb, user, lab, body.listingIds));
       case "applyTemplate": return json(await applyTemplate(sb, user, lab, body));
       case "saveSettings": {
@@ -195,6 +196,9 @@ async function create(sb, user, lab, { group, pricePence, subtype = "", marketPe
     throw e;
   }
   const costNote = await costsFor(sb, user, rows, group);
+  // Which Cardmarket product it is, matched once and kept (card-identity.js).
+  // Never allowed to cost the listing: an unlinked card is linked later.
+  try { await linkCatalog(sb, user.id, [listing], rows.map((r) => ({ ...r, listing_id: listing.id }))); } catch { /* linked later from the Inventory */ }
   const headRow = desiredFor(listing, rows).head;
 
   if (!settings.policies) {
@@ -320,6 +324,7 @@ async function join(sb, user, lab, listing, group) {
     return { ok: false, error: `eBay refused the new quantity for "${listing.title}": ${e.message}` };
   }
   const costNote = await costsFor(sb, user, rows, group);
+  try { await linkCatalog(sb, user.id, [listing], rows.map((r) => ({ ...r, listing_id: listing.id }))); } catch { /* linked later from the Inventory */ }
   await logEvent(sb, user.id, listing.id, "joined", { added: rows.map((r) => r.sku), from: before.available, to });
   return { ok: true, joined: true, itemId: listing.ebay_item_id, from: before.available, to, pricePence: listing.price_pence, warnings: costNote ? [costNote] : [] };
 }

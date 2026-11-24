@@ -8,6 +8,7 @@
  * disagree about which copy is on show or where a card is.
  */
 import { splitLotCost } from "./card-costs.js";
+import { identityKey } from "./card-identity.js";
 import { queueOf, displayOrder, pilePositions, pileOf } from "./lab-copies.js";
 import { renderListing } from "./listing-template.js";
 
@@ -67,6 +68,8 @@ export function inventoryRows(listings, copies) {
     // What the copies still for sale cost us, per copy (card-costs.js):
     // averaged over the ones that carry a cost, and how many of them do.
     const costed = queue.filter((c) => c.cost_pence != null);
+    // The Cardmarket product its copies are linked to (migration 045).
+    const cardmarketId = mine.find((c) => c.cardmarket_id != null)?.cardmarket_id ?? null;
     return {
       id: l.id,
       listing: l,
@@ -88,6 +91,10 @@ export function inventoryRows(listings, copies) {
       marketPence: l.market_pence ?? null,
       costPence: costed.length ? Math.round(costed.reduce((t, c) => t + Number(c.cost_pence), 0) / costed.length) : null,
       costed: costed.length,
+      cardmarketId,
+      // One identity per card (card-identity.js): the product, the printing
+      // and the language — never the condition, which is the copy's.
+      identity: identityKey({ cardmarketId, name: card.name, number: card.number, set: card.set, finish: card.finish, title: l.title, language: card.language }),
       marketAt: l.market_at || null,
       itemId: l.ebay_item_id || null,
       addedAt: l.created_at || null,

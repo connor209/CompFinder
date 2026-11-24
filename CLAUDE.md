@@ -373,6 +373,14 @@ stream` (the relay, only while streaming).
   Inventory's cost plan leaving a copy's existing cost alone unless told,
   and greps that Sales costs through `saleCost()` and both a new listing and
   a join write the costs.
+- `scripts/check-cardidentity.mjs` — one identity per card
+  (`lib/card-identity.js`, migration 045): the Cardmarket product plus the
+  printing, language and grade, never the condition; Reverse Valley is not a
+  reverse holo; the same card in the same condition live on two listings is
+  flagged and an ended one never is; linking against a fake database puts the
+  plain Geodude and its Master Ball pattern on their own products and refuses
+  a number that belongs to another card; and greps that the price guide and
+  the link read the catalogue through one `catalogRowsForSets()`.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -2665,6 +2673,35 @@ rules in `lib/card-costs.js`.
 
 Accounts is untouched: its cost of goods is the Buy ledger, which is what was
 spent, not what was sold.
+
+## One identity per card
+
+The app had half a dozen spellings of "which card is this" — stockcheck's
+`cardKey`, the lab's key, the stream box's `duplicateKey`, CardUploader's CS-
+SKU, the eBay item id, and Cardmarket's matcher run fresh on every screen —
+and most bugs worth writing up lived where two disagreed. The anchor now is
+the **Cardmarket product** (`card_catalog.cardmarket_id`), matched ONCE by
+`lib/cm-match.js` and stored on the stack card (`stack_cards.cardmarket_id`,
+migration 045). Started with lab cards (2026-11-24); the older keys still
+stand and move over one at a time.
+
+- **`identityKey()` is the product plus what the product does not carry**:
+  `|rev` for the reverse holo (same product, priced apart), the language
+  (English adds nothing), the grade of a slab. Never the condition — that is
+  the copy's. An unlinked card gets a `txt:` key from its own fields, which is
+  only ever compared with other `txt:` keys.
+- **Linked when listed, and on demand.** The lab route links a new listing's
+  copies and a join's (never allowed to cost the listing), and the Inventory's
+  **🔗 N not linked — link** links the rest. A card that cannot be pinned to
+  one product stays unlinked and is named with why; a product for the wrong
+  card is worse than none.
+- **One catalogue read.** `lib/catalog-read.js` is the matching read for the
+  price guide route and the link alike, so they cannot match a card two ways.
+  A linked card sends its product to `/api/cardmarket/prices` and is not
+  re-matched by name.
+- **The payoff on screen:** the Inventory flags the same card in the same
+  condition live on two listings (`duplicateListings()`) — the copies belong
+  on one, and two means the keys disagreed when it was listed.
 
 ## Show history is the ledger, grouped
 
