@@ -6,7 +6,7 @@ import { createGate, runPool, SOLDCOMPS_GAP_MS } from "@/lib/pace";
 import { HOUSE_RULES, resolveRules } from "@/lib/house-pricing";
 import { VARIANTS } from "@/lib/variants";
 import {
-  BATCH_FETCH_OPTIONS, MAX_CARDS, cardsFromCsv, evaluateCard, mergeComps, normaliseCard,
+  BATCH_FETCH_OPTIONS, MAX_CARDS, cardsFromCsv, compKey, evaluateCard, mergeComps, normaliseCard,
   planCard, priceDiffers, resultsCsv, unpricedSkus, wantsFallback
 } from "@/lib/batch-comps";
 import { REASON_CODES, TITLE_MAX_CARDS, isTitleRequest, planTitleCard, titleCardResult, titleKey } from "@/lib/title-comps";
@@ -56,7 +56,7 @@ export async function GET() {
       check: { abs_pounds: 1, pct: 30 },
       rules: HOUSE_RULES,
       fresh: "true skips the 24h cache read (a sale from today may be missing from a cached answer)",
-      depth: "1 = one search per card; 2 (default) = retry without the set when the first search finds fewer than minCompsForPercentile",
+      depth: "1 = one search per card; 2 (default) = retry without the set when the first search finds fewer than minCompsForPercentile; 3 = the full ladder — every rung (exact, no set, no printing words, unpadded number, numerator only, set code, no language word) run and merged, each sale once; results carry search[] with what each rung fetched and added",
       format: "\"json\" (default) or \"csv\" for sku,suggested_price"
     },
     variant_keys: VARIANTS.map((v) => ({ key: v.key, label: v.label })),
@@ -110,7 +110,9 @@ export async function POST(request) {
   }
 
   const rules = resolveRules(body.rules);
-  const depth = Number(body.depth) === 1 ? 1 : 2;
+  // 1 = one search; 2 = retry without the set when thin; 3 = the full ladder,
+  // every rung run and merged (planCard's `ladder`, see searchLadder()).
+  const depth = [1, 2, 3].includes(Number(body.depth)) ? Number(body.depth) : 2;
   const fresh = !!body.fresh;
   const options = { ...BATCH_FETCH_OPTIONS };
   const gate = createGate(SOLDCOMPS_GAP_MS);
@@ -167,6 +169,31 @@ export async function POST(request) {
     const pages = [];
     let meta = {};
     try {
+      if (depth === 3) {
+        // Every rung at once (the gate still paces them); a failed rung costs
+        // that rung, never the card, unless every rung failed.
+        const rungs = plan.ladder;
+        const got = await Promise.all(rungs.map((r) => getComps(r.query).then((x) => ({ ok: true, ...x }), (err) => ({ ok: false, err }))));
+        if (fatal && got.every((g) => !g.ok)) throw fatal;
+        const okOnes = got.filter((g) => g.ok);
+        if (!okOnes.length) throw got[0].err;
+        const seen = new Set();
+        const search = rungs.map((r, i) => {
+          const g = got[i];
+          if (!g.ok) return { rung: r.rung, query: r.query, error: g.err?.message || "failed" };
+          let added = 0;
+          for (const c of g.comps) { const k = compKey(c); if (!seen.has(k)) { seen.add(k); added++; } }
+          return { rung: r.rung, query: r.query, fetched: g.comps.length, added, cached: !!g.cached, page_full: !!g.pageFull };
+        });
+        const merged = mergeComps(okOnes.map((g) => g.comps));
+        const fetchedAt = okOnes.map((g) => g.fetchedAt).filter(Boolean).sort()[0] || null;
+        const result = evaluateCard(plan, merged, {
+          queries: rungs.filter((_, i) => got[i].ok).map((r) => r.query), fetchedAt,
+          cached: okOnes.every((g) => g.cached), pageFull: okOnes.some((g) => g.pageFull)
+        }, rules);
+        results[i] = { ...result, search };
+        return;
+      }
       const first = await getComps(plan.queries[0]);
       sent.push(plan.queries[0]);
       pages.push(first.comps);

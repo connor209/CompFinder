@@ -143,15 +143,20 @@ export default function LabAdd() {
     setBusy("price");
     setMsg(null);
     const got = new Map();
-    for (let i = 0; i < todo.length; i += 50) {
-      setProgress({ label: "Pricing from sold comps", done: i, total: todo.length });
-      const chunk = todo.slice(i, i + 50);
+    // The full search ladder (depth 3) is up to seven searches a card, paced at
+    // SoldComps' 60 a minute — so a few cards a request, well inside the
+    // server's five minutes.
+    const PER_REQUEST = 6;
+    for (let i = 0; i < todo.length; i += PER_REQUEST) {
+      setProgress({ label: "Pricing from sold comps (every search)", done: i, total: todo.length });
+      const chunk = todo.slice(i, i + PER_REQUEST);
       const cards = chunk.map((r) => ({
         sku: r.copies[0].sku, name: r.cardName, number: r.cardNumber, set: r.set, title: r.title, condition: r.condition,
-        language: r.language || "English", any_language: Boolean(r.anyLanguage), game: r.card?.game || "", variant: r.card?.finish || ""
+        language: r.language || "English", any_language: Boolean(r.anyLanguage), game: r.card?.game || "", variant: r.card?.finish || "",
+        set_code: r.card?.setCode || ""
       }));
       try {
-        const res = await fetch("/api/batch-comps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards }) });
+        const res = await fetch("/api/batch-comps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards, depth: 3 }) });
         const j = await res.json();
         if (!res.ok || !j.results) throw new Error(j.error || `Pricing answered ${res.status}.`);
         const bySku = new Map(j.results.map((x) => [String(x.sku), x]));
@@ -161,6 +166,8 @@ export default function LabAdd() {
             pence: priceFromComps(x), confidence: x?.confidence || null, n: x?.n_comps ?? null,
             flags: x?.flags ? Object.keys(x.flags).filter((k) => x.flags[k]) : [],
             decision: x?.decision || (x?.error ? "hold" : null), reason: x?.decision_reason || x?.error || "",
+            searches: Array.isArray(x?.search) ? x.search.length : null,
+            fetched: Array.isArray(x?.search) ? x.search.reduce((t, s) => t + (s.added || 0), 0) : null,
             ...(x?.error ? { error: x.error } : {})
           });
         }
@@ -432,7 +439,7 @@ export default function LabAdd() {
                       </td>
                       <td className="mono sm-hide">{live.length}{live.length !== r.copies.length ? <small>of {r.copies.length}</small> : null}</td>
                       <td className="sm-hide"><b>{r.condition}</b></td>
-                      <td className="r sm-hide" title={r.comps?.error || (r.comps ? `${r.comps.n ?? "?"} sales · ${r.comps.confidence || "?"} confidence${r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}${r.comps.reason ? ` (${r.comps.reason})` : ""}` : ""}${r.comps.flags?.length ? ` · ${r.comps.flags.join(", ").replace(/_/g, " ")}` : ""}` : "Not priced from sold comps yet")}>
+                      <td className="r sm-hide" title={r.comps?.error || (r.comps ? `${r.comps.n ?? "?"} sales counted${r.comps.searches ? ` of ${r.comps.fetched ?? "?"} found across ${r.comps.searches} searches` : ""} · ${r.comps.confidence || "?"} confidence${r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}${r.comps.reason ? ` (${r.comps.reason})` : ""}` : ""}${r.comps.flags?.length ? ` · ${r.comps.flags.join(", ").replace(/_/g, " ")}` : ""}` : "Not priced from sold comps yet")}>
                         {r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(r.comps?.pence ?? null)}
                         {r.comps && !r.comps.error && <small className={isThin(r) ? "li-warn" : ""}>{r.comps.n ?? "?"} sale{r.comps.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
                         {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}

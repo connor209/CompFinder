@@ -43,6 +43,7 @@ export const REASON_CODES = Object.freeze({
   promoVariant: "variant_mismatch",
   nonUkLocation: "non_uk",
   foreignPrint: "foreign",
+  notThisLanguage: "foreign",
   catalogMismatch: "catalog_mismatch",
   categoryMismatch: "catalog_mismatch",
   // Outside the requested list — no honest mapping into it.

@@ -79,7 +79,14 @@ Pokémon £2.49, Yu-Gi-Oh £1.99, Magic £0.99.
 checks first (always for a rise on fewer than four sales, and for a big rise or
 drop, a p90/p10 spread over 3, or no sales of this printing); `keep` — nothing
 found and the card already has a price; `hold` — the lookup failed.
-`decision_reason` says which. Send `current_price` for the rise and drop tests
+`decision_reason` says which.
+
+`depth: 3` runs the full search ladder for each card — exact, no set, no
+printing words, unpadded number, numerator only, set code, no language word —
+merges every rung, each sale once, and returns `search[]`: each rung's query,
+how many it fetched and how many it added. Up to seven searches a card, so send
+a few cards a request (Add copies sends six). A non-English card only counts
+sales whose title shows its language (reason `notThisLanguage`). Send `current_price` for the rise and drop tests
 to mean anything. `any_language: true` counts sales in every language.
 
 ## The title form: the evidence, no price

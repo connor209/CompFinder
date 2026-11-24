@@ -20,7 +20,7 @@ import { readFileSync } from "node:fs";
 import { isPromoCard, promoNumber, textLooksPromo } from "../apps/app/lib/promo.js";
 import { compVariants, detectVariants, nameWithoutVariants, variantExclusion } from "../apps/app/lib/variants.js";
 import { housePrice, percentileOf, resolveRules, roundUpToLadder, rulesForGame, gameCode, decide, spreadTooWide, HOUSE_RULES } from "../apps/app/lib/house-pricing.js";
-import { cardsFromCsv, evaluateCard, listsOtherCards, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
+import { cardsFromCsv, evaluateCard, languageMarker, searchLadder, listsOtherCards, normaliseCard, planCard, priceDiffers, resultsCsv, unpricedSkus } from "../apps/app/lib/batch-comps.js";
 import { settingsForText } from "../apps/app/lib/matching.js";
 
 let failed = 0;
@@ -290,6 +290,34 @@ eq("mirror is recognised but soft: no name word, no query word", [lum.variantKey
 eq("…and a sale need not say mirror", evaluateCard(lum, [comp("Luminous Energy 190/190 Shiny Treasure ex Japanese", 2), comp("Luminous Energy Mirror Holo 190/190 sv4a", 2.5)]).n_comps, 2);
 eq("an unplaced bracket is never a required word", planCard(normaliseCard({ name: "Pikachu (Rainbow Swirl Foil)", number: "025/165" })).nameTokens, ["Pikachu"]);
 eq("…but Unown keeps its letter", planCard(normaliseCard({ name: "Unown (E)", number: "E/28" })).baseName, "Unown (E)");
+
+// --- 4d. the full search ladder (depth 3) -----------------------------------------
+const geoJ = planCard(normaliseCard({ name: "Geodude (Master Ball Pattern)", number: "074/165", set: "Pokemon Card 151", language: "Japanese" }));
+eq("the ladder for a Japanese pattern card, every rung different", geoJ.ladder.map((r) => r.query), [
+  "Geodude Master Ball 074/165 Japanese", "Geodude 074/165 Japanese", "Geodude Master Ball 74/165 Japanese",
+  "Geodude Master Ball 074 Japanese", "Geodude Master Ball 074/165 sv2a", "Geodude Master Ball 074/165"
+]);
+eq("Cardmarket's Japanese set name gives the printed code", geoJ.setCode, "sv2a");
+eq("an English card's ladder keeps its set first and never drops a language word", planCard(normaliseCard({ name: "Emboar", number: "33/236", set: "Cosmic Eclipse", variant: "Reverse Holofoil" })).ladder.map((r) => r.rung), ["exact", "noset", "noprinting", "numerator"]);
+eq("a promo is its code, asked two ways", planCard(normaliseCard({ name: "Riolu (Cosmos Holo)", number: "BW33/101", set: "Black and White Promos" })).ladder.map((r) => r.query), ["Riolu Cosmos Holo BW33", "Riolu BW33"]);
+eq("a card with nothing to vary is one search", searchLadder({ baseName: "Pikachu", number: "" }).length, 1);
+eq("a numberless card asks with its set", planCard(normaliseCard({ name: "Lightning Energy", set: "25th Anniversary Golden Box", language: "Japanese" })).ladder.map((r) => r.rung), ["exact", "nolanguage", "withset"]);
+// The widest rungs return the English copy that shares the number: a
+// Japanese card only counts a sale that says it is Japanese, one way or another.
+const jm = languageMarker("Japanese", "Pokemon Card 151", "sv2a");
+eq("what says Japanese", [
+  "Geodude Master Ball 074/165 Japanese", "Geodude 074/165 JPN", "Geodude Master Ball 074/165 sv2a",
+  "Geodude (Master Ball Pattern) 074/165 Common - SV2a: Pokemon Card 151", "イシツブテ 074/165", "Geodude 074/165 Scarlet & Violet 151 English"
+].map((t) => jm.test(t)), [true, true, true, true, true, false]);
+const mixed = evaluateCard(geoJ, [
+  comp("Geodude Master Ball 074/165 Japanese", 6), comp("Geodude Master Ball Reverse 74/165 sv2a", 7),
+  comp("Geodude 074/165 Master Ball Reverse Holo 151 Prismatic", 9)
+]);
+eq("an English-looking sale of the same number is left out, saying why", [mixed.n_comps, mixed.excluded.map((e) => e.reason)], [2, ["notThisLanguage"]]);
+ok("any-language stands the language rule down", planCard(normaliseCard({ name: "Geodude", number: "074/165", language: "Japanese", any_language: true })).languageMarker === null);
+ok("an English card has no language rule", planCard(normaliseCard({ name: "Geodude", number: "074/165" })).languageMarker === null);
+const routeSrc = readFileSync(new URL("../apps/app/app/api/batch-comps/route.js", import.meta.url), "utf8");
+ok("depth 3 runs the ladder and reports each rung", /depth === 3/.test(routeSrc) && /plan\.ladder/.test(routeSrc) && /search \}/.test(routeSrc));
 
 // --- 5. output ---------------------------------------------------------------
 

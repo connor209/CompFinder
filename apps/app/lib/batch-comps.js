@@ -27,6 +27,7 @@ import { isPromoCard, promoNumber, promoNumberPattern, anyPromoOfPrefix } from "
 import { detectVariants, isReverseKind, nameWithoutVariants, queryWordsFor, subjectTextFor, variantExclusion, variantLabel, withoutReverseWords } from "./variants.js";
 import { housePrice, houseTotal, resolveRules, rulesForGame, conditionCode, decide, gameCode, spreadTooWide } from "./house-pricing.js";
 import { UNPRICED_PENCE } from "./zero-price.js";
+import { japaneseSetCode } from "./japanese-sets.js";
 
 /** Most cards one request will take. A page of 50 is the normal batch. */
 export const MAX_CARDS = 100;
@@ -53,6 +54,7 @@ export const REASON_TEXT = {
   pickYourOwn: "\"Choose your card\" listing",
   promoVariant: "A different promo (league / championship / prerelease)",
   foreignPrint: "Other language",
+  notThisLanguage: "Doesn't say it's this language (an English copy shares the number)",
   plainPrinting: "Ordinary copy (pricing a stamped one)",
   variantMismatch: "Wrong printing (reverse holo vs plain)",
   wrongVariant: "Wrong variant",
@@ -105,6 +107,7 @@ export function normaliseCard(raw = {}, index = 0) {
     name: strip(pick("name", "cardName", "card_name")),
     number: strip(pick("number", "cardNumber", "card_number")),
     set: strip(pick("set", "setName", "set_name")),
+    setCode: strip(pick("setCode", "set_code", "*C:Set Code", "C:Set Code")),
     variant: strip(pick("variant", "finish", "printing")),
     variantKeys,
     condition: strip(pick("condition")),
@@ -154,6 +157,76 @@ export function cardsFromCsv(csvText) {
 // What the card is, and how it is searched
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// The search ladder (depth 3)
+// ---------------------------------------------------------------------------
+
+/** A Japanese/Korean/Chinese set code as sellers write it: sv2a, s12a, sm10b, SV4a. */
+const ASIAN_SET_CODE = /\b(?:sv|s|sm|xy|bw|dp|pt|l|cp|m|svg|sva|svn)\d{1,2}[a-z]\b/i;
+
+/** The words that say a sale is in a given language, in a title. */
+const LANGUAGE_WORDS = {
+  japanese: "japanese|japan|jpn|jp|jap",
+  korean: "korean|korea|kor|kr",
+  chinese: "chinese|china|chn|cn|simplified|traditional",
+  german: "german|deutsch|ger|de",
+  french: "french|fran[cç]ais|fra|fr",
+  italian: "italian|italiano|ita",
+  spanish: "spanish|espa[nñ]ol|esp",
+  portuguese: "portuguese|portugu[eê]s|por",
+  dutch: "dutch|nederlands|nl"
+};
+
+/**
+ * What a sale's title must carry to count for a non-English card: its
+ * language's word, an Asian set code (sv2a) for the Asian languages, or the
+ * card's own set name or code. Without it the widest searches would pool the
+ * English copy that shares the card's number — Japanese 151 is numbered
+ * exactly like English 151.
+ */
+export function languageMarker(language, setName = "", setCode = "") {
+  const key = String(language || "").trim().toLowerCase();
+  const words = LANGUAGE_WORDS[key];
+  if (!words) return null;
+  const parts = [`\\b(?:${words})\\b`];
+  // A title in Japanese script is a Japanese card's title (kana, or kanji).
+  if (key === "japanese") parts.push("[\\u3040-\\u30ff\\u4e00-\\u9faf]");
+  if (["japanese", "korean", "chinese"].includes(key)) parts.push(ASIAN_SET_CODE.source);
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s*");
+  const name = plain(setName).trim();
+  if (name && name.length >= 4) parts.push(esc(name));
+  if (setCode && /^[A-Za-z0-9-]{2,8}$/.test(setCode)) parts.push(`\\b${esc(setCode)}\\b`);
+  return new RegExp(parts.join("|"), "i");
+}
+
+/**
+ * Every way to ask for one card, narrowest first, duplicates dropped. Each is
+ * an eBay search, and eBay needs every word — so each rung drops or respells
+ * one thing sellers are inconsistent about: the set, the printing's words, the
+ * number's zero padding, the number's denominator, the language word.
+ */
+export function searchLadder({ baseName, variantWords = "", number = "", promo = false, setForQuery = "", setName = "", langWord = "", setCode = "", english = true }) {
+  const q = (...parts) => parts.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  const rungs = [];
+  const add = (rung, query) => { if (query && !rungs.some((r) => r.query.toLowerCase() === query.toLowerCase())) rungs.push({ rung, query }); };
+  const m = !promo && String(number).match(/^([A-Z]{0,4})(\d{1,4})([a-z]?)\s*\/\s*([A-Z]{0,4}\d{1,4})$/i);
+  const unpadded = m && m[2].replace(/^0+(?=\d)/, "") !== m[2] ? `${m[1]}${m[2].replace(/^0+(?=\d)/, "")}${m[3]}/${m[4]}` : "";
+  const numerator = m ? `${m[1]}${m[2]}${m[3]}` : "";
+
+  add("exact", q(baseName, variantWords, number, setForQuery, langWord));
+  add("noset", q(baseName, variantWords, number, langWord));
+  if (variantWords) add("noprinting", q(baseName, number, langWord));
+  if (unpadded) add("unpadded", q(baseName, variantWords, unpadded, langWord));
+  if (numerator) add("numerator", q(baseName, variantWords, numerator, langWord));
+  if (!english && setCode && /^[A-Za-z0-9-]{2,8}$/.test(setCode)) add("setcode", q(baseName, variantWords, number || "", setCode));
+  if (!english) add("nolanguage", q(baseName, variantWords, number));
+  // No number to anchor on: the set is the only thing between this card and
+  // every other copy of its name, so ask for it as sellers might write it.
+  if (!number && setName) add("withset", q(baseName, variantWords, setName));
+  if (!number && variantWords) add("nameonly", q(baseName, langWord));
+  return rungs;
+}
+
 /**
  * Everything decided about a card before any request is made: what it is,
  * the queries that will be sent, and the settings its comps are judged by.
@@ -199,6 +272,13 @@ export function planCard(card) {
   const queries = [compose(true)];
   if (setForQuery) queries.push(compose(false));
 
+  // The full ladder (depth 3): the same card asked every way sellers title it.
+  // Every rung is run and merged, each sale once; the filter — not the search
+  // — decides what counts, so a wide rung adds evidence and never a card.
+  // The printed set code: the file's, else Cardmarket's Japanese set name looked up.
+  const setCode = card.setCode || (/^japanese$/i.test(card.language || "") ? japaneseSetCode(card.set) : "");
+  const ladder = searchLadder({ baseName, variantWords: queryWordsFor(keys), number, promo, setForQuery, setName: setUsable && !promo ? plain(card.set) : "", langWord, setCode, english });
+
   // The text the engine's subject readers see. Variant words that core reads
   // itself (reverse, stamped) are written in so its reading and ours agree.
   const subjectText = [baseName, number, subjectTextFor(keys), card.title, langWord].filter(Boolean).join(" ");
@@ -222,6 +302,9 @@ export function planCard(card) {
     unrecognisedVariant: unrecognised,
     set: setUsable ? card.set : null,
     queries,
+    ladder,
+    languageMarker: english || card.anyLanguage ? null : languageMarker(card.language, setUsable ? card.set : "", setCode),
+    setCode,
     settings,
     nameTokens,
     condition: conditionCode(card.condition),
@@ -314,6 +397,10 @@ export function prefilterComps(plan, comps) {
           continue;
         }
       }
+    }
+    if (plan.languageMarker && !plan.languageMarker.test(t)) {
+      excluded.push({ ...c, exclusionReason: "notThisLanguage", exclusionDetail: plan.card?.language || "" });
+      continue;
     }
     if (listsOtherCards(plan, t)) {
       excluded.push({ ...c, exclusionReason: "multiCardLot", exclusionDetail: "lists other cards" });

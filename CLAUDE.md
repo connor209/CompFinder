@@ -310,7 +310,9 @@ stream` (the relay, only while streaming).
   every variant's sales and a variant requires its own, "1st Class postage" is
   not 1st Edition, the house rules (p40, postage cap, ladder, condition) as a
   table, CardCropper's port (floors by game, lots that only list names, high
-  postage put back, any language, the decision ladder), an unpriced card written 0.00 in the CSV, and greps keeping the
+  postage put back, any language, the decision ladder), Cardmarket's bracketed
+  printings as variants, the depth-3 search ladder and the language marker a
+  non-English card's sales must carry, an unpriced card written 0.00 in the CSV, and greps keeping the
   rules out of core and Quick Search on the same pre-filter.
 - `scripts/check-titlecomps.mjs` — `/api/batch-comps`'s title form ({ id,
   title } in, evidence out): what a title parses to, that every fetched sale
@@ -786,6 +788,21 @@ for the same contract as JSON.
   lookup failed), plus `in_hand_check` for NM at £15+. Add copies shows it
   and files anything but apply under **Check first**. CardCropper's seven
   golden cards are the live acceptance test and need a real run.
+- **Depth 3 is the full ladder** (`searchLadder()`, what Add copies sends):
+  exact, no set, no printing words, unpadded number, numerator only, set
+  code, no language word — every rung run every time, merged, each sale once.
+  eBay needs every word of a search, so each rung drops or respells one thing
+  sellers are inconsistent about; the FILTER decides what counts. Learned on
+  Geodude (Master Ball Pattern) 074/165, 2026-11-24: "(Master Ball Pattern)"
+  made "Pattern" a required word and Cardmarket's "Pokemon Card 151" was in
+  the query — 0 of 5 UK sales found. Cardmarket's bracketed printings are now
+  variants (`masterBall`, `pokeBall`, `energyPattern`; `mirror` is soft), an
+  unplaced bracket never becomes a required word, a non-English card is never
+  searched by Cardmarket's set name, and `lib/japanese-sets.js` gives the
+  printed code (sv2a). Because the widest rungs return the English copy that
+  shares a Japanese number, a non-English card only counts a sale whose title
+  shows its language — the word, an Asian set code, the set name, or Japanese
+  script (`languageMarker()`, reason `notThisLanguage`).
 - **A promo is its code, and its comps say "promo"** (`lib/promo.js`). The
   catalogue carried "BW33/101", which finds nothing; and the engine drops any
   comp saying "promo", so eleven UK sales showed and one counted.
