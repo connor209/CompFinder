@@ -592,7 +592,9 @@ function SalesFound({ row, onPicks, onUse, disabled }) {
         </span>
         <span className="li-spacer" />
         {changed && <button className="li-btn" disabled={disabled} onClick={() => onPicks(null)}>Reset picks</button>}
-        <button className="li-btn primary" disabled={disabled || p.suggestedPence == null || p.suggestedPence === row.pricePence} onClick={() => onUse(p.suggestedPence)}>Use this price</button>
+        {p.suggestedPence != null && p.suggestedPence === row.pricePence
+          ? <span className="li-dim">✓ already the price</span>
+          : <button className="li-btn primary" disabled={disabled || p.suggestedPence == null} onClick={() => onUse(p.suggestedPence)}>Use this price</button>}
       </div>
     </div>
   );
