@@ -30,6 +30,12 @@ export const RULE_KINDS = [
   { key: "lot", label: "Lot / bundle", hint: "lot, bundle, playset, x4", pattern: /\b(?:lot|bundle|playset|joblot)\b|\bx\s?\d+\b|\b\d+\s?x\b/i },
   { key: "language", label: "Other language", hint: "Japanese, Korean, Chinese, German, French…", pattern: /\b(?:japanese|jpn|korean|chinese|german|deutsch|french|français|italian|spanish|portuguese)\b/i },
   { key: "reverse", label: "Reverse holo", hint: "reverse, rev holo", pattern: /\brev(?:erse)?\b/i },
+  // A holo sale when your copy isn't (2026-11-25: a Camerupt rule meant for
+  // "Holo" titles only ever caught "reverse"). "Non-holo" and "reverse holo"
+  // are not holo copies, so they never trip it.
+  { key: "holo", label: "Holo", hint: "holo, holofoil — not non-holo or reverse holo", pattern: /\bholo(?:foil|graphic)?\b/i,
+    unless: /\bnon[\s-]?holo|\brev(?:erse)?[\s-]*holo/i },
+  { key: "nonHolo", label: "Non-holo", hint: "non-holo, non holo", pattern: /\bnon[\s-]?holo\b/i },
   { key: "firstEdition", label: "1st Edition", hint: "1st edition, first edition", pattern: /\b(?:1st|first)\s*ed(?:ition|\.)?\b/i }
 ];
 const KIND = Object.fromEntries(RULE_KINDS.map((k) => [k.key, k]));
@@ -133,7 +139,9 @@ export const SALE_REASONS = [
   { key: "graded", label: "Graded / slab", kind: "graded" },
   { key: "lot", label: "Lot / bundle", kind: "lot" },
   { key: "language", label: "Other language", kind: "language" },
-  { key: "reverse", label: "Other printing (reverse/holo)", kind: "reverse" },
+  { key: "reverse", label: "Reverse holo", kind: "reverse" },
+  { key: "holo", label: "Holo (ours isn't)", kind: "holo" },
+  { key: "nonHolo", label: "Non-holo (ours is holo)", kind: "nonHolo" },
   { key: "otherCard", label: "Different card or set" },
   { key: "condition", label: "Condition (damaged, played)" },
   { key: "price", label: "Price looks wrong" },

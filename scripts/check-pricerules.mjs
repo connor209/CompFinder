@@ -59,6 +59,15 @@ ok("nothing ticked is no rule", isEmptyRule(normaliseRule({ kinds: [], words: []
 eq("described in words", describeRule(normaliseRule({ kinds: ["stamped"], words: ["shadowless"] })), 'no stamped · no "shadowless"');
 eq("read back from the table", [...rulesByKey([{ card_key: "k", kinds: ["graded"], words: [], note: "n" }]).entries()], [["k", { kinds: ["graded"], words: [], note: "n" }]]);
 
+// ---- holo, non-holo, reverse: three different rules (Camerupt 4/107, 2026-11-25) ----
+const holo = normaliseRule({ kinds: ["holo"] });
+for (const t of ["Camerupt 4/107 EX Deoxys Holo Rare Pokemon Card - NM", "Camerupt Holo #4/107 Ex Deoxys", "Camerupt 4/107 Holofoil"]) ok(`holo catches "${t}"`, !!saleBreaksRule(t, holo, "Camerupt"));
+for (const t of ["Pokémon TCG - Camerupt 4/107 - English EX Deoxys Non-Holo - Vintage Rare LP", "Camerupt 4/107 Non Holo", "Camerupt 4/107 Reverse Holo", "Camerupt 4/107 Rev Holo", "Holon's Castform 44/110"]) ok(`holo leaves "${t}"`, !saleBreaksRule(t, holo, "Camerupt"));
+const nonHolo = normaliseRule({ kinds: ["nonHolo"] });
+ok("non-holo catches a non-holo sale", !!saleBreaksRule("Camerupt 4/107 Non-Holo", nonHolo, "Camerupt") && !saleBreaksRule("Camerupt 4/107 Holo", nonHolo, "Camerupt"));
+ok("reverse never catches a plain Holo title", !saleBreaksRule("Camerupt 4/107 Holo Rare", normaliseRule({ kinds: ["reverse"] }), "Camerupt"));
+eq("each printing reason makes its own rule", ["reverse", "holo", "nonHolo"].map(ruleKindForReason), ["reverse", "holo", "nonHolo"]);
+
 // ---- the server's filter ----
 let seq = 0;
 const comp = (title, pounds) => ({ title, itemPricePence: Math.round(pounds * 100), postagePence: 0, itemLocation: null,
@@ -139,7 +148,7 @@ ok("notes never go to eBay", !("saleNotes" in groupToSend({ ...r1, copies: [], s
 const page = readFileSync("apps/app/app/panel/lab/add/LabAdd.js", "utf8");
 ok("an unticked, noted or ruled-out sale stays in the table", /e\.reasonCode === "yourRule" \|\| notes\[String\(e\.id\)\]/.test(page));
 ok("every sale offers a note, not only an unticked one", /unticked \? "✎ why not\?" : "✎ add a note"/.test(page));
-ok("the open card panel is pinned to the visible width", /\.li-scroll \.la-open \{ position: sticky;[^}]*100cqw/.test(page));
+ok("the Add copies table never scrolls sideways", /\.la-fit \{ overflow-x: clip; \}/.test(page) && /\.la-table \{ table-layout: fixed; \}/.test(page) && /<div className="la-fit">\s*<table className="li-table la-table">/.test(page));
 
 // ---- greps ----
 const read = (p) => readFileSync(p, "utf8");

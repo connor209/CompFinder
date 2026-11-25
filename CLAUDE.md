@@ -1840,10 +1840,15 @@ only file naming `card_price_rules` (migration 050).
   and — when the reason is a rule kind and you tick it — made this card's rule
   in the same step. A rule keeps your picks, less what it took out.
 
-**The app is 1600px wide, not 1080** (2026-11-25). The card panel in Add
-copies sits in a table that scrolls sideways, so it is pinned to the scroll
-box's own width (`100cqw`, the box is an inline-size container) — otherwise
-its right half is drawn past the edge.
+**The app is 1600px wide, not 1080** (2026-11-25), and **the Add copies table
+never scrolls sideways**: fixed column widths, text wraps, File hides under
+1200px. Scrolled sideways, the tick column went off the left edge and rows
+looked as if they had no checkbox.
+
+**Holo, Non-holo and Reverse holo are three rule kinds** (2026-11-25). The
+note reason "Other printing (reverse/holo)" only ever made a reverse rule, so
+a Camerupt rule meant for "Holo" titles caught nothing. `holo` never trips on
+"non-holo" or "reverse holo".
 
 **The global version is measured by `scripts/probe-stamps.mjs`** (Actions →
 Probe: stamped sales on plain cards). Read-only: for every plain card in Add

@@ -44,7 +44,7 @@ export const LAB_TABLE_CSS = `
 .li-bulk, .li-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .li-foot { border-bottom: 0; border-top: 1px solid var(--line); }
 .li-pager { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink-soft); }
-.li-scroll { overflow-x: auto; container-type: inline-size; }
+.li-scroll { overflow-x: auto; }
 .li-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .li-table th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-faint); font-weight: 600; padding: 10px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .li-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
