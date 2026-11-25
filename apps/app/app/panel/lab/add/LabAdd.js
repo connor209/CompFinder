@@ -1073,18 +1073,18 @@ export default function LabAdd() {
         )}
 
         {/* ---------------- The table ---------------- */}
-        <div className="li-scroll">
-          <table className="li-table">
+        <div className="la-fit">
+          <table className="li-table la-table">
             <thead>
               <tr>
                 <th className="li-cb"><input type="checkbox" checked={allOnScreen} aria-label="Tick everything shown" onChange={(e) => setTicked((t) => { const n = new Set(t); for (const r of shown) { if (e.target.checked) n.add(String(r.id)); else n.delete(String(r.id)); } return n; })} /></th>
-                <th>Card</th>
-                <th className="sm-hide">Status</th>
-                <th className="sm-hide">Copies</th>
-                <th className="sm-hide">Condition</th>
-                <th className="r sm-hide">Sold comps</th>
-                <th className="r">Your price</th>
-                <th className="sm-hide">File</th>
+                <th className="la-c-card">Card</th>
+                <th className="sm-hide la-c-status">Status</th>
+                <th className="sm-hide la-c-copies">Copies</th>
+                <th className="sm-hide la-c-cond">Condition</th>
+                <th className="r sm-hide la-c-comps">Sold comps</th>
+                <th className="r la-c-price">Your price</th>
+                <th className="sm-hide md-hide la-c-file">File</th>
               </tr>
             </thead>
             <tbody>
@@ -1152,7 +1152,7 @@ export default function LabAdd() {
                           <PriceBox value={r.pricePence} disabled={done || !!busy} onSet={(p) => setRow(r.id, { pricePence: p })} />
                         )}
                       </td>
-                      <td className="li-dim sm-hide" style={{ whiteSpace: "normal", maxWidth: 140 }}>{r.file}</td>
+                      <td className="li-dim sm-hide md-hide la-file">{r.file}</td>
                     </tr>
                     {isOpen && (
                       <tr className="li-sub">
@@ -1516,7 +1516,31 @@ const EXTRA_CSS = `
 .la-open { display: flex; flex-direction: column; gap: 12px; white-space: normal; padding: 4px 0; }
 /* The card's open panel sits in a row of a table that scrolls sideways: pinned
    to the scroll box's own width (cqw), so it is never drawn past the edge. */
-.li-scroll .la-open { position: sticky; left: 8px; width: calc(100cqw - 64px); box-sizing: border-box; }
+/* The Add copies table never scrolls sideways (asked for 2026-11-25): fixed
+   column widths, text wraps, and the File column goes first when it's tight.
+   Scrolled sideways, the tick column went off the left edge and rows looked
+   as if they had no checkbox. */
+.la-fit { overflow-x: clip; }
+.la-table { table-layout: fixed; }
+.la-table td { white-space: normal; overflow-wrap: anywhere; }
+.la-table .li-cb { width: 40px; }
+.la-table .la-c-status { width: 190px; }
+.la-table .la-c-copies { width: 72px; }
+.la-table .la-c-cond { width: 96px; }
+.la-table .la-c-comps { width: 230px; }
+.la-table .la-c-price { width: 124px; }
+.la-table .la-c-file { width: 150px; }
+.la-file { font-size: 12px; }
+.la-open { min-width: 0; }
+.la-open .li-scroll { max-width: 100%; overflow-x: clip; }
+.la-sales-table { table-layout: fixed; }
+.la-sales-table td { white-space: normal; overflow-wrap: anywhere; }
+.la-sales-table th:nth-child(1) { width: 44px; }
+.la-sales-table th:nth-child(3) { width: 96px; }
+.la-sales-table th:nth-child(4) { width: 104px; }
+.la-sales-table th:nth-child(5) { width: 200px; }
+@media (max-width: 1200px) { .la-table .md-hide { display: none; } }
+@media (max-width: 760px) { .la-table .la-c-price { width: 104px; } }
 .la-sales-table td, .la-sales-table th { vertical-align: top; }
 .la-note-row td { background: var(--surface-2, rgba(127,127,127,.06)); }
 .la-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
@@ -1525,7 +1549,7 @@ const EXTRA_CSS = `
 .la-note-tag { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
 .la-fields { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
 .la-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); }
-.la-fields input:not([type=checkbox]), .la-fields select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); min-width: 320px; max-width: 100%; }
+.la-fields input:not([type=checkbox]), .la-fields select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); min-width: min(320px, 100%); max-width: 100%; }
 .la-fields .li-check { flex-direction: row; }
 .la-copies { display: flex; flex-wrap: wrap; gap: 10px; }
 .la-progress { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; background: var(--surface); position: sticky; top: 8px; z-index: 5; }
