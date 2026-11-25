@@ -1398,7 +1398,7 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, onNote, rule, status
                   {e.url ? <a href={e.url} target="_blank" rel="noreferrer">{e.title}</a> : e.title}
                   <small className="sm-only">{e.date ? String(e.date).slice(0, 10) : ""} · {e.counted ? "counted" : e.reason}</small>
                   {note && <span className="la-note-tag">✎ {saleReasonLabel(note.why)}{note.text ? ` — ${note.text}` : ""}{onNote && <> · <button className="li-link" disabled={disabled} onClick={() => setNoting(id)}>edit</button></>}</span>}
-                  {!note && unticked && onNote && <span className="la-note-tag"><button className="li-link" disabled={disabled} onClick={() => setNoting(id)}>✎ why not?</button></span>}
+                  {!note && onNote && <span className="la-note-tag"><button className="li-link" disabled={disabled} onClick={() => setNoting(id)} title="Say why this sale isn't the card — it stays on this card and goes to feedback">{unticked ? "✎ why not?" : "✎ add a note"}</button></span>}
                 </td>
                 <td className="r mono">£{Number(e.total).toFixed(2)}<small>£{Number(e.price).toFixed(2)} + £{Number(e.postage || 0).toFixed(2)}</small></td>
                 <td className="mono sm-hide">{e.date ? String(e.date).slice(0, 10) : "—"}</td>
