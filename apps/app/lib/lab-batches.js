@@ -254,6 +254,36 @@ export async function saveLabBatch(sb, { id, rows, rev, at = new Date() }) {
   } catch (e) { return fail(e); }
 }
 
+/**
+ * Fill in a tile for a batch saved before migration 049 — its cover, value
+ * and counts are only written on a save, and a batch nobody has touched since
+ * would show "no scan" and £0.00 for ever. Reads the rows once, writes only the
+ * columns read OFF them (never the rows, never the rev), so it cannot clash
+ * with a tab saving the batch. A batch with no scan at all is written "" so it
+ * isn't asked again on every visit. `{ ok, tile }` — the new tile fields.
+ */
+export async function refreshTile(sb, id) {
+  if (tilesMissing) return { ok: false, missing: true };
+  try {
+    const { data, error } = await sb.from(TABLE).select("id,rows").eq("id", id).maybeSingle();
+    if (error) return fail(error);
+    if (!data) return { ok: false, notFound: true };
+    const { files, ...summary } = batchSummary(Array.isArray(data.rows) ? data.rows : []);
+    const tile = { ...summary, files, cover_url: summary.cover_url || "" };
+    const up = await sb.from(TABLE).update(tile).eq("id", id);
+    if (up.error) {
+      if (isMissingTileColumn(up.error)) tilesMissing = true;
+      return fail(up.error);
+    }
+    return { ok: true, tile };
+  } catch (e) { return fail(e); }
+}
+
+/** The batches whose tiles were never filled in (saved before 049). */
+export function tilesToFill(batches, limit = 40) {
+  return (batches || []).filter((b) => b.cover_url == null && (b.card_count || 0) > 0).slice(0, limit);
+}
+
 export async function renameLabBatch(sb, id, name) {
   const clean = String(name || "").trim().slice(0, 120);
   if (!clean) return { ok: false, error: "A batch needs a name." };

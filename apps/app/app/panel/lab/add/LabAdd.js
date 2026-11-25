@@ -16,7 +16,7 @@ import { parseCostPence } from "@/lib/card-costs.js";
 import { createClient } from "@/lib/supabase/client";
 import {
   batchIdFrom, listLabBatches, loadLabBatch, createLabBatch, saveLabBatch, renameLabBatch, deleteLabBatch,
-  defaultBatchName, localKeyFor, batchDefaults, batchKind, batchProgress
+  defaultBatchName, localKeyFor, batchDefaults, batchKind, batchProgress, refreshTile, tilesToFill
 } from "@/lib/lab-batches.js";
 import BatchHome, { BATCH_HOME_CSS } from "./BatchHome";
 import NewBatch, { NEW_BATCH_CSS } from "./NewBatch";
@@ -138,6 +138,20 @@ export default function LabAdd() {
       setStore("ok");
       setBatches(listed.batches);
       setBatchTiles(listed.tiles !== false);
+      // Batches saved before 049 have no cover or value on their tile yet:
+      // fill them in, two at a time, as the grid is already on screen.
+      if (listed.tiles !== false && !id) {
+        const todo = tilesToFill(listed.batches);
+        (async () => {
+          for (let i = 0; i < todo.length && live; i += 2) {
+            const done = await Promise.all(todo.slice(i, i + 2).map((b) => refreshTile(sb, b.id).then((r) => ({ id: b.id, r }))));
+            if (!live) return;
+            const got = new Map(done.filter((d) => d.r.ok).map((d) => [d.id, d.r.tile]));
+            if (got.size) setBatches((bs) => bs.map((b) => (got.has(b.id) ? { ...b, ...got.get(b.id) } : b)));
+            if (done.some((d) => d.r.missing)) return;
+          }
+        })();
+      }
       setLegacy(loadDraft());
       if (id) {
         const got = await loadLabBatch(sb, id);
