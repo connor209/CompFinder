@@ -2529,3 +2529,8 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .pf-reason { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); padding:4px 8px; font:inherit; font-size:12px; cursor:pointer; color:inherit; }
 .pf-reason:hover { border-color:var(--accent); }
 .pf-cancel { color:var(--ink-faint); }
+
+/* A screen whose code is still arriving (Panel.js SCREEN_LOADERS) — and the
+   panel's own loading state (app/panel/loading.js) for a full page load. */
+.screen-loading { display:flex; align-items:center; gap:10px; padding:32px 16px; color:var(--ink-soft); font-size:14px; }
+.panel-loading { min-height:60vh; display:flex; align-items:center; justify-content:center; gap:10px; color:var(--ink-soft); font-size:14px; background:var(--bg, transparent); }

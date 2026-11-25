@@ -23,6 +23,7 @@ import NewBatch, { NEW_BATCH_CSS } from "./NewBatch";
 import BatchSteps, { BATCH_STEPS_CSS } from "./BatchSteps";
 import LabHeader, { LAB_HEADER_CSS } from "../LabHeader";
 import { labCardFor, compsFromResult, applyComps } from "@/lib/lab-pricing.js";
+import { navigate } from "@/lib/client-nav.js";
 import { applyJobs, isOpen, remainingCards } from "@/lib/pricing-queue.js";
 
 /**
@@ -79,6 +80,8 @@ export default function LabAdd() {
   const flushingRef = useRef(false);
   const conflictRef = useRef(false);
   const batchId = batch?.id || null;
+  const batchIdRef = useRef(null);
+  batchIdRef.current = batchId;
   // The pricing queue (migration 048): every job of this account, and this
   // batch's answers. `missing` means 048 isn't run — the tab prices itself.
   const [queue, setQueue] = useState({ jobs: [], eta: [], busy: null, batchJobs: [], missing: false, loaded: false });
@@ -192,7 +195,7 @@ export default function LabAdd() {
    * straight after it, so the rev is never stale by our own hand.
    */
   async function flushBatch() {
-    const id = batch?.id;
+    const id = batchIdRef.current;
     if (!id || flushingRef.current || conflictRef.current) return;
     const now = rowsRef.current;
     const json = JSON.stringify(now);
@@ -233,6 +236,11 @@ export default function LabAdd() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, loaded, store, batchId]);
+
+  // Switching section in place (lib/client-nav.js) unmounts this screen
+  // without a page unload, so the debounced save would be cancelled with it:
+  // save now instead. The fetch outlives the screen.
+  useEffect(() => () => { flushBatch(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Leaving with a save still to arrive is the one way left to lose work.
   useEffect(() => {
@@ -320,7 +328,7 @@ export default function LabAdd() {
     const res = await deleteLabBatch(createClient(), b.id);
     if (!res.ok) { setMsg({ bad: true, text: `Couldn't delete it: ${res.error || "migration 047 isn't run"}` }); return; }
     try { localStorage.removeItem(localKeyFor(b.id)); } catch { /* nothing to clear */ }
-    if (b.id === batchId) { window.location.href = "/panel/lab/add"; return; }
+    if (b.id === batchId) { navigate("/panel/lab/add"); return; }
     setBatches((bs) => bs.filter((x) => x.id !== b.id));
   }
 

@@ -27,9 +27,16 @@ export async function middleware(request) {
   // what actually refreshes an expiring session token via the cookies
   // above. Skipping it is a common way to end up with users randomly
   // logged out mid-session.
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
+  //
+  // getClaims(), not getUser(): getUser() asks Supabase's auth server who you
+  // are on EVERY request — every page and every API call paid that round trip
+  // before doing anything. getClaims() checks the token's signature here
+  // against the project's published keys (cached), and only falls back to the
+  // network when the project still signs with the legacy shared secret. It
+  // refreshes an expiring session exactly as before. Every route that acts on
+  // a user still asks getUser() itself.
+  const { data } = await supabase.auth.getClaims();
+  const user = data?.claims?.sub ? { id: data.claims.sub } : null;
 
   const isProtected = PROTECTED_PATHS.some((path) => request.nextUrl.pathname.startsWith(path));
   if (isProtected && !user) {
