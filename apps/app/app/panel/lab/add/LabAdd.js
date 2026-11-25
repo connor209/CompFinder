@@ -49,6 +49,32 @@ async function api(body) {
   return res.json().catch(() => ({ ok: false, error: `The server answered ${res.status}.` }));
 }
 
+/**
+ * What this screen last saw, kept for the life of the page — it outlives the
+ * screen remounting on every in-place navigation (lib/client-nav.js), never a
+ * reload. Going back and forth between the grid and a batch used to start from
+ * nothing each time: the whole screen waited on /api/lab (a function waking
+ * up, a login check, every lab listing, copy and log line) even on the grid,
+ * which uses none of it, and a batch was a second read after the list. Now the
+ * last answer is drawn at once and the fresh one replaces it when it lands.
+ *
+ * The rev of a batch and whether a save is in flight are kept HERE too, not
+ * per screen: a save started by the screen you just left must not leave the
+ * next one saving over a rev it no longer holds.
+ */
+const MEM = { lab: null, batches: null, tiles: true, open: new Map(), rev: new Map(), saving: new Set() };
+const MEM_OPEN_MAX = 6;
+function rememberOpen(id, entry) {
+  MEM.open.delete(id);
+  MEM.open.set(id, { ...(MEM.open.get(id) || {}), ...entry });
+  while (MEM.open.size > MEM_OPEN_MAX) MEM.open.delete(MEM.open.keys().next().value);
+}
+const startingBatch = () => {
+  if (typeof window === "undefined") return null;
+  const id = batchIdFrom(window.location.search);
+  return id ? MEM.open.get(id) || null : null;
+};
+
 function loadDraft() {
   try { return restoreDraft(localStorage.getItem(DRAFT_KEY)); } catch { return []; }
 }
@@ -56,16 +82,20 @@ function loadDraft() {
 const when = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
 export default function LabAdd() {
-  const [lab, setLab] = useState(null);
-  const [rows, setRows] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  // The batch this screen opens on, if it was seen this session — drawn at once.
+  const [start] = useState(startingBatch);
+  const [lab, setLab] = useState(() => MEM.lab);
+  // Whether `lab` is this visit's answer, not the one remembered: listing waits for it.
+  const [labFresh, setLabFresh] = useState(false);
+  const [rows, setRows] = useState(() => start?.rows || []);
+  const [loaded, setLoaded] = useState(() => Boolean(start) || (MEM.batches != null && typeof window !== "undefined" && !batchIdFrom(window.location.search)));
   // Where the list lives: "ok" (batches on the server), "missing" (047 not
   // run — the old local draft), "error" (couldn't ask — the local draft too,
   // so a dropped connection never stops the work).
-  const [store, setStore] = useState("loading");
-  const [batch, setBatch] = useState(null); // { id, name, updated_at } of the open batch
-  const [batches, setBatches] = useState([]);
-  const [batchTiles, setBatchTiles] = useState(true); // false before migration 049: no cover or value on a tile
+  const [store, setStore] = useState(() => (MEM.batches ? "ok" : "loading"));
+  const [batch, setBatch] = useState(() => start?.batch || null); // { id, name, updated_at } of the open batch
+  const [batches, setBatches] = useState(() => MEM.batches || []);
+  const [batchTiles, setBatchTiles] = useState(() => MEM.tiles); // false before migration 049: no cover or value on a tile
   const [legacy, setLegacy] = useState([]); // a pre-batch list still in this browser
   const [saveState, setSaveState] = useState("saved"); // saved | pending | saving | conflict | error
   const [saveErr, setSaveErr] = useState("");
@@ -75,11 +105,12 @@ export default function LabAdd() {
   const tableRef = useRef(null);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
-  const revRef = useRef(0);
-  const savedRef = useRef("[]");
+  const revRef = useRef(start?.rev ?? 0);
+  const savedRef = useRef(start?.savedJson ?? "[]");
   const flushingRef = useRef(false);
   const conflictRef = useRef(false);
   const batchId = batch?.id || null;
+  useEffect(() => { if (store === "ok") MEM.batches = batches; }, [batches, store]);
   const batchIdRef = useRef(null);
   batchIdRef.current = batchId;
   // The pricing queue (migration 048): every job of this account, and this
@@ -120,7 +151,12 @@ export default function LabAdd() {
   const [viewKey, setViewKey] = useState(0);
   const refreshView = () => setViewKey((k) => k + 1);
 
-  const reloadLab = useCallback(async () => setLab(await api()), []);
+  const reloadLab = useCallback(async () => {
+    const r = await api();
+    MEM.lab = r;
+    setLab(r);
+    setLabFresh(true);
+  }, []);
   useEffect(() => {
     reloadLab();
     let live = true;
@@ -128,7 +164,8 @@ export default function LabAdd() {
       const sb = createClient();
       const id = batchIdFrom(window.location.search);
       if (!id && new URLSearchParams(window.location.search).get("new")) setIsNew(true);
-      const listed = await listLabBatches(sb);
+      // The list and the batch are read together, not one after the other.
+      const [listed, got] = await Promise.all([listLabBatches(sb), id ? loadLabBatch(sb, id) : Promise.resolve(null)]);
       if (!live) return;
       if (!listed.ok) {
         // Before 047, or the store can't be reached: the old local draft.
@@ -141,6 +178,8 @@ export default function LabAdd() {
       setStore("ok");
       setBatches(listed.batches);
       setBatchTiles(listed.tiles !== false);
+      MEM.batches = listed.batches;
+      MEM.tiles = listed.tiles !== false;
       // Batches saved before 049 have no cover or value on their tile yet:
       // fill them in, two at a time, as the grid is already on screen.
       if (listed.tiles !== false && !id) {
@@ -157,23 +196,32 @@ export default function LabAdd() {
       }
       setLegacy(loadDraft());
       if (id) {
-        const got = await loadLabBatch(sb, id);
-        if (!live) return;
         if (got.ok) {
           const b = got.batch;
-          let start = b.rows;
+          const remembered = MEM.rev.get(b.id);
+          // Drawn from memory and nothing has changed on the server since, or
+          // edited here already (a save is on its way): keep what is on screen.
+          const sameAsShown = start && remembered != null && b.rev <= remembered;
+          const editedHere = start && JSON.stringify(rowsRef.current) !== savedRef.current;
+          setBatch({ id: b.id, name: b.name, updated_at: b.updated_at });
+          if (sameAsShown || editedHere) { setLoaded(true); return; }
+          let startRows = b.rows;
           // A save that never reached the server (wifi dropped, tab closed)
           // is still on this device; take it if it is newer than the server's.
           try {
             const local = JSON.parse(localStorage.getItem(localKeyFor(b.id)) || "null");
             if (local?.v === 1 && Array.isArray(local.rows) && local.at && new Date(local.at) > new Date(b.updated_at)
-              && JSON.stringify(local.rows) !== JSON.stringify(b.rows)) start = local.rows;
+              && JSON.stringify(local.rows) !== JSON.stringify(b.rows)) startRows = local.rows;
           } catch { /* no backup */ }
           revRef.current = b.rev;
+          MEM.rev.set(b.id, b.rev);
           savedRef.current = JSON.stringify(b.rows);
-          setBatch({ id: b.id, name: b.name, updated_at: b.updated_at });
-          setRows(start);
+          rememberOpen(b.id, { batch: { id: b.id, name: b.name, updated_at: b.updated_at }, rows: startRows, rev: b.rev, savedJson: savedRef.current });
+          setRows(startRows);
         } else {
+          // Shown from memory but gone from the server (deleted in another
+          // tab): don't leave a batch on screen that saving can't reach.
+          if (start) { MEM.open.delete(id); setBatch(null); setRows([]); }
           setMsg({ bad: true, text: got.error || "Couldn't open that batch." });
         }
       }
@@ -197,16 +245,23 @@ export default function LabAdd() {
   async function flushBatch() {
     const id = batchIdRef.current;
     if (!id || flushingRef.current || conflictRef.current) return;
+    // A save from the screen just left is still out: wait for it, then go.
+    if (MEM.saving.has(id)) { setTimeout(() => flushBatch(), 400); return; }
     const now = rowsRef.current;
     const json = JSON.stringify(now);
     if (json === savedRef.current) { setSaveState("saved"); return; }
     flushingRef.current = true;
+    MEM.saving.add(id);
     setSaveState("saving");
+    if (MEM.rev.has(id)) revRef.current = Math.max(revRef.current, MEM.rev.get(id));
     const res = await saveLabBatch(createClient(), { id, rows: now, rev: revRef.current });
     flushingRef.current = false;
+    MEM.saving.delete(id);
     if (res.ok) {
       revRef.current = res.rev;
+      MEM.rev.set(id, res.rev);
       savedRef.current = json;
+      rememberOpen(id, { rows: now, rev: res.rev, savedJson: json });
       setSaveState("saved");
       setSaveErr("");
       if (JSON.stringify(rowsRef.current) !== json) flushBatch();
@@ -230,6 +285,7 @@ export default function LabAdd() {
     }
     if (!batchId) return undefined;
     try { localStorage.setItem(localKeyFor(batchId), serialiseDraft(rows)); } catch { /* the server copy still saves */ }
+    if (batch) rememberOpen(batchId, { batch, rows });
     if (JSON.stringify(rows) === savedRef.current || conflictRef.current) return undefined;
     setSaveState("pending");
     const t = setTimeout(() => { flushBatch(); }, 1000);
@@ -291,7 +347,9 @@ export default function LabAdd() {
     const res = await createLabBatch(createClient(), { name: name || defaultBatchName(fileNames), rows: list });
     if (!res.ok) return res;
     revRef.current = res.batch.rev;
+    MEM.rev.set(res.batch.id, res.batch.rev);
     savedRef.current = JSON.stringify(list);
+    rememberOpen(res.batch.id, { batch: { id: res.batch.id, name: res.batch.name, updated_at: res.batch.updated_at }, rows: list, rev: res.batch.rev, savedJson: savedRef.current });
     conflictRef.current = false;
     setBatch({ id: res.batch.id, name: res.batch.name, updated_at: res.batch.updated_at });
     setBatches((bs) => [res.batch, ...bs]);
@@ -306,6 +364,7 @@ export default function LabAdd() {
     const got = await loadLabBatch(createClient(), batchId);
     if (!got.ok) { setMsg({ bad: true, text: got.error || "Couldn't reload the batch." }); return; }
     revRef.current = got.batch.rev;
+    MEM.rev.set(got.batch.id, got.batch.rev);
     savedRef.current = JSON.stringify(got.batch.rows);
     conflictRef.current = false;
     setRows(got.batch.rows);
@@ -318,6 +377,7 @@ export default function LabAdd() {
     const got = await loadLabBatch(createClient(), batchId);
     if (!got.ok) { setMsg({ bad: true, text: got.error || "Couldn't reach the batch." }); return; }
     revRef.current = got.batch.rev;
+    MEM.rev.set(got.batch.id, got.batch.rev);
     savedRef.current = JSON.stringify(got.batch.rows);
     conflictRef.current = false;
     flushBatch();
@@ -576,6 +636,7 @@ export default function LabAdd() {
 
   // ---- listing -----------------------------------------------------------
   async function listRows(candidates) {
+    if (!labFresh) { setMsg({ text: "Checking your live listings on eBay first — try again in a moment." }); return; }
     const go = candidates.filter((r) => LISTABLE.has(rowStatus(r, joinsOf(r))));
     const skipped = candidates.length - go.length;
     if (!go.length) { setMsg({ bad: true, text: "Nothing ticked is ready to list — give it a price, or put it back in." }); return; }
@@ -660,8 +721,9 @@ export default function LabAdd() {
     return () => clearInterval(t);
   }, [sending, reloadLab]);
 
-  if (!lab) return <main className="li-wrap"><style>{LAB_TABLE_CSS}</style>Loading…</main>;
-  if (!lab.ok) {
+  // The grid and New batch need nothing from /api/lab, so nothing waits on it;
+  // a batch draws at once and fills in what joins a live listing when it lands.
+  if (lab && !lab.ok) {
     return <main className="li-wrap"><style>{LAB_TABLE_CSS}</style>{lab.needsMove || lab.foldPending ? <>{lab.error} <a href="/panel/lab">Open the lab</a></> : `Couldn't load the lab: ${lab.error}`}</main>;
   }
 
@@ -756,6 +818,7 @@ export default function LabAdd() {
             <span className="lb-chip">{defaults.anyLanguage ? "sales in every language" : `${defaults.language} sales only`}</span>
             <span className="lb-chip">{defaults.overseas ? "overseas sellers counted" : "UK sellers"}</span>
             <span className="lb-chip">New listings <b>{gbp(totals.value)}</b></span>
+            {!labFresh ? <span className="lb-chip">checking live listings…</span> : null}
           </div>
         </div>
       ) : (

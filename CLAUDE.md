@@ -3488,6 +3488,17 @@ closed together:
   Keys); on the legacy shared secret it falls back to the same network call
   as before. Routes that act on a user still call `getUser()` themselves.
 - `app/panel/loading.js` covers the loads that still go to the server.
+- **Batches remembers what it last saw** (2026-11-25, "enough of a delay that
+  has me thinking 'what is happening'"). Every hop between the grid and a
+  batch remounted the screen, which then waited on `/api/lab` — a function
+  waking, a login check, every lab listing, copy and log line — even on the
+  grid, which uses none of it, and read a batch only after the list. Now a
+  module-level `MEM` in `LabAdd.js` (life of the page, never a reload) draws
+  the last grid, the last lab answer and the last few batches at once; the
+  list and a batch are read together; the grid never waits on the lab; and
+  **listing waits for this visit's lab answer**, never the remembered one.
+  A batch's rev and a save in flight live in `MEM` too, so the screen you
+  just left finishing its save never makes the next one conflict with itself.
 
 ## Gotchas that have already bitten
 
