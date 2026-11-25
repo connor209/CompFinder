@@ -369,7 +369,7 @@ export function planCard(card) {
   // The text the engine's subject readers see. Variant words that core reads
   // itself (reverse, stamped) are written in so its reading and ours agree.
   const subjectText = [baseName, number, subjectTextFor(keys), card.title, langWord].filter(Boolean).join(" ");
-  const settings = settingsForText(subjectText, { promo });
+  const settings = settingsForText(subjectText, { promo, wcd: keys.includes("worldChampionship") });
   if (card.anyLanguage && settings.excludeKeywords?.foreignPrint) {
     const { foreignPrint, ...rest } = settings.excludeKeywords; // eslint-disable-line no-unused-vars
     settings.excludeKeywords = rest;
