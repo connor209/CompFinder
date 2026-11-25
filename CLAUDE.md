@@ -390,6 +390,14 @@ stream` (the relay, only while streaming).
   greps that nothing which prices a card — core, the house rules, Last Comp —
   reads feedback.
 
+- `scripts/check-labbatches.mjs` — Add copies batches (`lib/lab-batches.js`,
+  migration 047): a save names the rev it was loaded at and a stale one writes
+  NOTHING and says conflict, two batches never touch each other, the batch
+  list's counts come off the rows, a URL's batch id is a uuid or nothing, and
+  greps that the table is named in one file and the screen reads its batch
+  from the URL, puts a conflict to you both ways, and writes the old one-slot
+  draft only when batches are unavailable.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -2685,6 +2693,41 @@ Three things about it that are the point rather than detail:
   checkbox that brings them back, and the count of cards at a show is in the
   summary. A row that vanished with no count looks exactly like a card we never
   had, in the one list you would go looking in to find out.
+
+## Add copies: each upload is a batch, kept on the server
+
+Add copies used to keep ONE working list per browser, in localStorage. Four
+tabs loading four exports each saved its whole list over the others, the
+last write won, and a refresh the next morning showed the same list in all
+four — three batches' typed prices and costs gone (2026-11-25). Anything
+already listed was safe; the working rows were not.
+
+A **batch** is that list on the server (`lab_batches`, migration 047, named
+only in `lib/lab-batches.js`). The list itself is still `lib/lab-draft.js`'s,
+unchanged; this only moves where it lives.
+
+- **An upload with no batch open starts one**, named after the file and saved
+  before it is shown, and the batch goes in the URL
+  (`/panel/lab/add?batch=<id>`) — so a tab IS a batch, survives a reload, and
+  four tabs are four batches. Loading more files into an open batch adds to it,
+  as Add copies always has.
+- **The same batch open twice is a CONFLICT, never last-write-wins.** A save
+  names the `rev` it was loaded at; a save from the stale tab matches no row,
+  writes nothing, stops saving and asks: load the latest, or keep this tab's
+  knowingly. One save in flight at a time, so a tab never conflicts with
+  itself.
+- **A copy stays on the device per batch** (`localKeyFor`), and a batch opened
+  after a save that never arrived takes it when it is newer than the server's.
+  Leaving with a save still out asks first.
+- **A list from before batches** is offered as "Save it as a batch" on the
+  batch list, or discarded — never adopted silently.
+- **Pricing two batches at once is warned about**, off the PRICING_KEY bar the
+  overview already reads: two tabs pricing together run past SoldComps' 60 a
+  minute and lookups fail.
+- **Before 047, or if batches can't be reached**, the screen keeps the old
+  one-list draft and says so — one tab only.
+- Kept until deleted. A batch is a few hundred rows of text; the batch list
+  reads counts, never rows.
 
 ## What a card cost, so a sale says what it made
 
