@@ -41,13 +41,14 @@ export function compsFromResult(x, r, extra = {}) {
 
 /**
  * Put answers on rows. A price already typed is never overwritten; new sales
- * drop any old picks. `byId` is Map|object rowId → comps.
+ * drop any old picks, and a row marked Checked goes back to "check first". `byId` is Map|object rowId → comps.
  */
 export function applyComps(rows, byId) {
   const get = (id) => (byId instanceof Map ? byId.get(id) : byId?.[id]);
   return (rows || []).map((r) => {
     const c = get(r.id);
     if (!c) return r;
-    return { ...r, comps: c, picks: null, pricePence: r.pricePence != null ? r.pricePence : c.pence };
+    // New evidence: old picks and an old "checked" were about the old sales.
+    return { ...r, comps: c, picks: null, checkedAt: null, pricePence: r.pricePence != null ? r.pricePence : c.pence };
   });
 }

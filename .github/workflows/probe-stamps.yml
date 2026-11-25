@@ -1,0 +1,43 @@
+# Would a stamp rule for every plain card be safe? scripts/probe-stamps.mjs.
+#
+# READ-ONLY: reads lab_batches, price_batch_items and app_comp_cache, writes
+# nothing, spends no SoldComps request. The answer is in the run's summary and
+# in stamps.json.
+#
+# Manual, plus a pull_request trigger on THIS probe's own two files only, so
+# a change to the probe measures itself before it merges (workflow_dispatch
+# only exists once a workflow is on main). Same-repo PRs only: a fork never
+# gets the service-role key.
+name: "Probe: stamped sales on plain cards"
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/probe-stamps.mjs
+      - .github/workflows/probe-stamps.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Measure
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/probe-stamps.mjs --out stamps.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stamps
+          path: stamps.json
+          if-no-files-found: ignore

@@ -7,8 +7,11 @@ import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
   DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
-  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent
+  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown, applyCardRule, ruleFeedbackArgs
 } from "@/lib/lab-draft.js";
+import { RULE_KINDS, ruleKeyFor, normaliseRule, isEmptyRule, describeRule, saleBreaksRule, ruleComment } from "@/lib/price-rules.js";
+import { listRules, saveRule } from "@/lib/price-rules-store.js";
+import { recordFeedback } from "@/lib/feedback-store.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
 import { PRICING_KEY } from "@/lib/lab-overview.js";
 import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer } from "@/lib/lab-evidence.js";
@@ -42,12 +45,38 @@ import { applyJobs, isOpen, remainingCards } from "@/lib/pricing-queue.js";
 
 const gbp = (p) => (p == null ? "—" : `£${(p / 100).toFixed(2)}`);
 const SORTS = [["attention", "Needs attention first"], ["name", "Name"], ["sku", "SKU"], ["price-desc", "Your price, high first"], ["comps-desc", "Sold comps, high first"]];
-const STATUS_CLASS = { ready: "s-live", thin: "s-soldout", needsprice: "s-sold", toolow: "s-sold", failed: "s-sold", listed: "s-next", excluded: "s-ended", nocopies: "s-ended", sending: "s-soldout" };
+const STATUS_CLASS = { ready: "s-live", checked: "s-live", thin: "s-soldout", needsprice: "s-sold", toolow: "s-sold", failed: "s-sold", listed: "s-next", excluded: "s-ended", nocopies: "s-ended", sending: "s-soldout" };
 
 async function api(body) {
   const res = await fetch("/api/lab", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   return res.json().catch(() => ({ ok: false, error: `The server answered ${res.status}.` }));
 }
+
+/**
+ * What this screen last saw, kept for the life of the page — it outlives the
+ * screen remounting on every in-place navigation (lib/client-nav.js), never a
+ * reload. Going back and forth between the grid and a batch used to start from
+ * nothing each time: the whole screen waited on /api/lab (a function waking
+ * up, a login check, every lab listing, copy and log line) even on the grid,
+ * which uses none of it, and a batch was a second read after the list. Now the
+ * last answer is drawn at once and the fresh one replaces it when it lands.
+ *
+ * The rev of a batch and whether a save is in flight are kept HERE too, not
+ * per screen: a save started by the screen you just left must not leave the
+ * next one saving over a rev it no longer holds.
+ */
+const MEM = { lab: null, batches: null, tiles: true, open: new Map(), rev: new Map(), saving: new Set(), rules: null };
+const MEM_OPEN_MAX = 6;
+function rememberOpen(id, entry) {
+  MEM.open.delete(id);
+  MEM.open.set(id, { ...(MEM.open.get(id) || {}), ...entry });
+  while (MEM.open.size > MEM_OPEN_MAX) MEM.open.delete(MEM.open.keys().next().value);
+}
+const startingBatch = () => {
+  if (typeof window === "undefined") return null;
+  const id = batchIdFrom(window.location.search);
+  return id ? MEM.open.get(id) || null : null;
+};
 
 function loadDraft() {
   try { return restoreDraft(localStorage.getItem(DRAFT_KEY)); } catch { return []; }
@@ -56,16 +85,20 @@ function loadDraft() {
 const when = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
 
 export default function LabAdd() {
-  const [lab, setLab] = useState(null);
-  const [rows, setRows] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  // The batch this screen opens on, if it was seen this session — drawn at once.
+  const [start] = useState(startingBatch);
+  const [lab, setLab] = useState(() => MEM.lab);
+  // Whether `lab` is this visit's answer, not the one remembered: listing waits for it.
+  const [labFresh, setLabFresh] = useState(false);
+  const [rows, setRows] = useState(() => start?.rows || []);
+  const [loaded, setLoaded] = useState(() => Boolean(start) || (MEM.batches != null && typeof window !== "undefined" && !batchIdFrom(window.location.search)));
   // Where the list lives: "ok" (batches on the server), "missing" (047 not
   // run — the old local draft), "error" (couldn't ask — the local draft too,
   // so a dropped connection never stops the work).
-  const [store, setStore] = useState("loading");
-  const [batch, setBatch] = useState(null); // { id, name, updated_at } of the open batch
-  const [batches, setBatches] = useState([]);
-  const [batchTiles, setBatchTiles] = useState(true); // false before migration 049: no cover or value on a tile
+  const [store, setStore] = useState(() => (MEM.batches ? "ok" : "loading"));
+  const [batch, setBatch] = useState(() => start?.batch || null); // { id, name, updated_at } of the open batch
+  const [batches, setBatches] = useState(() => MEM.batches || []);
+  const [batchTiles, setBatchTiles] = useState(() => MEM.tiles); // false before migration 049: no cover or value on a tile
   const [legacy, setLegacy] = useState([]); // a pre-batch list still in this browser
   const [saveState, setSaveState] = useState("saved"); // saved | pending | saving | conflict | error
   const [saveErr, setSaveErr] = useState("");
@@ -75,11 +108,12 @@ export default function LabAdd() {
   const tableRef = useRef(null);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
-  const revRef = useRef(0);
-  const savedRef = useRef("[]");
+  const revRef = useRef(start?.rev ?? 0);
+  const savedRef = useRef(start?.savedJson ?? "[]");
   const flushingRef = useRef(false);
   const conflictRef = useRef(false);
   const batchId = batch?.id || null;
+  useEffect(() => { if (store === "ok") MEM.batches = batches; }, [batches, store]);
   const batchIdRef = useRef(null);
   batchIdRef.current = batchId;
   // The pricing queue (migration 048): every job of this account, and this
@@ -112,6 +146,9 @@ export default function LabAdd() {
   const [pricingIds, setPricingIds] = useState(() => new Set());
   const stopRef = useRef(false);
   const [msg, setMsg] = useState(null);
+  // Your rules for a card (migration 050): key → rule, and whether they can be kept.
+  const [cardRules, setCardRules] = useState(() => MEM.rules || new Map());
+  const [rulesStore, setRulesStore] = useState("ok");
   // The view (which rows, in what order) is worked out when you ASK for it —
   // a filter, a search, a sort, a load, a bulk action — never because a price
   // was typed. Re-sorting on every keystroke moved a row out from under the
@@ -120,7 +157,18 @@ export default function LabAdd() {
   const [viewKey, setViewKey] = useState(0);
   const refreshView = () => setViewKey((k) => k + 1);
 
-  const reloadLab = useCallback(async () => setLab(await api()), []);
+  const reloadLab = useCallback(async () => {
+    const r = await api();
+    MEM.lab = r;
+    setLab(r);
+    setLabFresh(true);
+  }, []);
+  useEffect(() => {
+    listRules(createClient()).then((r) => {
+      if (r.ok) { MEM.rules = r.rules; setCardRules(r.rules); }
+      else setRulesStore(r.missing ? "missing" : "error");
+    });
+  }, []);
   useEffect(() => {
     reloadLab();
     let live = true;
@@ -128,7 +176,8 @@ export default function LabAdd() {
       const sb = createClient();
       const id = batchIdFrom(window.location.search);
       if (!id && new URLSearchParams(window.location.search).get("new")) setIsNew(true);
-      const listed = await listLabBatches(sb);
+      // The list and the batch are read together, not one after the other.
+      const [listed, got] = await Promise.all([listLabBatches(sb), id ? loadLabBatch(sb, id) : Promise.resolve(null)]);
       if (!live) return;
       if (!listed.ok) {
         // Before 047, or the store can't be reached: the old local draft.
@@ -141,6 +190,8 @@ export default function LabAdd() {
       setStore("ok");
       setBatches(listed.batches);
       setBatchTiles(listed.tiles !== false);
+      MEM.batches = listed.batches;
+      MEM.tiles = listed.tiles !== false;
       // Batches saved before 049 have no cover or value on their tile yet:
       // fill them in, two at a time, as the grid is already on screen.
       if (listed.tiles !== false && !id) {
@@ -157,23 +208,32 @@ export default function LabAdd() {
       }
       setLegacy(loadDraft());
       if (id) {
-        const got = await loadLabBatch(sb, id);
-        if (!live) return;
         if (got.ok) {
           const b = got.batch;
-          let start = b.rows;
+          const remembered = MEM.rev.get(b.id);
+          // Drawn from memory and nothing has changed on the server since, or
+          // edited here already (a save is on its way): keep what is on screen.
+          const sameAsShown = start && remembered != null && b.rev <= remembered;
+          const editedHere = start && JSON.stringify(rowsRef.current) !== savedRef.current;
+          setBatch({ id: b.id, name: b.name, updated_at: b.updated_at });
+          if (sameAsShown || editedHere) { setLoaded(true); return; }
+          let startRows = b.rows;
           // A save that never reached the server (wifi dropped, tab closed)
           // is still on this device; take it if it is newer than the server's.
           try {
             const local = JSON.parse(localStorage.getItem(localKeyFor(b.id)) || "null");
             if (local?.v === 1 && Array.isArray(local.rows) && local.at && new Date(local.at) > new Date(b.updated_at)
-              && JSON.stringify(local.rows) !== JSON.stringify(b.rows)) start = local.rows;
+              && JSON.stringify(local.rows) !== JSON.stringify(b.rows)) startRows = local.rows;
           } catch { /* no backup */ }
           revRef.current = b.rev;
+          MEM.rev.set(b.id, b.rev);
           savedRef.current = JSON.stringify(b.rows);
-          setBatch({ id: b.id, name: b.name, updated_at: b.updated_at });
-          setRows(start);
+          rememberOpen(b.id, { batch: { id: b.id, name: b.name, updated_at: b.updated_at }, rows: startRows, rev: b.rev, savedJson: savedRef.current });
+          setRows(startRows);
         } else {
+          // Shown from memory but gone from the server (deleted in another
+          // tab): don't leave a batch on screen that saving can't reach.
+          if (start) { MEM.open.delete(id); setBatch(null); setRows([]); }
           setMsg({ bad: true, text: got.error || "Couldn't open that batch." });
         }
       }
@@ -197,16 +257,23 @@ export default function LabAdd() {
   async function flushBatch() {
     const id = batchIdRef.current;
     if (!id || flushingRef.current || conflictRef.current) return;
+    // A save from the screen just left is still out: wait for it, then go.
+    if (MEM.saving.has(id)) { setTimeout(() => flushBatch(), 400); return; }
     const now = rowsRef.current;
     const json = JSON.stringify(now);
     if (json === savedRef.current) { setSaveState("saved"); return; }
     flushingRef.current = true;
+    MEM.saving.add(id);
     setSaveState("saving");
+    if (MEM.rev.has(id)) revRef.current = Math.max(revRef.current, MEM.rev.get(id));
     const res = await saveLabBatch(createClient(), { id, rows: now, rev: revRef.current });
     flushingRef.current = false;
+    MEM.saving.delete(id);
     if (res.ok) {
       revRef.current = res.rev;
+      MEM.rev.set(id, res.rev);
       savedRef.current = json;
+      rememberOpen(id, { rows: now, rev: res.rev, savedJson: json });
       setSaveState("saved");
       setSaveErr("");
       if (JSON.stringify(rowsRef.current) !== json) flushBatch();
@@ -230,6 +297,7 @@ export default function LabAdd() {
     }
     if (!batchId) return undefined;
     try { localStorage.setItem(localKeyFor(batchId), serialiseDraft(rows)); } catch { /* the server copy still saves */ }
+    if (batch) rememberOpen(batchId, { batch, rows });
     if (JSON.stringify(rows) === savedRef.current || conflictRef.current) return undefined;
     setSaveState("pending");
     const t = setTimeout(() => { flushBatch(); }, 1000);
@@ -291,7 +359,9 @@ export default function LabAdd() {
     const res = await createLabBatch(createClient(), { name: name || defaultBatchName(fileNames), rows: list });
     if (!res.ok) return res;
     revRef.current = res.batch.rev;
+    MEM.rev.set(res.batch.id, res.batch.rev);
     savedRef.current = JSON.stringify(list);
+    rememberOpen(res.batch.id, { batch: { id: res.batch.id, name: res.batch.name, updated_at: res.batch.updated_at }, rows: list, rev: res.batch.rev, savedJson: savedRef.current });
     conflictRef.current = false;
     setBatch({ id: res.batch.id, name: res.batch.name, updated_at: res.batch.updated_at });
     setBatches((bs) => [res.batch, ...bs]);
@@ -306,6 +376,7 @@ export default function LabAdd() {
     const got = await loadLabBatch(createClient(), batchId);
     if (!got.ok) { setMsg({ bad: true, text: got.error || "Couldn't reload the batch." }); return; }
     revRef.current = got.batch.rev;
+    MEM.rev.set(got.batch.id, got.batch.rev);
     savedRef.current = JSON.stringify(got.batch.rows);
     conflictRef.current = false;
     setRows(got.batch.rows);
@@ -318,6 +389,7 @@ export default function LabAdd() {
     const got = await loadLabBatch(createClient(), batchId);
     if (!got.ok) { setMsg({ bad: true, text: got.error || "Couldn't reach the batch." }); return; }
     revRef.current = got.batch.rev;
+    MEM.rev.set(got.batch.id, got.batch.rev);
     savedRef.current = JSON.stringify(got.batch.rows);
     conflictRef.current = false;
     flushBatch();
@@ -374,6 +446,28 @@ export default function LabAdd() {
     return { text: out.title, cut: out.titleCut };
   };
   const setRow = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  /**
+   * Your rule for the card on this row: applied at once to every row of the
+   * card in this batch (no new search), kept for next time (050), and told to
+   * the feedback store as a 👎 with the rule in the comment (046), which is
+   * what export-feedback.mjs tallies.
+   */
+  async function saveCardRule(row, input) {
+    const rule = normaliseRule(input);
+    const key = ruleKeyFor(row);
+    const empty = isEmptyRule(rule);
+    setRows((rs) => applyCardRule(rs, key, empty ? null : rule));
+    setCardRules((m) => { const n = new Map(m); if (empty) n.delete(key); else n.set(key, rule); MEM.rules = n; return n; });
+    const sb = createClient();
+    const label = [row.cardName, row.cardNumber, row.set].filter(Boolean).join(" ");
+    const kept = await saveRule(sb, null, { key, label, rule });
+    if (!empty) recordFeedback(sb, ruleFeedbackArgs(row, rule, ruleComment(rule))).catch(() => {});
+    const what = empty ? "rule removed" : `rule: ${describeRule(rule)}`;
+    if (kept.ok) setMsg({ text: `${label} — ${what}. ${empty ? "" : "Applied to this batch, and kept for every time this card is priced."}` });
+    else if (kept.missing) setMsg({ text: `${label} — ${what}, applied to this batch. Not kept for next time: migration 050 still to run.` });
+    else setMsg({ bad: true, text: `${label} — ${what}, applied to this batch, but not kept: ${kept.error}` });
+  }
   const tick = (id, on) => setTicked((t) => { const n = new Set(t); if (on) n.add(String(id)); else n.delete(String(id)); return n; });
 
   // ---- files -------------------------------------------------------------
@@ -576,6 +670,7 @@ export default function LabAdd() {
 
   // ---- listing -----------------------------------------------------------
   async function listRows(candidates) {
+    if (!labFresh) { setMsg({ text: "Checking your live listings on eBay first — try again in a moment." }); return; }
     const go = candidates.filter((r) => LISTABLE.has(rowStatus(r, joinsOf(r))));
     const skipped = candidates.length - go.length;
     if (!go.length) { setMsg({ bad: true, text: "Nothing ticked is ready to list — give it a price, or put it back in." }); return; }
@@ -660,8 +755,9 @@ export default function LabAdd() {
     return () => clearInterval(t);
   }, [sending, reloadLab]);
 
-  if (!lab) return <main className="li-wrap"><style>{LAB_TABLE_CSS}</style>Loading…</main>;
-  if (!lab.ok) {
+  // The grid and New batch need nothing from /api/lab, so nothing waits on it;
+  // a batch draws at once and fills in what joins a live listing when it lands.
+  if (lab && !lab.ok) {
     return <main className="li-wrap"><style>{LAB_TABLE_CSS}</style>{lab.needsMove || lab.foldPending ? <>{lab.error} <a href="/panel/lab">Open the lab</a></> : `Couldn't load the lab: ${lab.error}`}</main>;
   }
 
@@ -756,6 +852,7 @@ export default function LabAdd() {
             <span className="lb-chip">{defaults.anyLanguage ? "sales in every language" : `${defaults.language} sales only`}</span>
             <span className="lb-chip">{defaults.overseas ? "overseas sellers counted" : "UK sellers"}</span>
             <span className="lb-chip">New listings <b>{gbp(totals.value)}</b></span>
+            {!labFresh ? <span className="lb-chip">checking live listings…</span> : null}
           </div>
         </div>
       ) : (
@@ -873,6 +970,7 @@ export default function LabAdd() {
           {subtypes.length > 0 && <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "subtype" ? null : "subtype")}>Subtype ▾</button>}
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "language" ? null : "language")}>Language &amp; sellers ▾</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "cost" ? null : "cost")}>Cost ▾</button>
+          <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "check" }, "Marked checked")} title="The ticked rows' prices have been reviewed">✓ Mark checked</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "exclude" }, "Left out")}>Leave out</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "include" }, "Put back")}>Put back</button>
           <button className="li-chip primary-chip" disabled={!onScreen.length || !!busy} onClick={() => listRows(onScreen)}>
@@ -971,6 +1069,8 @@ export default function LabAdd() {
                 const st = rowStatus(r, j);
                 const t = titleOf(r);
                 const live = liveCopies(r);
+                // The sold comps as shown: your picks in "see sales" where you made them.
+                const cs = compsShown(r);
                 const isOpen = open.has(r.id);
                 const done = st === "listed";
                 return (
@@ -990,13 +1090,15 @@ export default function LabAdd() {
                             </small>
                             <small className="sm-only">
                               <span className={`li-status ${STATUS_CLASS[st]}`}>{STATUS_TEXT[st]}</span> ×{live.length} · {r.condition}
-                              {r.comps?.pence != null ? ` · comps ${gbp(r.comps.pence)}` : ""}{r.comps?.decision && r.comps.decision !== "apply" ? ` · ${DECISION_TEXT[r.comps.decision]}` : ""}{j && !done ? " · joins a listing" : ""}
+                              {cs.pence != null ? ` · comps ${gbp(cs.pence)}${cs.picked ? " (your picks)" : ""}` : ""}{r.comps?.decision && r.comps.decision !== "apply" ? ` · ${DECISION_TEXT[r.comps.decision]}` : ""}{j && !done ? " · joins a listing" : ""}
                             </small>
                           </span>
                         </div>
                       </td>
                       <td className="sm-hide">
                         <span className={`li-status ${STATUS_CLASS[st]}`}>{STATUS_TEXT[st]}</span>
+                        {st === "thin" && <button className="li-link" disabled={!!busy} onClick={() => setRow(r.id, { checkedAt: new Date().toISOString() })} title="You've looked at the sales behind this price and are happy with it">✓ Mark checked</button>}
+                        {st === "checked" && <small className="li-dim">checked {new Date(r.checkedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} · <button className="li-link" disabled={!!busy} onClick={() => setRow(r.id, { checkedAt: null })}>undo</button></small>}
                         {j && !done && <small style={{ color: "var(--accent)" }}>joins eBay {j.ebay_item_id}</small>}
                         {done && r.result.itemId && <small><a href={`https://www.ebay.co.uk/itm/${r.result.itemId}`} target="_blank" rel="noreferrer">{r.result.joined ? "added to" : "eBay"} {r.result.itemId}</a></small>}
                         {st === "failed" && <small style={{ color: "var(--bad)", whiteSpace: "normal", maxWidth: 260 }}>{r.result.error}</small>}
@@ -1004,8 +1106,9 @@ export default function LabAdd() {
                       <td className="mono sm-hide">{live.length}{live.length !== r.copies.length ? <small>of {r.copies.length}</small> : null}</td>
                       <td className="sm-hide"><b>{r.condition}</b></td>
                       <td className="r sm-hide" title={r.comps?.error || (r.comps ? `${r.comps.n ?? "?"} sales counted${r.comps.searches ? ` of ${r.comps.fetched ?? "?"} found across ${r.comps.searches} searches` : ""} · ${r.comps.confidence || "?"} confidence${r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}${r.comps.reason ? ` (${r.comps.reason})` : ""}` : ""}${r.comps.flags?.length ? ` · ${r.comps.flags.join(", ").replace(/_/g, " ")}` : ""}` : "Not priced from sold comps yet")}>
-                        {pricingIds.has(r.id) ? <span className="la-now">⏳ pricing now…</span> : queuedIds.has(String(r.id)) ? <span className="la-now">⏳ queued</span> : r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(r.comps?.pence ?? null)}
-                        {r.comps && !r.comps.error && <small className={isThin(r) ? "li-warn" : ""}>{r.comps.n ?? "?"} sale{r.comps.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
+                        {pricingIds.has(r.id) ? <span className="la-now">⏳ pricing now…</span> : queuedIds.has(String(r.id)) ? <span className="la-now">⏳ queued</span> : r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(cs.pence)}
+                        {cs.picked && <small style={{ color: "var(--accent)" }}>your picks · counted {gbp(cs.counted)}</small>}
+                        {r.comps && !r.comps.error && <small className={isThin(r) && st !== "checked" ? "li-warn" : ""}>{cs.n ?? "?"} sale{cs.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
                         {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}
                         {r.comps?.flags?.includes("in_hand_check") && <small className="li-warn">check in hand</small>}
                         {r.comps?.evidence && <small className="li-dim" style={{ whiteSpace: "normal", maxWidth: 220 }}>{evidenceSummary(r.comps.evidence)}</small>}
@@ -1046,7 +1149,10 @@ export default function LabAdd() {
                               <label className="li-check"><input type="checkbox" checked={!r.excluded} disabled={done} onChange={(e) => setRow(r.id, { excluded: !e.target.checked })} /> List this card</label>
                             </div>
                             {r.comps?.evidence?.length > 0 && (
-                              <SalesFound row={r} disabled={done || !!busy}
+                              <SalesFound row={r} disabled={done || !!busy} status={st}
+                                rule={cardRules.get(ruleKeyFor(r)) || r.comps?.rule || null}
+                                onRule={(rule) => saveCardRule(r, rule)}
+                                onCheck={(on) => setRow(r.id, { checkedAt: on ? new Date().toISOString() : null })}
                                 onPicks={(picks) => setRow(r.id, { picks })}
                                 onUse={(pence) => { setRow(r.id, { pricePence: pence }); setMsg({ text: `${r.title}: price set to ${gbp(pence)} from the sales you picked.` }); }} />
                             )}
@@ -1139,7 +1245,53 @@ function PricingBar({ p, onStop }) {
  * worked out from your picks by the same house rules as the server's. Nothing
  * changes until "Use this price".
  */
-function SalesFound({ row, onPicks, onUse, disabled }) {
+/**
+ * "These sales aren't this card": quick kinds, your own words, a note. What it
+ * would take out is counted before you save, off the sales on screen.
+ */
+function CardRule({ row, rule, onSave, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [kinds, setKinds] = useState(() => new Set(rule?.kinds || []));
+  const [words, setWords] = useState(() => (rule?.words || []).join(", "));
+  const [note, setNote] = useState(rule?.note || "");
+  useEffect(() => { setKinds(new Set(rule?.kinds || [])); setWords((rule?.words || []).join(", ")); setNote(rule?.note || ""); }, [rule]);
+  const draft = normaliseRule({ kinds: [...kinds], words: words.split(","), note });
+  const ev = row.comps?.evidence || [];
+  const hits = isEmptyRule(draft) ? 0 : ev.filter((e) => (e.counted || e.reasonCode === "yourRule") && saleBreaksRule(e.title, draft, row.cardName)).length;
+  if (!open) {
+    return (
+      <div className="la-rule">
+        {rule && !isEmptyRule(rule)
+          ? <span>Your rule for this card: <b>{describeRule(rule)}</b>{rule.note ? <span className="li-dim"> — {rule.note}</span> : null}</span>
+          : <span className="li-dim">Wrong card in these sales (stamped, graded, a lot…)?</span>}
+        <button className="li-link" disabled={disabled} onClick={() => setOpen(true)}>{rule && !isEmptyRule(rule) ? "edit rule" : "＋ add a rule for this card"}</button>
+      </div>
+    );
+  }
+  return (
+    <div className="la-rule open">
+      <div><b>Not this card:</b> {RULE_KINDS.map((k) => (
+        <label key={k.key} className="li-check" title={k.hint}>
+          <input type="checkbox" checked={kinds.has(k.key)} disabled={disabled}
+            onChange={(e) => setKinds((s) => { const n = new Set(s); if (e.target.checked) n.add(k.key); else n.delete(k.key); return n; })} /> {k.label}
+        </label>
+      ))}</div>
+      <div className="la-rule-fields">
+        <input className="li-search" placeholder="Words that mean it isn't this card, comma-separated" value={words} disabled={disabled} onChange={(e) => setWords(e.target.value)} />
+        <input className="li-search" placeholder="A note (yours — e.g. no stamp on this one)" value={note} disabled={disabled} onChange={(e) => setNote(e.target.value)} />
+      </div>
+      <div className="la-sales-foot">
+        <span className="li-dim">{isEmptyRule(draft) ? "Tick a kind or type a word." : `Takes out ${hits} of the sales found. Kept for this card and used every time it's priced.`}</span>
+        <span className="li-spacer" />
+        <button className="li-btn" disabled={disabled} onClick={() => setOpen(false)}>Cancel</button>
+        {rule && !isEmptyRule(rule) && <button className="li-btn" disabled={disabled} onClick={() => { onSave(null); setOpen(false); }}>Remove rule</button>}
+        <button className="li-btn primary" disabled={disabled || isEmptyRule(draft)} onClick={() => { onSave(draft); setOpen(false); }}>Save rule</button>
+      </div>
+    </div>
+  );
+}
+
+function SalesFound({ row, onPicks, onUse, onCheck, onRule, rule, status, disabled }) {
   const [showOut, setShowOut] = useState(false);
   const [showSearches, setShowSearches] = useState(false);
   const ev = row.comps.evidence;
@@ -1171,6 +1323,7 @@ function SalesFound({ row, onPicks, onUse, disabled }) {
           {row.comps.search.map((s, i) => <div key={i}><span className="mono">{s.query}</span> <span className="li-dim">— {s.error ? `failed: ${s.error}` : `found ${s.fetched ?? "?"}, new ${s.added ?? "?"}`}</span></div>)}
         </div>
       )}
+      {onRule && <CardRule row={row} rule={rule} onSave={onRule} disabled={disabled} />}
       <div className="li-scroll" style={{ maxHeight: 360 }}>
         <table className="li-table la-sales-table">
           <thead><tr><th className="li-cb">Use</th><th>Sold listing</th><th className="r">Total</th><th className="sm-hide">Sold</th><th className="sm-hide">Filter</th></tr></thead>
@@ -1197,6 +1350,8 @@ function SalesFound({ row, onPicks, onUse, disabled }) {
         </span>
         <span className="li-spacer" />
         {changed && <button className="li-btn" disabled={disabled} onClick={() => onPicks(null)}>Reset picks</button>}
+        {status === "thin" && <button className="li-btn" disabled={disabled} onClick={() => onCheck(true)}>✓ Mark checked</button>}
+        {status === "checked" && <button className="li-btn" disabled={disabled} onClick={() => onCheck(false)}>Checked ✓ — undo</button>}
         {p.suggestedPence != null && p.suggestedPence === row.pricePence
           ? <span className="li-dim">✓ already the price</span>
           : <button className="li-btn primary" disabled={disabled || p.suggestedPence == null} onClick={() => onUse(p.suggestedPence)}>Use this price</button>}
@@ -1303,6 +1458,11 @@ const EXTRA_CSS = `
 .la-cm { color: var(--ink-soft); }
 .la-cm b { color: var(--ink); }
 .la-sales { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.la-rule { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 13px; padding: 6px 8px; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.06)); }
+.la-rule.open { flex-direction: column; align-items: stretch; }
+.la-rule.open .li-check { margin-right: 10px; }
+.la-rule-fields { display: flex; flex-wrap: wrap; gap: 6px; }
+.la-rule-fields .li-search { flex: 1 1 240px; min-width: 0; }
 .la-sales-head, .la-sales-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
 .la-sales-table td, .la-sales-table th { font-size: 12.5px; }
 .la-sales-table tr.ended td { opacity: .55; }

@@ -501,6 +501,9 @@ export default function QuickSearch({ seed }) {
     const plan = { promo, number: card.number || "", variantKeys, baseName: card.name };
     const subject = `${query} ${subjectTextFor(variantKeys)}`;
     const cardSettings = settingsForText(subject, { promo });
+    // prefilterComps reads the subject off the settings: a stamped card keeps
+    // its stamped sales, an ordinary one drops them.
+    plan.settings = cardSettings;
     // The card database is English-first: a card's English collector number and
     // set name don't map to Japanese/Korean/Chinese prints (different numbering,
     // localised set names). When a language is selected, drop them so comp

@@ -64,6 +64,14 @@ try {
   votesNote = e.missing ? "price_feedback is not there yet — run migration 046." : `could not read price_feedback: ${e.message}`;
 }
 
+// Your rules for a card (migration 050) as they stand now, beside the votes.
+let cardRules = null;
+try {
+  cardRules = await readAll(`card_price_rules?select=card_key,label,kinds,words,note,updated_at&order=card_key.asc,id.asc${who}`);
+} catch (e) {
+  cardRules = null;
+}
+
 let overrides;
 try {
   const checks = await readAll(`price_checks?select=id,created_at,title,query,sku,confidence,data_source,comps_used,comps_excluded,note&note=like.Priced%20by%20hand*&order=created_at.asc,id.asc${who}`);
@@ -85,14 +93,20 @@ if (votes == null) console.log(`  unavailable: ${votesNote}`);
 else {
   console.log(`  👍 ${summary.votes.up}   👎 ${summary.votes.down}`);
   for (const [k, n] of Object.entries(summary.votes.byReason).sort((a, b) => b[1] - a[1])) console.log(`    ${n}  ${reasonLabel(k)}`);
+  const tags = Object.entries(summary.votes.ruleTags || {}).sort((a, b) => b[1] - a[1]);
+  if (tags.length) {
+    console.log("  your card rules, by what they leave out (a kind on many cards is a case for a rule on every card — measure it first):");
+    for (const [k, n] of tags) console.log(`    ${n}  ${k}`);
+  }
 }
 console.log("\nPrices typed by hand");
+if (cardRules) console.log(`  ${cardRules.length} card rule${cardRules.length === 1 ? "" : "s"} kept`);
 console.log(`  ${summary.overrides.count} overrides`);
 const dirLabel = { tooLow: "app was too low (you went >10% higher)", tooHigh: "app was too high (you went >10% lower)", aboutRight: "within 10%", unpriced: "app had no price" };
 for (const [k, n] of Object.entries(summary.overrides.byDirection)) console.log(`    ${n}  ${dirLabel[k] || k}`);
 if (summary.overrides.medianGapPct != null) console.log(`  median gap: ${summary.overrides.medianGapPct > 0 ? "+" : ""}${summary.overrides.medianGapPct}% (your price against the app's)`);
 
 if (out) {
-  writeFileSync(out, JSON.stringify({ exportedAt: new Date().toISOString(), summary, votes: votes || [], votesNote: votesNote || null, overrides }, null, 2));
+  writeFileSync(out, JSON.stringify({ exportedAt: new Date().toISOString(), summary, votes: votes || [], votesNote: votesNote || null, cardRules, overrides }, null, 2));
   console.log(`\nWrote ${out}`);
 }

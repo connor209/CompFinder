@@ -28,6 +28,8 @@
 
 import { keyForLanguage } from "./lab-copies.js";
 import { splitLotCost } from "./card-costs.js";
+import { evidencePrice, picksDiffer } from "./lab-evidence.js";
+import { ruleKeyFor, saleBreaksRule, isEmptyRule } from "./price-rules.js";
 
 export const DRAFT_KEY = "cf-lab-add-draft-v1";
 
@@ -94,7 +96,7 @@ export function liveCopies(row) {
 
 /** The group the server is sent: the row with its skipped copies taken out. */
 export function groupToSend(row) {
-  const { pricePence, titleOverride, subtype, skippedSkus, excluded, comps, result, file, id, costPence, ...g } = row; // eslint-disable-line no-unused-vars
+  const { pricePence, titleOverride, subtype, skippedSkus, excluded, comps, result, file, id, costPence, checkedAt, ...g } = row; // eslint-disable-line no-unused-vars
   // The cost rides on each copy: it is the copy's, written to its stack card.
   const cost = Number.isInteger(costPence) && costPence >= 0 ? costPence : null;
   return { ...g, copies: liveCopies(row).map((c) => (cost == null ? c : { ...c, costPence: cost })) };
@@ -115,6 +117,80 @@ export const isThin = (row) => {
   return Boolean(THIN.has(c.confidence) || (c.flags || []).length);
 };
 
+/**
+ * The sold-comps figure a row shows: what the filter counted, or — once you
+ * have ticked different sales in "see sales" — the price those sales make by
+ * the same house rules (evidencePrice). `picked` says which, and `counted`
+ * keeps the filter's own figure beside it. Your price is never changed by
+ * this; "Use this price" does that.
+ */
+export function compsShown(row) {
+  const c = row?.comps;
+  if (!c) return { pence: null, n: null, picked: false, counted: null };
+  if (c.evidence?.length && picksDiffer(c.evidence, row.picks)) {
+    const p = evidencePrice(c.evidence, row.picks, { condition: c.condition || row.condition, game: c.game || row.card?.game || "" });
+    return { pence: p.suggestedPence, n: p.n, picked: true, counted: c.pence ?? null };
+  }
+  return { pence: c.pence ?? null, n: c.n ?? null, picked: false, counted: c.pence ?? null };
+}
+
+/**
+ * Your rule for a card, applied to the sales a row already has — no new
+ * search. Every row of that card (ruleKeyFor) is re-filtered: a counted sale
+ * the rule catches goes out as "your rule", and one only your rule had left
+ * out comes back when the rule no longer catches it (so a rule can be
+ * loosened or removed). The figure is re-worked by the same house rules
+ * (evidencePrice); a price that was the old figure follows it, a price you
+ * typed stays; picks and "checked" go, since they were about the old sales.
+ * `rule` null or empty takes the rule off. Rows with no sales just carry it.
+ */
+export function applyCardRule(rows, key, rule) {
+  const live = isEmptyRule(rule) ? null : rule;
+  return (rows || []).map((r) => {
+    if (ruleKeyFor(r) !== key || r.result?.ok) return r;
+    const c = r.comps;
+    if (!c?.evidence?.length) return c ? { ...r, comps: { ...c, rule: live } } : r;
+    let changed = false;
+    const evidence = c.evidence.map((e) => {
+      const why = live ? saleBreaksRule(e.title, live, r.cardName) : null;
+      if (e.counted && why) { changed = true; return { ...e, counted: false, reasonCode: "yourRule", reason: `your rule (${why})` }; }
+      if (!e.counted && e.reasonCode === "yourRule" && !why) { changed = true; return { ...e, counted: true, reasonCode: null, reason: "" }; }
+      return e;
+    });
+    if (!changed) return { ...r, comps: { ...c, rule: live } };
+    const p = evidencePrice(evidence, null, { condition: c.condition || r.condition, game: c.game || r.card?.game || "" });
+    const comps = { ...c, evidence, rule: live, pence: p.suggestedPence, n: p.n };
+    const followed = r.pricePence == null || r.pricePence === c.pence;
+    return { ...r, comps, picks: null, checkedAt: null, pricePence: followed ? p.suggestedPence : r.pricePence };
+  });
+}
+
+/**
+ * What a rule saved on a row tells the feedback store (lib/feedback-store.js):
+ * a 👎 "wrong card in the sales", the rule in the comment (ruleComment), and
+ * the sales as they were BEFORE the rule — what the price was built from is
+ * the evidence. `query` is the card's rule key, so the latest vote per card
+ * wins in export-feedback.mjs.
+ */
+export function ruleFeedbackArgs(row, rule, comment) {
+  const ev = row?.comps?.evidence || [];
+  const comp = (e) => ({
+    title: e.title, itemPricePence: Math.round((Number(e.price) || 0) * 100),
+    postagePence: Math.round((Number(e.postage) || 0) * 100), totalPence: Math.round((Number(e.total) || 0) * 100),
+    ...(e.counted ? {} : { exclusionReason: e.reasonCode || "excluded" })
+  });
+  return {
+    verdict: "down", reason: "wrongCard", comment, surface: "lab",
+    row: { title: row?.title, query: ruleKeyFor(row || {}), sku: row?.copies?.[0]?.sku, cardNumber: row?.cardNumber, set: row?.set },
+    rec: {
+      finalPence: row?.comps?.pence ?? null, overridePence: row?.pricePence != null && row.pricePence !== row?.comps?.pence ? row.pricePence : null,
+      confidence: row?.comps?.confidence || null, dataSource: "sold",
+      house: row?.comps?.decision ? { decision: row.comps.decision } : undefined,
+      included: ev.filter((e) => e.counted).map(comp), excluded: ev.filter((e) => !e.counted).map(comp)
+    }
+  };
+}
+
 /** What a decision says, for a row. */
 export const DECISION_TEXT = { apply: "Apply", terapeak: "Check Terapeak", keep: "Keep current", hold: "Lookup failed" };
 
@@ -131,11 +207,12 @@ export function rowStatus(row, joins) {
   if (joins) return "ready";
   if (row.pricePence == null) return "needsprice";
   if (row.pricePence < 99) return "toolow";
-  return isThin(row) ? "thin" : "ready";
+  // "Check first" until somebody has looked: then Checked, which lists like Ready.
+  return isThin(row) ? (row.checkedAt ? "checked" : "thin") : "ready";
 }
 
 export const STATUS_TEXT = {
-  ready: "Ready", thin: "Ready · check first", needsprice: "Needs a price", toolow: "Under £0.99",
+  ready: "Ready", thin: "Ready · check first", checked: "Checked ✓", needsprice: "Needs a price", toolow: "Under £0.99",
   failed: "Failed", listed: "Listed", excluded: "Left out", nocopies: "Every copy left out",
   sending: "Listing on eBay…"
 };
@@ -183,7 +260,7 @@ export function settleSent(rows, lab, now = Date.now()) {
   return changed ? out : rows;
 }
 /** Rows a "List" button may send: a thin price is the person's call, so it goes. */
-export const LISTABLE = new Set(["ready", "thin", "failed"]);
+export const LISTABLE = new Set(["ready", "thin", "checked", "failed"]);
 
 /**
  * The house ladder: up onto the next .49 or .99, never below £0.99. The same
@@ -231,7 +308,7 @@ export function applyBulk(rows, ids, action) {
   // whole selection before any row is changed.
   const lot = action.op === "costLot"
     ? splitLotCost((rows || []).filter((r) => on.has(String(r.id)) && !r.result?.ok && !r.excluded)
-      .map((r) => ({ id: r.id, copies: liveCopies(r).length, weight: r.pricePence ?? r.comps?.pence ?? 0 })), action.pence)
+      .map((r) => ({ id: r.id, copies: liveCopies(r).length, weight: r.pricePence ?? compsShown(r).pence ?? 0 })), action.pence)
     : null;
   return (rows || []).map((r) => {
     if (!on.has(String(r.id)) || r.result?.ok) return r;
@@ -240,11 +317,17 @@ export function applyBulk(rows, ids, action) {
       case "costLot": return lot.has(String(r.id)) ? { ...r, costPence: lot.get(String(r.id)) } : r;
       case "costClear": return { ...r, costPence: null };
       case "price": return action.pence >= 99 ? { ...r, pricePence: action.pence } : r;
-      case "comps": return r.comps?.pence != null ? { ...r, pricePence: r.comps.pence } : r;
+      // The sold comps as shown — your picks where you made them.
+      case "comps": { const c = compsShown(r).pence; return c != null ? { ...r, pricePence: c } : r; }
       case "compsPct": {
-        if (r.comps?.pence == null || !Number.isFinite(action.pct)) return r;
-        return { ...r, pricePence: ladderUp(r.comps.pence * (1 + action.pct / 100)) };
+        const c = compsShown(r).pence;
+        if (c == null || !Number.isFinite(action.pct)) return r;
+        return { ...r, pricePence: ladderUp(c * (1 + action.pct / 100)) };
       }
+      // Reviewed: a "check first" row somebody has looked at. Only a row that
+      // needs checking can be checked; undoing it puts it back in the pile.
+      case "check": return isThin(r) && !r.checkedAt ? { ...r, checkedAt: action.at || new Date().toISOString() } : r;
+      case "uncheck": return r.checkedAt ? { ...r, checkedAt: null } : r;
       case "ladder": return r.pricePence != null ? { ...r, pricePence: ladderUp(r.pricePence) } : r;
       case "clear": return { ...r, pricePence: null };
       case "subtype": return { ...r, subtype: action.value || "" };
@@ -259,7 +342,7 @@ export function applyBulk(rows, ids, action) {
         return {
           ...r, language, anyLanguage, overseas, key: keyForLanguage(r.key, language),
           card: r.card ? { ...r.card, language } : r.card,
-          comps: null, picks: null, pricePence: fromComps ? null : r.pricePence
+          comps: null, picks: null, checkedAt: null, pricePence: fromComps ? null : r.pricePence
         };
       }
       default: return r;
@@ -268,7 +351,7 @@ export function applyBulk(rows, ids, action) {
 }
 
 export const FILTERS = [
-  ["all", "All"], ["needsprice", "Needs a price"], ["thin", "Check first (Terapeak / thin)"], ["joins", "Joins a live listing"],
+  ["all", "All"], ["needsprice", "Needs a price"], ["thin", "Check first (Terapeak / thin)"], ["checked", "Checked"], ["joins", "Joins a live listing"],
   ["ready", "Ready"], ["failed", "Failed"], ["listed", "Listed"], ["excluded", "Left out"]
 ];
 
@@ -280,7 +363,7 @@ export function filterRows(rows, { filter = "all", q = "", file = "" } = {}, joi
     if (file && r.file !== file) return false;
     if (filter === "joins" ? !joinsOf(r)
       : filter === "ready" ? st !== "ready"
-      : filter === "thin" ? !(st === "thin" || (isThin(r) && st !== "listed"))
+      : filter === "thin" ? !(st === "thin" || (isThin(r) && st !== "listed" && st !== "checked"))
       : filter !== "all" && filter !== st) return false;
     if (!words.length) return true;
     const hay = [r.title, r.titleOverride, r.cardName, r.cardNumber, r.set, r.condition, r.subtype, r.language, ...r.copies.map((c) => c.sku)]
@@ -291,7 +374,7 @@ export function filterRows(rows, { filter = "all", q = "", file = "" } = {}, joi
 
 /** Sort: needs attention first by default, then by the chosen field. Unpriced last on price sorts. */
 export function sortRows(rows, sort = "attention", joinsOf = () => null) {
-  const rank = { failed: 0, needsprice: 1, toolow: 1, thin: 2, ready: 3, sending: 3, nocopies: 4, excluded: 5, listed: 6 };
+  const rank = { failed: 0, needsprice: 1, toolow: 1, thin: 2, checked: 3, ready: 3, sending: 3, nocopies: 4, excluded: 5, listed: 6 };
   const by = {
     attention: (a, b) => rank[rowStatus(a, joinsOf(a))] - rank[rowStatus(b, joinsOf(b))],
     name: (a, b) => String(a.title).localeCompare(String(b.title), undefined, { numeric: true }),

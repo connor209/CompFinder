@@ -413,6 +413,17 @@ stream` (the relay, only while streaming).
   `/api/batch-comps` price through one `priceFieldCards`, at `QUEUE_GAP_MS`,
   with the hand-on behind CRON_SECRET.
 
+- `scripts/check-pricerules.mjs` — your rules for a card (`lib/price-rules.js`,
+  migration 050): a rule is per CARD (name, number, set, printing, language,
+  never the condition) and the server's card and an Add copies row key alike;
+  the stamped kind catches every spelling and not "unstamped"; a word in the
+  card's own name never trips one ("Staff of Nin"); the house filter leaves a
+  breaking sale out as `yourRule` for that card only; applied on screen the
+  figure is re-worked by the house rules, a typed price stays, and taking the
+  rule off brings back only what it took out; the rule is told to feedback as
+  a 👎 with its tags, tallied by the export; and greps that the table is named
+  in one store and the route and the worker both pass the rules.
+
 - `scripts/check-clientnav.mjs` — moving around the app without a page load
   (`lib/client-nav.js`): which panel URLs are switched in place and which
   still need the server (a saved run, ?pool, ?import, ?ids, ?wish), which
@@ -791,8 +802,20 @@ which is the half that actually cost money.
   copy on the shelf is no more evidence about the plain one in the run than a
   slab is about a raw card.
 
-**Still unmeasured, deliberately.** A stamped comp can still contaminate an
-ORDINARY card's price upward, which is this bug's mirror. Closing that changes
+**The mirror is ON in the app's house pricing (2026-11-25), and only there.**
+Pricing an ordinary card, `prefilterComps` (`/api/batch-comps`, the pricing
+queue, Quick Search) drops any sale core's `isStampedTitle()` calls stamped,
+as `stampedCopy`; a stamped subject stands it down. Measured first with
+`scripts/probe-stamps.mjs`: 137 plain cards in Add copies batches, 9 had
+counted a stamped sale, 3 prices moved (all down — Magnemite 54/108 £9.49 →
+£2.49, Ludicolo 19/107 £7.49 → £3.99, Hypno 23/113 £16.49 → £9.49), none lost
+a price, and all 13 matched titles were genuinely stamped copies. Across
+173,028 cached titles 3.5% read as stamped, "stamped addressed envelope" never
+appeared and the three "not stamped" titles were refused. Core, the Batch
+screen's engine path and Last Comp are unchanged; what follows is about those.
+
+**Still unmeasured there, deliberately.** A stamped comp can still contaminate an
+ORDINARY card's price upward in core, which is this bug's mirror. Closing that changes
 every card in both products rather than only the broken ones, so it wants
 `CORPUS_OUT=corpus.json node scripts/probe-rules.mjs` and the audit harness
 first — the rule this repo already has for exactly this situation. The same run
@@ -894,7 +917,15 @@ for the same contract as JSON.
   is kept on the row (`lib/lab-evidence.js`); tick the ones that are the
   card and the price follows by the SAME house rules (`evidencePrice` runs
   `housePrice`, never a copy), applied only on "Use this price". New sales
-  drop old picks.
+  drop old picks. **The row's Sold comps figure follows your picks**
+  (`compsShown()` in `lab-draft.js`, asked for 2026-11-25), marked "your
+  picks · counted £X", and the bulk "price from sold comps" actions use it;
+  your own price still only moves on "Use this price".
+- **A "check first" row can be marked Checked** (2026-11-25): ✓ Mark checked
+  on the row, in the sales panel or in bulk sets `checkedAt`, the status reads
+  **Checked ✓**, it lists like Ready and leaves the check-first filter for a
+  Checked one. New sales (`applyComps`) or a language change clear it — the
+  review was of the old evidence — and it is never sent to eBay.
 - **Every Zubat numbered 41 (TEST6, 2026-11-24).** The numerator-only rung
   returns every set's card 41, and with overseas sellers counted a 1996 Base
   Set Zubat, a Carddass and a Sealdass sticker priced a 2022 Dark Phantasma
@@ -1767,6 +1798,47 @@ owns what a vote means, `lib/feedback-store.js` is the only file naming
 
 Still to do: listed price against what actually sold and how fast
 (`ebay_sales`), the one signal that is not anybody's opinion.
+
+## Your rules for a card: "these sales aren't this card"
+
+Asked for 2026-11-25: a plain card auto-priced off prerelease-STAMPED sales,
+which the engine only drops from an ordinary card's pool when they say
+"prerelease" — "stamp", "stamped" and "staff" get through (the mirror of the
+stamped-card rule, still unmeasured; see the stamped section). Add copies →
+🔍 see sales → **＋ add a rule for this card**: tick kinds (stamped, graded,
+lot, other language, reverse holo, 1st Edition), type words, leave a note.
+`lib/price-rules.js` owns what a rule means, `lib/price-rules-store.js` is the
+only file naming `card_price_rules` (migration 050).
+
+- **Per card, kept, applied wherever it is priced through the house route**:
+  `/api/batch-comps` and the pricing worker load the account's rules and hand
+  them to `priceFieldCards`, so the Add copies tab, the queue and the Batch
+  screen's house rules all filter the same way. `prefilterComps` checks the
+  rule FIRST and the sale goes out as `yourRule`, shown and restorable.
+  The key is `ruleKeyFor()`: name, number, set, printing, language — never the
+  condition. Core and Last Comp are untouched.
+- **Applied at once on screen, no new search** (`applyCardRule` in
+  `lab-draft.js`) to every row of that card in the batch: the figure is
+  re-worked by the house rules, a price that was the old figure follows it, a
+  typed one stays, picks and Checked go. Removing the rule brings back only
+  what the rule took out.
+- **A word in the card's own name never trips a rule**, and words are whole
+  words ("stamp" is not "unstamped").
+- **Every rule is also a 👎** ("wrong card in the sales", surface `lab`) with
+  the rule in the comment (`[rule: stamped, word:x] note`), and
+  `export-feedback.mjs` tallies those tags and exports the rules. A kind that
+  turns up on many cards is the case for a rule on every card — argued from
+  a probe, never switched on from the tally alone. Stamped was the first, and
+  is now on for every plain card (see the stamped section).
+- **Before 050** the rule still applies to the batch on screen and says it
+  couldn't be kept.
+
+**The global version is measured by `scripts/probe-stamps.mjs`** (Actions →
+Probe: stamped sales on plain cards). Read-only: for every plain card in Add
+copies batches and the Batch screen's saved runs it counts the COUNTED sales
+core's `isStampedTitle()` calls stamped and re-works the house price without
+them, and over every cached search it counts how sellers spell a stamp and
+which titles only a wider pattern (bare "staff") would catch.
 
 ## A price you set beats a price we worked out
 
@@ -3488,6 +3560,17 @@ closed together:
   Keys); on the legacy shared secret it falls back to the same network call
   as before. Routes that act on a user still call `getUser()` themselves.
 - `app/panel/loading.js` covers the loads that still go to the server.
+- **Batches remembers what it last saw** (2026-11-25, "enough of a delay that
+  has me thinking 'what is happening'"). Every hop between the grid and a
+  batch remounted the screen, which then waited on `/api/lab` — a function
+  waking, a login check, every lab listing, copy and log line — even on the
+  grid, which uses none of it, and read a batch only after the list. Now a
+  module-level `MEM` in `LabAdd.js` (life of the page, never a reload) draws
+  the last grid, the last lab answer and the last few batches at once; the
+  list and a batch are read together; the grid never waits on the lab; and
+  **listing waits for this visit's lab answer**, never the remembered one.
+  A batch's rev and a save in flight live in `MEM` too, so the screen you
+  just left finishing its save never makes the next one conflict with itself.
 
 ## Gotchas that have already bitten
 

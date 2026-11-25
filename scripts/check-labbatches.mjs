@@ -274,6 +274,11 @@ for (const [f, tab] of [["apps/app/app/panel/lab/LabCopies.js", "overview"], ["a
   ok(`${f} carries the lab's one header`, new RegExp(`<LabHeader current="${tab}"`).test(readFileSync(f, "utf8")));
 }
 ok("the lab's log is written in words, not JSON", !/JSON\.stringify\(e\.detail\)/.test(readFileSync("apps/app/app/panel/lab/LabCopies.js", "utf8")));
+ok("the grid and New batch never wait on /api/lab", !/if \(!lab\) return/.test(screen));
+ok("a batch and the list are read together, not one after the other", /Promise\.all\(\[listLabBatches\(sb\), id \? loadLabBatch\(sb, id\)/.test(screen));
+ok("what was last seen is drawn at once, for the life of the page", /const MEM = \{/.test(screen) && /useState\(\(\) => MEM\.batches \|\| \[\]\)/.test(screen));
+ok("a batch's rev and a save in flight are shared between screens, so leaving one never makes the next conflict with itself", /MEM\.saving\.has\(id\)/.test(screen) && /MEM\.rev\.set\(id, res\.rev\)/.test(screen));
+ok("listing waits for this visit's live listings, never the remembered ones", /async function listRows\(candidates\) \{\s*if \(!labFresh\)/.test(screen));
 const css = screen.slice(screen.indexOf("const EXTRA_CSS"));
 ok("the batch rows wrap on a phone", /\.lb-strip, \.lb-row \{[^}]*flex-wrap:wrap/.test(css));
 

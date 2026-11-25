@@ -16,6 +16,7 @@ import { BATCH_FETCH_OPTIONS, normaliseCard } from "./batch-comps.js";
 import { resolveRules } from "./house-pricing.js";
 import { createCompsFetcher, priceFieldCards } from "./batch-price-core.js";
 import { compsFromResult } from "./lab-pricing.js";
+import { rulesForPricing } from "./price-rules-store.js";
 import {
   QUEUE_GAP_MS, QUEUE_CHUNK, WORK_BUDGET_MS, nextJob, nextChunk, saveJob, stepTotals, renewLease, releaseLease
 } from "./pricing-queue.js";
@@ -31,6 +32,8 @@ export async function runPricingQueue(sb, userId, holder, {
   const start = now();
   const gate = createGate(gapMs);
   const rules = resolveRules();
+  // Your rules for a card, read once a run (the service client: by user_id).
+  const userRules = priceCards ? new Map() : await rulesForPricing(sb, userId);
   try {
     while (now() - start < budgetMs) {
       const got = await nextJob(sb, userId);
@@ -55,7 +58,7 @@ export async function runPricingQueue(sb, userId, holder, {
       } else {
         const engine = createCompsFetcher({ supabase: sb, apiKey, options: { ...BATCH_FETCH_OPTIONS }, gate });
         const cards = chunk.map((c, i) => normaliseCard(c.card, i));
-        const results = await priceFieldCards(cards, { getComps: engine.getComps, fatalNow: engine.fatalNow, depth: 3, rules, concurrency: QUEUE_CHUNK });
+        const results = await priceFieldCards(cards, { getComps: engine.getComps, fatalNow: engine.fatalNow, depth: 3, rules, userRules, concurrency: QUEUE_CHUNK });
         chunk.forEach((c, i) => {
           answers[c.rowId] = compsFromResult(results[i], { condition: c.card.condition, card: { game: c.card.game } });
         });
