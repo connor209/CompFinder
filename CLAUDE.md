@@ -2889,7 +2889,8 @@ single worker (`lib/pricing-worker.js`) prices every queued job, oldest first.
   each step finishes; the tab holding the batch reads them back
   (`applyJobs()`) and saves the batch itself, so the rev guard on batches
   still means something. An answer lands only if it is newer than the row's
-  (`pricedAt`); a typed price is kept; a listed row is left alone.
+  (`pricedAt`); a typed price is kept, one that was only the old sold comps
+  figure follows the new one (as a saved rule does); a listed row is left alone.
 - **It outlives the tab.** A run works ~4 minutes in `after()` and hands on to
   the next with a POST carrying `CRON_SECRET`. **Without CRON_SECRET the
   hand-on can't be authenticated**, and the queue only carries on while an Add
