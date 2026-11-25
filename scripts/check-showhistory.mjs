@@ -246,7 +246,7 @@ eq("a returned card is never a direct sale",
 {
   const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
   if (!/showhistory:\s*"show-history"/.test(panel)) fail("Panel.js: no /panel/show-history slug");
-  if (!/stream === "showhistory" && <ShowHistory \/>/.test(panel)) fail("Panel.js: Show history is not rendered");
+  if (!/stream === "showhistory" && <ShowHistory \/>|screen\("showhistory", <ShowHistory \/>\)/.test(panel)) fail("Panel.js: Show history is not rendered");
   // The history is a reader. A write from it would be a second place a
   // checkout gets resolved, and the desk and the deal already guard theirs.
   const screen = readFileSync(new URL("../apps/app/app/panel/ShowHistory.js", import.meta.url), "utf8");

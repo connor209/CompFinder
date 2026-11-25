@@ -413,6 +413,14 @@ stream` (the relay, only while streaming).
   `/api/batch-comps` price through one `priceFieldCards`, at `QUEUE_GAP_MS`,
   with the hand-on behind CRON_SECRET.
 
+- `scripts/check-clientnav.mjs` — moving around the app without a page load
+  (`lib/client-nav.js`): which panel URLs are switched in place and which
+  still need the server (a saved run, ?pool, ?import, ?ids, ?wish), which
+  clicks are left to the browser, and greps that sections switch with
+  `navigate()`, that no stock screen is kept alive, that the lab's screens
+  remount on a new URL, that an open batch saves when its screen is left, that
+  the panel has a loading state and that the middleware uses `getClaims()`.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -3439,6 +3447,47 @@ Verify locally (`npm run check`, `npm run build:public`), let fixes accumulate
 on the branch, and merge once you have something worth deploying. If the site
 stops reflecting a merge, check the Vercel dashboard before assuming the code
 is wrong: a missed deploy looks exactly like a bug that didn't take.
+
+## Moving between screens is in place, not a page load
+
+Asked 2026-11-25: "why is navigating around the site slow?" Five causes, all
+closed together:
+
+- **A section change was a server round trip and a remount.** `go()` did a
+  `router.push`, so `/panel/<slug>` was rendered on the server again, nothing
+  moved until it answered, and the whole panel remounted — every screen
+  re-fetching from scratch. Now `navigate()` (`lib/client-nav.js`) is a
+  `history.pushState`, which Next 15 folds into its router: `usePathname`
+  follows, Back restores without a fetch (Next tags our entries `__NA`), and
+  the panel stays mounted. URLs the server must read — a saved run
+  `/panel/batch/<id>`, `?pool`, `?import`, `?ids`, `?wish` — still go through
+  the router (`needsServer()`), because the page hands them in as props.
+- **Plain links reloaded the whole app**, the lab's tabs and tiles worst. One
+  click handler in the panel catches any ordinary link to a known section and
+  switches in place; a new tab, a modified click, a download, another site or
+  a server-only URL is left to the browser. The lab's screens are keyed on a
+  navigation counter, so `?batch=`/`?new=1` remount the screen they name, and
+  an open batch flushes its pending save when its screen is left in place
+  (there is no unload to warn on any more).
+- **Some screens are kept alive** for ten minutes after you leave
+  (`KEEP_ALIVE`): Dashboard, Quick Search, Sales, Accounts, Show history,
+  Browse, Arbitrage — reports and searches, where an old view costs nothing.
+  **Never a screen that says where stock is or acts on it** (My listings,
+  Stacks, Pull sheet, Show Desk, stream box, Cardmarket stock, the lab, Buy,
+  Sell sheets, Imports) — a Stacks view from before a pull was committed sends
+  you to the wrong card — and never Scan, because a hidden camera is still on.
+  `check-clientnav.mjs` fails if one is added.
+- **One 464 kB bundle.** Every screen is its own chunk (`SCREEN_LOADERS`,
+  `next/dynamic`), warmed when the panel goes idle and on hover in the menu;
+  the first load of any panel page is 248 kB.
+- **The middleware asked Supabase's auth server who you are on every request**
+  — pages and API calls alike. It uses `getClaims()` now, which verifies the
+  token's signature locally against the project's published keys and
+  refreshes a session exactly as before. **It is only network-free if the
+  project signs with asymmetric JWT keys** (Supabase → Project Settings → JWT
+  Keys); on the legacy shared secret it falls back to the same network call
+  as before. Routes that act on a user still call `getUser()` themselves.
+- `app/panel/loading.js` covers the loads that still go to the server.
 
 ## Gotchas that have already bitten
 
