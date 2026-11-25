@@ -16,6 +16,7 @@ export const EVIDENCE_CAP = 120;
 /** Short words for why a sale was left out, for a row and a table cell. */
 export const REASON_SHORT = {
   yourRule: "your rule",
+  stampedCopy: "stamped copy",
   nameMismatch: "different name",
   wrongNumber: "different number",
   setMismatch: "different set",

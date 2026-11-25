@@ -69,13 +69,22 @@ const comps = [
 ];
 const plain = planCard(server);
 const before = evaluateCard(plain, comps);
-ok("without a rule the stamped sales get through (the bug this is for)", before.sales.some((s) => /stamp/i.test(s.title)));
+ok("a plain card drops every stamped sale on its own (the global rule, 2026-11-25)", before.sales.every((s) => !/stamp/i.test(s.title)));
+eq("…each as stampedCopy", before.excluded.filter((e) => e.reason === "stampedCopy").length, 2);
+const kept = evaluateCard(planCard(server), [...comps, comp("Shedinja 14/107 Deoxys not stamped", 6.2), comp("Shedinja 14/107 Deoxys unstamped holo", 6.3)]);
+ok("…but keeps a seller saying it is NOT stamped", kept.sales.some((s) => /not stamped/.test(s.title)) && kept.sales.some((s) => /unstamped/.test(s.title)));
+const stampedCard = evaluateCard(planCard(normaliseCard({ name: "Shedinja", number: "14/107", set: "Deoxys", title: "Shedinja 14/107 Deoxys Prerelease Stamped", condition: "NM" })), comps);
+ok("a STAMPED card is never hit by it", !stampedCard.excluded.some((e) => e.reason === "stampedCopy"));
+const shadow = [...comps, comp("Shedinja 14/107 Deoxys swirl", 7.5)];
+const free = evaluateCard(planCard(server), shadow);
 const ruled = planCard(server);
-ruled.userRule = stamped;
-const after = evaluateCard(ruled, comps);
-ok("with the rule no stamped sale is counted", after.sales.every((s) => !/stamp/i.test(s.title)));
-eq("…each goes as yourRule", after.excluded.filter((e) => e.reason === "yourRule").length, 2);
-ok("…and the price comes down", after.suggested_price < before.suggested_price);
+ruled.userRule = normaliseRule({ words: ["swirl"] });
+const after = evaluateCard(ruled, shadow);
+ok("without your rule the word gets through", free.sales.some((s) => /swirl/i.test(s.title)));
+ok("with it, it doesn't", after.sales.every((s) => !/swirl/i.test(s.title)));
+eq("…and goes as yourRule", after.excluded.filter((e) => e.reason === "yourRule").length, 1);
+ok("…and the price comes down", after.suggested_price <= free.suggested_price);
+ok("Quick Search hands the filter its settings, so a stamped card searched there keeps its sales", /plan\.settings = cardSettings/.test(readFileSync("apps/app/app/panel/QuickSearch.js", "utf8")));
 
 // ---- on screen, no new search ----
 const ev = (id, title, price, counted = true, extra = {}) => ({ id, title, price, postage: 0, total: price, date: null, url: null, counted, reason: "", ...extra });

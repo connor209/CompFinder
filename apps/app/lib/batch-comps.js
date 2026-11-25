@@ -46,6 +46,7 @@ export const BATCH_FETCH_OPTIONS = Object.freeze({
 /** Plain-English reasons, for a human reading `excluded[]`. */
 export const REASON_TEXT = {
   yourRule: "Your rule for this card",
+  stampedCopy: "A stamped copy (pricing an ordinary one)",
   nameMismatch: "Title doesn't name this card",
   graded: "Graded slab",
   rawCopy: "Raw copy (pricing a slab)",
@@ -544,6 +545,16 @@ export function prefilterComps(plan, comps) {
         excluded.push({ ...c, exclusionReason: "yourRule", exclusionDetail: why });
         continue;
       }
+    }
+    // A stamped sale is not an ordinary card (switched on 2026-11-25, measured
+    // by scripts/probe-stamps.mjs): pricing a plain copy, a sale core's own
+    // isStampedTitle() calls stamped goes. Core already drops "prerelease";
+    // "stamp", "stamped" and "staff stamp" got through and dragged plain
+    // commons up to a stamped copy's price. Pricing a STAMPED copy this stands
+    // down — core keeps the stamped sales and drops the ordinary ones instead.
+    if (!plan.settings?.subjectStamp?.stamped && CompFinderPricing.isStampedTitle(t)) {
+      excluded.push({ ...c, exclusionReason: "stampedCopy" });
+      continue;
     }
     if (ours) {
       // A promo comp is ours if it carries our code. One carrying a different

@@ -802,8 +802,20 @@ which is the half that actually cost money.
   copy on the shelf is no more evidence about the plain one in the run than a
   slab is about a raw card.
 
-**Still unmeasured, deliberately.** A stamped comp can still contaminate an
-ORDINARY card's price upward, which is this bug's mirror. Closing that changes
+**The mirror is ON in the app's house pricing (2026-11-25), and only there.**
+Pricing an ordinary card, `prefilterComps` (`/api/batch-comps`, the pricing
+queue, Quick Search) drops any sale core's `isStampedTitle()` calls stamped,
+as `stampedCopy`; a stamped subject stands it down. Measured first with
+`scripts/probe-stamps.mjs`: 137 plain cards in Add copies batches, 9 had
+counted a stamped sale, 3 prices moved (all down — Magnemite 54/108 £9.49 →
+£2.49, Ludicolo 19/107 £7.49 → £3.99, Hypno 23/113 £16.49 → £9.49), none lost
+a price, and all 13 matched titles were genuinely stamped copies. Across
+173,028 cached titles 3.5% read as stamped, "stamped addressed envelope" never
+appeared and the three "not stamped" titles were refused. Core, the Batch
+screen's engine path and Last Comp are unchanged; what follows is about those.
+
+**Still unmeasured there, deliberately.** A stamped comp can still contaminate an
+ORDINARY card's price upward in core, which is this bug's mirror. Closing that changes
 every card in both products rather than only the broken ones, so it wants
 `CORPUS_OUT=corpus.json node scripts/probe-rules.mjs` and the audit harness
 first — the rule this repo already has for exactly this situation. The same run
@@ -1816,7 +1828,8 @@ only file naming `card_price_rules` (migration 050).
   the rule in the comment (`[rule: stamped, word:x] note`), and
   `export-feedback.mjs` tallies those tags and exports the rules. A kind that
   turns up on many cards is the case for a rule on every card — argued from
-  the probe below, never switched on from the tally alone.
+  a probe, never switched on from the tally alone. Stamped was the first, and
+  is now on for every plain card (see the stamped section).
 - **Before 050** the rule still applies to the batch on screen and says it
   couldn't be kept.
 

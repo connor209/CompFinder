@@ -52,6 +52,7 @@ export const REASON_CODES = Object.freeze({
   priceOutlierLow: "price_outlier",
   highPostage: "high_postage",
   duplicate: "duplicate",
+  stampedCopy: "variant_mismatch",
   yourRule: "your_rule" // a rule you set on this card (price-rules.js)
 });
 
