@@ -28,6 +28,7 @@ import { compVariants, detectVariants, isReverseKind, isSoftVariant, nameWithout
 import { housePrice, houseTotal, resolveRules, rulesForGame, conditionCode, decide, gameCode, spreadTooWide } from "./house-pricing.js";
 import { UNPRICED_PENCE } from "./zero-price.js";
 import { japaneseSetCode } from "./japanese-sets.js";
+import { saleBreaksRule } from "./price-rules.js";
 
 /** Most cards one request will take. A page of 50 is the normal batch. */
 export const MAX_CARDS = 100;
@@ -44,6 +45,7 @@ export const BATCH_FETCH_OPTIONS = Object.freeze({
 
 /** Plain-English reasons, for a human reading `excluded[]`. */
 export const REASON_TEXT = {
+  yourRule: "Your rule for this card",
   nameMismatch: "Title doesn't name this card",
   graded: "Graded slab",
   rawCopy: "Raw copy (pricing a slab)",
@@ -534,6 +536,15 @@ export function prefilterComps(plan, comps) {
   const anyCode = plan.promo ? anyPromoOfPrefix(plan.number) : null;
   for (const c of comps || []) {
     const t = c.title || "";
+    // Your rule for this card (lib/price-rules.js): a sale you've said isn't
+    // this card goes first, before any rule of ours could count it.
+    if (plan.userRule) {
+      const why = saleBreaksRule(t, plan.userRule, plan.card?.name || plan.baseName || "");
+      if (why) {
+        excluded.push({ ...c, exclusionReason: "yourRule", exclusionDetail: why });
+        continue;
+      }
+    }
     if (ours) {
       // A promo comp is ours if it carries our code. One carrying a different
       // code of the same series, or a main-set "61/124", is another card.

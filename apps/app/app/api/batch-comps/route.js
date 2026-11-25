@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createGate, runPool, SOLDCOMPS_GAP_MS } from "@/lib/pace";
+import { rulesForPricing } from "@/lib/price-rules-store";
 import { HOUSE_RULES, resolveRules } from "@/lib/house-pricing";
 import { VARIANTS } from "@/lib/variants";
 import {
@@ -120,7 +121,9 @@ export async function POST(request) {
 
   if (titleForm) return titleResponse(cards, { getComps, stats, started, options, fatalNow: engine.fatalNow });
 
-  const results = await priceFieldCards(cards, { getComps, fatalNow: engine.fatalNow, depth, rules, concurrency: CONCURRENCY });
+  // Your rules for a card ("no stamped sales") — empty before migration 050.
+  const userRules = await rulesForPricing(supabase, user.id);
+  const results = await priceFieldCards(cards, { getComps, fatalNow: engine.fatalNow, depth, rules, userRules, concurrency: CONCURRENCY });
   const fatal = engine.fatalNow();
 
   let out = results;

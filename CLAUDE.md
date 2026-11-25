@@ -413,6 +413,17 @@ stream` (the relay, only while streaming).
   `/api/batch-comps` price through one `priceFieldCards`, at `QUEUE_GAP_MS`,
   with the hand-on behind CRON_SECRET.
 
+- `scripts/check-pricerules.mjs` — your rules for a card (`lib/price-rules.js`,
+  migration 050): a rule is per CARD (name, number, set, printing, language,
+  never the condition) and the server's card and an Add copies row key alike;
+  the stamped kind catches every spelling and not "unstamped"; a word in the
+  card's own name never trips one ("Staff of Nin"); the house filter leaves a
+  breaking sale out as `yourRule` for that card only; applied on screen the
+  figure is re-worked by the house rules, a typed price stays, and taking the
+  rule off brings back only what it took out; the rule is told to feedback as
+  a 👎 with its tags, tallied by the export; and greps that the table is named
+  in one store and the route and the worker both pass the rules.
+
 - `scripts/check-clientnav.mjs` — moving around the app without a page load
   (`lib/client-nav.js`): which panel URLs are switched in place and which
   still need the server (a saved run, ?pool, ?import, ?ids, ?wish), which
@@ -1775,6 +1786,46 @@ owns what a vote means, `lib/feedback-store.js` is the only file naming
 
 Still to do: listed price against what actually sold and how fast
 (`ebay_sales`), the one signal that is not anybody's opinion.
+
+## Your rules for a card: "these sales aren't this card"
+
+Asked for 2026-11-25: a plain card auto-priced off prerelease-STAMPED sales,
+which the engine only drops from an ordinary card's pool when they say
+"prerelease" — "stamp", "stamped" and "staff" get through (the mirror of the
+stamped-card rule, still unmeasured; see the stamped section). Add copies →
+🔍 see sales → **＋ add a rule for this card**: tick kinds (stamped, graded,
+lot, other language, reverse holo, 1st Edition), type words, leave a note.
+`lib/price-rules.js` owns what a rule means, `lib/price-rules-store.js` is the
+only file naming `card_price_rules` (migration 050).
+
+- **Per card, kept, applied wherever it is priced through the house route**:
+  `/api/batch-comps` and the pricing worker load the account's rules and hand
+  them to `priceFieldCards`, so the Add copies tab, the queue and the Batch
+  screen's house rules all filter the same way. `prefilterComps` checks the
+  rule FIRST and the sale goes out as `yourRule`, shown and restorable.
+  The key is `ruleKeyFor()`: name, number, set, printing, language — never the
+  condition. Core and Last Comp are untouched.
+- **Applied at once on screen, no new search** (`applyCardRule` in
+  `lab-draft.js`) to every row of that card in the batch: the figure is
+  re-worked by the house rules, a price that was the old figure follows it, a
+  typed one stays, picks and Checked go. Removing the rule brings back only
+  what the rule took out.
+- **A word in the card's own name never trips a rule**, and words are whole
+  words ("stamp" is not "unstamped").
+- **Every rule is also a 👎** ("wrong card in the sales", surface `lab`) with
+  the rule in the comment (`[rule: stamped, word:x] note`), and
+  `export-feedback.mjs` tallies those tags and exports the rules. A kind that
+  turns up on many cards is the case for a rule on every card — argued from
+  the probe below, never switched on from the tally alone.
+- **Before 050** the rule still applies to the batch on screen and says it
+  couldn't be kept.
+
+**The global version is measured by `scripts/probe-stamps.mjs`** (Actions →
+Probe: stamped sales on plain cards). Read-only: for every plain card in Add
+copies batches and the Batch screen's saved runs it counts the COUNTED sales
+core's `isStampedTitle()` calls stamped and re-works the house price without
+them, and over every cached search it counts how sellers spell a stamp and
+which titles only a wider pattern (bare "staff") would catch.
 
 ## A price you set beats a price we worked out
 

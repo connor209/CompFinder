@@ -51,7 +51,8 @@ export const REASON_CODES = Object.freeze({
   priceOutlier: "price_outlier",
   priceOutlierLow: "price_outlier",
   highPostage: "high_postage",
-  duplicate: "duplicate"
+  duplicate: "duplicate",
+  yourRule: "your_rule" // a rule you set on this card (price-rules.js)
 });
 
 const snake = (s) => String(s).replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase();

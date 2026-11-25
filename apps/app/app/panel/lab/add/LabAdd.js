@@ -7,8 +7,11 @@ import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
   DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
-  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown
+  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown, applyCardRule, ruleFeedbackArgs
 } from "@/lib/lab-draft.js";
+import { RULE_KINDS, ruleKeyFor, normaliseRule, isEmptyRule, describeRule, saleBreaksRule, ruleComment } from "@/lib/price-rules.js";
+import { listRules, saveRule } from "@/lib/price-rules-store.js";
+import { recordFeedback } from "@/lib/feedback-store.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
 import { PRICING_KEY } from "@/lib/lab-overview.js";
 import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer } from "@/lib/lab-evidence.js";
@@ -62,7 +65,7 @@ async function api(body) {
  * per screen: a save started by the screen you just left must not leave the
  * next one saving over a rev it no longer holds.
  */
-const MEM = { lab: null, batches: null, tiles: true, open: new Map(), rev: new Map(), saving: new Set() };
+const MEM = { lab: null, batches: null, tiles: true, open: new Map(), rev: new Map(), saving: new Set(), rules: null };
 const MEM_OPEN_MAX = 6;
 function rememberOpen(id, entry) {
   MEM.open.delete(id);
@@ -143,6 +146,9 @@ export default function LabAdd() {
   const [pricingIds, setPricingIds] = useState(() => new Set());
   const stopRef = useRef(false);
   const [msg, setMsg] = useState(null);
+  // Your rules for a card (migration 050): key → rule, and whether they can be kept.
+  const [cardRules, setCardRules] = useState(() => MEM.rules || new Map());
+  const [rulesStore, setRulesStore] = useState("ok");
   // The view (which rows, in what order) is worked out when you ASK for it —
   // a filter, a search, a sort, a load, a bulk action — never because a price
   // was typed. Re-sorting on every keystroke moved a row out from under the
@@ -156,6 +162,12 @@ export default function LabAdd() {
     MEM.lab = r;
     setLab(r);
     setLabFresh(true);
+  }, []);
+  useEffect(() => {
+    listRules(createClient()).then((r) => {
+      if (r.ok) { MEM.rules = r.rules; setCardRules(r.rules); }
+      else setRulesStore(r.missing ? "missing" : "error");
+    });
   }, []);
   useEffect(() => {
     reloadLab();
@@ -434,6 +446,28 @@ export default function LabAdd() {
     return { text: out.title, cut: out.titleCut };
   };
   const setRow = (id, patch) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  /**
+   * Your rule for the card on this row: applied at once to every row of the
+   * card in this batch (no new search), kept for next time (050), and told to
+   * the feedback store as a 👎 with the rule in the comment (046), which is
+   * what export-feedback.mjs tallies.
+   */
+  async function saveCardRule(row, input) {
+    const rule = normaliseRule(input);
+    const key = ruleKeyFor(row);
+    const empty = isEmptyRule(rule);
+    setRows((rs) => applyCardRule(rs, key, empty ? null : rule));
+    setCardRules((m) => { const n = new Map(m); if (empty) n.delete(key); else n.set(key, rule); MEM.rules = n; return n; });
+    const sb = createClient();
+    const label = [row.cardName, row.cardNumber, row.set].filter(Boolean).join(" ");
+    const kept = await saveRule(sb, null, { key, label, rule });
+    if (!empty) recordFeedback(sb, ruleFeedbackArgs(row, rule, ruleComment(rule))).catch(() => {});
+    const what = empty ? "rule removed" : `rule: ${describeRule(rule)}`;
+    if (kept.ok) setMsg({ text: `${label} — ${what}. ${empty ? "" : "Applied to this batch, and kept for every time this card is priced."}` });
+    else if (kept.missing) setMsg({ text: `${label} — ${what}, applied to this batch. Not kept for next time: migration 050 still to run.` });
+    else setMsg({ bad: true, text: `${label} — ${what}, applied to this batch, but not kept: ${kept.error}` });
+  }
   const tick = (id, on) => setTicked((t) => { const n = new Set(t); if (on) n.add(String(id)); else n.delete(String(id)); return n; });
 
   // ---- files -------------------------------------------------------------
@@ -1116,6 +1150,8 @@ export default function LabAdd() {
                             </div>
                             {r.comps?.evidence?.length > 0 && (
                               <SalesFound row={r} disabled={done || !!busy} status={st}
+                                rule={cardRules.get(ruleKeyFor(r)) || r.comps?.rule || null}
+                                onRule={(rule) => saveCardRule(r, rule)}
                                 onCheck={(on) => setRow(r.id, { checkedAt: on ? new Date().toISOString() : null })}
                                 onPicks={(picks) => setRow(r.id, { picks })}
                                 onUse={(pence) => { setRow(r.id, { pricePence: pence }); setMsg({ text: `${r.title}: price set to ${gbp(pence)} from the sales you picked.` }); }} />
@@ -1209,7 +1245,53 @@ function PricingBar({ p, onStop }) {
  * worked out from your picks by the same house rules as the server's. Nothing
  * changes until "Use this price".
  */
-function SalesFound({ row, onPicks, onUse, onCheck, status, disabled }) {
+/**
+ * "These sales aren't this card": quick kinds, your own words, a note. What it
+ * would take out is counted before you save, off the sales on screen.
+ */
+function CardRule({ row, rule, onSave, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [kinds, setKinds] = useState(() => new Set(rule?.kinds || []));
+  const [words, setWords] = useState(() => (rule?.words || []).join(", "));
+  const [note, setNote] = useState(rule?.note || "");
+  useEffect(() => { setKinds(new Set(rule?.kinds || [])); setWords((rule?.words || []).join(", ")); setNote(rule?.note || ""); }, [rule]);
+  const draft = normaliseRule({ kinds: [...kinds], words: words.split(","), note });
+  const ev = row.comps?.evidence || [];
+  const hits = isEmptyRule(draft) ? 0 : ev.filter((e) => (e.counted || e.reasonCode === "yourRule") && saleBreaksRule(e.title, draft, row.cardName)).length;
+  if (!open) {
+    return (
+      <div className="la-rule">
+        {rule && !isEmptyRule(rule)
+          ? <span>Your rule for this card: <b>{describeRule(rule)}</b>{rule.note ? <span className="li-dim"> — {rule.note}</span> : null}</span>
+          : <span className="li-dim">Wrong card in these sales (stamped, graded, a lot…)?</span>}
+        <button className="li-link" disabled={disabled} onClick={() => setOpen(true)}>{rule && !isEmptyRule(rule) ? "edit rule" : "＋ add a rule for this card"}</button>
+      </div>
+    );
+  }
+  return (
+    <div className="la-rule open">
+      <div><b>Not this card:</b> {RULE_KINDS.map((k) => (
+        <label key={k.key} className="li-check" title={k.hint}>
+          <input type="checkbox" checked={kinds.has(k.key)} disabled={disabled}
+            onChange={(e) => setKinds((s) => { const n = new Set(s); if (e.target.checked) n.add(k.key); else n.delete(k.key); return n; })} /> {k.label}
+        </label>
+      ))}</div>
+      <div className="la-rule-fields">
+        <input className="li-search" placeholder="Words that mean it isn't this card, comma-separated" value={words} disabled={disabled} onChange={(e) => setWords(e.target.value)} />
+        <input className="li-search" placeholder="A note (yours — e.g. no stamp on this one)" value={note} disabled={disabled} onChange={(e) => setNote(e.target.value)} />
+      </div>
+      <div className="la-sales-foot">
+        <span className="li-dim">{isEmptyRule(draft) ? "Tick a kind or type a word." : `Takes out ${hits} of the sales found. Kept for this card and used every time it's priced.`}</span>
+        <span className="li-spacer" />
+        <button className="li-btn" disabled={disabled} onClick={() => setOpen(false)}>Cancel</button>
+        {rule && !isEmptyRule(rule) && <button className="li-btn" disabled={disabled} onClick={() => { onSave(null); setOpen(false); }}>Remove rule</button>}
+        <button className="li-btn primary" disabled={disabled || isEmptyRule(draft)} onClick={() => { onSave(draft); setOpen(false); }}>Save rule</button>
+      </div>
+    </div>
+  );
+}
+
+function SalesFound({ row, onPicks, onUse, onCheck, onRule, rule, status, disabled }) {
   const [showOut, setShowOut] = useState(false);
   const [showSearches, setShowSearches] = useState(false);
   const ev = row.comps.evidence;
@@ -1241,6 +1323,7 @@ function SalesFound({ row, onPicks, onUse, onCheck, status, disabled }) {
           {row.comps.search.map((s, i) => <div key={i}><span className="mono">{s.query}</span> <span className="li-dim">— {s.error ? `failed: ${s.error}` : `found ${s.fetched ?? "?"}, new ${s.added ?? "?"}`}</span></div>)}
         </div>
       )}
+      {onRule && <CardRule row={row} rule={rule} onSave={onRule} disabled={disabled} />}
       <div className="li-scroll" style={{ maxHeight: 360 }}>
         <table className="li-table la-sales-table">
           <thead><tr><th className="li-cb">Use</th><th>Sold listing</th><th className="r">Total</th><th className="sm-hide">Sold</th><th className="sm-hide">Filter</th></tr></thead>
@@ -1375,6 +1458,11 @@ const EXTRA_CSS = `
 .la-cm { color: var(--ink-soft); }
 .la-cm b { color: var(--ink); }
 .la-sales { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.la-rule { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 13px; padding: 6px 8px; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.06)); }
+.la-rule.open { flex-direction: column; align-items: stretch; }
+.la-rule.open .li-check { margin-right: 10px; }
+.la-rule-fields { display: flex; flex-wrap: wrap; gap: 6px; }
+.la-rule-fields .li-search { flex: 1 1 240px; min-width: 0; }
 .la-sales-head, .la-sales-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
 .la-sales-table td, .la-sales-table th { font-size: 12.5px; }
 .la-sales-table tr.ended td { opacity: .55; }

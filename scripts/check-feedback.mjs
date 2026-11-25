@@ -113,7 +113,7 @@ eq("you went lower: the app was too high", overrideDirection({ overridePence: 80
 eq("within 10%", overrideDirection({ overridePence: 1299, enginePence: 1249 }), "aboutRight");
 eq("no app price", overrideDirection({ overridePence: 350, enginePence: null }), "unpriced");
 const sum = feedbackSummary({ votes: latest, overrides: [{ overridePence: 2000, enginePence: 1000 }, { overridePence: 500, enginePence: 1000 }, { overridePence: 1000, enginePence: 1000 }] });
-eq("the summary", sum, { votes: { up: 0, down: 2, byReason: { thin: 1, tooHigh: 1 } }, overrides: { count: 3, byDirection: { tooLow: 1, tooHigh: 1, aboutRight: 1 }, medianGapPct: 0 } });
+eq("the summary", sum, { votes: { up: 0, down: 2, byReason: { thin: 1, tooHigh: 1 }, ruleTags: {} }, overrides: { count: 3, byDirection: { tooLow: 1, tooHigh: 1, aboutRight: 1 }, medianGapPct: 0 } });
 
 // ---- the store, against a fake Supabase ----
 function fakeSb({ insertError = null, selectRows = [], selectError = null, user = { id: "u1" } } = {}) {

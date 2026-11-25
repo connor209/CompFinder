@@ -14,6 +14,7 @@ import { fetchSoldComps } from "./soldcomps-fetch.js";
 import { readCache, writeCache } from "./comp-cache.js";
 import { runPool } from "./pace.js";
 import { compKey, evaluateCard, mergeComps, planCard, wantsFallback } from "./batch-comps.js";
+import { ruleKeyFor } from "./price-rules.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -70,8 +71,10 @@ export function createCompsFetcher({ supabase, apiKey, options, fresh = false, g
 }
 
 /** House-rule prices for normalised cards (normaliseCard), in order. */
-export async function priceFieldCards(cards, { getComps, fatalNow, depth = 3, rules, concurrency = 4 }) {
+export async function priceFieldCards(cards, { getComps, fatalNow, depth = 3, rules, concurrency = 4, userRules = null }) {
   const plans = cards.map(planCard);
+  // Your rules for these cards (lib/price-rules.js), keyed the way a card is read.
+  if (userRules && userRules.size) for (const p of plans) p.userRule = userRules.get(ruleKeyFor(p.card)) || null;
   const results = new Array(plans.length);
 
   await runPool(plans.length, concurrency, async (i) => {

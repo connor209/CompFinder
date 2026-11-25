@@ -29,6 +29,7 @@
 import { keyForLanguage } from "./lab-copies.js";
 import { splitLotCost } from "./card-costs.js";
 import { evidencePrice, picksDiffer } from "./lab-evidence.js";
+import { ruleKeyFor, saleBreaksRule, isEmptyRule } from "./price-rules.js";
 
 export const DRAFT_KEY = "cf-lab-add-draft-v1";
 
@@ -131,6 +132,63 @@ export function compsShown(row) {
     return { pence: p.suggestedPence, n: p.n, picked: true, counted: c.pence ?? null };
   }
   return { pence: c.pence ?? null, n: c.n ?? null, picked: false, counted: c.pence ?? null };
+}
+
+/**
+ * Your rule for a card, applied to the sales a row already has — no new
+ * search. Every row of that card (ruleKeyFor) is re-filtered: a counted sale
+ * the rule catches goes out as "your rule", and one only your rule had left
+ * out comes back when the rule no longer catches it (so a rule can be
+ * loosened or removed). The figure is re-worked by the same house rules
+ * (evidencePrice); a price that was the old figure follows it, a price you
+ * typed stays; picks and "checked" go, since they were about the old sales.
+ * `rule` null or empty takes the rule off. Rows with no sales just carry it.
+ */
+export function applyCardRule(rows, key, rule) {
+  const live = isEmptyRule(rule) ? null : rule;
+  return (rows || []).map((r) => {
+    if (ruleKeyFor(r) !== key || r.result?.ok) return r;
+    const c = r.comps;
+    if (!c?.evidence?.length) return c ? { ...r, comps: { ...c, rule: live } } : r;
+    let changed = false;
+    const evidence = c.evidence.map((e) => {
+      const why = live ? saleBreaksRule(e.title, live, r.cardName) : null;
+      if (e.counted && why) { changed = true; return { ...e, counted: false, reasonCode: "yourRule", reason: `your rule (${why})` }; }
+      if (!e.counted && e.reasonCode === "yourRule" && !why) { changed = true; return { ...e, counted: true, reasonCode: null, reason: "" }; }
+      return e;
+    });
+    if (!changed) return { ...r, comps: { ...c, rule: live } };
+    const p = evidencePrice(evidence, null, { condition: c.condition || r.condition, game: c.game || r.card?.game || "" });
+    const comps = { ...c, evidence, rule: live, pence: p.suggestedPence, n: p.n };
+    const followed = r.pricePence == null || r.pricePence === c.pence;
+    return { ...r, comps, picks: null, checkedAt: null, pricePence: followed ? p.suggestedPence : r.pricePence };
+  });
+}
+
+/**
+ * What a rule saved on a row tells the feedback store (lib/feedback-store.js):
+ * a 👎 "wrong card in the sales", the rule in the comment (ruleComment), and
+ * the sales as they were BEFORE the rule — what the price was built from is
+ * the evidence. `query` is the card's rule key, so the latest vote per card
+ * wins in export-feedback.mjs.
+ */
+export function ruleFeedbackArgs(row, rule, comment) {
+  const ev = row?.comps?.evidence || [];
+  const comp = (e) => ({
+    title: e.title, itemPricePence: Math.round((Number(e.price) || 0) * 100),
+    postagePence: Math.round((Number(e.postage) || 0) * 100), totalPence: Math.round((Number(e.total) || 0) * 100),
+    ...(e.counted ? {} : { exclusionReason: e.reasonCode || "excluded" })
+  });
+  return {
+    verdict: "down", reason: "wrongCard", comment, surface: "lab",
+    row: { title: row?.title, query: ruleKeyFor(row || {}), sku: row?.copies?.[0]?.sku, cardNumber: row?.cardNumber, set: row?.set },
+    rec: {
+      finalPence: row?.comps?.pence ?? null, overridePence: row?.pricePence != null && row.pricePence !== row?.comps?.pence ? row.pricePence : null,
+      confidence: row?.comps?.confidence || null, dataSource: "sold",
+      house: row?.comps?.decision ? { decision: row.comps.decision } : undefined,
+      included: ev.filter((e) => e.counted).map(comp), excluded: ev.filter((e) => !e.counted).map(comp)
+    }
+  };
 }
 
 /** What a decision says, for a row. */

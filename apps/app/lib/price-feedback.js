@@ -22,6 +22,7 @@
  */
 import { slimRec } from "./batch-store.js";
 import { effectivePence } from "./price-override.js";
+import { ruleTagsFromComment } from "./price-rules.js";
 
 export const VERDICTS = ["up", "down", "clear"];
 
@@ -44,7 +45,7 @@ export function reasonLabel(key) {
   return REASONS.find((r) => r.key === key)?.label || key || "";
 }
 
-const SURFACES = new Set(["batch", "quick"]);
+const SURFACES = new Set(["batch", "quick", "lab"]); // lab: a rule set on a card in Add copies
 const text = (v, max = 500) => {
   const s = String(v ?? "").replace(/\u0000/g, "").trim();
   return s ? s.slice(0, max) : null;
@@ -163,10 +164,12 @@ export function overrideDirection({ overridePence, enginePence }, tolerance = 0.
  */
 export function feedbackSummary({ votes = [], overrides = [] } = {}) {
   const byReason = {};
+  const ruleTags = {}; // what your per-card rules keep saying (price-rules.js)
   let up = 0, down = 0;
   for (const v of votes) {
     if (v.verdict === "up") up++;
     else if (v.verdict === "down") { down++; byReason[v.reason] = (byReason[v.reason] || 0) + 1; }
+    for (const t of ruleTagsFromComment(v.comment)) ruleTags[t] = (ruleTags[t] || 0) + 1;
   }
   const byDirection = {};
   const gaps = [];
@@ -180,7 +183,7 @@ export function feedbackSummary({ votes = [], overrides = [] } = {}) {
     ? (gaps.length % 2 ? gaps[(gaps.length - 1) / 2] : (gaps[gaps.length / 2 - 1] + gaps[gaps.length / 2]) / 2)
     : null;
   return {
-    votes: { up, down, byReason },
+    votes: { up, down, byReason, ruleTags },
     overrides: { count: overrides.length, byDirection, medianGapPct: medianGap == null ? null : Math.round(medianGap * 1000) / 10 }
   };
 }
