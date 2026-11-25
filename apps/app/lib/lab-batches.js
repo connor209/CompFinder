@@ -126,7 +126,7 @@ export function batchProgress(rows, joinsOf = () => null, queued = new Set()) {
     else if (!r.comps && !queued.has(String(r.id))) p.unpriced += 1;
     if (st === "needsprice" || st === "toolow") { if (r.comps || r.pricePence != null) p.needsPrice += 1; }
     if (st === "thin") p.check += 1;
-    if (st === "ready") { p.ready += 1; p.readyIds.push(r.id); }
+    if (st === "ready" || st === "checked") { p.ready += 1; p.readyIds.push(r.id); }
   }
   return p;
 }

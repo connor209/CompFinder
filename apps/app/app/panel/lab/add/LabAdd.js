@@ -7,7 +7,7 @@ import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
   DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
-  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent
+  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown
 } from "@/lib/lab-draft.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
 import { PRICING_KEY } from "@/lib/lab-overview.js";
@@ -42,7 +42,7 @@ import { applyJobs, isOpen, remainingCards } from "@/lib/pricing-queue.js";
 
 const gbp = (p) => (p == null ? "—" : `£${(p / 100).toFixed(2)}`);
 const SORTS = [["attention", "Needs attention first"], ["name", "Name"], ["sku", "SKU"], ["price-desc", "Your price, high first"], ["comps-desc", "Sold comps, high first"]];
-const STATUS_CLASS = { ready: "s-live", thin: "s-soldout", needsprice: "s-sold", toolow: "s-sold", failed: "s-sold", listed: "s-next", excluded: "s-ended", nocopies: "s-ended", sending: "s-soldout" };
+const STATUS_CLASS = { ready: "s-live", checked: "s-live", thin: "s-soldout", needsprice: "s-sold", toolow: "s-sold", failed: "s-sold", listed: "s-next", excluded: "s-ended", nocopies: "s-ended", sending: "s-soldout" };
 
 async function api(body) {
   const res = await fetch("/api/lab", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
@@ -936,6 +936,7 @@ export default function LabAdd() {
           {subtypes.length > 0 && <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "subtype" ? null : "subtype")}>Subtype ▾</button>}
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "language" ? null : "language")}>Language &amp; sellers ▾</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "cost" ? null : "cost")}>Cost ▾</button>
+          <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "check" }, "Marked checked")} title="The ticked rows' prices have been reviewed">✓ Mark checked</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "exclude" }, "Left out")}>Leave out</button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => bulk({ op: "include" }, "Put back")}>Put back</button>
           <button className="li-chip primary-chip" disabled={!onScreen.length || !!busy} onClick={() => listRows(onScreen)}>
@@ -1034,6 +1035,8 @@ export default function LabAdd() {
                 const st = rowStatus(r, j);
                 const t = titleOf(r);
                 const live = liveCopies(r);
+                // The sold comps as shown: your picks in "see sales" where you made them.
+                const cs = compsShown(r);
                 const isOpen = open.has(r.id);
                 const done = st === "listed";
                 return (
@@ -1053,13 +1056,15 @@ export default function LabAdd() {
                             </small>
                             <small className="sm-only">
                               <span className={`li-status ${STATUS_CLASS[st]}`}>{STATUS_TEXT[st]}</span> ×{live.length} · {r.condition}
-                              {r.comps?.pence != null ? ` · comps ${gbp(r.comps.pence)}` : ""}{r.comps?.decision && r.comps.decision !== "apply" ? ` · ${DECISION_TEXT[r.comps.decision]}` : ""}{j && !done ? " · joins a listing" : ""}
+                              {cs.pence != null ? ` · comps ${gbp(cs.pence)}${cs.picked ? " (your picks)" : ""}` : ""}{r.comps?.decision && r.comps.decision !== "apply" ? ` · ${DECISION_TEXT[r.comps.decision]}` : ""}{j && !done ? " · joins a listing" : ""}
                             </small>
                           </span>
                         </div>
                       </td>
                       <td className="sm-hide">
                         <span className={`li-status ${STATUS_CLASS[st]}`}>{STATUS_TEXT[st]}</span>
+                        {st === "thin" && <button className="li-link" disabled={!!busy} onClick={() => setRow(r.id, { checkedAt: new Date().toISOString() })} title="You've looked at the sales behind this price and are happy with it">✓ Mark checked</button>}
+                        {st === "checked" && <small className="li-dim">checked {new Date(r.checkedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })} · <button className="li-link" disabled={!!busy} onClick={() => setRow(r.id, { checkedAt: null })}>undo</button></small>}
                         {j && !done && <small style={{ color: "var(--accent)" }}>joins eBay {j.ebay_item_id}</small>}
                         {done && r.result.itemId && <small><a href={`https://www.ebay.co.uk/itm/${r.result.itemId}`} target="_blank" rel="noreferrer">{r.result.joined ? "added to" : "eBay"} {r.result.itemId}</a></small>}
                         {st === "failed" && <small style={{ color: "var(--bad)", whiteSpace: "normal", maxWidth: 260 }}>{r.result.error}</small>}
@@ -1067,8 +1072,9 @@ export default function LabAdd() {
                       <td className="mono sm-hide">{live.length}{live.length !== r.copies.length ? <small>of {r.copies.length}</small> : null}</td>
                       <td className="sm-hide"><b>{r.condition}</b></td>
                       <td className="r sm-hide" title={r.comps?.error || (r.comps ? `${r.comps.n ?? "?"} sales counted${r.comps.searches ? ` of ${r.comps.fetched ?? "?"} found across ${r.comps.searches} searches` : ""} · ${r.comps.confidence || "?"} confidence${r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}${r.comps.reason ? ` (${r.comps.reason})` : ""}` : ""}${r.comps.flags?.length ? ` · ${r.comps.flags.join(", ").replace(/_/g, " ")}` : ""}` : "Not priced from sold comps yet")}>
-                        {pricingIds.has(r.id) ? <span className="la-now">⏳ pricing now…</span> : queuedIds.has(String(r.id)) ? <span className="la-now">⏳ queued</span> : r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(r.comps?.pence ?? null)}
-                        {r.comps && !r.comps.error && <small className={isThin(r) ? "li-warn" : ""}>{r.comps.n ?? "?"} sale{r.comps.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
+                        {pricingIds.has(r.id) ? <span className="la-now">⏳ pricing now…</span> : queuedIds.has(String(r.id)) ? <span className="la-now">⏳ queued</span> : r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(cs.pence)}
+                        {cs.picked && <small style={{ color: "var(--accent)" }}>your picks · counted {gbp(cs.counted)}</small>}
+                        {r.comps && !r.comps.error && <small className={isThin(r) && st !== "checked" ? "li-warn" : ""}>{cs.n ?? "?"} sale{cs.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
                         {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}
                         {r.comps?.flags?.includes("in_hand_check") && <small className="li-warn">check in hand</small>}
                         {r.comps?.evidence && <small className="li-dim" style={{ whiteSpace: "normal", maxWidth: 220 }}>{evidenceSummary(r.comps.evidence)}</small>}
@@ -1109,7 +1115,8 @@ export default function LabAdd() {
                               <label className="li-check"><input type="checkbox" checked={!r.excluded} disabled={done} onChange={(e) => setRow(r.id, { excluded: !e.target.checked })} /> List this card</label>
                             </div>
                             {r.comps?.evidence?.length > 0 && (
-                              <SalesFound row={r} disabled={done || !!busy}
+                              <SalesFound row={r} disabled={done || !!busy} status={st}
+                                onCheck={(on) => setRow(r.id, { checkedAt: on ? new Date().toISOString() : null })}
                                 onPicks={(picks) => setRow(r.id, { picks })}
                                 onUse={(pence) => { setRow(r.id, { pricePence: pence }); setMsg({ text: `${r.title}: price set to ${gbp(pence)} from the sales you picked.` }); }} />
                             )}
@@ -1202,7 +1209,7 @@ function PricingBar({ p, onStop }) {
  * worked out from your picks by the same house rules as the server's. Nothing
  * changes until "Use this price".
  */
-function SalesFound({ row, onPicks, onUse, disabled }) {
+function SalesFound({ row, onPicks, onUse, onCheck, status, disabled }) {
   const [showOut, setShowOut] = useState(false);
   const [showSearches, setShowSearches] = useState(false);
   const ev = row.comps.evidence;
@@ -1260,6 +1267,8 @@ function SalesFound({ row, onPicks, onUse, disabled }) {
         </span>
         <span className="li-spacer" />
         {changed && <button className="li-btn" disabled={disabled} onClick={() => onPicks(null)}>Reset picks</button>}
+        {status === "thin" && <button className="li-btn" disabled={disabled} onClick={() => onCheck(true)}>✓ Mark checked</button>}
+        {status === "checked" && <button className="li-btn" disabled={disabled} onClick={() => onCheck(false)}>Checked ✓ — undo</button>}
         {p.suggestedPence != null && p.suggestedPence === row.pricePence
           ? <span className="li-dim">✓ already the price</span>
           : <button className="li-btn primary" disabled={disabled || p.suggestedPence == null} onClick={() => onUse(p.suggestedPence)}>Use this price</button>}

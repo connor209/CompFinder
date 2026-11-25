@@ -6,8 +6,10 @@
 //   node scripts/check-labdraft.mjs
 import {
   mergeGroups, liveCopies, groupToSend, rowStatus, applyBulk, ladderUp, parsePrice,
-  filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, LISTABLE, isThin, unreadableRows, settleSent, SENT_TIMEOUT_MS
+  filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, LISTABLE, isThin, unreadableRows, settleSent, SENT_TIMEOUT_MS,
+  compsShown, STATUS_TEXT, FILTERS
 } from "../apps/app/lib/lab-draft.js";
+import { applyComps } from "../apps/app/lib/lab-pricing.js";
 import { groupKey, keyForLanguage, groupsFromItems } from "../apps/app/lib/lab-copies.js";
 import { readFileSync } from "node:fs";
 import { labOverview, PRICING_STALE_MS, JOB_STALE_MS } from "../apps/app/lib/lab-overview.js";
@@ -182,7 +184,7 @@ eq("a sale found twice is one row", evidenceFrom({ sales: [{ title: "a", total: 
 const relangPicks = applyBulk([{ ...priced, picks: ["a"] }], ["p"], { op: "language", language: "Japanese", overseas: true });
 eq("changing language or sellers drops your picks with the old sales", [relangPicks[0].picks, relangPicks[0].overseas], [null, true]);
 const pageSrc = page;
-eq("the page sends the overseas choice and keeps the sales", [/overseas: Boolean\(r\.overseas\)/.test(pageSrc), /evidence: evidenceFrom\(x\)/.test(pageSrc), /picks: null, pricePence/.test(pageSrc)], [true, true, true]);
+eq("the page sends the overseas choice and keeps the sales", [/overseas: Boolean\(r\.overseas\)/.test(pageSrc), /evidence: evidenceFrom\(x\)/.test(pageSrc), /picks: null,( checkedAt: null,)? pricePence/.test(pageSrc)], [true, true, true]);
 ok("…and prices your picks through lab-evidence, not a copy of the rules", /evidencePrice\(ev, row\.picks/.test(pageSrc) && !/percentileOf|roundUpToLadder/.test(pageSrc));
 
 // ---- listing in the background ------------------------------------------------------
@@ -246,6 +248,36 @@ eq("the page sends jobs, not one request per card", [/action: "createMany"/.test
   const labPage = readFileSync(new URL("../apps/app/app/panel/lab/LabCopies.js", import.meta.url), "utf8");
   ok("the lab page shows it", /<LabOverview lab=\{lab\}/.test(labPage));
   ok("Add copies writes pricing progress for it, and clears it", /setItem\(PRICING_KEY/.test(pageSrc) && /removeItem\(PRICING_KEY\)/.test(pageSrc));
+}
+
+
+// ---- picking sales moves the sold-comps figure; a checked row is reviewed ------------------
+{
+  const sale = (id, price, counted = true) => ({ id, title: `Pikachu 25/102 sale ${id}`, price, postage: 0, counted, reason: counted ? "" : "nameMismatch" });
+  const ev = [sale("a", 2), sale("b", 3), sale("c", 4), sale("d", 40, false)];
+  const thinComps = { pence: 349, n: 3, decision: "terapeak", confidence: "low", flags: ["few_sales"], evidence: ev, condition: "NM", game: "pokemon" };
+  const row = { id: "r1", key: "k", title: "Pikachu", copies: [{ sku: "A1" }], condition: "NM", pricePence: 349, comps: thinComps, picks: null };
+  eq("no picks: the figure the filter counted", compsShown(row), { pence: 349, n: 3, picked: false, counted: 349 });
+  const picked = { ...row, picks: ["c", "d"] };
+  const want = evidencePrice(ev, ["c", "d"], { condition: "NM", game: "pokemon" });
+  eq("ticking a sale moves the sold-comps figure, by the same house rules", compsShown(picked), { pence: want.suggestedPence, n: 2, picked: true, counted: 349 });
+  ok("…to a different figure than the filter's", want.suggestedPence !== 349);
+  eq("picking the same sales the filter counted is not 'your picks'", compsShown({ ...row, picks: ["a", "b", "c"] }).picked, false);
+  eq("your price is not moved by picking", picked.pricePence, 349);
+  eq("'set price from sold comps' uses your picks", applyBulk([picked], ["r1"], { op: "comps" })[0].pricePence, want.suggestedPence);
+
+  eq("a thin row is check first", rowStatus(row, null), "thin");
+  const checked = applyBulk([row], ["r1"], { op: "check", at: "2026-11-25T12:00:00Z" })[0];
+  eq("marking it checked", [checked.checkedAt, rowStatus(checked, null), STATUS_TEXT.checked], ["2026-11-25T12:00:00Z", "checked", "Checked ✓"]);
+  ok("a checked row can be listed", LISTABLE.has("checked"));
+  eq("a checked row leaves the check-first filter and has its own", [filterRows([checked], { filter: "thin" }).length, filterRows([checked], { filter: "checked" }).length], [0, 1]);
+  ok("Checked is a filter", FILTERS.some(([k]) => k === "checked"));
+  const ready = { ...row, id: "r2", comps: { ...thinComps, decision: "apply", confidence: "high", flags: [] } };
+  eq("only a row that needs checking can be checked", applyBulk([ready], ["r2"], { op: "check" })[0].checkedAt, undefined);
+  eq("undo puts it back in the pile", rowStatus(applyBulk([checked], ["r1"], { op: "uncheck" })[0], null), "thin");
+  eq("new sales clear it — it was about the old ones", applyComps([checked], { r1: { ...thinComps, pence: 299 } })[0].checkedAt, null);
+  eq("changing language clears it too", applyBulk([checked], ["r1"], { op: "language", language: "Japanese" })[0].checkedAt, null);
+  ok("a checked mark is never sent to eBay", !("checkedAt" in groupToSend(checked)));
 }
 
 // ---- reload ------------------------------------------------------------------------------

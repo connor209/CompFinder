@@ -37,7 +37,7 @@ export function labOverview({ rows = [], lab = null, pricing = null, now = Date.
     else if (st === "failed") draft.failed += 1;
     else if (st === "needsprice" || st === "toolow") draft.needsPrice += 1;
     else if (st === "thin") draft.checkFirst += 1;
-    else if (st === "ready") draft.ready += 1;
+    else if (st === "ready" || st === "checked") draft.ready += 1;
     if (!r.comps && !r.result?.ok && !joinsOf(r)) draft.unpriced += 1;
   }
   draft.toList = draft.ready + draft.checkFirst;

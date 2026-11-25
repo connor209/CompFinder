@@ -894,7 +894,15 @@ for the same contract as JSON.
   is kept on the row (`lib/lab-evidence.js`); tick the ones that are the
   card and the price follows by the SAME house rules (`evidencePrice` runs
   `housePrice`, never a copy), applied only on "Use this price". New sales
-  drop old picks.
+  drop old picks. **The row's Sold comps figure follows your picks**
+  (`compsShown()` in `lab-draft.js`, asked for 2026-11-25), marked "your
+  picks · counted £X", and the bulk "price from sold comps" actions use it;
+  your own price still only moves on "Use this price".
+- **A "check first" row can be marked Checked** (2026-11-25): ✓ Mark checked
+  on the row, in the sales panel or in bulk sets `checkedAt`, the status reads
+  **Checked ✓**, it lists like Ready and leaves the check-first filter for a
+  Checked one. New sales (`applyComps`) or a language change clear it — the
+  review was of the old evidence — and it is never sent to eBay.
 - **Every Zubat numbered 41 (TEST6, 2026-11-24).** The numerator-only rung
   returns every set's card 41, and with overseas sellers counted a 1996 Base
   Set Zubat, a Carddass and a Sealdass sticker priced a 2022 Dark Phantasma
