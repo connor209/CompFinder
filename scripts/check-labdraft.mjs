@@ -118,7 +118,10 @@ eq("an unknown language is refused", applyBulk([priced], ["p"], { op: "language"
 eq("Terapeak is check first", rowStatus(row({ pricePence: 599, comps: { pence: 599, decision: "terapeak", confidence: "high", flags: [] } })), "thin");
 eq("apply on few sales is not (the decision rules, not the confidence)", rowStatus(row({ pricePence: 349, comps: { pence: 349, decision: "apply", confidence: "low", flags: ["few_sales"] } })), "ready");
 eq("a failed lookup is check first", isThin(row({ comps: { error: "x", decision: "hold" } })), true);
-const page = readFileSync(new URL("../apps/app/app/panel/lab/add/LabAdd.js", import.meta.url), "utf8");
+// The card a row is priced as, and what an answer does to it, live in
+// lib/lab-pricing.js — shared by the page and the pricing queue's worker.
+const page = readFileSync(new URL("../apps/app/app/panel/lab/add/LabAdd.js", import.meta.url), "utf8")
+  + readFileSync(new URL("../apps/app/lib/lab-pricing.js", import.meta.url), "utf8");
 eq("the page sends the batch's language and the every-language choice", [/any_language: Boolean\(r\.anyLanguage\)/.test(page), /language: r\.language/.test(page)], [true, true]);
 eq("the page stamps the batch language on every card it loads", /language: batchLang/.test(page), true);
 
@@ -178,7 +181,7 @@ eq("capped, never cutting a counted sale", [many.length, many[0].id], [EVIDENCE_
 eq("a sale found twice is one row", evidenceFrom({ sales: [{ title: "a", total: 1, price: 1, item_id: "z" }], excluded: [{ title: "a", total: 1, price: 1, item_id: "z", reason: "duplicate" }] }).length, 1);
 const relangPicks = applyBulk([{ ...priced, picks: ["a"] }], ["p"], { op: "language", language: "Japanese", overseas: true });
 eq("changing language or sellers drops your picks with the old sales", [relangPicks[0].picks, relangPicks[0].overseas], [null, true]);
-const pageSrc = readFileSync(new URL("../apps/app/app/panel/lab/add/LabAdd.js", import.meta.url), "utf8");
+const pageSrc = page;
 eq("the page sends the overseas choice and keeps the sales", [/overseas: Boolean\(r\.overseas\)/.test(pageSrc), /evidence: evidenceFrom\(x\)/.test(pageSrc), /picks: null, pricePence/.test(pageSrc)], [true, true, true]);
 ok("…and prices your picks through lab-evidence, not a copy of the rules", /evidencePrice\(ev, row\.picks/.test(pageSrc) && !/percentileOf|roundUpToLadder/.test(pageSrc));
 

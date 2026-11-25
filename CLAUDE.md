@@ -398,6 +398,16 @@ stream` (the relay, only while streaming).
   from the URL, puts a conflict to you both ways, and writes the old one-slot
   draft only when batches are unavailable.
 
+- `scripts/check-pricequeue.mjs` — the pricing queue (`lib/pricing-queue.js`,
+  `lib/pricing-worker.js`, migration 048): one worker per account (two claims
+  at once, one wins; a live lease is never taken), oldest job first a few
+  cards a step, a run that stops at its budget picks up where it left off, a
+  cancel mid-step stays cancelled with its answers kept, a refused key fails
+  that job and leaves the rest queued, an answer lands on a row only if it is
+  newer than what the row has, and greps that the worker and
+  `/api/batch-comps` price through one `priceFieldCards`, at `QUEUE_GAP_MS`,
+  with the hand-on behind CRON_SECRET.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -2728,6 +2738,41 @@ unchanged; this only moves where it lives.
   one-list draft and says so — one tab only.
 - Kept until deleted. A batch is a few hundred rows of text; the batch list
   reads counts, never rows.
+
+## Pricing is queued: one worker, one rate, however many batches
+
+Add copies priced in the tab that asked, each tab pacing only itself, so ten
+batches priced at once were ten callers against SoldComps' ONE limit of 60 a
+minute, and the lookups past it fail. With batches (047) and the queue (048),
+**£ Queue for pricing** files a job instead (`lib/pricing-queue.js`, the only
+file naming `pricing_jobs` and `pricing_leases`; `/api/pricing-queue`), and a
+single worker (`lib/pricing-worker.js`) prices every queued job, oldest first.
+
+- **The rate is held by there being one worker.** A worker runs only while it
+  holds the account's lease, taken by one conditional UPDATE on an expired
+  lease, so two can never run at once; it paces at `QUEUE_GAP_MS` (1.5s, 40 a
+  minute), deliberately under 60, because Quick Search and the Batch screen
+  still ask SoldComps directly and the rest of the minute is theirs.
+- **The same pricing as everywhere else.** `/api/batch-comps`' fields form was
+  moved into `lib/batch-price-core.js`; the route and the worker both call
+  `priceFieldCards()` at depth 3, and the card a row is priced as and what an
+  answer does to it are `lib/lab-pricing.js`, shared with the tab's own path.
+- **The worker never writes a batch.** Answers go on the JOB, by row id, as
+  each step finishes; the tab holding the batch reads them back
+  (`applyJobs()`) and saves the batch itself, so the rev guard on batches
+  still means something. An answer lands only if it is newer than the row's
+  (`pricedAt`); a typed price is kept; a listed row is left alone.
+- **It outlives the tab.** A run works ~4 minutes in `after()` and hands on to
+  the next with a POST carrying `CRON_SECRET`. **Without CRON_SECRET the
+  hand-on can't be authenticated**, and the queue only carries on while an Add
+  copies tab is open — every open tab polls, and restarts a worker when the
+  lease is free and jobs are open.
+- **The log is on Add copies**: every job, its place in the queue, a finish
+  time measured off what this account's jobs have actually cost per card,
+  priced / no sales / failed, searches and cache hits, and Stop. A refused key
+  or spent quota fails the job it hit and stops the queue; the rest wait.
+- **Before 048** the button reads "Price from sold comps" and the tab prices
+  itself, warning when another tab is already pricing.
 
 ## What a card cost, so a sale says what it made
 
