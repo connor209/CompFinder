@@ -23,7 +23,7 @@ import { join } from "node:path";
 import {
   batchSummary, defaultBatchName, batchIdFrom, localKeyFor,
   listLabBatches, loadLabBatch, createLabBatch, saveLabBatch, deleteLabBatch, renameLabBatch,
-  batchDefaults, batchKind, batchStage, viewBatches, batchesTotals, batchProgress, nextStep, TILE_FIELDS
+  batchDefaults, batchKind, batchStage, viewBatches, batchesTotals, batchProgress, nextStep, TILE_FIELDS, refreshTile, tilesToFill
 } from "../apps/app/lib/lab-batches.js";
 import { describeEvent } from "../apps/app/lib/lab-log.js";
 
@@ -193,6 +193,23 @@ function fakeDb({ missing = false } = {}) {
   eq("and the other stays", (await loadLabBatch(sb, a.batch.id)).ok, true);
 }
 {
+  // A batch saved before 049 has no tile: the grid fills it in from its rows,
+  // touching neither the rows nor the rev.
+  const sb = fakeDb();
+  const scanned = [{ id: "y", file: "f.csv", copies: [{ sku: "B1", scans: ["https://cdn/b1.jpg"] }], pricePence: 300, language: "English", card: { game: "Pokemon" } }];
+  sb.table.push({ id: "old", user_id: "u1", name: "Old", rev: 4, rows: scanned, card_count: 1, cover_url: null });
+  sb.table.push({ id: "bare", user_id: "u1", name: "No scans", rev: 0, rows: [{ id: "z", copies: [{ sku: "Z1", scans: [] }] }], card_count: 1, cover_url: null });
+  sb.table.push({ id: "done", user_id: "u1", name: "Filled", rev: 0, rows: [], card_count: 3, cover_url: "https://cdn/x.jpg" });
+  sb.table.push({ id: "empty", user_id: "u1", name: "Empty", rev: 0, rows: [], card_count: 0, cover_url: null });
+  eq("only unfilled batches with cards are filled", tilesToFill(sb.table).map((b) => b.id), ["old", "bare"]);
+  const r = await refreshTile(sb, "old");
+  eq("the tile comes off the rows", [r.ok, r.tile.cover_url, r.tile.value_pence, r.tile.game], [true, "https://cdn/b1.jpg", 300, "Pokemon"]);
+  const old = sb.table.find((b) => b.id === "old");
+  eq("the rows and the rev are untouched", [old.rev, old.rows], [4, scanned]);
+  await refreshTile(sb, "bare");
+  eq("a batch with no scan is marked so it isn't asked again", [sb.table.find((b) => b.id === "bare").cover_url, tilesToFill(sb.table).map((b) => b.id)], ["", []]);
+}
+{
   // Before 049: the first write naming a tile column is refused, the save goes
   // again without them, and every later call leaves them out.
   const sb = fakeDb();
@@ -252,6 +269,7 @@ ok("New batch creates the batch before it is shown, and queues it in the same st
 ok("more files into an open batch load the way the batch was set up", /batchDefaults\(rows\)/.test(screen));
 const home = readFileSync("apps/app/app/panel/lab/add/BatchHome.js", "utf8");
 ok("the grid never reads a batch's rows", !/\.rows\b/.test(home));
+ok("the grid fills in tiles saved before 049", /tilesToFill\(listed\.batches\)/.test(screen) && /refreshTile\(sb, b\.id\)/.test(screen));
 for (const [f, tab] of [["apps/app/app/panel/lab/LabCopies.js", "overview"], ["apps/app/app/panel/lab/add/LabAdd.js", "batches"], ["apps/app/app/panel/lab/inventory/LabInventory.js", "inventory"], ["apps/app/app/panel/lab/settings/ListingSettings.js", "settings"]]) {
   ok(`${f} carries the lab's one header`, new RegExp(`<LabHeader current="${tab}"`).test(readFileSync(f, "utf8")));
 }
