@@ -40,7 +40,8 @@ export function compsFromResult(x, r, extra = {}) {
 }
 
 /**
- * Put answers on rows. A price already typed is never overwritten; new sales
+ * Put answers on rows. A price you typed is never overwritten, and one that
+ * was only the old sold comps figure follows the new one; new sales
  * drop any old picks, and a row marked Checked goes back to "check first". `byId` is Map|object rowId → comps.
  */
 export function applyComps(rows, byId) {
@@ -49,6 +50,10 @@ export function applyComps(rows, byId) {
     const c = get(r.id);
     if (!c) return r;
     // New evidence: old picks and an old "checked" were about the old sales.
-    return { ...r, comps: c, picks: null, checkedAt: null, pricePence: r.pricePence != null ? r.pricePence : c.pence };
+    // A price that was only the old sold comps figure follows the new one —
+    // the same as saving a rule does (applyCardRule). One you typed, or set
+    // from your picks, stays.
+    const followed = r.pricePence == null || (r.comps?.pence != null && r.pricePence === r.comps.pence);
+    return { ...r, comps: c, picks: null, checkedAt: null, pricePence: followed ? c.pence : r.pricePence };
   });
 }

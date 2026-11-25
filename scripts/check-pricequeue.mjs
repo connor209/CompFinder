@@ -122,6 +122,9 @@ const cards = (k, n) => Array.from({ length: n }, (_, i) => ({ rowId: `${k}${i}`
   eq("an answer kept on a row", [c.pence, c.n, c.decision, c.flags], [4999, 11, "apply", ["wide_spread"]]);
   eq("a failed lookup is a hold", compsFromResult({ error: "timeout" }, r).decision, "hold");
   ok("applyComps keeps a typed price", applyComps([{ id: "r1", pricePence: 100 }], { r1: { pence: 4999 } })[0].pricePence === 100);
+  ok("…and one set from old comps it never matched", applyComps([{ id: "r1", pricePence: 100, comps: { pence: 1299 } }], { r1: { pence: 949 } })[0].pricePence === 100);
+  ok("a price that was the old sold comps figure follows the new one", applyComps([{ id: "r1", pricePence: 1299, comps: { pence: 1299 } }], { r1: { pence: 949 } })[0].pricePence === 949);
+  ok("no price takes the new figure", applyComps([{ id: "r1", pricePence: null }], { r1: { pence: 949 } })[0].pricePence === 949);
 }
 
 // ---- the lease -----------------------------------------------------------------
