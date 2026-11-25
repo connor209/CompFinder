@@ -138,6 +138,7 @@ eq("the export tallies why sales were unticked", feedbackSummary({ votes: [sf] }
 ok("notes never go to eBay", !("saleNotes" in groupToSend({ ...r1, copies: [], saleNotes: { a: note } })));
 const page = readFileSync("apps/app/app/panel/lab/add/LabAdd.js", "utf8");
 ok("an unticked, noted or ruled-out sale stays in the table", /e\.reasonCode === "yourRule" \|\| notes\[String\(e\.id\)\]/.test(page));
+ok("every sale offers a note, not only an unticked one", /unticked \? "✎ why not\?" : "✎ add a note"/.test(page));
 ok("the open card panel is pinned to the visible width", /\.li-scroll \.la-open \{ position: sticky;[^}]*100cqw/.test(page));
 
 // ---- greps ----

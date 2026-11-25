@@ -1325,22 +1325,19 @@ function SaleNoteEditor({ note, onSave, onCancel, disabled }) {
   const [text, setText] = useState(note?.text || "");
   const [alsoRule, setAlsoRule] = useState(false);
   const kind = ruleKindForReason(why);
+  const save = () => onSave({ why: why || "other", text }, { alsoRule: alsoRule && !!kind });
   return (
     <div className="la-note">
-      <div className="la-note-kinds">
-        <b>Why not this sale?</b>
-        {SALE_REASONS.map((r) => (
-          <label key={r.key} className="li-check"><input type="radio" name="la-note-why" checked={why === r.key} disabled={disabled} onChange={() => setWhy(r.key)} /> {r.label}</label>
-        ))}
-      </div>
-      <input className="li-search" placeholder="A note (optional) — e.g. stamp on the back, not in the title" value={text} maxLength={300} disabled={disabled} onChange={(e) => setText(e.target.value)} />
-      <div className="la-sales-foot">
-        {kind && <label className="li-check"><input type="checkbox" checked={alsoRule} disabled={disabled} onChange={(e) => setAlsoRule(e.target.checked)} /> and leave every {saleReasonLabel(why).toLowerCase()} sale out of this card from now on</label>}
-        <span className="li-spacer" />
-        <button className="li-btn" disabled={disabled} onClick={onCancel}>Cancel</button>
-        {note && <button className="li-btn" disabled={disabled} onClick={() => onSave(null)}>Remove note</button>}
-        <button className="li-btn primary" disabled={disabled || (!why && !text.trim())} onClick={() => onSave({ why: why || "other", text }, { alsoRule: alsoRule && !!kind })}>Save note</button>
-      </div>
+      <select className="li-select" value={why} disabled={disabled} onChange={(e) => setWhy(e.target.value)} aria-label="Why not this sale?">
+        <option value="">Why not this sale?</option>
+        {SALE_REASONS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+      </select>
+      <input className="la-note-text" placeholder="Note (optional)" value={text} maxLength={300} disabled={disabled}
+        onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (why || text.trim())) save(); if (e.key === "Escape") onCancel(); }} />
+      {kind && <label className="li-check" title="Make it this card's rule, so every sale like this is left out from now on"><input type="checkbox" checked={alsoRule} disabled={disabled} onChange={(e) => setAlsoRule(e.target.checked)} /> rule for this card</label>}
+      <button className="li-btn primary" disabled={disabled || (!why && !text.trim())} onClick={save}>Save</button>
+      {note && <button className="li-btn" disabled={disabled} onClick={() => onSave(null)}>Remove</button>}
+      <button className="li-link" disabled={disabled} onClick={onCancel}>cancel</button>
     </div>
   );
 }
@@ -1398,7 +1395,7 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, onNote, rule, status
                   {e.url ? <a href={e.url} target="_blank" rel="noreferrer">{e.title}</a> : e.title}
                   <small className="sm-only">{e.date ? String(e.date).slice(0, 10) : ""} · {e.counted ? "counted" : e.reason}</small>
                   {note && <span className="la-note-tag">✎ {saleReasonLabel(note.why)}{note.text ? ` — ${note.text}` : ""}{onNote && <> · <button className="li-link" disabled={disabled} onClick={() => setNoting(id)}>edit</button></>}</span>}
-                  {!note && unticked && onNote && <span className="la-note-tag"><button className="li-link" disabled={disabled} onClick={() => setNoting(id)}>✎ why not?</button></span>}
+                  {!note && onNote && <span className="la-note-tag"><button className="li-link" disabled={disabled} onClick={() => setNoting(id)} title="Say why this sale isn't the card — it stays on this card and goes to feedback">{unticked ? "✎ why not?" : "✎ add a note"}</button></span>}
                 </td>
                 <td className="r mono">£{Number(e.total).toFixed(2)}<small>£{Number(e.price).toFixed(2)} + £{Number(e.postage || 0).toFixed(2)}</small></td>
                 <td className="mono sm-hide">{e.date ? String(e.date).slice(0, 10) : "—"}</td>
@@ -1522,9 +1519,10 @@ const EXTRA_CSS = `
 .li-scroll .la-open { position: sticky; left: 8px; width: calc(100cqw - 64px); box-sizing: border-box; }
 .la-sales-table td, .la-sales-table th { vertical-align: top; }
 .la-note-row td { background: var(--surface-2, rgba(127,127,127,.06)); }
-.la-note { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
-.la-note-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
-.la-note-tag { display: inline-block; margin-top: 3px; font-size: 12px; color: var(--ink-soft); }
+.la-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
+.la-note .li-select, .la-note .li-btn { padding: 4px 8px; font-size: 12px; }
+.la-note-text { flex: 1 1 200px; min-width: 0; font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+.la-note-tag { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
 .la-fields { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
 .la-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); }
 .la-fields input:not([type=checkbox]), .la-fields select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); min-width: 320px; max-width: 100%; }
