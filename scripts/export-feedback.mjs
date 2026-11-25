@@ -93,6 +93,11 @@ if (votes == null) console.log(`  unavailable: ${votesNote}`);
 else {
   console.log(`  👍 ${summary.votes.up}   👎 ${summary.votes.down}`);
   for (const [k, n] of Object.entries(summary.votes.byReason).sort((a, b) => b[1] - a[1])) console.log(`    ${n}  ${reasonLabel(k)}`);
+  const saleTags = Object.entries(summary.votes.saleTags || {}).sort((a, b) => b[1] - a[1]);
+  if (saleTags.length) {
+    console.log("  single sales you unticked, by why:");
+    for (const [k, n] of saleTags) console.log(`    ${n}  ${k}`);
+  }
   const tags = Object.entries(summary.votes.ruleTags || {}).sort((a, b) => b[1] - a[1]);
   if (tags.length) {
     console.log("  your card rules, by what they leave out (a kind on many cards is a case for a rule on every card — measure it first):");

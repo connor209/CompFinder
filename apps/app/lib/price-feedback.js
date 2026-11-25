@@ -22,7 +22,7 @@
  */
 import { slimRec } from "./batch-store.js";
 import { effectivePence } from "./price-override.js";
-import { ruleTagsFromComment } from "./price-rules.js";
+import { ruleTagsFromComment, saleTagFromComment } from "./price-rules.js";
 
 export const VERDICTS = ["up", "down", "clear"];
 
@@ -165,11 +165,14 @@ export function overrideDirection({ overridePence, enginePence }, tolerance = 0.
 export function feedbackSummary({ votes = [], overrides = [] } = {}) {
   const byReason = {};
   const ruleTags = {}; // what your per-card rules keep saying (price-rules.js)
+  const saleTags = {}; // why single sales were unticked, from "why not?" notes
   let up = 0, down = 0;
   for (const v of votes) {
     if (v.verdict === "up") up++;
     else if (v.verdict === "down") { down++; byReason[v.reason] = (byReason[v.reason] || 0) + 1; }
     for (const t of ruleTagsFromComment(v.comment)) ruleTags[t] = (ruleTags[t] || 0) + 1;
+    const st = saleTagFromComment(v.comment);
+    if (st) saleTags[st] = (saleTags[st] || 0) + 1;
   }
   const byDirection = {};
   const gaps = [];
@@ -183,7 +186,7 @@ export function feedbackSummary({ votes = [], overrides = [] } = {}) {
     ? (gaps.length % 2 ? gaps[(gaps.length - 1) / 2] : (gaps[gaps.length / 2 - 1] + gaps[gaps.length / 2]) / 2)
     : null;
   return {
-    votes: { up, down, byReason, ruleTags },
+    votes: { up, down, byReason, ruleTags, saleTags },
     overrides: { count: overrides.length, byDirection, medianGapPct: medianGap == null ? null : Math.round(medianGap * 1000) / 10 }
   };
 }

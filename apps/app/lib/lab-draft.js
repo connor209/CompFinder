@@ -96,7 +96,7 @@ export function liveCopies(row) {
 
 /** The group the server is sent: the row with its skipped copies taken out. */
 export function groupToSend(row) {
-  const { pricePence, titleOverride, subtype, skippedSkus, excluded, comps, result, file, id, costPence, checkedAt, ...g } = row; // eslint-disable-line no-unused-vars
+  const { pricePence, titleOverride, subtype, skippedSkus, excluded, comps, result, file, id, costPence, checkedAt, saleNotes, ...g } = row; // eslint-disable-line no-unused-vars
   // The cost rides on each copy: it is the copy's, written to its stack card.
   const cost = Number.isInteger(costPence) && costPence >= 0 ? costPence : null;
   return { ...g, copies: liveCopies(row).map((c) => (cost == null ? c : { ...c, costPence: cost })) };
@@ -141,7 +141,8 @@ export function compsShown(row) {
  * out comes back when the rule no longer catches it (so a rule can be
  * loosened or removed). The figure is re-worked by the same house rules
  * (evidencePrice); a price that was the old figure follows it, a price you
- * typed stays; picks and "checked" go, since they were about the old sales.
+ * typed stays; your picks stay less what the rule took out, and "checked"
+ * goes, since it was about the old sales.
  * `rule` null or empty takes the rule off. Rows with no sales just carry it.
  */
 export function applyCardRule(rows, key, rule) {
@@ -161,7 +162,11 @@ export function applyCardRule(rows, key, rule) {
     const p = evidencePrice(evidence, null, { condition: c.condition || r.condition, game: c.game || r.card?.game || "" });
     const comps = { ...c, evidence, rule: live, pence: p.suggestedPence, n: p.n };
     const followed = r.pricePence == null || r.pricePence === c.pence;
-    return { ...r, comps, picks: null, checkedAt: null, pricePence: followed ? p.suggestedPence : r.pricePence };
+    // Your picks stay, less any sale the rule just took out; a pick the rule
+    // gave back stays unpicked (you hadn't chosen it).
+    const out = new Set(evidence.filter((e) => e.reasonCode === "yourRule").map((e) => String(e.id)));
+    const picks = Array.isArray(r.picks) ? r.picks.filter((id) => !out.has(String(id))) : null;
+    return { ...r, comps, picks, checkedAt: null, pricePence: followed ? p.suggestedPence : r.pricePence };
   });
 }
 
@@ -172,7 +177,7 @@ export function applyCardRule(rows, key, rule) {
  * the evidence. `query` is the card's rule key, so the latest vote per card
  * wins in export-feedback.mjs.
  */
-export function ruleFeedbackArgs(row, rule, comment) {
+export function ruleFeedbackArgs(row, rule, comment, { query = null } = {}) {
   const ev = row?.comps?.evidence || [];
   const comp = (e) => ({
     title: e.title, itemPricePence: Math.round((Number(e.price) || 0) * 100),
@@ -181,7 +186,7 @@ export function ruleFeedbackArgs(row, rule, comment) {
   });
   return {
     verdict: "down", reason: "wrongCard", comment, surface: "lab",
-    row: { title: row?.title, query: ruleKeyFor(row || {}), sku: row?.copies?.[0]?.sku, cardNumber: row?.cardNumber, set: row?.set },
+    row: { title: row?.title, query: query || ruleKeyFor(row || {}), sku: row?.copies?.[0]?.sku, cardNumber: row?.cardNumber, set: row?.set },
     rec: {
       finalPence: row?.comps?.pence ?? null, overridePence: row?.pricePence != null && row.pricePence !== row?.comps?.pence ? row.pricePence : null,
       confidence: row?.comps?.confidence || null, dataSource: "sold",
