@@ -71,7 +71,8 @@ const MIGRATIONS = [
   ["037", "CardUploader inventory (variation listings on the pull sheet)", [["column", "stack_cards", "listing_sku"], ["column", "stack_cards", "pulled_line"]]],
   ["038", "Stack check log (who checked a stack, and when)", [["table", "stack_checks"]]],
   ["046", "price feedback (👍 / 👎 on a price)", [["table", "price_feedback"]]],
-  ["047", "Add copies batches (each upload kept on the server)", [["table", "lab_batches"]]]
+  ["047", "Add copies batches (each upload kept on the server)", [["table", "lab_batches"]]],
+  ["048", "pricing queue (batches priced one at a time under the SoldComps limit)", [["table", "pricing_jobs"], ["table", "pricing_leases"]]]
 ];
 
 /**

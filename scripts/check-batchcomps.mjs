@@ -318,7 +318,10 @@ const mixed = evaluateCard(geoJ, [
 eq("an English-looking sale of the same number is left out, saying why", [mixed.n_comps, mixed.excluded.map((e) => e.reason)], [2, ["notThisLanguage"]]);
 ok("any-language stands the language rule down", planCard(normaliseCard({ name: "Geodude", number: "074/165", language: "Japanese", any_language: true })).languageMarker === null);
 ok("an English card has no language rule", planCard(normaliseCard({ name: "Geodude", number: "074/165" })).languageMarker === null);
-const routeSrc = readFileSync(new URL("../apps/app/app/api/batch-comps/route.js", import.meta.url), "utf8");
+// The route's fields-form pricing lives in lib/batch-price-core.js, shared with
+// the pricing queue's worker — read both as "the route".
+const routeSrc = readFileSync(new URL("../apps/app/app/api/batch-comps/route.js", import.meta.url), "utf8")
+  + readFileSync(new URL("../apps/app/lib/batch-price-core.js", import.meta.url), "utf8");
 ok("depth 3 runs the ladder and reports each rung", /depth === 3/.test(routeSrc) && /plan\.ladder/.test(routeSrc) && /search \}/.test(routeSrc));
 
 // --- 4e. where the TEST3 batch fell apart (2026-11-24) ------------------------------
@@ -450,7 +453,7 @@ eq("CSV in: current price", fromCsv[0].currentPence, 249);
 // --- 6. greps ----------------------------------------------------------------
 
 const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
-const route = read("apps/app/app/api/batch-comps/route.js");
+const route = read("apps/app/app/api/batch-comps/route.js") + read("apps/app/lib/batch-price-core.js");
 if (!/auth\.getUser\(\)/.test(route) || !/status: 401/.test(route)) fail("batch-comps must refuse a request with no signed-in user");
 if (/soldcomps_api_key[^\n]*NextResponse\.json\(\{[^}]*soldcomps_api_key/.test(route)) fail("the key must never be returned");
 if (!/fetchSoldComps/.test(route) || /async function fetchSoldComps/.test(route)) fail("batch-comps must use the shared lib/soldcomps-fetch.js, not a copy");

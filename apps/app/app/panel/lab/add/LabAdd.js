@@ -18,6 +18,8 @@ import {
   batchIdFrom, listLabBatches, loadLabBatch, createLabBatch, saveLabBatch, renameLabBatch, deleteLabBatch,
   defaultBatchName, localKeyFor
 } from "@/lib/lab-batches.js";
+import { labCardFor, compsFromResult, applyComps } from "@/lib/lab-pricing.js";
+import { applyJobs, isOpen, remainingCards } from "@/lib/pricing-queue.js";
 
 /**
  * Add copies: the working list between a CardUploader export and eBay.
@@ -69,6 +71,9 @@ export default function LabAdd() {
   const flushingRef = useRef(false);
   const conflictRef = useRef(false);
   const batchId = batch?.id || null;
+  // The pricing queue (migration 048): every job of this account, and this
+  // batch's answers. `missing` means 048 isn't run — the tab prices itself.
+  const [queue, setQueue] = useState({ jobs: [], eta: [], busy: null, batchJobs: [], missing: false, loaded: false });
   const [refused, setRefused] = useState([]);
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
@@ -213,6 +218,42 @@ export default function LabAdd() {
     return () => window.removeEventListener("beforeunload", warn);
   }, [saveState]);
 
+  /** Read the queue; put this batch's answers on its rows; restart a worker that died. */
+  async function refreshQueue() {
+    if (store !== "ok") return;
+    const res = await fetch(`/api/pricing-queue${batchId ? `?batch=${batchId}` : ""}`).then((r) => r.json()).catch(() => null);
+    if (!res) return;
+    if (!res.ok) { if (res.missing) setQueue((q) => ({ ...q, missing: true, loaded: true })); return; }
+    setQueue({ jobs: res.jobs, eta: res.eta, busy: res.busy, batchJobs: res.batchJobs || [], missing: false, loaded: true });
+    if (res.batchJobs?.length) setRows((rs) => applyJobs(rs, res.batchJobs));
+    if (res.busy === false && res.jobs.some(isOpen)) {
+      fetch("/api/pricing-queue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "kick" }) }).catch(() => {});
+    }
+  }
+
+  async function cancelQueued(id) {
+    if (!window.confirm("Stop this pricing job? Cards already priced keep their prices.")) return;
+    const res = await fetch("/api/pricing-queue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel", id }) }).then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+    if (!res.ok) setMsg({ bad: true, text: res.error || "Couldn't stop it." });
+    refreshQueue();
+  }
+
+  const queueOpen = queue.jobs.some(isOpen);
+  useEffect(() => {
+    if (!loaded || store !== "ok") return undefined;
+    refreshQueue();
+    const t = setInterval(refreshQueue, queueOpen ? 8000 : 60000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, store, batchId, queueOpen]);
+
+  /** This batch's rows waiting in an open job, for the "queued" mark on the row. */
+  const queuedIds = useMemo(() => {
+    const ids = new Set();
+    for (const j of queue.batchJobs) if (isOpen(j)) for (const c of remainingCards(j)) ids.add(String(c.rowId));
+    return ids;
+  }, [queue.batchJobs]);
+
   /** Start a batch holding `list`, and put it in the URL so this tab IS that batch. */
   async function startBatch(list, fileNames) {
     const res = await createLabBatch(createClient(), { name: defaultBatchName(fileNames), rows: list });
@@ -343,7 +384,32 @@ export default function LabAdd() {
 
   // ---- pricing -----------------------------------------------------------
   /** Sold comps for the ticked rows on screen, or — nothing ticked — every row not yet priced from comps. */
+  /** The rows a press of £ Price would price: ticked on screen, else every row not yet priced. */
+  function rowsToPrice() {
+    const base = onScreen.length ? onScreen : rows.filter((r) => !r.comps && !r.result?.ok && !r.excluded);
+    return base.filter((r) => !joinsOf(r) && !r.result?.ok && !r.result?.pending && !queuedIds.has(String(r.id)));
+  }
+
+  /**
+   * With batches, pricing is QUEUED: the server's one worker prices every
+   * queued batch in turn under SoldComps' limit, and the answers land on the
+   * rows here as they come (lib/pricing-queue.js). Without the queue (048 not
+   * run), the tab prices as it always has.
+   */
   async function priceFromSold() {
+    if (store !== "ok" || !batchId || queue.missing) return priceInTab();
+    const todo = rowsToPrice();
+    if (!todo.length) { setMsg({ text: "Nothing to price — every row has sold comps, is queued, joins a live listing or is listed." }); return; }
+    if (saveState !== "saved") await flushBatch(); // the server prices the rows as saved
+    const res = await fetch("/api/pricing-queue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "enqueue", batchId, rowIds: todo.map((r) => r.id) }) })
+      .then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+    if (res.missing) { setQueue((q) => ({ ...q, missing: true })); return priceInTab(); }
+    if (!res.ok) { setMsg({ bad: true, text: `Couldn't queue it: ${res.error}` }); return; }
+    setMsg({ text: `Queued ${res.job.total} card${res.job.total === 1 ? "" : "s"} for pricing. Prices fill in here as they arrive — you can close this tab, queue more batches, or come back later.` });
+    refreshQueue();
+  }
+
+  async function priceInTab() {
     const base = onScreen.length ? onScreen : rows.filter((r) => !r.comps && !r.result?.ok && !r.excluded);
     const todo = base.filter((r) => !joinsOf(r) && !r.result?.ok && !r.result?.pending);
     if (!todo.length) { setMsg({ text: "Nothing to price — every row has sold comps, joins a live listing or is listed." }); return; }
@@ -374,11 +440,7 @@ export default function LabAdd() {
       const chunk = todo.slice(i, i + PER_REQUEST);
       setPricingIds(new Set(chunk.map((r) => r.id)));
       show(chunk.map((r) => r.title));
-      const cards = chunk.map((r) => ({
-        sku: r.copies[0].sku, name: r.cardName, number: r.cardNumber, set: r.set, title: r.title, condition: r.condition,
-        language: r.language || "English", any_language: Boolean(r.anyLanguage), overseas: Boolean(r.overseas), game: r.card?.game || "", variant: r.card?.finish || "",
-        set_code: r.card?.setCode || "", year: r.card?.year || ""
-      }));
+      const cards = chunk.map(labCardFor);
       const got = new Map();
       try {
         const res = await fetch("/api/batch-comps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards, depth: 3 }) });
@@ -389,18 +451,7 @@ export default function LabAdd() {
         const bySku = new Map(j.results.map((x) => [String(x.sku), x]));
         for (const r of chunk) {
           const x = bySku.get(String(r.copies[0].sku));
-          got.set(r.id, {
-            pence: priceFromComps(x), confidence: x?.confidence || null, n: x?.n_comps ?? null,
-            flags: x?.flags ? Object.keys(x.flags).filter((k) => x.flags[k]) : [],
-            decision: x?.decision || (x?.error ? "hold" : null), reason: x?.decision_reason || x?.error || "",
-            searches: Array.isArray(x?.search) ? x.search.length : null,
-            fetched: Array.isArray(x?.search) ? x.search.reduce((t, s) => t + (s.added || 0), 0) : null,
-            // Every sale fetched, counted or not and why — the Sales found table.
-            evidence: evidenceFrom(x), setCode: x?.set_code || null,
-            search: Array.isArray(x?.search) ? x.search.map((s) => ({ rung: s.rung, query: s.query, fetched: s.fetched ?? null, added: s.added ?? null, error: s.error || null })) : [],
-            condition: r.condition, game: r.card?.game || "",
-            ...(x?.error ? { error: x.error } : {})
-          });
+          got.set(r.id, compsFromResult(x, r));
         }
       } catch (e) {
         for (const r of chunk) got.set(r.id, { pence: null, error: e.message });
@@ -411,11 +462,7 @@ export default function LabAdd() {
       }
       // Each request's rows fill in as soon as it answers. A price already
       // typed is never overwritten; new sales drop any old picks.
-      setRows((rs) => rs.map((r) => {
-        const c = got.get(r.id);
-        if (!c) return r;
-        return { ...r, comps: c, picks: null, pricePence: r.pricePence != null ? r.pricePence : c.pence };
-      }));
+      setRows((rs) => applyComps(rs, got));
       show([]);
     }
     const stopped = stopRef.current && tally.done < todo.length;
@@ -668,6 +715,9 @@ export default function LabAdd() {
         </select>
       </div>
 
+      {store === "ok" && !queue.missing && queue.jobs.length > 0 ? (
+        <QueueLog queue={queue} batchId={batchId} onCancel={cancelQueued} />
+      ) : null}
       {msg && <div className={msg.bad ? "li-msg bad" : "li-msg"}>{msg.text}</div>}
       {progress && <PricingBar p={progress} onStop={() => { stopRef.current = true; setProgress((x) => (x ? { ...x, stopping: true } : x)); }} />}
       {rows.some((r) => r.result?.pending) && (
@@ -678,7 +728,7 @@ export default function LabAdd() {
         {/* ---------------- Bulk bar ---------------- */}
         <div className="li-bulk">
           <button className="li-chip" disabled={!!busy || !rows.length} onClick={priceFromSold} title="Ticked rows on screen; with nothing ticked, every row not yet priced from sold comps">
-            {busy === "price" ? "Pricing…" : "£ Price from sold comps"}
+            {busy === "price" ? "Pricing…" : store === "ok" && batchId && !queue.missing ? "£ Queue for pricing" : "£ Price from sold comps"}
           </button>
           <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "price" ? null : "price")}>Set price ▾</button>
           {subtypes.length > 0 && <button className="li-chip" disabled={!onScreen.length || !!busy} onClick={() => setPanel(panel === "subtype" ? null : "subtype")}>Subtype ▾</button>}
@@ -815,7 +865,7 @@ export default function LabAdd() {
                       <td className="mono sm-hide">{live.length}{live.length !== r.copies.length ? <small>of {r.copies.length}</small> : null}</td>
                       <td className="sm-hide"><b>{r.condition}</b></td>
                       <td className="r sm-hide" title={r.comps?.error || (r.comps ? `${r.comps.n ?? "?"} sales counted${r.comps.searches ? ` of ${r.comps.fetched ?? "?"} found across ${r.comps.searches} searches` : ""} · ${r.comps.confidence || "?"} confidence${r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}${r.comps.reason ? ` (${r.comps.reason})` : ""}` : ""}${r.comps.flags?.length ? ` · ${r.comps.flags.join(", ").replace(/_/g, " ")}` : ""}` : "Not priced from sold comps yet")}>
-                        {pricingIds.has(r.id) ? <span className="la-now">⏳ pricing now…</span> : r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(r.comps?.pence ?? null)}
+                        {pricingIds.has(r.id) ? <span className="la-now">⏳ pricing now…</span> : queuedIds.has(String(r.id)) ? <span className="la-now">⏳ queued</span> : r.comps?.error ? <span style={{ color: "var(--bad)" }}>error</span> : gbp(r.comps?.pence ?? null)}
                         {r.comps && !r.comps.error && <small className={isThin(r) ? "li-warn" : ""}>{r.comps.n ?? "?"} sale{r.comps.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
                         {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}
                         {r.comps?.flags?.includes("in_hand_check") && <small className="li-warn">check in hand</small>}
@@ -1033,7 +1083,57 @@ function PriceBox({ value, onSet, disabled }) {
   );
 }
 
+/**
+ * The pricing queue's log: every job, what it has done, and where the open
+ * ones stand. Open by default while anything is waiting.
+ */
+function QueueLog({ queue, batchId, onCancel }) {
+  const open = queue.jobs.filter(isOpen);
+  const recent = queue.jobs.filter((j) => !isOpen(j)).slice(0, 8);
+  const eta = new Map((queue.eta || []).map((e) => [e.id, e]));
+  const statusText = { queued: "waiting", running: "pricing", done: "done", failed: "stopped", cancelled: "cancelled" };
+  const line = (j) => {
+    const e = eta.get(j.id);
+    return (
+      <div key={j.id} className={`pq-row pq-${j.status}`}>
+        <span className="pq-status">{statusText[j.status] || j.status}</span>
+        {j.batch_id && j.batch_id !== batchId ? <a href={`?batch=${j.batch_id}`}>{j.batch_name || "a batch"}</a> : <b>{j.batch_name || "this batch"}</b>}
+        <span>{j.done} of {j.total}</span>
+        <span className="li-dim">
+          {j.priced} priced{j.no_price ? ` · ${j.no_price} no sales` : ""}{j.failed ? ` · ${j.failed} failed` : ""} · {j.searches} searches{j.cache_hits ? `, ${j.cache_hits} cached` : ""}
+        </span>
+        {e ? <span className="li-dim">#{e.place} in queue · ~{e.minutes} min</span> : null}
+        {j.error ? <span style={{ color: "var(--bad)" }}>{j.error}</span> : null}
+        <span className="li-spacer" />
+        {isOpen(j) ? <button className="li-btn" onClick={() => onCancel(j.id)}>Stop</button> : null}
+      </div>
+    );
+  };
+  return (
+    <details className="li-panel pq" open={open.length > 0}>
+      <summary>
+        <b>Pricing queue</b>{" "}
+        <span className="li-dim">
+          {open.length ? `${open.length} job${open.length === 1 ? "" : "s"} waiting or running` : "nothing waiting"}
+          {queue.busy ? " · worker on it" : open.length ? " · starting…" : ""}
+          {" "}— one at a time, 40 searches a minute, under SoldComps&apos; limit
+        </span>
+      </summary>
+      {open.map(line)}
+      {recent.length ? <div className="li-dim pq-sub">Recent</div> : null}
+      {recent.map(line)}
+    </details>
+  );
+}
+
 const EXTRA_CSS = `
+.pq { display:flex; flex-direction:column; gap:6px; align-items:stretch; }
+.pq summary { cursor:pointer; }
+.pq-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:4px 0; border-top:1px solid var(--line); font-size:13px; }
+.pq-status { font-weight:700; text-transform:uppercase; font-size:11px; letter-spacing:.04em; min-width:64px; }
+.pq-running .pq-status { color:var(--accent); }
+.pq-failed .pq-status { color:var(--bad); }
+.pq-sub { margin-top:6px; }
 .lb-strip, .lb-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .lb-list { display:flex; flex-direction:column; gap:8px; align-items:stretch; }
 .lb-h { font-weight:700; }
