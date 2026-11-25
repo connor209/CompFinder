@@ -4,18 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import LabOverview from "./LabOverview";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { renderListing } from "@/lib/listing-template.js";
-import { groupsFromItems, desiredFor, pickList, pilePositions, displayOrder, listingForGroup, priceFromComps, listBlockers, removeBlocker, PHOTO_PROMISE } from "@/lib/lab-copies.js";
+import { groupsFromItems, pickList, listingForGroup, priceFromComps, listBlockers, PHOTO_PROMISE } from "@/lib/lab-copies.js";
 
 /**
  * The lab screen. Four parts, top to bottom: the scorecard the test is judged
- * on, adding copies from a CardUploader export, the live listings with their
- * queues, and the pick list. Nothing here is linked from the rest of the app.
+ * on, adding copies from a CardUploader export, and the pick list. Each
+ * listing and its copy queue is in the Inventory. Reached from Lab in the panel nav.
  */
 
 const SETTINGS_KEY = "cf-lab-settings";
 const box = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 16, marginBottom: 16 };
 const row = { display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" };
-const thumb = { width: 64, height: 88, objectFit: "contain", background: "var(--surface-sink)", borderRadius: 6, border: "1px solid var(--line)" };
 const small = { fontSize: 13, color: "var(--ink-soft)" };
 const gbp = (p) => (p == null ? "—" : `£${(p / 100).toFixed(2)}`);
 
@@ -85,11 +84,8 @@ export default function LabCopies() {
   }
 
   const copies = lab?.copies || [];
-  const listings = lab?.listings || [];
   const events = lab?.events || [];
   const picks = useMemo(() => pickList(copies), [copies]);
-  const pos = useMemo(() => pilePositions(copies), [copies]);
-  const bySku = useMemo(() => new Map(copies.map((c) => [String(c.id), c])), [copies]);
 
   const score = useMemo(() => {
     const count = (k) => events.filter((e) => e.kind === k).length;
@@ -382,70 +378,6 @@ export default function LabCopies() {
           sale shows the exact copy the buyer saw, at its position in its LAB- stack, and Commit pulls it. A cancelled order is released
           from the <a href="/panel/lab/inventory">inventory</a>.
         </p>
-      </section>
-
-      {/* ---------------- Live listings ---------------- */}
-      <section style={box}>
-        <strong>Listings ({listings.filter((l) => !l.ended_at).length} live)</strong>
-        {listings.length === 0 && <p style={small}>None yet. Add copies below.</p>}
-        {listings.map((l) => {
-          const d = desiredFor(l, copies);
-          const mine = copies.filter((c) => c.listing_id === l.id);
-          const showing = l.pictured_copy_id ? bySku.get(String(l.pictured_copy_id)) : null;
-          return (
-            <div key={l.id} style={{ borderTop: "1px solid var(--line)", padding: "10px 0", opacity: l.ended_at ? 0.55 : 1 }}>
-              <div style={{ ...row, justifyContent: "space-between" }}>
-                <div>
-                  <strong>{l.title}</strong>
-                  <div style={small}>
-                    {l.condition} · {gbp(l.price_pence)} · {d.quantity} for sale ·{" "}
-                    {l.ebay_item_id
-                      ? <a href={`https://www.ebay.co.uk/itm/${l.ebay_item_id}`} target="_blank" rel="noreferrer">eBay {l.ebay_item_id}</a>
-                      : "not on eBay"}
-                    {l.ended_at ? " · ended" : ""}
-                    {l.checked_at ? ` · checked ${new Date(l.checked_at).toLocaleString()}` : ""}
-                  </div>
-                </div>
-                {!l.ended_at && (
-                  <button className="btn btn-ghost" disabled={!!busy} onClick={() => {
-                    if (window.confirm(`End "${l.title}" on eBay? Copies still in the queue stay in their piles.`)) run(`end-${l.id}`, { action: "end", listingId: l.id });
-                  }}>End listing</button>
-                )}
-              </div>
-              <div style={{ ...row, marginTop: 8 }}>
-                {displayOrder(l.id, copies).map((c) => {
-                  const state = c.pulled_at ? "pulled" : c.reserved_line ? "sold" : d.head?.id === c.id ? "next" : "queued";
-                  const isShowing = showing?.id === c.id;
-                  return (
-                    <div key={c.id} style={{ textAlign: "center", fontSize: 12, opacity: c.pulled_at ? 0.4 : 1 }}>
-                      {c.scan_urls?.[0] ? <img src={c.scan_urls[0]} alt="" style={{ ...thumb, outline: isShowing ? "3px solid var(--accent)" : "none" }} referrerPolicy="no-referrer" /> : <div style={thumb} />}
-                      <div><strong>{c.sku}</strong>{pos.get(String(c.id)) ? ` · ${pos.get(String(c.id)).pile} #${pos.get(String(c.id)).position}` : ""}</div>
-                      <div style={{ color: state === "sold" ? "var(--warn)" : state === "next" ? "var(--accent)" : "var(--ink-soft)" }}>
-                        {isShowing ? "on eBay now" : state}
-                      </div>
-                      {!l.ended_at && !removeBlocker(c, l, copies) && (
-                        <button className="btn btn-ghost" style={{ fontSize: 11, padding: "2px 6px", marginTop: 2 }} disabled={!!busy} onClick={() => {
-                          const n = d.quantity;
-                          if (!window.confirm(
-                            `Take ${c.sku} off "${l.title}"?\n\neBay quantity ${n} → ${n - 1}.` +
-                            (isShowing ? ` It's the copy on show, so the listing moves on to the next copy's photos.` : "") +
-                            `\n\nThe card is still in its pile — take it out once this is done, or the pile numbers will be off by one.`
-                          )) return;
-                          run(`rm-${c.id}`, { action: "remove", copyId: c.id }, (r) => setMsg({ text: `${r.sku} removed: eBay quantity ${r.from} → ${r.to}${r.moved ? ", photos moved on" : ""}. Take it out of the pile.` }));
-                        }}>✕ Remove</button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              {showing && d.head && showing.id !== d.head.id && !l.ended_at && (
-                <div style={{ color: "var(--warn)", fontSize: 13, marginTop: 6 }}>
-                  ⚠ eBay is still showing {showing.sku}, which has sold. Press Check for sales to move it on to {d.head.sku}.
-                </div>
-              )}
-            </div>
-          );
-        })}
       </section>
 
       {/* ---------------- Add copies: its own page now ---------------- */}
