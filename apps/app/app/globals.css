@@ -362,7 +362,8 @@ a { color:var(--accent-2); }
 /* Never let the page scroll sideways — clip (not hidden) so position:sticky
    still works. Wide content (tables, chart) manages its own inner scroll. */
 html, body { overflow-x: clip; max-width: 100%; }
-#app { max-width:1080px; margin:0 auto; padding:22px 20px 96px; overflow-x: clip; }
+/* 1600, not 1080: the stock and lab tables want the width (2026-11-25). */
+#app { max-width:1600px; margin:0 auto; padding:22px 20px 96px; overflow-x: clip; }
 
 /* ---------- App bar (logo centred, nav toggle + context) ---------- */
 .appbar { display:grid; grid-template-columns:44px 1fr 44px; align-items:center; gap:10px; padding:2px 0 12px; margin-bottom:14px; border-bottom:1px solid var(--line); }

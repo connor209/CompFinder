@@ -9,7 +9,7 @@ import {
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
   LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown, applyCardRule, ruleFeedbackArgs
 } from "@/lib/lab-draft.js";
-import { RULE_KINDS, ruleKeyFor, normaliseRule, isEmptyRule, describeRule, saleBreaksRule, ruleComment } from "@/lib/price-rules.js";
+import { RULE_KINDS, ruleKeyFor, normaliseRule, isEmptyRule, describeRule, saleBreaksRule, ruleComment, SALE_REASONS, saleReasonLabel, ruleKindForReason, normaliseSaleNote, saleComment } from "@/lib/price-rules.js";
 import { listRules, saveRule } from "@/lib/price-rules-store.js";
 import { recordFeedback } from "@/lib/feedback-store.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
@@ -453,6 +453,33 @@ export default function LabAdd() {
    * the feedback store as a 👎 with the rule in the comment (046), which is
    * what export-feedback.mjs tallies.
    */
+  /**
+   * A note on ONE sale — an automated pick you unticked, and why. Kept on the
+   * row beside the sale (it stays in the table), told to feedback, and, when
+   * asked, turned into this card's rule in the same step.
+   */
+  async function saveSaleNote(row, sale, input, { alsoRule = false } = {}) {
+    const note = input ? normaliseSaleNote(input) : null;
+    const id = String(sale.id);
+    setRows((rs) => rs.map((r) => {
+      if (r.id !== row.id) return r;
+      const notes = { ...(r.saleNotes || {}) };
+      if (note) notes[id] = note; else delete notes[id];
+      return { ...r, saleNotes: notes };
+    }));
+    if (!note) return;
+    recordFeedback(createClient(), ruleFeedbackArgs(row, null, saleComment(note, sale), { query: `${ruleKeyFor(row)}|sale:${id}` }))
+      .then((res) => { if (res && !res.ok && !res.missing) setMsg({ bad: true, text: `Note kept on the card, but not sent to feedback: ${res.error}` }); })
+      .catch(() => {});
+    const kind = ruleKindForReason(note.why);
+    if (alsoRule && kind) {
+      const cur = cardRules.get(ruleKeyFor(row)) || row.comps?.rule || { kinds: [], words: [], note: "" };
+      await saveCardRule(row, { ...cur, kinds: [...new Set([...(cur.kinds || []), kind])], note: cur.note || note.text });
+    } else {
+      setMsg({ text: `Noted on that sale: ${saleReasonLabel(note.why)}${note.text ? ` — ${note.text}` : ""}.` });
+    }
+  }
+
   async function saveCardRule(row, input) {
     const rule = normaliseRule(input);
     const key = ruleKeyFor(row);
@@ -1152,6 +1179,7 @@ export default function LabAdd() {
                               <SalesFound row={r} disabled={done || !!busy} status={st}
                                 rule={cardRules.get(ruleKeyFor(r)) || r.comps?.rule || null}
                                 onRule={(rule) => saveCardRule(r, rule)}
+                                onNote={(sale, note, opts) => saveSaleNote(r, sale, note, opts)}
                                 onCheck={(on) => setRow(r.id, { checkedAt: on ? new Date().toISOString() : null })}
                                 onPicks={(picks) => setRow(r.id, { picks })}
                                 onUse={(pence) => { setRow(r.id, { pricePence: pence }); setMsg({ text: `${r.title}: price set to ${gbp(pence)} from the sales you picked.` }); }} />
@@ -1291,7 +1319,35 @@ function CardRule({ row, rule, onSave, disabled }) {
   );
 }
 
-function SalesFound({ row, onPicks, onUse, onCheck, onRule, rule, status, disabled }) {
+/** Why this one sale isn't the card: a reason, a few words, and optionally a rule. */
+function SaleNoteEditor({ note, onSave, onCancel, disabled }) {
+  const [why, setWhy] = useState(note?.why || "");
+  const [text, setText] = useState(note?.text || "");
+  const [alsoRule, setAlsoRule] = useState(false);
+  const kind = ruleKindForReason(why);
+  return (
+    <div className="la-note">
+      <div className="la-note-kinds">
+        <b>Why not this sale?</b>
+        {SALE_REASONS.map((r) => (
+          <label key={r.key} className="li-check"><input type="radio" name="la-note-why" checked={why === r.key} disabled={disabled} onChange={() => setWhy(r.key)} /> {r.label}</label>
+        ))}
+      </div>
+      <input className="li-search" placeholder="A note (optional) — e.g. stamp on the back, not in the title" value={text} maxLength={300} disabled={disabled} onChange={(e) => setText(e.target.value)} />
+      <div className="la-sales-foot">
+        {kind && <label className="li-check"><input type="checkbox" checked={alsoRule} disabled={disabled} onChange={(e) => setAlsoRule(e.target.checked)} /> and leave every {saleReasonLabel(why).toLowerCase()} sale out of this card from now on</label>}
+        <span className="li-spacer" />
+        <button className="li-btn" disabled={disabled} onClick={onCancel}>Cancel</button>
+        {note && <button className="li-btn" disabled={disabled} onClick={() => onSave(null)}>Remove note</button>}
+        <button className="li-btn primary" disabled={disabled || (!why && !text.trim())} onClick={() => onSave({ why: why || "other", text }, { alsoRule: alsoRule && !!kind })}>Save note</button>
+      </div>
+    </div>
+  );
+}
+
+function SalesFound({ row, onPicks, onUse, onCheck, onRule, onNote, rule, status, disabled }) {
+  const [noting, setNoting] = useState(null); // the sale id whose note is open
+  const notes = row.saleNotes || {};
   const [showOut, setShowOut] = useState(false);
   const [showSearches, setShowSearches] = useState(false);
   const ev = row.comps.evidence;
@@ -1303,7 +1359,9 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, rule, status, disabl
   };
   const p = evidencePrice(ev, row.picks, { condition: row.comps.condition || row.condition, game: row.comps.game || row.card?.game || "" });
   const changed = picksDiffer(ev, row.picks);
-  const shown = ev.filter((e) => showOut || e.counted || chosen.has(String(e.id)));
+  // A sale you've unticked, noted, or taken out with your rule stays where it
+  // was — it is the one you're about to say something about.
+  const shown = ev.filter((e) => showOut || e.counted || chosen.has(String(e.id)) || e.reasonCode === "yourRule" || notes[String(e.id)]);
   const outCount = ev.filter((e) => !e.counted).length;
   return (
     <div className="la-sales">
@@ -1328,18 +1386,33 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, rule, status, disabl
         <table className="li-table la-sales-table">
           <thead><tr><th className="li-cb">Use</th><th>Sold listing</th><th className="r">Total</th><th className="sm-hide">Sold</th><th className="sm-hide">Filter</th></tr></thead>
           <tbody>
-            {shown.map((e) => (
-              <tr key={e.id} className={chosen.has(String(e.id)) ? "" : "ended"}>
+            {shown.map((e) => {
+              const id = String(e.id);
+              const note = notes[id];
+              const unticked = !chosen.has(id) && (e.counted || e.reasonCode === "yourRule");
+              return (
+              <Fragment key={e.id}>
+              <tr className={chosen.has(id) ? "" : "ended"}>
                 <td className="li-cb"><input type="checkbox" disabled={disabled} checked={chosen.has(String(e.id))} onChange={(x) => toggle(e.id, x.target.checked)} aria-label={`Use ${e.title}`} /></td>
                 <td style={{ whiteSpace: "normal" }}>
                   {e.url ? <a href={e.url} target="_blank" rel="noreferrer">{e.title}</a> : e.title}
                   <small className="sm-only">{e.date ? String(e.date).slice(0, 10) : ""} · {e.counted ? "counted" : e.reason}</small>
+                  {note && <span className="la-note-tag">✎ {saleReasonLabel(note.why)}{note.text ? ` — ${note.text}` : ""}{onNote && <> · <button className="li-link" disabled={disabled} onClick={() => setNoting(id)}>edit</button></>}</span>}
+                  {!note && unticked && onNote && <span className="la-note-tag"><button className="li-link" disabled={disabled} onClick={() => setNoting(id)}>✎ why not?</button></span>}
                 </td>
                 <td className="r mono">£{Number(e.total).toFixed(2)}<small>£{Number(e.price).toFixed(2)} + £{Number(e.postage || 0).toFixed(2)}</small></td>
                 <td className="mono sm-hide">{e.date ? String(e.date).slice(0, 10) : "—"}</td>
-                <td className={`sm-hide ${e.counted ? "" : "li-dim"}`} style={{ whiteSpace: "normal", maxWidth: 200 }}>{e.counted ? (e.reason || "counted") : e.reason}</td>
+                <td className={`sm-hide ${e.counted ? "" : "li-dim"}`} style={{ whiteSpace: "normal", maxWidth: 220 }}>{e.counted ? (e.reason || "counted") : e.reason}</td>
               </tr>
-            ))}
+              {noting === id && onNote && (
+                <tr className="la-note-row"><td colSpan={5}>
+                  <SaleNoteEditor note={note} disabled={disabled} onCancel={() => setNoting(null)}
+                    onSave={(n, opts) => { onNote(e, n, opts); setNoting(null); }} />
+                </td></tr>
+              )}
+              </Fragment>
+              );
+            })}
             {shown.length === 0 && <tr><td colSpan={5} className="li-empty">Nothing counted. Tick &quot;show the left out&quot; to pick from what was found.</td></tr>}
           </tbody>
         </table>
@@ -1444,6 +1517,14 @@ const EXTRA_CSS = `
 .lb-conflict { border-color:var(--bad); display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .li-chip.primary-chip { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .la-open { display: flex; flex-direction: column; gap: 12px; white-space: normal; padding: 4px 0; }
+/* The card's open panel sits in a row of a table that scrolls sideways: pinned
+   to the scroll box's own width (cqw), so it is never drawn past the edge. */
+.li-scroll .la-open { position: sticky; left: 8px; width: calc(100cqw - 64px); box-sizing: border-box; }
+.la-sales-table td, .la-sales-table th { vertical-align: top; }
+.la-note-row td { background: var(--surface-2, rgba(127,127,127,.06)); }
+.la-note { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.la-note-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.la-note-tag { display: inline-block; margin-top: 3px; font-size: 12px; color: var(--ink-soft); }
 .la-fields { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
 .la-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); }
 .la-fields input:not([type=checkbox]), .la-fields select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); min-width: 320px; max-width: 100%; }

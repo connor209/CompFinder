@@ -1832,6 +1832,18 @@ only file naming `card_price_rules` (migration 050).
   is now on for every plain card (see the stamped section).
 - **Before 050** the rule still applies to the batch on screen and says it
   couldn't be kept.
+- **A note on ONE sale** ("✎ why not?", asked for 2026-11-25): an automated
+  pick you untick keeps its place in the table, and takes a reason
+  (`SALE_REASONS`) and a few words. Kept on the batch row (`saleNotes`, never
+  sent to eBay), sent to feedback as its own 👎 (`[sale: why] text — "title"`,
+  keyed per sale so two notes on one card both count), tallied by the export,
+  and — when the reason is a rule kind and you tick it — made this card's rule
+  in the same step. A rule keeps your picks, less what it took out.
+
+**The app is 1600px wide, not 1080** (2026-11-25). The card panel in Add
+copies sits in a table that scrolls sideways, so it is pinned to the scroll
+box's own width (`100cqw`, the box is an inline-size container) — otherwise
+its right half is drawn past the edge.
 
 **The global version is measured by `scripts/probe-stamps.mjs`** (Actions →
 Probe: stamped sales on plain cards). Read-only: for every plain card in Add

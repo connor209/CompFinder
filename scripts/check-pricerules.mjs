@@ -22,9 +22,9 @@
  *   both pass the rules to priceFieldCards.
  */
 import { readFileSync, readdirSync } from "node:fs";
-import { ruleKeyFor, normaliseRule, saleBreaksRule, isEmptyRule, describeRule, rulesByKey, ruleComment, ruleTagsFromComment } from "../apps/app/lib/price-rules.js";
+import { ruleKeyFor, normaliseRule, saleBreaksRule, isEmptyRule, describeRule, rulesByKey, ruleComment, ruleTagsFromComment, normaliseSaleNote, saleComment, saleTagFromComment, ruleKindForReason } from "../apps/app/lib/price-rules.js";
 import { normaliseCard, planCard, evaluateCard } from "../apps/app/lib/batch-comps.js";
-import { applyCardRule, ruleFeedbackArgs, compsShown } from "../apps/app/lib/lab-draft.js";
+import { applyCardRule, ruleFeedbackArgs, compsShown, groupToSend } from "../apps/app/lib/lab-draft.js";
 import { evidencePrice } from "../apps/app/lib/lab-evidence.js";
 import { feedbackRecord, feedbackSummary } from "../apps/app/lib/price-feedback.js";
 
@@ -99,9 +99,12 @@ eq("the figure is re-worked off what is left", a1.comps.pence, evidencePrice(evi
 eq("…n follows", a1.comps.n, 3);
 eq("a price that was the old figure follows it", a1.pricePence, a1.comps.pence);
 eq("a price you typed stays", a2.pricePence, 1999);
-ok("picks and checked go", a1.picks === null && a1.checkedAt === null);
+eq("your picks stay, less what the rule took out", a1.picks, ["a"]);
+ok("checked goes", a1.checkedAt === null);
+eq("a pick the rule took out leaves the picks", applyCardRule([{ ...r1, picks: ["a", "d"] }], ruleKeyFor(row), stamped)[0].picks, ["a"]);
 ok("another card is untouched", a3 === other);
-ok("the sales panel's figure agrees", compsShown(a1).pence === a1.comps.pence && !compsShown(a1).picked);
+const np = applyCardRule([{ ...r1, picks: null }], ruleKeyFor(row), stamped)[0];
+ok("the sales panel's figure agrees", compsShown(np).pence === np.comps.pence && !compsShown(np).picked);
 const [back] = applyCardRule([a1], ruleKeyFor(row), null);
 ok("taking the rule off brings the stamped sale back", back.comps.evidence.find((e) => e.id === "d").counted === true);
 ok("…but never what something else left out", back.comps.evidence.find((e) => e.id === "e").counted === false);
@@ -119,6 +122,23 @@ eq("…keyed on the card", fb.query, ruleKeyFor(row));
 eq("…with the sales as they were", fb.comps_used, 4);
 eq("…and no saved-run id", fb.batch_id, null);
 eq("the export tallies rule tags", feedbackSummary({ votes: [fb, { ...fb, comment: "[rule: stamped]" }] }).votes.ruleTags, { stamped: 2, "word:shadowless": 1 });
+
+// ---- a note on one sale ("why not?") ----
+const note = normaliseSaleNote({ why: "stamped", text: " stamp on the back " }, "2026-11-25T10:00:00Z");
+eq("a sale note is a reason, a short text and when", note, { why: "stamped", text: "stamp on the back", at: "2026-11-25T10:00:00.000Z" });
+eq("an unknown reason reads as other", normaliseSaleNote({ why: "nope", text: "x" }).why, "other");
+eq("nothing said is no note", normaliseSaleNote({ text: "  " }), null);
+const sc = saleComment(note, { title: "Shedinja 14/107 Holo", total: 6.29 });
+eq("its comment names the sale", sc, '[sale: stamped] stamp on the back — "Shedinja 14/107 Holo" £6.29');
+eq("…and reads back", saleTagFromComment(sc), "stamped");
+eq("a reason that is a rule kind can become one", [ruleKindForReason("stamped"), ruleKindForReason("price")], ["stamped", null]);
+const sf = feedbackRecord(ruleFeedbackArgs(r1, null, sc, { query: `${ruleKeyFor(row)}|sale:a` }));
+ok("each sale's note is its own vote, so two notes on one card both count", sf.query.endsWith("|sale:a") && sf.query !== fb.query);
+eq("the export tallies why sales were unticked", feedbackSummary({ votes: [sf] }).votes.saleTags, { stamped: 1 });
+ok("notes never go to eBay", !("saleNotes" in groupToSend({ ...r1, copies: [], saleNotes: { a: note } })));
+const page = readFileSync("apps/app/app/panel/lab/add/LabAdd.js", "utf8");
+ok("an unticked, noted or ruled-out sale stays in the table", /e\.reasonCode === "yourRule" \|\| notes\[String\(e\.id\)\]/.test(page));
+ok("the open card panel is pinned to the visible width", /\.li-scroll \.la-open \{ position: sticky;[^}]*100cqw/.test(page));
 
 // ---- greps ----
 const read = (p) => readFileSync(p, "utf8");

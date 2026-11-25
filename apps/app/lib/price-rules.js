@@ -121,3 +121,44 @@ export function ruleTagsFromComment(comment) {
   const m = String(comment || "").match(/^\[rule: ([^\]]*)\]/);
   return m ? m[1].split(",").map((s) => s.trim()).filter(Boolean) : [];
 }
+
+/**
+ * Why one SALE isn't this card — a note on an automated pick you unticked
+ * (Add copies → see sales → "why not?"). The note stays on the batch row
+ * beside the sale and goes to feedback; a reason that is also a rule kind can
+ * become this card's rule in the same step. Keys are stored: add, don't rename.
+ */
+export const SALE_REASONS = [
+  { key: "stamped", label: "Stamped", kind: "stamped" },
+  { key: "graded", label: "Graded / slab", kind: "graded" },
+  { key: "lot", label: "Lot / bundle", kind: "lot" },
+  { key: "language", label: "Other language", kind: "language" },
+  { key: "reverse", label: "Other printing (reverse/holo)", kind: "reverse" },
+  { key: "otherCard", label: "Different card or set" },
+  { key: "condition", label: "Condition (damaged, played)" },
+  { key: "price", label: "Price looks wrong" },
+  { key: "other", label: "Something else" }
+];
+const SALE_REASON = Object.fromEntries(SALE_REASONS.map((r) => [r.key, r]));
+export const saleReasonLabel = (k) => SALE_REASON[k]?.label || k || "";
+export const ruleKindForReason = (k) => SALE_REASON[k]?.kind || null;
+
+/** A note as kept on the row: a known reason, a short text, when. Null when empty. */
+export function normaliseSaleNote(input = {}, at = new Date()) {
+  const why = SALE_REASON[input.why] ? input.why : null;
+  const text = String(input.text ?? "").trim().slice(0, 300);
+  if (!why && !text) return null;
+  return { why: why || "other", text, at: new Date(at).toISOString() };
+}
+
+/** The feedback comment for one sale: `[sale: stamped] text — "title" £6.29`. */
+export function saleComment(note, sale = {}) {
+  const total = sale.total != null ? ` £${Number(sale.total).toFixed(2)}` : "";
+  return `[sale: ${note.why}]${note.text ? ` ${note.text}` : ""} — "${String(sale.title || "").slice(0, 200)}"${total}`.slice(0, 500);
+}
+
+/** The reason back out of a sale comment, for the export's tally. */
+export function saleTagFromComment(comment) {
+  const m = String(comment || "").match(/^\[sale: ([^\]]*)\]/);
+  return m ? m[1].trim() : null;
+}
