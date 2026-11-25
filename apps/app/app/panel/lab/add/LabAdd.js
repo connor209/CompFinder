@@ -13,12 +13,22 @@ import { LAB_TABLE_CSS } from "../labTableCss";
 import { PRICING_KEY } from "@/lib/lab-overview.js";
 import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer } from "@/lib/lab-evidence.js";
 import { parseCostPence } from "@/lib/card-costs.js";
+import { createClient } from "@/lib/supabase/client";
+import {
+  batchIdFrom, listLabBatches, loadLabBatch, createLabBatch, saveLabBatch, renameLabBatch, deleteLabBatch,
+  defaultBatchName, localKeyFor
+} from "@/lib/lab-batches.js";
 
 /**
  * Add copies: the working list between a CardUploader export and eBay.
  * Load one or more exports, price them from sold comps, edit prices, titles,
- * subtypes and which copies go — singly or in bulk — then list. The list is
- * kept on this device until it is cleared, so a reload loses nothing.
+ * subtypes and which copies go — singly or in bulk — then list.
+ *
+ * Each upload is a BATCH, kept on the server (lib/lab-batches.js, migration
+ * 047) at its own URL, so two tabs or two devices are two batches rather than
+ * one localStorage slot overwritten by whichever saved last. The same batch
+ * open twice is caught by its rev and shown as a conflict, never overwritten.
+ * Before 047 the screen keeps the old one-list-per-browser draft.
  * Rules in lib/lab-draft.js; every bulk action and every List acts on rows
  * ticked AND on screen.
  */
@@ -36,10 +46,29 @@ function loadDraft() {
   try { return restoreDraft(localStorage.getItem(DRAFT_KEY)); } catch { return []; }
 }
 
+const when = (iso) => (iso ? new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "");
+
 export default function LabAdd() {
   const [lab, setLab] = useState(null);
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false);
+  // Where the list lives: "ok" (batches on the server), "missing" (047 not
+  // run — the old local draft), "error" (couldn't ask — the local draft too,
+  // so a dropped connection never stops the work).
+  const [store, setStore] = useState("loading");
+  const [batch, setBatch] = useState(null); // { id, name, updated_at } of the open batch
+  const [batches, setBatches] = useState([]);
+  const [legacy, setLegacy] = useState([]); // a pre-batch list still in this browser
+  const [saveState, setSaveState] = useState("saved"); // saved | pending | saving | conflict | error
+  const [saveErr, setSaveErr] = useState("");
+  const [renaming, setRenaming] = useState(null);
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
+  const revRef = useRef(0);
+  const savedRef = useRef("[]");
+  const flushingRef = useRef(false);
+  const conflictRef = useRef(false);
+  const batchId = batch?.id || null;
   const [refused, setRefused] = useState([]);
   const [filter, setFilter] = useState("all");
   const [q, setQ] = useState("");
@@ -76,7 +105,50 @@ export default function LabAdd() {
   const refreshView = () => setViewKey((k) => k + 1);
 
   const reloadLab = useCallback(async () => setLab(await api()), []);
-  useEffect(() => { reloadLab(); setRows(loadDraft()); setLoaded(true); }, [reloadLab]);
+  useEffect(() => {
+    reloadLab();
+    let live = true;
+    (async () => {
+      const sb = createClient();
+      const id = batchIdFrom(window.location.search);
+      const listed = await listLabBatches(sb);
+      if (!live) return;
+      if (!listed.ok) {
+        // Before 047, or the store can't be reached: the old local draft.
+        setStore(listed.missing ? "missing" : "error");
+        if (!listed.missing) setSaveErr(listed.error || "");
+        setRows(loadDraft());
+        setLoaded(true);
+        return;
+      }
+      setStore("ok");
+      setBatches(listed.batches);
+      setLegacy(loadDraft());
+      if (id) {
+        const got = await loadLabBatch(sb, id);
+        if (!live) return;
+        if (got.ok) {
+          const b = got.batch;
+          let start = b.rows;
+          // A save that never reached the server (wifi dropped, tab closed)
+          // is still on this device; take it if it is newer than the server's.
+          try {
+            const local = JSON.parse(localStorage.getItem(localKeyFor(b.id)) || "null");
+            if (local?.v === 1 && Array.isArray(local.rows) && local.at && new Date(local.at) > new Date(b.updated_at)
+              && JSON.stringify(local.rows) !== JSON.stringify(b.rows)) start = local.rows;
+          } catch { /* no backup */ }
+          revRef.current = b.rev;
+          savedRef.current = JSON.stringify(b.rows);
+          setBatch({ id: b.id, name: b.name, updated_at: b.updated_at });
+          setRows(start);
+        } else {
+          setMsg({ bad: true, text: got.error || "Couldn't open that batch." });
+        }
+      }
+      setLoaded(true);
+    })();
+    return () => { live = false; };
+  }, [reloadLab]);
   // Pricing runs from this tab (listing runs on the server): closing or
   // reloading it stops the pricing after the card in flight. Ask first.
   useEffect(() => {
@@ -85,11 +157,123 @@ export default function LabAdd() {
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
   }, [busy]);
-  // Kept on this device as you go: a typed price survives a reload.
+  /**
+   * Save the open batch, if it changed — and only over the rev it was loaded
+   * at. One save in flight at a time; a change made while one is out is saved
+   * straight after it, so the rev is never stale by our own hand.
+   */
+  async function flushBatch() {
+    const id = batch?.id;
+    if (!id || flushingRef.current || conflictRef.current) return;
+    const now = rowsRef.current;
+    const json = JSON.stringify(now);
+    if (json === savedRef.current) { setSaveState("saved"); return; }
+    flushingRef.current = true;
+    setSaveState("saving");
+    const res = await saveLabBatch(createClient(), { id, rows: now, rev: revRef.current });
+    flushingRef.current = false;
+    if (res.ok) {
+      revRef.current = res.rev;
+      savedRef.current = json;
+      setSaveState("saved");
+      setSaveErr("");
+      if (JSON.stringify(rowsRef.current) !== json) flushBatch();
+    } else if (res.conflict) {
+      conflictRef.current = true;
+      setSaveState("conflict");
+    } else {
+      setSaveState("error");
+      setSaveErr(res.error || "unknown error");
+    }
+  }
+
+  // Kept as you go: a typed price survives a reload. A batch saves to the
+  // server a moment after the last change, with a copy on this device in case
+  // the save doesn't arrive; without batches, the old one-list draft.
   useEffect(() => {
-    if (!loaded) return;
-    try { localStorage.setItem(DRAFT_KEY, serialiseDraft(rows)); } catch { /* full or blocked: the list still works */ }
-  }, [rows, loaded]);
+    if (!loaded) return undefined;
+    if (store !== "ok") {
+      try { localStorage.setItem(DRAFT_KEY, serialiseDraft(rows)); } catch { /* full or blocked: the list still works */ }
+      return undefined;
+    }
+    if (!batchId) return undefined;
+    try { localStorage.setItem(localKeyFor(batchId), serialiseDraft(rows)); } catch { /* the server copy still saves */ }
+    if (JSON.stringify(rows) === savedRef.current || conflictRef.current) return undefined;
+    setSaveState("pending");
+    const t = setTimeout(() => { flushBatch(); }, 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, loaded, store, batchId]);
+
+  // Leaving with a save still to arrive is the one way left to lose work.
+  useEffect(() => {
+    if (saveState !== "pending" && saveState !== "saving") return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; return ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [saveState]);
+
+  /** Start a batch holding `list`, and put it in the URL so this tab IS that batch. */
+  async function startBatch(list, fileNames) {
+    const res = await createLabBatch(createClient(), { name: defaultBatchName(fileNames), rows: list });
+    if (!res.ok) return res;
+    revRef.current = res.batch.rev;
+    savedRef.current = JSON.stringify(list);
+    conflictRef.current = false;
+    setBatch({ id: res.batch.id, name: res.batch.name, updated_at: res.batch.updated_at });
+    setBatches((bs) => [res.batch, ...bs]);
+    setSaveState("saved");
+    try { window.history.replaceState(null, "", `${window.location.pathname}?batch=${res.batch.id}`); } catch { /* the batch is saved either way */ }
+    return res;
+  }
+
+  /** The other tab's version wins: load it over this one. */
+  async function takeTheirs() {
+    const got = await loadLabBatch(createClient(), batchId);
+    if (!got.ok) { setMsg({ bad: true, text: got.error || "Couldn't reload the batch." }); return; }
+    revRef.current = got.batch.rev;
+    savedRef.current = JSON.stringify(got.batch.rows);
+    conflictRef.current = false;
+    setRows(got.batch.rows);
+    setSaveState("saved");
+    refreshView();
+  }
+
+  /** This tab's version wins: save it over the other one, knowingly. */
+  async function keepMine() {
+    const got = await loadLabBatch(createClient(), batchId);
+    if (!got.ok) { setMsg({ bad: true, text: got.error || "Couldn't reach the batch." }); return; }
+    revRef.current = got.batch.rev;
+    savedRef.current = JSON.stringify(got.batch.rows);
+    conflictRef.current = false;
+    flushBatch();
+  }
+
+  async function removeBatch(b) {
+    if (!window.confirm(`Delete the batch "${b.name}" (${b.card_count ?? rows.length} cards)? Typed prices go with it. Nothing on eBay changes.`)) return;
+    const res = await deleteLabBatch(createClient(), b.id);
+    if (!res.ok) { setMsg({ bad: true, text: `Couldn't delete it: ${res.error || "migration 047 isn't run"}` }); return; }
+    try { localStorage.removeItem(localKeyFor(b.id)); } catch { /* nothing to clear */ }
+    if (b.id === batchId) { window.location.href = "/panel/lab/add"; return; }
+    setBatches((bs) => bs.filter((x) => x.id !== b.id));
+  }
+
+  async function saveRename() {
+    const res = await renameLabBatch(createClient(), batchId, renaming);
+    if (!res.ok) { setMsg({ bad: true, text: res.error }); return; }
+    setBatch((b) => ({ ...b, name: res.name }));
+    setRenaming(null);
+  }
+
+  /** A list from before batches, still in this browser: make it a batch. */
+  async function adoptLegacy() {
+    const res = await startBatch(legacy, [...new Set(legacy.map((r) => r.file))]);
+    if (!res.ok) { setMsg({ bad: true, text: `Couldn't save it as a batch: ${res.error || "migration 047 isn't run"}` }); return; }
+    setRows(legacy);
+    setLegacy([]);
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* it is a batch now */ }
+    refreshView();
+  }
 
   const listings = lab?.listings || [];
   const settings = lab?.listingSettings || null;
@@ -146,6 +330,11 @@ export default function LabAdd() {
         newRefused.push({ sku: f.name, title: "", why: err.message || "couldn't read that file", file: f.name });
       }
     }
+    // No batch open: this upload IS a new batch, saved before it is shown.
+    if (store === "ok" && !batchId && next.length) {
+      const made = await startBatch(next, picked.map((f) => f.name));
+      if (!made.ok) setMsg({ bad: true, text: `Loaded, but couldn't save it as a batch: ${made.error}. It is only in this tab — don't refresh.` });
+    }
     setRows(next);
     refreshView();
     setRefused((r) => [...r, ...newRefused]);
@@ -158,6 +347,14 @@ export default function LabAdd() {
     const base = onScreen.length ? onScreen : rows.filter((r) => !r.comps && !r.result?.ok && !r.excluded);
     const todo = base.filter((r) => !joinsOf(r) && !r.result?.ok && !r.result?.pending);
     if (!todo.length) { setMsg({ text: "Nothing to price — every row has sold comps, joins a live listing or is listed." }); return; }
+    // Two batches pricing at once in two tabs run past SoldComps' 60 a minute
+    // between them, and lookups start failing. The other tab's bar is in
+    // PRICING_KEY; this tab isn't pricing, so a fresh one is someone else's.
+    try {
+      const other = JSON.parse(localStorage.getItem(PRICING_KEY) || "null");
+      if (other && Date.now() - (other.updatedAt || 0) < 60000 && other.done < other.total
+        && !window.confirm(`Another tab is pricing right now (${other.done} of ${other.total}). Running both at once goes past SoldComps' limit and lookups fail. Price this batch anyway?`)) return;
+    } catch { /* can't tell: go ahead */ }
     setBusy("price");
     setMsg(null);
     stopRef.current = false;
@@ -356,6 +553,63 @@ export default function LabAdd() {
         </div>
       </div>
 
+      {/* ---------------- Batches ---------------- */}
+      {store === "missing" ? (
+        <div className="li-panel li-dim">One list per browser until migration 047 is run — then each upload is its own batch, kept on the server, and tabs stop overwriting each other.</div>
+      ) : store === "error" ? (
+        <div className="li-panel li-warn">Couldn&apos;t reach your batches ({saveErr}). Working on this browser&apos;s list for now — one tab only.</div>
+      ) : batchId ? (
+        <div className="li-panel lb-strip">
+          <span>📦</span>
+          {renaming != null ? (
+            <>
+              <input className="li-search" value={renaming} autoFocus onChange={(e) => setRenaming(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveRename(); if (e.key === "Escape") setRenaming(null); }} />
+              <button className="li-btn" onClick={saveRename}>Save</button>
+              <button className="li-btn" onClick={() => setRenaming(null)}>Cancel</button>
+            </>
+          ) : (
+            <>
+              <b>{batch.name}</b>
+              <button className="li-btn" onClick={() => setRenaming(batch.name)}>✎ Rename</button>
+            </>
+          )}
+          <span className={`lb-save lb-${saveState}`}>
+            {saveState === "saved" ? "✓ saved" : saveState === "pending" || saveState === "saving" ? "saving…" : saveState === "error" ? `not saved: ${saveErr} — it is still on this device` : ""}
+          </span>
+          <span className="li-spacer" />
+          <a className="li-btn" href="/panel/lab/add">All batches</a>
+          <a className="li-btn" href="/panel/lab/add" target="_blank" rel="noreferrer">＋ New batch in a new tab</a>
+        </div>
+      ) : (
+        <div className="li-panel lb-list">
+          <div className="lb-h">Batches <span className="li-dim">— each upload is one, kept until you delete it. Open different batches in different tabs freely.</span></div>
+          {legacy.length > 0 ? (
+            <div className="lb-row li-warn">
+              This browser still has a list from before batches ({legacy.length} card{legacy.length === 1 ? "" : "s"}).
+              <button className="li-btn primary" onClick={adoptLegacy}>Save it as a batch</button>
+              <button className="li-btn" onClick={() => { if (window.confirm("Discard that old list? Typed prices go with it.")) { try { localStorage.removeItem(DRAFT_KEY); } catch { /* gone */ } setLegacy([]); } }}>Discard</button>
+            </div>
+          ) : null}
+          {batches.length === 0 ? <div className="li-dim">No batches yet — load an export below to start one.</div> : batches.map((b) => (
+            <div key={b.id} className="lb-row">
+              <a href={`?batch=${b.id}`}><b>{b.name}</b></a>
+              <span className="li-dim">{b.card_count} card{b.card_count === 1 ? "" : "s"} · {b.copy_count} cop{b.copy_count === 1 ? "y" : "ies"}{b.listed_count ? ` · ${b.listed_count} listed` : ""} · {when(b.updated_at)}</span>
+              {b.card_count > 0 && b.listed_count >= b.card_count ? <span style={{ color: "var(--good)" }}>all listed</span> : null}
+              <span className="li-spacer" />
+              <a className="li-btn" href={`?batch=${b.id}`} target="_blank" rel="noreferrer">Open in new tab</a>
+              <button className="li-btn" onClick={() => removeBatch(b)}>Delete</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {saveState === "conflict" ? (
+        <div className="li-panel lb-conflict">
+          <b>This batch was saved from another tab or device since you opened it.</b> Nothing here has been saved over it.
+          <button className="li-btn primary" onClick={takeTheirs}>↻ Load the latest (lose changes made here)</button>
+          <button className="li-btn" onClick={keepMine}>Keep this tab&apos;s version (overwrite the other)</button>
+        </div>
+      ) : null}
+
       {/* ---------------- Load ---------------- */}
       <div className="li-panel">
         <label className="li-dim" style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -371,7 +625,7 @@ export default function LabAdd() {
           <input type="checkbox" checked={overseas} disabled={!!busy} onChange={(e) => setOverseas(e.target.checked)} /> count overseas sellers
         </label>
         <label className="li-btn primary" style={{ cursor: "pointer" }}>
-          ＋ Load {batchLang} export(s)
+          {store === "ok" && batchId ? `＋ Add ${batchLang} export(s) to this batch` : store === "ok" ? `＋ Load ${batchLang} export(s) — a new batch` : `＋ Load ${batchLang} export(s)`}
           <input type="file" accept=".csv,text/csv" multiple style={{ display: "none" }} onChange={onFiles} disabled={!!busy} />
         </label>
         <span className="li-dim">
@@ -379,7 +633,9 @@ export default function LabAdd() {
         </span>
         <span className="li-spacer" />
         {rows.some((r) => r.result?.ok) && <button className="li-btn" disabled={!!busy} onClick={() => setRows((rs) => rs.filter((r) => !r.result?.ok))}>Clear listed rows</button>}
-        {rows.length > 0 && <button className="li-btn" disabled={!!busy} onClick={() => {
+        {batchId ? (
+          <button className="li-btn" disabled={!!busy} onClick={() => removeBatch({ id: batchId, name: batch.name, card_count: rows.length })}>Delete batch</button>
+        ) : rows.length > 0 && <button className="li-btn" disabled={!!busy} onClick={() => {
           if (window.confirm(`Clear the whole list (${rows.length} rows)? Typed prices go with it. Nothing on eBay changes.`)) { setRows([]); setRefused([]); setTicked(new Set()); }
         }}>Clear list</button>}
       </div>
@@ -778,6 +1034,13 @@ function PriceBox({ value, onSet, disabled }) {
 }
 
 const EXTRA_CSS = `
+.lb-strip, .lb-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.lb-list { display:flex; flex-direction:column; gap:8px; align-items:stretch; }
+.lb-h { font-weight:700; }
+.lb-row { padding:6px 0; border-top:1px solid var(--line); }
+.lb-save { font-size:12px; color:var(--ink-faint); }
+.lb-error { color:var(--bad); }
+.lb-conflict { border-color:var(--bad); display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .li-chip.primary-chip { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .la-open { display: flex; flex-direction: column; gap: 12px; white-space: normal; padding: 4px 0; }
 .la-fields { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
