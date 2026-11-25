@@ -64,7 +64,9 @@ const EXEMPT = new Set([
   "scripts/check-zeroprice.mjs",
   "scripts/check-labels.mjs",
   "scripts/check-livestream.mjs",
-  "scripts/check-batchcomps.mjs"
+  "scripts/check-batchcomps.mjs",
+  // The app's 👍 / 👎 — its fixtures are Batch recs, which carry finalPence.
+  "scripts/check-feedback.mjs"
 ]);
 
 /** Strips line comments and whole-line block-comment bodies. */

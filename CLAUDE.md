@@ -382,6 +382,14 @@ stream` (the relay, only while streaming).
   a number that belongs to another card; and greps that the price guide and
   the link read the catalogue through one `catalogRowsForSets()`.
 
+- `scripts/check-feedback.mjs` — 👍 / 👎 on a price (`lib/price-feedback.js`,
+  migration 046): a down carries a reason and only a down does, the stored row
+  is an allow-list that keeps the comps and their exclusion reasons, a vote on
+  an overridden row records the price as SHOWN, the latest vote per card wins,
+  the override sentence the export reads back is `overrideNote()`'s own, and
+  greps that nothing which prices a card — core, the house rules, Last Comp —
+  reads feedback.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -1694,6 +1702,40 @@ at an empty screen wondering where the last one went — which is an argument fo
 one click away, not for thirty days of rows between the controls and the
 results. The header carries the count, an open run is named there, and a save
 that FAILED still says so whether the list is open or shut.
+
+## 👍 / 👎: what the app has been told about its prices
+
+Three signals say whether a price was right. An **override** already said
+"wrong, and here is the number" (`price_checks.note`: "Priced by hand at £X,
+overriding £Y"). What was missing was a **👎 with a reason** — wrong, and
+which way, without typing a figure — and a **👍**, without which an accepted
+price and a price nobody read are indistinguishable, so the overrides alone
+only ever described the misses. `PriceFeedback.js` is on every priced Batch
+row (sheet and cards) and on a Quick Search deep dive; `lib/price-feedback.js`
+owns what a vote means, `lib/feedback-store.js` is the only file naming
+`price_feedback` (migration 046), and it degrades until 046 is run.
+
+- **A vote never moves a price.** It is evidence for a MEASURED rule change:
+  `node scripts/export-feedback.mjs --out feedback.json` writes the latest
+  vote per card plus every override, with a summary (votes by reason,
+  overrides by direction, median gap), and a change is judged on how many 👎
+  it fixes against how many 👍 it breaks — the audit harness's discipline.
+  `check-feedback.mjs` greps that core, the house rules and Last Comp never
+  read it.
+- **A down asks why**, from a fixed list (`REASONS`; add keys, never rename —
+  a renamed key orphans every vote cast under it).
+- **Each row carries what the price was built from**: the app's figure, the
+  engine's under house pricing, any override, what was SHOWN (a 👍 on your
+  own price agrees with you, not the engine) and the comps used and excluded,
+  cut down exactly as a saved run stores them (`slimRec`).
+- **Append-only.** Tapping a lit thumb writes a `clear`; the latest row per
+  card (run + position, or a Quick Search query) is its verdict. A saved run's
+  votes are one read per run, never one per row.
+- **App only.** Anonymous votes on Last Comp would be noise and a thing to
+  game, and would need bot protection of their own.
+
+Still to do: listed price against what actually sold and how fast
+(`ebay_sales`), the one signal that is not anybody's opinion.
 
 ## A price you set beats a price we worked out
 
