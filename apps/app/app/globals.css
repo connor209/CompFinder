@@ -2512,3 +2512,20 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
 .dcp-detail { color:var(--ink-faint); }
 .dcp-blocked { font-size:12px; color:var(--ink-faint); white-space:nowrap; }
 @media (min-width:700px) { .dcp-back { align-items:center; } }
+
+/* 👍 / 👎 on a price (PriceFeedback.js). Both rows WRAP: a reason list that
+   cannot wrap puts its last choices off the side of a phone. */
+.pf { display:flex; flex-direction:column; gap:6px; }
+.pf-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.pf-btn { background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:2px 9px; font-size:14px; line-height:1.4; cursor:pointer; filter:grayscale(1); opacity:.7; }
+.pf-btn:hover { opacity:1; }
+.pf-btn.on { filter:none; opacity:1; border-color:var(--accent); }
+.pf-btn.on.down { border-color:var(--danger, #c0392b); }
+.pf-btn:disabled { cursor:default; opacity:.4; }
+.pf-why { font-size:12px; color:var(--ink-faint); }
+.pf-status { font-size:11px; color:var(--ink-faint); }
+.pf-warn, .pf-err { color:var(--danger, #c0392b); }
+.pf-reasons { display:flex; flex-wrap:wrap; gap:6px; }
+.pf-reason { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius-sm); padding:4px 8px; font:inherit; font-size:12px; cursor:pointer; color:inherit; }
+.pf-reason:hover { border-color:var(--accent); }
+.pf-cancel { color:var(--ink-faint); }

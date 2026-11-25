@@ -52,6 +52,8 @@ import SavedBatches from "./SavedBatches";
 import Fold from "./Fold";
 import Imports from "./Imports";
 import PriceOverride from "./PriceOverride";
+import PriceFeedback from "./PriceFeedback";
+import { recordFeedback, loadBatchFeedback } from "@/lib/feedback-store.js";
 import MarketLinks from "./MarketLinks";
 import { Icon } from "./icons";
 import ThemeSeg from "./ThemeSeg";
@@ -470,6 +472,19 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
   // re-opened and when a fresh run has just been saved, so the screen can say
   // which it is and a later active-listing check updates the right record.
   const [openBatch, setOpenBatch] = useState(null);
+  // 👍 / 👎 already cast on the saved run on screen, by position. One read per
+  // run, never one per row (lib/feedback-store.js).
+  const [feedbackByPos, setFeedbackByPos] = useState(() => new Map());
+  const openBatchId = openBatch?.id || null;
+  useEffect(() => {
+    let live = true;
+    setFeedbackByPos(new Map());
+    if (!openBatchId) return undefined;
+    loadBatchFeedback(createClient(), openBatchId).then((res) => {
+      if (live && res.ok) setFeedbackByPos(res.byPosition);
+    });
+    return () => { live = false; };
+  }, [openBatchId]);
   const [openingBatch, setOpeningBatch] = useState(false);
   const [batchNotice, setBatchNotice] = useState("");
   const [batchNoticeIsError, setBatchNoticeIsError] = useState(false);
@@ -1622,6 +1637,20 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
    * leave a saved-runs list of near-identical megabyte copies with no way to
    * tell which one you were listing from.
    */
+  /**
+   * 👍 / 👎 on one row. Evidence for a measured rule change, never a price
+   * change — see lib/price-feedback.js. The row's position is its index in the
+   * run, the same key the saved run uses, so a re-opened run shows the votes.
+   */
+  function voteFor(index, verdict, reason) {
+    const row = results[index];
+    if (!row) return Promise.resolve({ ok: false, error: "That row has gone." });
+    return recordFeedback(createClient(), {
+      verdict, reason, surface: "batch", row, rec: row.rec,
+      batchId: openBatch?.id || null, position: index
+    });
+  }
+
   async function setOverrideFor(index, pence) {
     const row = results[index];
     if (!row) return;
@@ -3071,6 +3100,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 onDeepDive={deepDiveCard}
                 onOverride={(pence) => setOverrideFor(origIndex, pence)}
                 onEditCard={(patch) => setCardFieldsFor(origIndex, patch)}
+                vote={feedbackByPos.get(origIndex) || null}
+                onVote={(verdict, reason) => voteFor(origIndex, verdict, reason)}
                 stale={priceIsStale(r)}
               />
             ))}
@@ -3089,6 +3120,8 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
                 onDeepDive={deepDiveCard}
                 onOverride={(pence) => setOverrideFor(origIndex, pence)}
                 onEditCard={(patch) => setCardFieldsFor(origIndex, patch)}
+                vote={feedbackByPos.get(origIndex) || null}
+                onVote={(verdict, reason) => voteFor(origIndex, verdict, reason)}
                 stale={priceIsStale(r)}
               />
             ))}
@@ -3413,7 +3446,7 @@ function ResultRow({ r, known, showCurrentPrice, showDetails = true, active, onC
  * narrow screen, and the old header-and-nth-child hiding is what made adding
  * the "In stock" column silently hide the wrong one.
  */
-function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride, onEditCard, stale = false }) {
+function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride, onEditCard, stale = false, vote = null, onVote }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const rec = r.rec;
@@ -3490,6 +3523,7 @@ function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, o
         {currentPence != null ? (
           <span className="rs-was">was {CompFinderPricing.toPoundsStr(currentPence)}</span>
         ) : null}
+        {rec && onVote ? <PriceFeedback initial={vote} send={onVote} /> : null}
       </div>
 
       <div className="rs-meta">
@@ -3554,7 +3588,7 @@ function ResultSheet({ r, known, showCurrentPrice, showDetails = true, active, o
   );
 }
 
-function ResultCard({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride }) {
+function ResultCard({ r, known, showCurrentPrice, showDetails = true, active, onCheckActive, onDeepDive, onOverride, vote = null, onVote }) {
   const [open, setOpen] = useState(false);
 
   if (!r.rec) {
@@ -3634,6 +3668,7 @@ function ResultCard({ r, known, showCurrentPrice, showDetails = true, active, on
 
       {overrideNote(rec) ? <div className="rc-note rc-note-mine">{overrideNote(rec)}</div> : null}
       {showDetails && rec.note ? <div className="rc-note">{rec.note}</div> : null}
+      {onVote ? <PriceFeedback initial={vote} send={onVote} /> : null}
 
       <div className="rc-foot">
         {canExpand ? (

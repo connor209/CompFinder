@@ -12,6 +12,8 @@ import { effectivePence, isOverridden, overrideNote, withOverride } from "@/lib/
 import CatalogBrowser from "./CatalogBrowser";
 import ListForm from "./ListForm";
 import PriceOverride from "./PriceOverride";
+import PriceFeedback from "./PriceFeedback";
+import { recordFeedback } from "@/lib/feedback-store.js";
 import Fold from "./Fold";
 import { isPromoCard, promoNumber } from "@/lib/promo.js";
 import { VARIANTS, detectVariants, nameWithoutVariants, queryWordsFor, subjectTextFor, variantLabel } from "@/lib/variants.js";
@@ -592,6 +594,17 @@ export default function QuickSearch({ seed }) {
    * is genuinely a later decision, which is what the History screen should
    * show.
    */
+  /** 👍 / 👎 on the card on screen — evidence, never a price change (lib/price-feedback.js). */
+  function voteOnCard(verdict, reason) {
+    if (!data) return Promise.resolve({ ok: false, error: "Nothing on screen." });
+    const { card, rec, query, lang } = data;
+    const title = `${card.name}${card.number ? ` ${card.number}` : ""}`.trim() + (lang ? ` (${lang})` : "");
+    return recordFeedback(createClient(), {
+      verdict, reason, surface: "quick", rec,
+      row: { title: title || query, query, cardNumber: card.number || null, set: card.set || null }
+    });
+  }
+
   function setOverride(pence) {
     if (!data) return;
     const rec = withOverride(data.rec, pence);
@@ -878,6 +891,7 @@ export default function QuickSearch({ seed }) {
                 <PriceOverride rec={view.rec} onSet={setOverride} showValue={false} />
               </div>
               {overrideNote(view.rec) ? <p className="dd-sub dd-sub-mine">{overrideNote(view.rec)}</p> : null}
+              <PriceFeedback key={data.query} send={voteOnCard} />
               <p className="dd-sub">
                 {view.usedCount > 0
                   ? `Recency-weighted from ${view.usedCount} UK sold comp(s) over the last 90 days${view.med != null ? ` · median ${pounds(view.med)}` : ""}.`
