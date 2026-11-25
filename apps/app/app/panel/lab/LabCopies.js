@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import LabOverview from "./LabOverview";
+import LabHeader, { LAB_HEADER_CSS } from "./LabHeader";
+import { describeEvent } from "@/lib/lab-log.js";
 import CardUploaderCsv from "@/lib/carduploader.js";
 import { renderListing } from "@/lib/listing-template.js";
 import { groupsFromItems, pickList, listingForGroup, priceFromComps, listBlockers, PHOTO_PROMISE } from "@/lib/lab-copies.js";
 
 /**
- * The lab screen. Four parts, top to bottom: the scorecard the test is judged
- * on, adding copies from a CardUploader export, and the pick list. Each
- * listing and its copy queue is in the Inventory. Reached from Lab in the panel nav.
+ * The lab's home: what the lab is, the four steps a batch goes through, where
+ * every card is now (LabOverview), what eBay has told us about sales, picking
+ * and the activity log in words (lib/lab-log.js). Batches are their own page
+ * (/panel/lab/add), listings and copies the Inventory.
  */
 
 const SETTINGS_KEY = "cf-lab-settings";
@@ -254,7 +257,7 @@ export default function LabCopies() {
   if (lab.foldPending || lab.needsMove) {
     return (
       <main style={{ maxWidth: 980, margin: "0 auto", padding: 16 }}>
-        <h1>Lab · quantity listings</h1>
+        <h1>Lab</h1>
         <section style={box}>
           <strong>The lab now keeps its copies in the stacks</strong>
           <p style={small}>
@@ -284,7 +287,7 @@ export default function LabCopies() {
   if (lab.missing) {
     return (
       <main style={{ maxWidth: 980, margin: "0 auto", padding: 16 }}>
-        <h1>Lab · quantity listings</h1>
+        <h1>Lab</h1>
         <p>Run <code>supabase/migrations/039_lab_copies.sql</code> in the Supabase SQL editor first. It only adds the lab&apos;s own three tables.</p>
       </main>
     );
@@ -299,37 +302,49 @@ export default function LabCopies() {
     return 2;
   };
 
+  const logRows = events.map((e) => ({ e, ...describeEvent(e) }));
+  const problems = logRows.filter((x) => x.tone === "bad").length;
+
   return (
     <main style={{ maxWidth: 980, margin: "0 auto", padding: 16, color: "var(--ink)" }}>
+      <style>{LAB_HEADER_CSS + HOME_CSS}</style>
+      <LabHeader current="overview" />
       <div style={{ ...row, justifyContent: "space-between" }}>
-        <h1 style={{ marginBottom: 4 }}>Lab · quantity listings</h1>
-        <div style={row}>
-          <a className="btn btn-ghost" href="/panel/lab/inventory">▤ Inventory</a>
-          <a className="btn btn-ghost" href="/panel/lab/settings">⚙ Listing settings</a>
-        </div>
+        <h1 style={{ margin: 0 }}>Lab</h1>
+        <a className="btn btn-primary" href="/panel/lab/add?new=1">＋ New batch</a>
       </div>
-      <p style={small}>
-        A side build. One listing per card and condition at quantity N, showing the copy that goes next. It has its
-        own tables, and nothing else in the app reads them. See <code>docs/LAB_COPIES.md</code>.
+      <p style={{ ...small, marginTop: 4 }}>
+        One eBay listing per card and condition, with every copy you hold behind it. A buyer sees the photo of the exact copy they get,
+        and when it sells the listing moves on to the next copy by itself.
       </p>
+
+      <ol className="lab-how">
+        <li><a href="/panel/lab/add?new=1"><b>1 · New batch</b><span>Load a CardUploader export</span></a></li>
+        <li><a href="/panel/lab/add"><b>2 · Price</b><span>From sold comps, in the queue</span></a></li>
+        <li><a href="/panel/lab/add"><b>3 · Check &amp; list</b><span>Look at the thin ones, then list</span></a></li>
+        <li><a href="/panel/pull"><b>4 · Pick</b><span>Sales go on the pull sheet</span></a></li>
+      </ol>
 
       <LabOverview lab={lab} onReload={reload} />
 
-      {/* ---------------- The scorecard: what the test is judged on ---------------- */}
+      {/* ---------------- Sales on eBay ---------------- */}
       <section style={box}>
         <div style={{ ...row, justifyContent: "space-between" }}>
-          <strong>Scorecard</strong>
+          <div>
+            <strong>Sales on eBay</strong>
+            <p style={{ ...small, margin: "2px 0 0" }}>What the lab has read from eBay since it started.</p>
+          </div>
           <button className="btn btn-primary" disabled={!!busy} onClick={() => run("check", { action: "check" }, (r) => setLastCheck(r))}>
-            {busy === "check" ? "Checking eBay…" : "↻ Check for sales"}
+            {busy === "check" ? "Checking eBay…" : "↻ Check eBay for sales"}
           </button>
         </div>
-        <div style={{ ...row, gap: 24, marginTop: 12 }}>
-          <span>Sales reserved <strong>{score.sold}</strong></span>
-          <span style={{ color: score.mismatch ? "var(--bad)" : undefined }}>Buyer saw a different copy <strong>{score.mismatch}</strong></span>
-          <span>Photo moves <strong>{score.moved}</strong></span>
-          <span style={{ color: score.oversold ? "var(--bad)" : undefined }}>Oversold <strong>{score.oversold}</strong></span>
-          <span style={{ color: score.errors ? "var(--warn)" : undefined }}>Errors <strong>{score.errors}</strong></span>
-          <span>Notifications <strong>{score.notified}</strong></span>
+        <div className="lab-score">
+          <span><b>{score.sold}</b>sales matched to a copy</span>
+          <span><b>{score.moved}</b>photos moved on</span>
+          <span className={score.mismatch ? "bad" : ""}><b>{score.mismatch}</b>buyer shown another copy</span>
+          <span className={score.oversold ? "bad" : ""}><b>{score.oversold}</b>sold more than held</span>
+          <span className={score.errors ? "warn" : ""}><b>{score.errors}</b>errors</span>
+          <span><b>{score.notified}</b>sale alerts from eBay</span>
         </div>
         {lastCheck && (
           <div style={{ ...small, marginTop: 10 }}>
@@ -369,47 +384,50 @@ export default function LabCopies() {
 
       {/* ---------------- Picking happens on the pull sheet ---------------- */}
       <section style={box}>
-        <strong>Picking</strong>
-        <p style={small}>
-          {picks.length
-            ? <>{picks.length} sold lab cop{picks.length === 1 ? "y is" : "ies are"} waiting to be picked. </>
-            : <>Nothing waiting to be picked. </>}
-          Lab cards are stack cards now, so they&apos;re picked on the <a href="/panel/pull">pull sheet</a> with everything else: each
-          sale shows the exact copy the buyer saw, at its position in its LAB- stack, and Commit pulls it. A cancelled order is released
-          from the <a href="/panel/lab/inventory">inventory</a>.
-        </p>
-      </section>
-
-      {/* ---------------- Add copies: its own page now ---------------- */}
-      <section style={box}>
         <div style={{ ...row, justifyContent: "space-between" }}>
           <div>
-            <strong>Add copies</strong>
-            <p style={small}>
-              Load CardUploader exports (several at once), price them from sold comps, edit prices, titles, subtypes and which copies go — one at a
-              time or in bulk — then list. The working list is kept on this device until you clear it.
+            <strong>Picking</strong>
+            <p style={{ ...small, margin: "2px 0 0" }}>
+              {picks.length ? <>{picks.length} sold cop{picks.length === 1 ? "y is" : "ies are"} waiting to be picked.</> : <>Nothing waiting to be picked.</>}{" "}
+              Lab cards are picked on the pull sheet with everything else — each sale shows the exact copy the buyer saw and where it is.
             </p>
           </div>
-          <a className="btn btn-primary" href="/panel/lab/add">Open Add copies →</a>
+          <a className="btn" href="/panel/pull">Open the pull sheet →</a>
         </div>
       </section>
 
       {/* ---------------- The log ---------------- */}
-      <section style={box}>
-        <strong>Log</strong>
-        <p style={small}>Every eBay change the lab made, and every sale it read. Newest first.</p>
-        {events.length === 0 && <p style={small}>Nothing yet.</p>}
-        <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 12 }}>
-          {events.map((e) => (
-            <div key={e.id} style={{ borderTop: "1px solid var(--line)", padding: "4px 0", color: e.kind === "mismatch" || e.kind === "oversold" ? "var(--bad)" : e.kind === "error" ? "var(--warn)" : undefined }}>
-              {new Date(e.at).toLocaleString()} · <strong>{e.kind}</strong> · {JSON.stringify(e.detail)}
+      <details style={box}>
+        <summary style={{ cursor: "pointer" }}>
+          <strong>Activity</strong> <span style={small}>— every change the lab made on eBay and every sale it read, newest first{problems ? ` · ${problems} need a look` : ""}</span>
+        </summary>
+        {logRows.length === 0 && <p style={small}>Nothing yet.</p>}
+        <div style={{ marginTop: 8 }}>
+          {logRows.map(({ e, text, tone }) => (
+            <div key={e.id} className={`lab-log ${tone}`}>
+              <span className="lab-when">{new Date(e.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>
+              <span>{text}</span>
             </div>
           ))}
         </div>
-      </section>
+      </details>
     </main>
   );
 }
+
+const HOME_CSS = `
+.lab-how { list-style:none; padding:0; margin:12px 0; display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:8px; }
+.lab-how a { display:flex; flex-direction:column; gap:2px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:var(--ink); text-decoration:none; font-size:13px; }
+.lab-how a:hover { border-color:var(--accent); }
+.lab-how span { color:var(--ink-soft); }
+.lab-score { display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:8px; margin-top:12px; }
+.lab-score span { display:flex; flex-direction:column; gap:2px; font-size:12px; color:var(--ink-soft); padding:8px 10px; border:1px solid var(--line); border-radius:10px; }
+.lab-score b { font-size:22px; color:var(--ink); }
+.lab-score .bad b { color:var(--bad); } .lab-score .warn b { color:var(--warn); }
+.lab-log { display:flex; gap:12px; padding:6px 0; border-top:1px solid var(--line); font-size:13px; }
+.lab-log.bad { color:var(--bad); } .lab-log.good span:last-child { color:var(--ink); }
+.lab-when { flex:0 0 auto; width:118px; color:var(--ink-faint); font-variant-numeric:tabular-nums; }
+`;
 
 /** What the sold comps said about one group, beside the price box. */
 function CompsNote({ c, typed }) {

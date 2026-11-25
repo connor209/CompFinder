@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import LabHeader, { LAB_HEADER_CSS } from "../LabHeader";
 import {
   inventoryRows, filterRows, sortRows, pageOf, actionable, parsePence, pricePlan, templatePlan,
   copyRows, isEmptyRow, inventoryCsv, EMPTY_FILTERS, STATUSES, PAGE_SIZES, SORT_FIELDS,
@@ -330,7 +331,8 @@ export default function LabInventory() {
 
   return (
     <main className="li-wrap">
-      <style>{CSS + INV_CSS}</style>
+      <style>{CSS + INV_CSS + LAB_HEADER_CSS}</style>
+      <LabHeader current="inventory" />
 
       {/* ---------------- Header ---------------- */}
       <div className="li-head">
@@ -348,8 +350,6 @@ export default function LabInventory() {
           </span>
         </div>
         <div className="li-headbtns">
-          <a className="li-btn" href="/panel/lab">Lab</a>
-          <a className="li-btn" href="/panel/lab/settings">Listing settings</a>
           <button className="li-btn" onClick={exportCsv} disabled={!matched.length}>Export CSV</button>
         </div>
       </div>

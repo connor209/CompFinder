@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import LabHeader, { LAB_HEADER_CSS } from "../LabHeader";
 import { createClient } from "@/lib/supabase/client";
 import { resizeImage } from "@/lib/resizeImage";
 import {
@@ -105,11 +106,12 @@ export default function ListingSettings() {
 
   return (
     <main style={{ maxWidth: 980, margin: "0 auto", padding: 16, color: "var(--ink)" }}>
+      <style>{LAB_HEADER_CSS}</style>
+      <LabHeader current="settings" />
       <div style={{ ...row, justifyContent: "space-between" }}>
         <div>
-          <a href="/panel/lab" style={small}>← Lab</a>
           <h1 style={{ margin: "4px 0" }}>Listing settings</h1>
-          <p style={small}>How new lab listings are written. Live listings aren&apos;t changed by saving here.</p>
+          <p style={small}>How a new listing&apos;s title, description and photos are written. Listings already live aren&apos;t changed when you save.</p>
         </div>
         <button className="btn btn-primary" disabled={busy || !dirty || problems.length > 0} onClick={save}>
           {busy ? "Saving…" : dirty ? "Save settings" : "Saved"}

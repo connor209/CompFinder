@@ -151,10 +151,10 @@ const MODULES = [
     key: "lab",
     label: "Lab",
     icon: "flask",
-    desc: "Quantity listings: one listing, several copies",
+    desc: "One listing per card, every copy behind it",
     sections: [
-      { key: "lab", label: "Overview", desc: "Scorecard, sales checks and picking" },
-      { key: "labadd", label: "Add copies", desc: "Load CardUploader exports, price and list" },
+      { key: "lab", label: "Overview", desc: "Where every batch and card is, and sales from eBay" },
+      { key: "labadd", label: "Batches", desc: "Load CardUploader exports, price them and list" },
       { key: "labinventory", label: "Inventory", desc: "Lab listings and their copies" },
       { key: "labsettings", label: "Listing settings", desc: "How lab listings are written" }
     ]
