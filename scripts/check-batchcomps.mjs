@@ -184,6 +184,32 @@ const nr = evaluateCard(numel, [
 eq("Numel keeps the Ditto copies", nr.n_comps, 4);
 
 
+// Uxie (Tsubasa Nakamura) 43/146, World Championship Decks (2026-11-25): the
+// reprint shares its number with Legends Awakened and the 30th Celebration
+// copy, so 70 sales were counted and none was the card, while the engine
+// threw out every real one for saying "championship".
+const wcdComps = [
+  comp("Uxie 43/146 World Championship Deck 2009 Tsubasa Nakamura Pokemon", 3.5, 1),
+  comp("Pokemon Uxie 43/146 WCD 2009 Luxdrive Gold Border", 2.99, 1),
+  comp("Uxie 43/146 Worlds 2009 deck Tsubasa Nakamura NM", 4, 0.85),
+  comp("Uxie 43/146 World Championships Deck Card", 3, 1),
+  comp("Uxie 43/146 30th Celebration Classic Collection Pokemon TCG", 5.45, 1),
+  comp("Pokémon TCG Uxie 43/146 30th Celebrations Classic Rare ENG HP70", 5.45, 1),
+  comp("Uxie 43/146 Legends Awakened Holo Rare", 12, 1)
+];
+const wcd = planCard(normaliseCard({ name: "Uxie (Tsubasa Nakamura)", number: "43/146", set: "World Championship Decks", condition: "LP" }));
+eq("a WCD card is its own printing", wcd.variantKeys, ["worldChampionship"]);
+eq("…and the player in brackets is not an unrecognised printing", wcd.unrecognisedVariant, []);
+ok("…every rung but noprinting asks for it", wcd.ladder.every((r) => r.rung === "noprinting" || /World Championship/.test(r.query)));
+ok("…and the engine no longer drops 'championship'", !wcd.settings.excludeKeywords.promoVariant.includes("championship"));
+const wr = evaluateCard(wcd, wcdComps);
+eq("a WCD card counts only WCD sales", wr.n_comps, 4);
+ok("…none of them a 30th Celebration or Legends Awakened copy", wr.sales.every((s) => /world|wcd|worlds/i.test(s.title)));
+const plainUxie = planCard(normaliseCard({ name: "Uxie", number: "43/146", set: "Legends Awakened" }));
+ok("a plain card drops every WCD sale", evaluateCard(plainUxie, wcdComps).sales.every((s) => !/world|wcd/i.test(s.title)));
+ok("a plain card still drops a championship promo", settingsForText("Uxie 43/146").excludeKeywords.promoVariant.includes("championship"));
+eq("a Worlds-stamped promo is not a deck", detectVariants({ name: "Pikachu (World Championships 2022)", set: "SWSH Black Star Promos" }).keys.includes("worldChampionship"), false);
+
 // --- 4b. CardCropper's rules, ported 2026-11-24 ---------------------------------
 
 // Floors by game.

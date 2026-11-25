@@ -15,6 +15,7 @@ import CompFinderPricing from "@compfinder/core/pricing.js";
 import { dropWrongNumerator, dropWrongSetTotal } from "@compfinder/core/cardnumber.js";
 import { isOverridden } from "./price-override.js";
 import { textLooksPromo } from "./promo.js";
+import { isWorldChampionshipDeck } from "./variants.js";
 
 /**
  * "No.", "No", "#" — a numbering prefix, at the front of a card NUMBER.
@@ -128,7 +129,7 @@ export const FOREIGN_LANGUAGE = [
  * throws away exactly the comps that ARE the card — see the block above
  * classifyExclusion for the £2.49 PSA 10 Umbreon that made it worth fixing.
  */
-export function settingsForText(text, { promo } = {}) {
+export function settingsForText(text, { promo, wcd } = {}) {
   const t = String(text || "");
   // Everything the title says about the COPY in hand — grade, stamp, reverse
   // holo — in one call. Three facts, three exclusions that invert on them, and
@@ -147,6 +148,12 @@ export function settingsForText(text, { promo } = {}) {
   // otherwise it is read off the text (a BW33/SM42/SWSH123 code, "promo").
   const isPromo = promo ?? textLooksPromo(t);
   if (isPromo) excludeKeywords.promoVariant = APP_SETTINGS.excludeKeywords.promoVariant.filter((w) => w !== "promo");
+  // A World Championship Deck reprint's own sales say "World Championship"
+  // and "Worlds", and the engine drops both as another promo — which left an
+  // Uxie WCD priced from nothing but the ordinary 43/146 (2026-11-25). For
+  // that card those words are the card; variants.js requires them instead.
+  const isWcd = wcd ?? isWorldChampionshipDeck(t);
+  if (isWcd) excludeKeywords.promoVariant = excludeKeywords.promoVariant.filter((w) => w !== "championship" && w !== "worlds");
   if (!namesALanguage) excludeKeywords.foreignPrint = FOREIGN_LANGUAGE; // an English card — foreign prints are other cards
   return { ...APP_SETTINGS, ...facts, excludeKeywords };
 }

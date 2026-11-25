@@ -79,6 +79,24 @@ export const VARIANTS = [
     engine: true,
     says: "Stamped"
   },
+  // World Championship Deck reprints (Cardmarket's set "World Championship
+  // Decks", the player in brackets: "Uxie (Tsubasa Nakamura) 43/146"). Gold
+  // border, a different back, not tournament legal — and the SAME number as
+  // the card it reprints, so a plain search pools the Legends Awakened Uxie
+  // and the 30th Celebration reprint with it and every sale clears the number
+  // check (2026-11-25: 70 counted, none the card). A WCD card requires its
+  // own words; a plain card drops a sale that says them.
+  // The subject is narrow on purpose: "World Championships 2022" on a stamped
+  // Worlds promo is the stamped variant, not a deck.
+  {
+    key: "worldChampionship",
+    label: "World Championship Deck",
+    subject: /\bworld\s*championships?\s*decks?\b|\bwcd\b/i,
+    comp: /\bworld\s*champ(?:ion(?:ship)?s?)?\b|\bwcd\b|\bchampionships?\s*decks?\b|\bworlds?\s*(?:decks?|19\d\d|20[0-2]\d)\b/i,
+    query: "World Championship",
+    // A bracketed aside is the player whose deck it was, not a printing.
+    asidesArePlayers: true
+  },
   {
     key: "firstEdition",
     label: "1st Edition",
@@ -237,7 +255,9 @@ export function detectVariants({ name = "", variant = "", set = "", title = "", 
   const keys = VARIANTS.filter((v) => hasUnnegated(v.subject, text)).map((v) => v.key);
 
   // "Unown (E)" is a NAME, so a one- or two-character aside is let through.
-  const brackets = [...String(name).matchAll(/\(([^()]*)\)/g)].map((m) => m[1]);
+  // A World Championship Deck card's aside names the player, which is no printing.
+  const playersAside = keys.some((k) => BY_KEY[k].asidesArePlayers);
+  const brackets = playersAside ? [] : [...String(name).matchAll(/\(([^()]*)\)/g)].map((m) => m[1]);
   const unrecognised = [variant, ...brackets]
     .map((s) => String(s || "").trim())
     .filter((s) => s && !BASE_WORDS.test(s) && !/^[A-Z0-9!?]{1,2}$/i.test(s))
@@ -315,6 +335,11 @@ export function isReverseKind(keys) {
  */
 export function withoutReverseWords(title) {
   return String(title || "").replace(/\brev(?:erse)?\b[\s.\-]*(?:holo(?:foil)?|foil)?\b/gi, " ").replace(/\s{2,}/g, " ").trim();
+}
+
+/** Whether a card's own text says it is a World Championship Deck reprint. */
+export function isWorldChampionshipDeck(text) {
+  return BY_KEY.worldChampionship.subject.test(String(text || ""));
 }
 
 /** A variant a sale need not say (mirror holo) — see prefilterComps for when it hardens. */
