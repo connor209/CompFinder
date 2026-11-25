@@ -16,8 +16,12 @@ import { parseCostPence } from "@/lib/card-costs.js";
 import { createClient } from "@/lib/supabase/client";
 import {
   batchIdFrom, listLabBatches, loadLabBatch, createLabBatch, saveLabBatch, renameLabBatch, deleteLabBatch,
-  defaultBatchName, localKeyFor
+  defaultBatchName, localKeyFor, batchDefaults, batchKind, batchProgress
 } from "@/lib/lab-batches.js";
+import BatchHome, { BATCH_HOME_CSS } from "./BatchHome";
+import NewBatch, { NEW_BATCH_CSS } from "./NewBatch";
+import BatchSteps, { BATCH_STEPS_CSS } from "./BatchSteps";
+import LabHeader, { LAB_HEADER_CSS } from "../LabHeader";
 import { labCardFor, compsFromResult, applyComps } from "@/lib/lab-pricing.js";
 import { applyJobs, isOpen, remainingCards } from "@/lib/pricing-queue.js";
 
@@ -60,10 +64,14 @@ export default function LabAdd() {
   const [store, setStore] = useState("loading");
   const [batch, setBatch] = useState(null); // { id, name, updated_at } of the open batch
   const [batches, setBatches] = useState([]);
+  const [batchTiles, setBatchTiles] = useState(true); // false before migration 049: no cover or value on a tile
   const [legacy, setLegacy] = useState([]); // a pre-batch list still in this browser
   const [saveState, setSaveState] = useState("saved"); // saved | pending | saving | conflict | error
   const [saveErr, setSaveErr] = useState("");
   const [renaming, setRenaming] = useState(null);
+  // /panel/lab/add?new=1 — the New batch setup, before any file is read.
+  const [isNew, setIsNew] = useState(false);
+  const tableRef = useRef(null);
   const rowsRef = useRef(rows);
   rowsRef.current = rows;
   const revRef = useRef(0);
@@ -116,6 +124,7 @@ export default function LabAdd() {
     (async () => {
       const sb = createClient();
       const id = batchIdFrom(window.location.search);
+      if (!id && new URLSearchParams(window.location.search).get("new")) setIsNew(true);
       const listed = await listLabBatches(sb);
       if (!live) return;
       if (!listed.ok) {
@@ -128,6 +137,7 @@ export default function LabAdd() {
       }
       setStore("ok");
       setBatches(listed.batches);
+      setBatchTiles(listed.tiles !== false);
       setLegacy(loadDraft());
       if (id) {
         const got = await loadLabBatch(sb, id);
@@ -255,8 +265,8 @@ export default function LabAdd() {
   }, [queue.batchJobs]);
 
   /** Start a batch holding `list`, and put it in the URL so this tab IS that batch. */
-  async function startBatch(list, fileNames) {
-    const res = await createLabBatch(createClient(), { name: defaultBatchName(fileNames), rows: list });
+  async function startBatch(list, fileNames, name = "") {
+    const res = await createLabBatch(createClient(), { name: name || defaultBatchName(fileNames), rows: list });
     if (!res.ok) return res;
     revRef.current = res.batch.rev;
     savedRef.current = JSON.stringify(list);
@@ -264,6 +274,7 @@ export default function LabAdd() {
     setBatch({ id: res.batch.id, name: res.batch.name, updated_at: res.batch.updated_at });
     setBatches((bs) => [res.batch, ...bs]);
     setSaveState("saved");
+    setIsNew(false);
     try { window.history.replaceState(null, "", `${window.location.pathname}?batch=${res.batch.id}`); } catch { /* the batch is saved either way */ }
     return res;
   }
@@ -344,10 +355,13 @@ export default function LabAdd() {
   const tick = (id, on) => setTicked((t) => { const n = new Set(t); if (on) n.add(String(id)); else n.delete(String(id)); return n; });
 
   // ---- files -------------------------------------------------------------
-  async function onFiles(e) {
-    const picked = [...(e.target.files || [])];
-    e.target.value = "";
-    let next = rows;
+  /**
+   * Read CardUploader exports into the list `base`, each card stamped with the
+   * batch's language and which sales count. Returns the new list and what was
+   * refused; changes no state.
+   */
+  async function readFiles(picked, { language, anyLanguage, overseas: os }, base) {
+    let next = base;
     const newRefused = [];
     let added = 0;
     let rowsRead = 0;
@@ -355,7 +369,7 @@ export default function LabAdd() {
       try {
         const text = await f.text();
         // The batch's language beats whatever the file or a title said.
-        const items = CardUploaderCsv.extractItems(text, { allowNoNumber: true }).map((it) => ({ ...it, language: batchLang }));
+        const items = CardUploaderCsv.extractItems(text, { allowNoNumber: true }).map((it) => ({ ...it, language }));
         const allRows = CardUploaderCsv.rowsToObjects(CardUploaderCsv.parseCsv(text));
         const skipped = unreadableRows(allRows, { needNumber: false });
         rowsRead += allRows.length - allRows.filter((r) => !Object.values(r || {}).some((v) => String(v ?? "").trim())).length;
@@ -363,7 +377,7 @@ export default function LabAdd() {
         const raw = allRows.filter((r) => (r["*C:Card Name"] || "").trim());
         const extras = raw.map((r) => ({ finish: (r["*C:Finish"] || "").trim(), setCode: (r["*C:Set Code"] || r["C:Set Code"] || "").trim() }));
         const { groups, refused: rf } = groupsFromItems(items, extras.length === items.length ? extras : []);
-        const merged = mergeGroups(next, groups, f.name, { anyLanguage: anyLang, overseas });
+        const merged = mergeGroups(next, groups, f.name, { anyLanguage, overseas: os });
         next = merged.rows;
         added += merged.added;
         newRefused.push(...skipped.map((x) => ({ ...x, file: f.name })), ...rf.map((x) => ({ ...x, file: f.name })), ...merged.refused.map((x) => ({ ...x, file: f.name })));
@@ -371,6 +385,17 @@ export default function LabAdd() {
         newRefused.push({ sku: f.name, title: "", why: err.message || "couldn't read that file", file: f.name });
       }
     }
+    return { next, newRefused, added, rowsRead };
+  }
+
+  const loadedAs = (o) => `${o.language}${o.anyLanguage ? ", sales in every language" : ""}${o.overseas ? ", overseas sellers counted" : ""}`;
+
+  /** More exports into the list on screen — an open batch loads them the way it was set up. */
+  async function onFiles(e) {
+    const picked = [...(e.target.files || [])];
+    e.target.value = "";
+    const as = store === "ok" && batchId ? batchDefaults(rows) : { language: batchLang, anyLanguage: anyLang, overseas };
+    const { next, newRefused, added, rowsRead } = await readFiles(picked, as, rows);
     // No batch open: this upload IS a new batch, saved before it is shown.
     if (store === "ok" && !batchId && next.length) {
       const made = await startBatch(next, picked.map((f) => f.name));
@@ -379,7 +404,37 @@ export default function LabAdd() {
     setRows(next);
     refreshView();
     setRefused((r) => [...r, ...newRefused]);
-    setMsg({ text: `${rowsRead} row${rowsRead === 1 ? "" : "s"} read, ${added} cop${added === 1 ? "y" : "ies"} loaded from ${picked.length} file${picked.length === 1 ? "" : "s"} as ${batchLang}${anyLang ? " (sold comps in every language)" : ""}${overseas ? " (overseas sellers counted)" : ""}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.` });
+    setMsg({ text: `${rowsRead} row${rowsRead === 1 ? "" : "s"} read, ${added} cop${added === 1 ? "y" : "ies"} loaded from ${picked.length} file${picked.length === 1 ? "" : "s"} as ${loadedAs(as)}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.` });
+  }
+
+  /** New batch → Create: read the files with the setup's settings, make the batch, and queue it if asked. */
+  async function createFromSetup({ files: picked, name, language, anyLanguage, overseas: os, subtype, costPence, priceNow }) {
+    setBusy("create");
+    setMsg(null);
+    try {
+      const as = { language, anyLanguage, overseas: os };
+      const { next: read, newRefused, added } = await readFiles(picked, as, []);
+      setRefused(newRefused);
+      if (!read.length) { setMsg({ bad: true, text: "Nothing in that file could be loaded — see what was refused below." }); return; }
+      let next = read;
+      const ids = next.map((r) => r.id);
+      if (subtype) next = applyBulk(next, ids, { op: "subtype", value: subtype });
+      if (costPence != null) next = applyBulk(next, ids, { op: "costEach", pence: costPence });
+      const made = await startBatch(next, picked.map((f) => f.name), name);
+      setRows(next);
+      refreshView();
+      if (!made.ok) {
+        setIsNew(false);
+        setMsg({ bad: true, text: `Loaded, but couldn't save it as a batch: ${made.error}. It is only in this tab — don't refresh.` });
+        return;
+      }
+      let queued = null;
+      if (priceNow) queued = await queueRows(next.filter((r) => !joinsOf(r)).map((r) => r.id), made.batch.id);
+      setMsg({ bad: queued && !queued.ok, text: `Batch created: ${added} cop${added === 1 ? "y" : "ies"} as ${loadedAs(as)}${newRefused.length ? `, ${newRefused.length} refused (below)` : ""}.${queued ? (queued.ok ? ` ${queued.job.total} queued for pricing — prices fill in as they arrive.` : ` Couldn't queue it for pricing: ${queued.error}`) : ""}` });
+      refreshQueue();
+    } finally {
+      setBusy(null);
+    }
   }
 
   // ---- pricing -----------------------------------------------------------
@@ -401,12 +456,25 @@ export default function LabAdd() {
     const todo = rowsToPrice();
     if (!todo.length) { setMsg({ text: "Nothing to price — every row has sold comps, is queued, joins a live listing or is listed." }); return; }
     if (saveState !== "saved") await flushBatch(); // the server prices the rows as saved
-    const res = await fetch("/api/pricing-queue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "enqueue", batchId, rowIds: todo.map((r) => r.id) }) })
-      .then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+    const res = await queueRows(todo.map((r) => r.id));
     if (res.missing) { setQueue((q) => ({ ...q, missing: true })); return priceInTab(); }
     if (!res.ok) { setMsg({ bad: true, text: `Couldn't queue it: ${res.error}` }); return; }
     setMsg({ text: `Queued ${res.job.total} card${res.job.total === 1 ? "" : "s"} for pricing. Prices fill in here as they arrive — you can close this tab, queue more batches, or come back later.` });
     refreshQueue();
+  }
+
+  /** Put rows of a batch in the pricing queue. */
+  function queueRows(rowIds, id = batchId) {
+    return fetch("/api/pricing-queue", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "enqueue", batchId: id, rowIds }) })
+      .then((r) => r.json()).catch((e) => ({ ok: false, error: e.message }));
+  }
+
+  /** The step bar's buttons: show a slice of the table, and bring it into view. */
+  function showOnly(f) {
+    setFilter(f === "needsprice" || f === "thin" || f === "failed" || f === "listed" ? f : "all");
+    setQ("");
+    refreshView();
+    try { tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch { /* old browser */ }
   }
 
   async function priceInTab() {
@@ -577,76 +645,106 @@ export default function LabAdd() {
 
   const s = totals.byStatus;
 
+  const css = LAB_TABLE_CSS + EXTRA_CSS + LAB_HEADER_CSS + BATCH_HOME_CSS + NEW_BATCH_CSS + BATCH_STEPS_CSS;
+  const legacyBanner = legacy.length > 0 ? (
+    <div className="li-panel lb-row li-warn">
+      This browser still has a list from before batches ({legacy.length} card{legacy.length === 1 ? "" : "s"}).
+      <button className="li-btn primary" onClick={adoptLegacy}>Save it as a batch</button>
+      <button className="li-btn" onClick={() => { if (window.confirm("Discard that old list? Typed prices go with it.")) { try { localStorage.removeItem(DRAFT_KEY); } catch { /* gone */ } setLegacy([]); } }}>Discard</button>
+    </div>
+  ) : null;
+  const queueLog = store === "ok" && !queue.missing && queue.jobs.length > 0 ? <QueueLog queue={queue} batchId={batchId} onCancel={cancelQueued} /> : null;
+
+  if (store === "loading") return <main className="li-wrap"><style>{css}</style><LabHeader current="batches" />Loading your batches…</main>;
+
+  // ---- the batch grid --------------------------------------------------------
+  if (store === "ok" && !batchId && !isNew) {
+    const pricingIds = new Set(queue.jobs.filter(isOpen).map((j) => j.batch_id).filter(Boolean));
+    return (
+      <main className="li-wrap">
+        <style>{css}</style>
+        <LabHeader current="batches" />
+        {msg && <div className={msg.bad ? "li-msg bad" : "li-msg"}>{msg.text}</div>}
+        {queueLog}
+        <BatchHome
+          batches={batches}
+          tiles={batchTiles}
+          pricingIds={pricingIds}
+          legacy={legacyBanner}
+          onDelete={removeBatch}
+          onRename={async (b) => {
+            const name = window.prompt("Rename the batch", b.name);
+            if (name == null || !name.trim() || name.trim() === b.name) return;
+            const res = await renameLabBatch(createClient(), b.id, name);
+            if (!res.ok) { setMsg({ bad: true, text: res.error }); return; }
+            setBatches((bs) => bs.map((x) => (x.id === b.id ? { ...x, name: res.name } : x)));
+          }}
+        />
+      </main>
+    );
+  }
+
+  // ---- New batch: the setup, before a file is read ----------------------------
+  if (store === "ok" && isNew) {
+    return (
+      <main className="li-wrap">
+        <style>{css}</style>
+        <LabHeader current="batches" />
+        {msg && <div className={msg.bad ? "li-msg bad" : "li-msg"}>{msg.text}</div>}
+        <NewBatch subtypes={subtypes} busy={busy === "create"} queueAvailable={!queue.missing} onCreate={createFromSetup} />
+      </main>
+    );
+  }
+
+  const defaults = batchId ? batchDefaults(rows) : null;
+  const progressNow = batchProgress(rows, joinsOf, queuedIds);
+
   return (
     <main className="li-wrap">
-      <style>{LAB_TABLE_CSS + EXTRA_CSS}</style>
+      <style>{css}</style>
+      <LabHeader current="batches" />
 
-      <div className="li-head">
-        <div className="li-title">
-          <h1>Add copies</h1>
-          <span className="li-totals">
-            {totals.rows} card{totals.rows === 1 ? "" : "s"} · {totals.copies} cop{totals.copies === 1 ? "y" : "ies"}
-            <span>New listings <b>{gbp(totals.value)}</b></span>
-            {s.needsprice ? <span className="li-warn">{s.needsprice} need a price</span> : null}
-            {s.thin ? <span className="li-warn">{s.thin} thin</span> : null}
-            {s.failed ? <span style={{ color: "var(--bad)" }}>{s.failed} failed</span> : null}
-            {s.listed ? <span style={{ color: "var(--good)" }}>{s.listed} listed</span> : null}
-          </span>
-        </div>
-        <div className="li-headbtns">
-          <a className="li-btn" href="/panel/lab">Lab</a>
-          <a className="li-btn" href="/panel/lab/inventory">Inventory</a>
-          <a className="li-btn" href="/panel/lab/settings">Listing settings</a>
-        </div>
-      </div>
-
-      {/* ---------------- Batches ---------------- */}
+      {/* ---------------- The open batch ---------------- */}
       {store === "missing" ? (
         <div className="li-panel li-dim">One list per browser until migration 047 is run — then each upload is its own batch, kept on the server, and tabs stop overwriting each other.</div>
       ) : store === "error" ? (
         <div className="li-panel li-warn">Couldn&apos;t reach your batches ({saveErr}). Working on this browser&apos;s list for now — one tab only.</div>
       ) : batchId ? (
-        <div className="li-panel lb-strip">
-          <span>📦</span>
-          {renaming != null ? (
-            <>
-              <input className="li-search" value={renaming} autoFocus onChange={(e) => setRenaming(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveRename(); if (e.key === "Escape") setRenaming(null); }} />
-              <button className="li-btn" onClick={saveRename}>Save</button>
-              <button className="li-btn" onClick={() => setRenaming(null)}>Cancel</button>
-            </>
-          ) : (
-            <>
-              <b>{batch.name}</b>
-              <button className="li-btn" onClick={() => setRenaming(batch.name)}>✎ Rename</button>
-            </>
-          )}
-          <span className={`lb-save lb-${saveState}`}>
-            {saveState === "saved" ? "✓ saved" : saveState === "pending" || saveState === "saving" ? "saving…" : saveState === "error" ? `not saved: ${saveErr} — it is still on this device` : ""}
-          </span>
-          <span className="li-spacer" />
-          <a className="li-btn" href="/panel/lab/add">All batches</a>
-          <a className="li-btn" href="/panel/lab/add" target="_blank" rel="noreferrer">＋ New batch in a new tab</a>
+        <div className="lb-head">
+          <a className="nb-back" href="/panel/lab/add">← Batches</a>
+          <div className="lb-titlerow">
+            {renaming != null ? (
+              <>
+                <input className="li-search" value={renaming} autoFocus onChange={(e) => setRenaming(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveRename(); if (e.key === "Escape") setRenaming(null); }} />
+                <button className="li-btn" onClick={saveRename}>Save</button>
+                <button className="li-btn" onClick={() => setRenaming(null)}>Cancel</button>
+              </>
+            ) : (
+              <>
+                <h1>{batch.name}</h1>
+                <button className="li-icon" title="Rename" onClick={() => setRenaming(batch.name)}>✎</button>
+              </>
+            )}
+            <span className={`lb-save lb-${saveState}`}>
+              {saveState === "saved" ? "✓ saved" : saveState === "pending" || saveState === "saving" ? "saving…" : saveState === "error" ? `not saved: ${saveErr} — it is still on this device` : ""}
+            </span>
+          </div>
+          <div className="lb-chips">
+            <span className="lb-chip">{batchKind({ language: defaults.language, game: rows.find((r) => r.card?.game)?.card?.game })}</span>
+            <span className="lb-chip">{defaults.anyLanguage ? "sales in every language" : `${defaults.language} sales only`}</span>
+            <span className="lb-chip">{defaults.overseas ? "overseas sellers counted" : "UK sellers"}</span>
+            <span className="lb-chip">New listings <b>{gbp(totals.value)}</b></span>
+          </div>
         </div>
       ) : (
-        <div className="li-panel lb-list">
-          <div className="lb-h">Batches <span className="li-dim">— each upload is one, kept until you delete it. Open different batches in different tabs freely.</span></div>
-          {legacy.length > 0 ? (
-            <div className="lb-row li-warn">
-              This browser still has a list from before batches ({legacy.length} card{legacy.length === 1 ? "" : "s"}).
-              <button className="li-btn primary" onClick={adoptLegacy}>Save it as a batch</button>
-              <button className="li-btn" onClick={() => { if (window.confirm("Discard that old list? Typed prices go with it.")) { try { localStorage.removeItem(DRAFT_KEY); } catch { /* gone */ } setLegacy([]); } }}>Discard</button>
-            </div>
-          ) : null}
-          {batches.length === 0 ? <div className="li-dim">No batches yet — load an export below to start one.</div> : batches.map((b) => (
-            <div key={b.id} className="lb-row">
-              <a href={`?batch=${b.id}`}><b>{b.name}</b></a>
-              <span className="li-dim">{b.card_count} card{b.card_count === 1 ? "" : "s"} · {b.copy_count} cop{b.copy_count === 1 ? "y" : "ies"}{b.listed_count ? ` · ${b.listed_count} listed` : ""} · {when(b.updated_at)}</span>
-              {b.card_count > 0 && b.listed_count >= b.card_count ? <span style={{ color: "var(--good)" }}>all listed</span> : null}
-              <span className="li-spacer" />
-              <a className="li-btn" href={`?batch=${b.id}`} target="_blank" rel="noreferrer">Open in new tab</a>
-              <button className="li-btn" onClick={() => removeBatch(b)}>Delete</button>
-            </div>
-          ))}
+        <div className="li-head">
+          <div className="li-title">
+            <h1>Add copies</h1>
+            <span className="li-totals">
+              {totals.rows} card{totals.rows === 1 ? "" : "s"} · {totals.copies} cop{totals.copies === 1 ? "y" : "ies"}
+              <span>New listings <b>{gbp(totals.value)}</b></span>
+            </span>
+          </div>
         </div>
       )}
       {saveState === "conflict" ? (
@@ -657,7 +755,29 @@ export default function LabAdd() {
         </div>
       ) : null}
 
+      {batchId ? (
+        <BatchSteps
+          progress={progressNow}
+          busy={!!busy}
+          onPrice={priceFromSold}
+          onFilter={showOnly}
+          onListReady={() => listRows(rows.filter((r) => progressNow.readyIds.includes(r.id)))}
+        />
+      ) : null}
+
       {/* ---------------- Load ---------------- */}
+      {batchId ? (
+        <div className="li-panel lb-more">
+          <label className="li-btn" style={{ cursor: "pointer" }}>
+            ＋ Add more exports
+            <input type="file" accept=".csv,text/csv" multiple style={{ display: "none" }} onChange={onFiles} disabled={!!busy} />
+          </label>
+          <span className="li-dim">Loaded as {defaults.language}{defaults.anyLanguage ? ", sales in every language" : ""}{defaults.overseas ? ", overseas sellers" : ""}, like the rest of this batch.</span>
+          <span className="li-spacer" />
+          {rows.some((r) => r.result?.ok) && <button className="li-btn" disabled={!!busy} onClick={() => setRows((rs) => rs.filter((r) => !r.result?.ok))}>Clear listed rows</button>}
+          <button className="li-btn" disabled={!!busy} onClick={() => removeBatch({ id: batchId, name: batch.name, card_count: rows.length })}>Delete batch</button>
+        </div>
+      ) : (
       <div className="li-panel">
         <label className="li-dim" style={{ display: "flex", gap: 6, alignItems: "center" }}>
           Batch language
@@ -672,7 +792,7 @@ export default function LabAdd() {
           <input type="checkbox" checked={overseas} disabled={!!busy} onChange={(e) => setOverseas(e.target.checked)} /> count overseas sellers
         </label>
         <label className="li-btn primary" style={{ cursor: "pointer" }}>
-          {store === "ok" && batchId ? `＋ Add ${batchLang} export(s) to this batch` : store === "ok" ? `＋ Load ${batchLang} export(s) — a new batch` : `＋ Load ${batchLang} export(s)`}
+          {`＋ Load ${batchLang} export(s)`}
           <input type="file" accept=".csv,text/csv" multiple style={{ display: "none" }} onChange={onFiles} disabled={!!busy} />
         </label>
         <span className="li-dim">
@@ -680,12 +800,11 @@ export default function LabAdd() {
         </span>
         <span className="li-spacer" />
         {rows.some((r) => r.result?.ok) && <button className="li-btn" disabled={!!busy} onClick={() => setRows((rs) => rs.filter((r) => !r.result?.ok))}>Clear listed rows</button>}
-        {batchId ? (
-          <button className="li-btn" disabled={!!busy} onClick={() => removeBatch({ id: batchId, name: batch.name, card_count: rows.length })}>Delete batch</button>
-        ) : rows.length > 0 && <button className="li-btn" disabled={!!busy} onClick={() => {
+        {rows.length > 0 && <button className="li-btn" disabled={!!busy} onClick={() => {
           if (window.confirm(`Clear the whole list (${rows.length} rows)? Typed prices go with it. Nothing on eBay changes.`)) { setRows([]); setRefused([]); setTicked(new Set()); }
         }}>Clear list</button>}
       </div>
+      )}
 
       {refused.length > 0 && (
         <details className="li-panel" open={refused.length <= 8}>
@@ -698,7 +817,7 @@ export default function LabAdd() {
       )}
 
       {/* ---------------- Toolbar ---------------- */}
-      <div className="li-toolbar">
+      <div className="li-toolbar" ref={tableRef}>
         <input className="li-search" placeholder="Search name, set, SKU…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="li-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
           {FILTERS.map(([k, l]) => <option key={k} value={k}>{l}{k !== "all" && k !== "joins" && s[k] ? ` (${s[k]})` : ""}</option>)}
@@ -715,9 +834,7 @@ export default function LabAdd() {
         </select>
       </div>
 
-      {store === "ok" && !queue.missing && queue.jobs.length > 0 ? (
-        <QueueLog queue={queue} batchId={batchId} onCancel={cancelQueued} />
-      ) : null}
+      {queueLog}
       {msg && <div className={msg.bad ? "li-msg bad" : "li-msg"}>{msg.text}</div>}
       {progress && <PricingBar p={progress} onStop={() => { stopRef.current = true; setProgress((x) => (x ? { ...x, stopping: true } : x)); }} />}
       {rows.some((r) => r.result?.pending) && (
@@ -1127,6 +1244,13 @@ function QueueLog({ queue, batchId, onCancel }) {
 }
 
 const EXTRA_CSS = `
+.lb-head { display:flex; flex-direction:column; gap:6px; margin-bottom:10px; }
+.lb-titlerow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.lb-titlerow h1 { margin:0; font-size:22px; }
+.lb-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.lb-chip { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:var(--surface); color:var(--ink-soft); }
+.lb-chip b { color:var(--ink); }
+.lb-more { padding:8px 12px; }
 .pq { display:flex; flex-direction:column; gap:6px; align-items:stretch; }
 .pq summary { cursor:pointer; }
 .pq-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:4px 0; border-top:1px solid var(--line); font-size:13px; }

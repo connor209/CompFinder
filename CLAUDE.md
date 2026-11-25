@@ -396,7 +396,12 @@ stream` (the relay, only while streaming).
   list's counts come off the rows, a URL's batch id is a uuid or nothing, and
   greps that the table is named in one file and the screen reads its batch
   from the URL, puts a conflict to you both ways, and writes the old one-slot
-  draft only when batches are unavailable.
+  draft only when batches are unavailable. And the batch grid and steps
+  (migration 049): a tile's cover, value and kind off the rows, its stage,
+  the grid's search/sort/filters, a batch's settings read back off its rows,
+  the step bar's one next action, a database without 049 refused once and
+  then saved without the tile columns, the log in words, and greps that the
+  grid never reads rows and every lab page carries the one header.
 
 - `scripts/check-pricequeue.mjs` — the pricing queue (`lib/pricing-queue.js`,
   `lib/pricing-worker.js`, migration 048): one worker per account (two claims
@@ -2738,6 +2743,32 @@ unchanged; this only moves where it lives.
   one-list draft and says so — one tab only.
 - Kept until deleted. A batch is a few hundred rows of text; the batch list
   reads counts, never rows.
+
+**The lab reads like CardUploader now (2026-11-25).** Asked for after the
+batches shipped as a plain list: "I really do want the batches to be
+intuitive". Three views of `/panel/lab/add`, and one header over every lab page:
+
+- **Batches** is a grid of tiles (`BatchHome.js`) — the first scan, what the
+  batch is ("Japanese · Pokemon"), its value, cards, date, a listed bar, a
+  stage chip (`batchStage()`: Not priced, n of N priced, Pricing…, Ready to
+  list, n of N listed, All listed) and View — with search, sort, stage and
+  language over it and the totals line above. The tile's cover, value, priced
+  count, language and game are copied onto the batch at every save
+  (`batchSummary()`, migration 049) so the grid still never reads rows; before
+  049 a save drops those columns after one refusal and tiles show no picture.
+- **New batch** (`?new=1`, `NewBatch.js`) decides what a load IS before the
+  file is read: name, language, which sales count, subtype, cost per card, and
+  "price it as soon as it's loaded", which queues it in the same step. More
+  files into an open batch load the way it was set up (`batchDefaults()`,
+  read off its rows — nothing else stored).
+- **Inside a batch** a step bar (`BatchSteps.js`, `batchProgress()` and
+  `nextStep()`) says Loaded → Priced → Checked → Listed and gives ONE next
+  action as the big button; the table below is unchanged.
+- **One header** (`LabHeader.js`): Overview · Batches · Inventory · Listing
+  settings, the same on all four pages. The home says what the lab is in a
+  sentence, shows the four steps, counts batches from the SERVER (not this
+  browser's old draft), names the eBay figures in words, and the log is
+  sentences (`lib/lab-log.js`), folded shut — never JSON.
 
 ## Pricing is queued: one worker, one rate, however many batches
 
