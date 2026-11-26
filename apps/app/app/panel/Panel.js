@@ -2,6 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { navigate, inPlaceTarget, isPlainClick, NAV_EVENT } from "@/lib/client-nav.js";
+import { pagedSelect } from "@/lib/pagedSelect";
+import SectionTabs from "./SectionTabs";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -157,6 +159,20 @@ const SLUG_STREAM = Object.fromEntries(Object.entries(STREAM_SLUG).map(([k, v]) 
 const MODULES = [
   { key: "dashboard", label: "Dashboard", icon: "home", desc: "Your portfolio & activity at a glance", sections: [{ key: "dashboard", label: "Dashboard" }] },
   {
+    key: "lab",
+    label: "Lab",
+    icon: "flask",
+    // Second, after the dashboard: the lab is where new stock comes in, gets
+    // priced and goes on eBay, so it is the module to find first.
+    desc: "One listing per card, every copy behind it",
+    sections: [
+      { key: "lab", label: "Overview", desc: "Where every batch and card is, and sales from eBay" },
+      { key: "labadd", label: "Batches", desc: "Load CardUploader exports, price them and list" },
+      { key: "labinventory", label: "Inventory", desc: "Lab listings and their copies" },
+      { key: "labsettings", label: "Listing settings", desc: "How lab listings are written" }
+    ]
+  },
+  {
     key: "pricing",
     label: "Pricing",
     icon: "search",
@@ -164,7 +180,7 @@ const MODULES = [
     sections: [
       { key: "single", label: "Quick search", desc: "Price a single card fast" },
       { key: "scan", label: "Scan", desc: "Point your camera to price instantly" },
-      { key: "batch", label: "Batch", desc: "Price a whole list or CSV at once" },
+      { key: "batch", label: "Bulk pricing", desc: "Price a pasted list or CSV in one run (not a lab batch)" },
       { key: "imports", label: "Imports", desc: "Your CardUploader uploads, with their scans" }
     ]
   },
@@ -195,18 +211,7 @@ const MODULES = [
       { key: "cardmarket", label: "Cardmarket stock", desc: "Load the MTG boxes and pick the day's orders" }
     ]
   },
-  {
-    key: "lab",
-    label: "Lab",
-    icon: "flask",
-    desc: "One listing per card, every copy behind it",
-    sections: [
-      { key: "lab", label: "Overview", desc: "Where every batch and card is, and sales from eBay" },
-      { key: "labadd", label: "Batches", desc: "Load CardUploader exports, price them and list" },
-      { key: "labinventory", label: "Inventory", desc: "Lab listings and their copies" },
-      { key: "labsettings", label: "Listing settings", desc: "How lab listings are written" }
-    ]
-  },
+
   { key: "accounts", label: "Accounts", icon: "chart", desc: "Profit & loss and tax-ready reports", sections: [{ key: "accounts", label: "P&L" }] },
   { key: "arbitrage", label: "Arbitrage", icon: "trend", desc: "Spot underpriced buying opportunities", sections: [{ key: "arbitrage", label: "Arbitrage" }] }
 ];
@@ -951,17 +956,11 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const pageSize = 1000;
-      let listings = [];
-      for (let from = 0; ; from += pageSize) {
-        const { data, error } = await supabase
-          .from("ebay_listings")
-          .select("ebay_item_id,sku,title,url,price_value,price_currency,quantity")
-          .range(from, from + pageSize - 1);
-        if (error || !data || data.length === 0) break;
-        listings = listings.concat(data);
-        if (data.length < pageSize) break;
-      }
+      // In a total order (pagedSelect): unordered pages skip some listings
+      // and read others twice, and a skipped one reads as "not in stock".
+      const listings = await pagedSelect(() => supabase
+        .from("ebay_listings")
+        .select("id,ebay_item_id,sku,title,url,price_value,price_currency,quantity"));
       const { data: checks } = await supabase
         .from("price_checks")
         .select("title,sku,recommended_pence,confidence,created_at")
@@ -2471,6 +2470,22 @@ export default function Panel({ initialSection = "dashboard", initialBatchId = n
         </nav>
 
         <main className="stream-main">
+      {(() => {
+        // The module's tabs over the screen (SectionTabs.js). The lab draws its
+        // own (LabHeader, the same strip), and a one-screen module has nothing
+        // to switch between.
+        const m = moduleForStream(stream);
+        if (m.key === "lab" || m.sections.length < 2) return null;
+        const sec = m.sections.find((x) => x.key === stream);
+        return (
+          <SectionTabs
+            label={m.label}
+            current={stream}
+            desc={sec?.desc}
+            tabs={m.sections.map((x) => ({ key: x.key, label: x.label, href: `/panel/${STREAM_SLUG[x.key] || x.key}` }))}
+          />
+        );
+      })()}
       {screen("dashboard", <Dashboard onNavigate={go} />)}
       {screen("single", <QuickSearch seed={seed} />)}
       {stream === "scan" && <Scan onDeepDive={deepDiveCard} />}

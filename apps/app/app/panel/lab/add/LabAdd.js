@@ -24,7 +24,7 @@ import {
 import BatchHome, { BATCH_HOME_CSS } from "./BatchHome";
 import NewBatch, { NEW_BATCH_CSS } from "./NewBatch";
 import BatchSteps, { BATCH_STEPS_CSS } from "./BatchSteps";
-import LabHeader, { LAB_HEADER_CSS } from "../LabHeader";
+import LabHeader from "../LabHeader";
 import { labCardFor, compsFromResult, applyComps } from "@/lib/lab-pricing.js";
 import { navigate } from "@/lib/client-nav.js";
 import { applyJobs, isOpen, remainingCards } from "@/lib/pricing-queue.js";
@@ -790,7 +790,7 @@ export default function LabAdd() {
 
   const s = totals.byStatus;
 
-  const css = LAB_TABLE_CSS + EXTRA_CSS + LAB_HEADER_CSS + BATCH_HOME_CSS + NEW_BATCH_CSS + BATCH_STEPS_CSS;
+  const css = LAB_TABLE_CSS + EXTRA_CSS + BATCH_HOME_CSS + NEW_BATCH_CSS + BATCH_STEPS_CSS;
   const legacyBanner = legacy.length > 0 ? (
     <div className="li-panel lb-row li-warn">
       This browser still has a list from before batches ({legacy.length} card{legacy.length === 1 ? "" : "s"}).
