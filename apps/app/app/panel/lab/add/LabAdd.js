@@ -1523,6 +1523,11 @@ const EXTRA_CSS = `
 .la-fit { overflow-x: clip; }
 .la-table { table-layout: fixed; }
 .la-table td { white-space: normal; overflow-wrap: anywhere; }
+/* Widths include the padding, and the card cell may shrink: otherwise at
+   ~1100px the Card column came out narrower than its own contents and the
+   name ran over Status. */
+.la-table th, .la-table td { box-sizing: border-box; }
+.la-table .li-cardcell { min-width: 0; }
 .la-table .li-cb { width: 40px; }
 .la-table .la-c-status { width: 190px; }
 .la-table .la-c-copies { width: 72px; }
@@ -1532,15 +1537,28 @@ const EXTRA_CSS = `
 .la-table .la-c-file { width: 150px; }
 .la-file { font-size: 12px; }
 .la-open { min-width: 0; }
-.la-open .li-scroll { max-width: 100%; overflow-x: clip; }
+/* hidden + auto, never clip: clip on one axis turns the other off, and the
+   sales list then spilled out of its 360px box over the rows below. */
+.la-open .li-scroll { max-width: 100%; overflow-x: hidden; overflow-y: auto; }
 .la-sales-table { table-layout: fixed; }
 .la-sales-table td { white-space: normal; overflow-wrap: anywhere; }
 .la-sales-table th:nth-child(1) { width: 44px; }
 .la-sales-table th:nth-child(3) { width: 96px; }
 .la-sales-table th:nth-child(4) { width: 104px; }
 .la-sales-table th:nth-child(5) { width: 200px; }
-@media (max-width: 1200px) { .la-table .md-hide { display: none; } }
-@media (max-width: 760px) { .la-table .la-c-price { width: 104px; } }
+/* A column hidden here is shrunk to nothing, never display:none: the open
+   card spans colSpan={7}, and with a column removed that span made a ghost
+   column that took half the spare width from Card. */
+@media (max-width: 1200px) {
+  .li-table.la-table .md-hide { display: table-cell; width: 0; padding: 0; border-width: 0; overflow: hidden; font-size: 0; }
+  .li-table.la-table .md-hide > * { display: none; }
+  .la-table .la-c-status { width: 160px; } .la-table .la-c-comps { width: 200px; }
+}
+@media (max-width: 760px) {
+  .li-table.la-table .sm-hide { display: table-cell; width: 0; padding: 0; border-width: 0; overflow: hidden; font-size: 0; }
+  .li-table.la-table .sm-hide > * { display: none; }
+  .la-table .la-c-price { width: 104px; }
+}
 .la-sales-table td, .la-sales-table th { vertical-align: top; }
 .la-note-row td { background: var(--surface-2, rgba(127,127,127,.06)); }
 .la-note { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 13px; }
@@ -1548,8 +1566,8 @@ const EXTRA_CSS = `
 .la-note-text { flex: 1 1 200px; min-width: 0; font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
 .la-note-tag { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-soft); }
 .la-fields { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
-.la-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); }
-.la-fields input:not([type=checkbox]), .la-fields select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); min-width: min(320px, 100%); max-width: 100%; }
+.la-fields label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-soft); max-width: 100%; min-width: 0; }
+.la-fields input:not([type=checkbox]), .la-fields select { font: inherit; font-size: 13px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); width: 420px; max-width: 100%; box-sizing: border-box; }
 .la-fields .li-check { flex-direction: row; }
 .la-copies { display: flex; flex-wrap: wrap; gap: 10px; }
 .la-progress { border: 1px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; background: var(--surface); position: sticky; top: 8px; z-index: 5; }
