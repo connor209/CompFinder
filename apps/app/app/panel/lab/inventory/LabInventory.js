@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import LabHeader, { LAB_HEADER_CSS } from "../LabHeader";
+import LabHeader from "../LabHeader";
 import {
   inventoryRows, filterRows, sortRows, pageOf, actionable, parsePence, pricePlan, templatePlan,
   copyRows, isEmptyRow, inventoryCsv, EMPTY_FILTERS, STATUSES, PAGE_SIZES, SORT_FIELDS,
@@ -228,7 +228,14 @@ export default function LabInventory() {
     setBusy(true);
     setMsg(null);
     setFailures([]);
-    const r = await api(body);
+    let r = await api(body);
+    // A drastic change (lib/price-change.js) is refused until asked twice —
+    // the same second confirm My listings' "Update to market" has always had.
+    if (!r.ok && r.needsConfirm && Array.isArray(r.drastic)) {
+      const again = window.confirm(`${r.drastic.length} of these is a big change from its current price:\n\n${listLines(r.drastic, (d) => `${d.title}: ${gbp(d.from)} → ${gbp(d.to)}`)}\n\nChange them anyway?`);
+      if (!again) { setBusy(false); setMsg({ bad: true, text: "Nothing changed." }); return; }
+      r = await api({ ...body, force: true });
+    }
     setBusy(false);
     finish(r, verb);
   }
@@ -331,7 +338,7 @@ export default function LabInventory() {
 
   return (
     <main className="li-wrap">
-      <style>{CSS + INV_CSS + LAB_HEADER_CSS}</style>
+      <style>{CSS + INV_CSS}</style>
       <LabHeader current="inventory" />
 
       {/* ---------------- Header ---------------- */}

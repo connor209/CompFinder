@@ -11,6 +11,7 @@ import { inventoryRows, templatePlan } from "@/lib/lab-inventory";
 import { runCheck } from "@/lib/lab-run";
 import { renderListing, settingsProblems, withDefaults } from "@/lib/listing-template";
 import { getNotificationState, enableSaleNotifications, disableSaleNotifications } from "@/lib/lab-notify";
+import { isDrasticChange, priceChangeRow } from "@/lib/price-change";
 
 /**
  * The quantity-listing lab (docs/LAB_COPIES.md). A side build: its own
@@ -25,7 +26,7 @@ import { getNotificationState, enableSaleNotifications, disableSaleNotifications
  *   setQuantity { listingId }                    make eBay's count match the queue
  *   end         { listingId }                    end the listing on eBay
  *   remove      { copyId }                       take one copy off its listing
- *   setPrices   { changes: [{ listingId, pence }] } bulk price, from the inventory view
+ *   setPrices   { changes: [{ listingId, pence }], force? } bulk price, from the inventory view
  *   endMany     { listingIds }                   bulk end, from the inventory view
  *   applyTemplate { listingIds, title, description } re-write live listings from the saved templates
  *   createMany  { job, items: [{ rowId, group, pricePence, … }] }  list in the BACKGROUND:
@@ -102,7 +103,7 @@ export async function POST(request) {
       }
       case "setQuantity": return json(await setQuantity(sb, user, lab, body.listingId));
       case "remove": return json(await remove(sb, user, lab, body.copyId));
-      case "setPrices": return json(await setPrices(sb, user, lab, body.changes));
+      case "setPrices": return json(await setPrices(sb, user, lab, body.changes, body.force === true));
       case "setCosts": return json(await setCosts(sb, user, lab, body.costs));
       case "linkCatalog": return json(await linkCatalog(sb, user.id, lab.listings.filter((l) => !Array.isArray(body.listingIds) || body.listingIds.includes(l.id)), lab.copies));
       case "endMany": return json(await endMany(sb, user, lab, body.listingIds));
@@ -374,13 +375,27 @@ const BULK_MAX = 50;
  * Bulk price. Each change is checked again here (a live lab listing of this
  * account, at least £0.99), sent to eBay, then recorded; one failure is
  * reported and the rest carry on. Never more than a page at a time.
+ *
+ * The same guard and audit as My listings' /api/ebay/revise-price
+ * (lib/price-change.js): a drastic change is refused, naming the listings,
+ * until the screen asks again and sends `force`; and every change applied is
+ * logged to `ebay_price_changes`, so the eBay activity screen shows it and
+ * can revert it, as well as to the lab's own log.
  */
-async function setPrices(sb, user, lab, changes) {
+async function setPrices(sb, user, lab, changes, force = false) {
   const list = Array.isArray(changes) ? changes.slice(0, BULK_MAX + 1) : [];
   if (!list.length) return { ok: false, error: "Nothing to change." };
   if (list.length > BULK_MAX) return { ok: false, error: `At most ${BULK_MAX} listings at once.` };
+  if (!force) {
+    const drastic = list
+      .map((ch) => ({ ch, l: lab.listings.find((x) => x.id === ch?.listingId) }))
+      .filter(({ ch, l }) => l && isDrasticChange(l.price_pence, Number(ch?.pence)))
+      .map(({ ch, l }) => ({ listingId: l.id, title: l.title, from: l.price_pence, to: Number(ch.pence) }));
+    if (drastic.length) return { ok: false, needsConfirm: true, drastic, error: `${drastic.length} of these is a big change from its current price.` };
+  }
   const token = await tokenFor(user.id);
   if (!token) return { ok: false, error: "eBay account not connected." };
+  const admin = createAdminClient();
   const results = [];
   for (const ch of list) {
     const l = lab.listings.find((x) => x.id === ch?.listingId);
@@ -391,6 +406,13 @@ async function setPrices(sb, user, lab, changes) {
       await reviseItemPrice(token, l.ebay_item_id, pence / 100);
       await updateListing(sb, user.id, l.id, { price_pence: pence });
       await logEvent(sb, user.id, l.id, "price", { from: l.price_pence, to: pence });
+      // The eBay activity log, as revise-price writes it, so the change can be
+      // seen and reverted there. Best-effort: the price is already live, and a
+      // missing table (migration 003) must not report the change as failed.
+      // The listings mirror is left to the sync, as the lab always has.
+      try {
+        await admin.from("ebay_price_changes").insert(priceChangeRow({ userId: user.id, itemId: l.ebay_item_id, title: l.title, fromPence: l.price_pence, toPence: pence, source: "lab" }));
+      } catch { /* audit optional */ }
       results.push({ listingId: l.id, ok: true, from: l.price_pence, to: pence });
     } catch (e) {
       await logEvent(sb, user.id, l.id, "error", { action: "price", message: e.message });
