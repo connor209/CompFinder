@@ -16,6 +16,12 @@ const throws = (fn) => { try { fn(); return false; } catch { return true; } };
 eq("near mint is ConditionID 4000 with descriptor 40001",
   conditionXml("400010"),
   "<ConditionID>4000</ConditionID><ConditionDescriptors><ConditionDescriptor><Name>40001</Name><Value>400010</Value></ConditionDescriptor></ConditionDescriptors>");
+// TEST10, 2026-11-26: every LP/MP/HP card failed with "Condition descriptor
+// value 400011 is not valid for condition descriptor 40001". 400011–400013 are
+// the SPORTS card ladder; CCG Individual Cards (183454) takes 400015–400017.
+eq("our grades are eBay's CCG values, not the sports-card ones", CONDITION_DESCRIPTOR, { NM: "400010", LP: "400015", MP: "400016", HP: "400017" });
+eq("a saved legacy LP default is sent as the CCG value", /<Value>400015<\/Value>/.test(conditionXml("400011")), true);
+eq("…and never as the value eBay refuses", /400011|400012|400013/.test(conditionXml("400011") + conditionXml("400012") + conditionXml("400013")), false);
 eq("a descriptor value is never sent as the ConditionID", /<ConditionID>4000\d\d<\/ConditionID>/.test(conditionXml("400013")), false);
 eq("a plain ConditionID passes through", conditionXml("3000"), "<ConditionID>3000</ConditionID>");
 eq("no condition, nothing", conditionXml(""), "");
