@@ -436,6 +436,9 @@ stream` (the relay, only while streaming).
   opens it — number, title, key, its wrong-search comps dropped, a typed price
   and a listed row kept.
 
+- `scripts/check-vercelignore.mjs` — the public page's Vercel ignoreCommand only
+  ever exits 0 or 1: a previous SHA missing from the shallow clone means build.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -3205,8 +3208,14 @@ skipped outright. `compfinder-public` builds Production only when `apps/public`,
 `packages/core` or the root package files changed since its last deploy
 (`VERCEL_GIT_PREVIOUS_SHA`), so an app-only merge never touches the public
 page. A Preview you do want is a **Redeploy** from the dashboard, or delete the
-line. If the previous SHA is missing from the shallow clone the diff errors,
-which counts as "build" — the safe direction.
+line. **An ignoreCommand may only exit 0 (skip) or 1 (build); any other code
+FAILS the deployment.** This file used to say a missing previous SHA "errors,
+which counts as build" — it does not: `git diff` exits 128, and that failed
+every Last Comp deploy from 2026-10-10 to 2026-11-26, because the last good
+deploy's SHA never moved on and fell out of Vercel's shallow clone. No public
+or core code changed in that window, so nothing stale was served; the fix
+(`git cat-file -e` first, then `&& exit 0 || exit 1`) is pinned by
+`check-vercelignore.mjs`.
 
 Verify locally (`npm run check`, `npm run build:public`), let fixes accumulate
 on the branch, and merge once you have something worth deploying. If the site
