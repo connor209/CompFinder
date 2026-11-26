@@ -432,6 +432,18 @@ stream` (the relay, only while streaming).
   remount on a new URL, that an open batch saves when its screen is left, that
   the panel has a loading state and that the middleware uses `getClaims()`.
 
+- `scripts/check-pricechange.mjs` — a price sent to eBay from either screen
+  (`lib/price-change.js`): one drastic-change rule (under a fifth, over five
+  times) for My listings and the lab, a second confirm before forcing, and the
+  `ebay_price_changes` row the eBay activity screen reverts from.
+- `scripts/check-cronauth.mjs` — the three nightly routes go through
+  `cronRefusal()` (`lib/cron-auth.js`): an UNSET `CRON_SECRET` refuses
+  everyone, never means open.
+- `scripts/check-ebaycondition.mjs` — an ungraded card's condition to eBay
+  (`lib/ebay-condition.js`): ConditionID 4000 plus descriptor 40001 from every
+  listing path, never the descriptor value as the ConditionID, and no Damaged
+  grade eBay doesn't have.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails
@@ -3589,6 +3601,40 @@ closed together:
   **listing waits for this visit's lab answer**, never the remembered one.
   A batch's rev and a save in flight live in `MEM` too, so the screen you
   just left finishing its save never makes the next one conflict with itself.
+
+## The platform review, 2026-11-26
+
+`docs/PLATFORM_REVIEW.md` reviewed the app as a daily user, an occasional
+user, a customer and a prospect, and the PR that came with it fixed what each
+of them would hit first. The rules it set:
+
+- **A lab listing is one card, one condition AND one printing.** `groupKey()`
+  in `lab-copies.js` adds `p:rev` for a reverse holo (read by
+  `isReversePrinting()` off the finish columns and the title), after any
+  language part; `keyForLanguage()` carries it through. A plain key is
+  unchanged, so live listings keep their joins. A reverse holo already listed
+  under a plain key stays as it is and the next reverse copy starts its own
+  listing, which Inventory's duplicate flag will name.
+- **Every price revised on eBay goes through `lib/price-change.js`.** The lab's
+  Inventory used to revise with no drastic-change guard and no
+  `ebay_price_changes` row; now both screens refuse a drastic change until
+  asked again, and both write the row EbayActivity shows and reverts.
+  Reverting a lab price from EbayActivity changes eBay and the mirror, not
+  `lab_listings.price_pence` — the lab shows its own figure until the next
+  change.
+- **Nightly jobs need `CRON_SECRET`.** Unset, they refuse with a 503 that says
+  so in the Vercel log. Set it on `comp-finder` before merging anything that
+  depends on the nightly sync.
+- **A condition read off a title is core's**, and `check-corebrowser.mjs`
+  fails on a panel screen deciding HP with its own `\bhp\b`.
+- **Paged reads of `ebay_listings` go through `pagedSelect`** — the portfolio
+  snapshot, Dashboard, Bulk pricing's stock check and My listings were each
+  paging without a total order.
+- **Every module with more than one screen carries the same tab strip**
+  (`SectionTabs.js`, CSS `.lh` in globals.css); LabHeader is that component
+  with the lab's four tabs. **The Lab is second in the menu**, after the
+  Dashboard, and the Pricing module's Batch is called **Bulk pricing** so it is
+  never confused with a lab batch.
 
 ## Gotchas that have already bitten
 
