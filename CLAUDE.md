@@ -36,7 +36,7 @@ is what keeps it shareable; breaking it breaks both apps.
 
 ```
 packages/core/   pricing · soldcomps · cardname · marketplace · epn · catalog · setmatch
-apps/app/        the business tool — eBay OAuth, inventory, batch, scan
+apps/app/        the business tool — eBay OAuth, the lab, inventory, stacks, shows, scan
 apps/public/     the free price page — no accounts, shared key, cached
 tools/           stream-relay: a local server OBS points at during an eBay Live
                  auction. Not deployed, no dependencies, not a workspace.
@@ -96,19 +96,6 @@ stream` (the relay, only while streaming).
   the sub-IDs, that the slot prefix still selects what it always did, that
   `epn.js` passes them through unrewritten, and a grep against hand-writing
   one at a call site.
-- `scripts/check-batchsave.mjs` — what survives saving and re-opening a batch
-  run: every comp, every exclusion reason, the asking prices on the right card,
-  and a grep against a second definition of the saved shape.
-- `scripts/check-cardimport.mjs` — a CardUploader export, kept: that the scans
-  and the card details survive the file and the round trip, that the serialiser
-  and migration 028 declare the same columns, that `title_original` is not
-  writable from a patch, that a batch run prices the EDITED title, and a grep
-  keeping the two tables named in one file.
-- `scripts/check-searchpasses.mjs` — asking one card several ways: the four
-  rungs and the queries they send, that a card with nothing to drop collapses
-  to one search rather than paying for four identical ones, that a sale found
-  by two passes is counted once, that a FULL page stops the ladder, and that a
-  widened QUERY never becomes a widened CARD.
 - `scripts/check-showstock.mjs` — the show pool and the price that reaches a
   label: the cash ladder as a table, which prices are held back, that a graded
   card starts from our own eBay price while a raw one never does, and that a
@@ -145,7 +132,7 @@ stream` (the relay, only while streaming).
   every grep in this repo passes, because it only throws when React renders.
   It also holds the rows that must WRAP — an inline flex row of buttons and a
   fixed-column filter grid both put controls off the side of a phone, with
-  nothing to scroll to reach them — and that re-running a batch confirms first.
+  nothing to scroll to reach them.
   And a hook's deps array naming a `const` declared further down the same
   component — `[sel]` one line above `useState`, which white-screened the Show
   Desk on 2026-10-10 for the same reason: read during render, invisible to a build.
@@ -155,9 +142,9 @@ stream` (the relay, only while streaming).
   `finalPence`.
 - `scripts/check-zeroprice.mjs` — a card nothing priced: that it is written as
   £0.00 rather than left blank, that the engine's own £2.49 floor is never
-  confused with it, that a run carrying one cannot be listed or exported and
-  the refusal names the cards, that a row the run never saw keeps its own
-  price, and greps keeping the zero out of `packages/core` and the public page.
+  confused with it, that `exportGuard()` refuses a list carrying one and names
+  the cards, and greps keeping the zero out of `packages/core` and the public
+  page. (The eBay upload CSV it guarded went with Bulk pricing.)
 - `scripts/check-stackpos.mjs` — where a card physically is: that pulled and
   checked-out cards close the numbering up behind them, and a grep against a
   fourth copy of the rule.
@@ -201,9 +188,7 @@ stream` (the relay, only while streaming).
 - `scripts/check-stockmatch.mjs` — whether a listing of ours is THIS card: that
   the reverse holo and the plain copy are two cards and a slab and a raw copy
   two more, that a SKU match stays exact, that "last priced" is kept per
-  printing, a grep against reading a matched listing's price around
-  `stockedMatch()`, and — since the results table hides columns by position —
-  that its header order still matches the CSS that does the hiding.
+  printing.
 - `scripts/check-recent.mjs` — the cards you looked at: newest first, one row
   per card however it was spelled, capped, and junk from an older build
   dropped rather than drawn.
@@ -431,6 +416,18 @@ stream` (the relay, only while streaming).
   `navigate()`, that no stock screen is kept alive, that the lab's screens
   remount on a new URL, that an open batch saves when its screen is left, that
   the panel has a loading state and that the middleware uses `getClaims()`.
+
+- `scripts/check-pricechange.mjs` — a price sent to eBay from either screen
+  (`lib/price-change.js`): one drastic-change rule (under a fifth, over five
+  times) for My listings and the lab, a second confirm before forcing, and the
+  `ebay_price_changes` row the eBay activity screen reverts from.
+- `scripts/check-cronauth.mjs` — the three nightly routes go through
+  `cronRefusal()` (`lib/cron-auth.js`): an UNSET `CRON_SECRET` refuses
+  everyone, never means open.
+- `scripts/check-ebaycondition.mjs` — an ungraded card's condition to eBay
+  (`lib/ebay-condition.js`): ConditionID 4000 plus descriptor 40001 from every
+  listing path, never the descriptor value as the ConditionID, and no Damaged
+  grade eBay doesn't have.
 
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
@@ -972,87 +969,6 @@ for the same contract as JSON.
   `check-batchcomps.mjs` are written the way sellers write; the acceptance
   figures (Riolu ~11 comps / ~£49.99, Numel ~29 / ~£12.49) need a real run.
 
-## Asking the same card more than one way
-
-One query per card is one sample, and the measured shape of that sample is
-poor on cheap cards: over a 50-card reverse-holo commons run SoldComps
-**returned** a median of 11 listings per card — six cards under five — while
-the filter kept 8 of the 11. **The loss is upstream of the rules.** And there
-is no time lever, because SoldComps holds no data far enough back for a wider
-window to reach.
-
-So `apps/app/lib/searchpasses.js` asks differently instead. **Search depth** on
-the Batch screen runs up to four passes per card, narrowest first:
-
-| rung | query | why |
-|---|---|---|
-| exact | `Emboar Reverse Holo 33/236 Cosmic Eclipse` | what the file describes |
-| noset | `Emboar Reverse Holo 33/236` | the number is the anchor; the set was steering, and it is the term sellers spell most variously — CardUploader writes Cardmarket's names, and nobody titles a listing "Deck Exclusives" |
-| noprinting | `Emboar 33/236 Cosmic Eclipse` | finds the "Rev Holo" and "Reverse Foil" listings the literal words never return |
-| bare | `Emboar 33/236` | the widest ask |
-
-- **A wider search is not a wider CARD.** Every pass is filtered against the
-  real card's `cardSettings`, so a pass that dropped "Reverse Holo" from the
-  SEARCH is still pricing a reverse holo and the plain copies it drags in go
-  out as `variantMismatch`. Reading the printing off the widened text would
-  pool the two printings, which is what three cards sold under market for;
-  `check-searchpasses.mjs` greps the cross-reference for a `settingsForText`
-  of its own.
-- **Every rung is a change to the ITEM, never a query string of its own**, so
-  all four go through `buildQueryFromItem`. A second query builder would drift,
-  and the drift reads as passes searching for something the app does not think
-  they search for.
-- **A rung that repeats a query is dropped.** A card with no set has nothing to
-  drop and collapses to one search — paying twice for one string is the one
-  thing a multi-pass search must never do.
-- **A FULL page stops the ladder.** SoldComps returns one page newest-first, so
-  a capped card has no more sales waiting behind a wider query — it has a
-  different, wider page, which on a reverse holo is a page of plain copies.
-  Widening a card that is already full spends a request to make the sample
-  worse.
-- **Each sale is counted once**, keyed on the item id, then the URL, then
-  title+total+date. The same listing counted twice weights the median toward
-  whatever the easy searches found, which is precisely the bias more passes
-  exist to remove.
-- **Agreement is the point, not just more comps.** Each pass is priced on its
-  OWN comps — free, the comps are already in hand — and searches that found
-  DIFFERENT listings and landed on the same figure are evidence one search
-  cannot give. Disagreement says the narrow search was a BIASED sample rather
-  than a small one, and nothing else in this app can tell those apart, so it
-  goes on the row with a ⚠ rather than being averaged away.
-- **`AGREE_WITHIN_PCT` (25) and `ENOUGH_COMPS` (12) are judgements, not
-  measurements.** They are in one file so they are one number rather than a
-  feeling scattered through the UI, and the audit harness is how they should
-  be settled.
-
-Depth 1 is the default and is exactly what the app has always done.
-
-**A run has to say how many searches it actually made.** The setting says "up
-to 4"; almost no run spends that, because three different things end a card's
-ladder and they mean opposite things about the card — the page came back FULL,
-the pool was already big enough, or every wider rung built the SAME query and
-there was never a second search to run. `searchSummary()` is the one definition
-of which happened, and `rec.search` carries it on **every** card at **every**
-depth.
-
-Attaching it only when more than one pass ran is what made this unanswerable:
-a card that stopped at the first rung carried nothing and was indistinguishable
-from a card priced at depth 1 — which is exactly the card you go looking at,
-because it is the one where the setting appears to have done nothing.
-
-- **`fetched` and `added` are different numbers and the row shows both.** Two
-  searches often come back with largely the same page. A rung that found twelve
-  and added none is the difference between a depth that is earning its requests
-  and one that is not.
-- **The run-wide line is the BILL, against the button's ceiling.** "61 searches
-  across 50 cards, against a ceiling of 200" is the useful fact; so is the
-  opposite, because if nearly every card ran the lot the wider passes are mostly
-  re-finding the same listings.
-- **`searchDepth` is in the downloaded run.** It is now the setting that changes
-  a corpus most, and a run that does not record it cannot be compared with
-  another — the file that prompted this carried none, so the one artefact that
-  could have answered "how many searches did this card make" could not.
-
 ## Measure before adding a pricing rule
 
 The audit harness exists so a rule is judged on data rather than on the two
@@ -1478,151 +1394,6 @@ condition field out of the listing. The mock also shows "sold at auction",
 "14 bids" and "private seller"; SoldComps returns none of those, so they are
 absent rather than guessed.
 
-## A batch run is saved, and a saved run is frozen
-
-A run of the app's Batch screen costs one SoldComps request per card and
-several minutes. It used to live only in React state, and **a slug change
-remounts the panel** — so opening a deep dive from a result (`/panel/search`)
-threw the whole run away. Fifty-nine cards, priced, gone on one click, with no
-way back except paying for all fifty-nine again.
-
-`price_checks` was never the answer to that. It keeps one flat row per priced
-card — title, query, price, confidence, two counts — deliberately without the
-comps, because the History page is a plain SELECT. It says what we priced a
-card at. It cannot say why.
-
-Migration 023 adds `price_batches` + `price_batch_items`: the run, with the
-**full recommendation including `included[]` and `excluded[]`**, the filters it
-ran under, and the CardUploader CSV verbatim so the eBay upload export still
-works days later. Both tables are named in exactly one file,
-`apps/app/lib/batch-store.js`, and `check-batchsave.mjs` greps to keep it that
-way.
-
-- **Re-opening a run spends nothing upstream.** The comps are the ones it was
-  priced from, not a fresh lookup — that is what makes it a record of a price
-  decision rather than a live quote, and it is why re-opening is free.
-- **A saved run is re-opened by URL** — `/panel/batch/<id>`. In the URL rather
-  than in state precisely because state is the thing that gets lost: a run
-  identified by its URL survives the next deep dive and comes back on the Back
-  button.
-- **There are two copies and one serialiser.** Supabase is the saved run;
-  `sessionStorage` under `cf-batch-live` covers the gap between finishing a run
-  and it being saved, and the case where migration 023 hasn't been applied.
-  Both go through `batchRows()`/`restoreResults()`, because two serialisers
-  would disagree eventually and the disagreement is invisible — a run that
-  re-opens with its prices but not the comps behind them still looks fine.
-- **A comp is stored cut down to what the results screen renders** (price,
-  postage, sold date, listing link, location, exclusion reason). A run is
-  around a megabyte of comps as it is.
-- **Retention is 30 days**, set by `RETENTION_DAYS` in `batch-store.js` and by
-  the column default in migration 023 — the check asserts they agree. The rows
-  are fat and their value decays fast: a run is a working document you list off
-  over a few days, not an archive. Expired runs are swept when the saved-runs
-  list loads, rather than by a cron that can quietly stop working.
-- **The file a run came from is HANDED to the save, not read off state.**
-  Every saved run read "50 cards pasted" even when it came from a CardUploader
-  file. `onCsvSelected` calls `setCsvRaw()` and then, in the same tick, starts
-  the run through `runBatchRef` — which points at the last COMPLETED render, so
-  the closure that saves holds the previous value: null on the first upload of
-  a session, and the WRONG FILE on the second. The label was only the symptom:
-  `csv_raw` is what the eBay upload export is rebuilt from days later, so a run
-  saved without it cannot produce the one file it exists to make — and nothing
-  said so, because the button reads live state and looked right until the run
-  was re-opened. Exactly the trap the comment above `runBatchRef` already
-  describes for the filters, one variable along.
-- **A save that fails says so, and can be retried.** Everything else on this
-  screen is fire-and-forget; this isn't, because the promise is that the run
-  can be got back and the failure would otherwise only surface at the moment it
-  was needed. **Save this run** saves whatever is on screen on demand — which
-  is what makes a failed automatic save recoverable rather than terminal, and
-  covers the run that was navigated away from before it finished.
-- **One bad comp must not cost the run.** The first version deleted the whole
-  batch if any chunk of rows failed to insert, so a single unstorable character
-  in one of several thousand scraped titles took an 89-card run with it. Rows
-  go in small chunks, a failed chunk is retried row by row, and a row that
-  still won't store keeps its price without its comps and says so. Titles are
-  cleaned of what Postgres rejects (`storableText`): a NUL byte is refused
-  outright in text and jsonb, and a lone surrogate — half a character pair,
-  left where a title was cut mid-emoji — isn't valid UTF-8 on the wire.
-- **An empty saved-runs list says it is empty.** It used to hide itself, so
-  "nothing saved yet" and "the save failed" looked identical: an empty screen.
-
-Migration 023 has to be applied in Supabase. Until it is, the panel says so on
-the run it couldn't save, and the sessionStorage copy still carries the run
-across the panel — but not across a reload.
-
-## The file already had the card in it
-
-The Batch screen has read CardUploader exports since the beginning and kept
-four fields out of twenty-five: title, SKU, number, condition. So a row on that
-screen could only ever say its title, and the two questions you actually ask
-holding a card — *is this the one I scanned* and *is the title right* — had no
-answer anywhere in the app.
-
-Both answers were in the file the whole time. **`PicURL` is a pipe-separated
-list of photographs of THAT COPY**, four per row in a September 2026 export,
-already public on CardUploader's CDN. The set, rarity, year, illustrator, type,
-stage and language are each one column. `apps/app/app/panel/Imports.js` is the
-screen, `lib/import-store.js` owns the tables, and migration 028 is
-`card_imports` + `card_import_items`.
-
-- **URLs, not bytes**, the same rule migration 022 set for catalogue art, and a
-  stronger case here: these are pictures of a card we are holding.
-- **The scans beat catalogue art, which is why the row never reaches for it.**
-  Counter mode settled this already — publisher artwork shows a mint card to
-  somebody holding a played one. A row with no scan says "no scan"; a gap is
-  honest and a perfect picture of a different copy is not. `check-cardimport`
-  greps the screen to keep it that way.
-- **The card details are editable too, not just the title.** Three of them are
-  not decoration: `cardName`, `cardNumber` and `set` are what
-  `buildQueryFromItem` searches on, so correcting a set CardUploader got wrong
-  changes which comps come back. `SPECIFIC_COLUMNS` in `import-store.js` is the
-  allow-list, and `check-cardimport.mjs` fails if the screen offers a field the
-  store would silently refuse to write.
-- **The same editor is on the BATCH results**, because the moment you notice a
-  wrong set is when you are looking at the price it produced, not when you are
-  looking at the file. `CardFields.js` is the one definition of what may be
-  corrected — two copies would drift about which fields are editable, and that
-  drift is invisible: the input renders, the edit does nothing. A correction
-  there reaches four copies, because the one you list from is whichever you
-  reach for next: React state, the `cf-batch-live` sessionStorage copy, the
-  saved run (`updateItemCard`), and the IMPORT the cards came from — that last
-  one because a fix that never reaches the record is a fix you make again on
-  the next run off the same file.
-- **A corrected card says its price predates the correction.** The row records
-  the `query` it was priced with, so the test is to rebuild one from the card
-  as it now stands and see whether they still agree — no stored flag to
-  round-trip and lose, and it catches a corrected SET (which changes the query)
-  as readily as a corrected title. Built with the RUN's own filters, or a run
-  made with "include condition" would call every one of its rows stale. The
-  count is at the top of the results, because a run you are listing from has to
-  say how many of its prices no longer describe their card.
-- **The price is not silently recomputed.** This screen cannot spend a
-  SoldComps request behind your back; what it can do is stop the figure
-  pretending it knows about the edit.
-- **Editing the title is the point, not a convenience.** The title is what the
-  engine searches on and — since `*C:Finish` is blank on 49 of 50 reverse holos
-  — it is also what decides which PRINTING gets priced. So a correction changes
-  the price that comes back. `title_original` is kept beside it and is NOT
-  writable from a patch, exactly as `finalPence` survives an override: a change
-  nobody can see is indistinguishable from what the file said.
-- **A run prices what you corrected.** `/panel/batch?import=<id>` is the same
-  device as `?pool=show` — a set of cards named in the URL, because a slug
-  change remounts the panel and state is what that loses — and it hands over
-  the edited titles. Handing over the originals would make the edit a
-  decoration.
-- **The serialiser and the migration are checked against each other.** A field
-  added to one and not the other is invisible until Postgres rejects the insert
-  — and it rejects the whole chunk of rows, not the offending column.
-- **No expiry, where a saved batch run has thirty days.** A run is a working
-  document fat with comps; an import is a few kilobytes of text and links, and
-  the day you want it is the day a card turns up in a box with a SKU on it and
-  nothing else attached.
-- **The file's £2.49 is shown and not editable.** Every row of a CardUploader
-  export carries that placeholder — the same figure as the engine's own floor,
-  which is the whole reason `zero-price.js` exists. Making it typeable here
-  would be a third place to set a price that nothing downstream reads.
-
 ## The copy on the shelf is only the same card if it is the same printing
 
 A batch row is matched against our live listings and our own price history on
@@ -1661,109 +1432,6 @@ on 25 of 30 reverse holos.
 - **"Last priced" is per printing too.** One newest row per card key had the
   reverse priced last Tuesday answering for the plain copy priced this morning,
   purely by being newer.
-
-## The working folds away; the answer and the warnings do not
-
-Fifty priced cards is fifty query strings and fifty paragraphs of engine prose,
-and the prose is read once and scrolled past for the rest of the run. **Show
-the working** (remembered in `localStorage`, default ON) drops the query line
-and the note from both the cards and the table — never the price, the
-confidence, the comp counts, the ⚑ or anything a price was overridden with,
-which is loud on every screen by rule. A note carrying a **⚠** keeps its mark
-beside the confidence badge with the full text behind it, so the one thing
-compacting a row must not do is unrepresentable rather than merely avoided.
-
-Default ON because off is a choice about your own screen; shipping it off would
-hide the engine's caveats from somebody who never asked for a quieter one.
-
-**The sheet is the default view**, and the card grid is the alternative. The
-sheet is the one that shows the card; the grid is for reading one closely,
-which is the rarer thing to be doing with a finished run.
-
-**The results are a sheet, not a table.** Ten columns whose titles wrapped to
-four lines made every row 130px tall, so a 33-card run was a long scroll and a
-200-card one was unreadable — a table that cannot be scanned is a card list
-wearing a table's clothes. `ResultSheet` lays a row out the way CardUploader
-does: the scan of THIS copy on the left, what the card is beside it, the
-numbers on the right.
-
-**The scan was already on the row and nothing drew it.** `csvItem` carries
-`images[]` from either upload path, and the saved run keeps it in `csv_item`,
-so a picture costs nothing — no fetch, no catalogue lookup. A row with no scan
-draws nothing: catalogue art there would show a mint card where a played one
-is, which is the rule counter mode settled.
-
-**Both upload buttons now keep the file.** The Batch screen's own CSV upload
-used to price the cards and keep nothing, so the scans inside a file existed
-only as long as the tab — and an import only appeared if you had used the other
-button. One upload path, one record; the save is fire-and-forget, because a
-failure there may cost the record and must never cost the run.
-
-**A run says what is on the bench.** Pricing 33 cards is several minutes during
-which the only thing that moved was a counter. `pricingNow` holds the cards in
-flight (three, BATCH_CONCURRENCY) with their scans — which is also the moment
-you would most like to notice that the wrong file went in. It is cleared in a
-`finally` around `priceOne`, never inside it: that function exits from half a
-dozen places and a missed one leaves a card on the bench for ever.
-
-**WHY a comp was dropped goes on the row, not in a tooltip.** The sheet shipped
-with `7 / 6` and the reason breakdown as a hover `title`, which reads fine on
-the screen it was written on and vanishes from a screenshot, a printout and a
-glance — and "6 excluded" without the reason is the one number on that row
-nobody can act on. It was caught the expensive way: a run printed to PDF to
-compare two builds could not answer the question it was printed for.
-
-**The positional column hiding went with the table, and good riddance.** It is
-what made adding an "In stock" column silently hide the Current one for months.
-`check-stockmatch.mjs` now pins what a row may DROP — the working goes, the
-answer, the ⚠ and an override note stay — rather than a header order against
-a stylesheet.
-
-**A row of buttons that cannot wrap is a button off the edge.** The results
-actions shipped as an inline `style={{ display: "flex" }}` inside a
-`space-between` header: five buttons fit a desktop, and on a phone the last of
-them were off the side of the screen with nothing to scroll to reach — one of
-which spends money. The filter row had the matching fault, five fixed grid
-columns with no breakpoint, and **Search depth** was added to it as a sixth.
-Both are classes that wrap now, and `check-panelstate.mjs` fails on either
-coming back. Neither was visible from a desktop, which is the whole point.
-
-**Reading a file costs nothing; only the button does.** Uploading a
-CardUploader CSV used to start the run in the same tick the file landed, so
-every control on the screen was already spent by the time you could see what
-was in the file — **search depth** most of all, which is exactly the one you
-would change HAVING seen it. Changing it afterwards did nothing and nothing
-said so, because the requests were gone. The upload now loads a QUEUE and
-stops: the count, the file name and the cost at the depth currently selected,
-with **▶ Start search** under them. Pasted titles, an import and the show pool
-were already explicit buttons; this was the one path that wasn't.
-
-- **The queue carries the file it was built from**, and hands that to the run.
-  That is the same rule the save follows for `csv_raw`, and it is what makes a
-  second upload impossible to price under the first one's file. It also
-  retires `runBatchRef` — with no run starting out of a memoised callback,
-  the render-old closure that caused that bug has nowhere left to happen.
-- **Cleared on success only.** A run that fell over leaves the file loaded and
-  the button live; going to find the CSV again to retry something that cost
-  nothing to load is the shape of problem this screen keeps having.
-- **The import and pool buttons quote the depth too.** They read `searchDepth`
-  like every other run and were quoting one request per card regardless, which
-  understated a depth-4 run fourfold.
-
-**A run can be priced again without finding the file.** Everything worth
-changing is changed AFTER a run — the search depth, a set the file got wrong, a
-title you corrected — and until `rerunCurrent()` the only way back was
-re-uploading the CSV, which throws away every correction made since. It
-CONFIRMS, because it spends a request per card on a screen somebody is holding
-in one hand at a show; the count it quotes is the ceiling, since anything
-priced in the last 24 hours comes back from the cache for nothing.
-
-**Saved runs is folded shut by default.** The argument for listing it above the
-Batch screen was that the moment you want a run is the moment you are looking
-at an empty screen wondering where the last one went — which is an argument for
-one click away, not for thirty days of rows between the controls and the
-results. The header carries the count, an open run is named there, and a save
-that FAILED still says so whether the list is open or shut.
 
 ## 👍 / 👎: what the app has been told about its prices
 
@@ -3589,6 +3257,72 @@ closed together:
   **listing waits for this visit's lab answer**, never the remembered one.
   A batch's rev and a save in flight live in `MEM` too, so the screen you
   just left finishing its save never makes the next one conflict with itself.
+
+## The platform review, 2026-11-26
+
+`docs/PLATFORM_REVIEW.md` reviewed the app as a daily user, an occasional
+user, a customer and a prospect, and the PR that came with it fixed what each
+of them would hit first. The rules it set:
+
+- **A lab listing is one card, one condition AND one printing.** `groupKey()`
+  in `lab-copies.js` adds `p:rev` for a reverse holo (read by
+  `isReversePrinting()` off the finish columns and the title), after any
+  language part; `keyForLanguage()` carries it through. A plain key is
+  unchanged, so live listings keep their joins. A reverse holo already listed
+  under a plain key stays as it is and the next reverse copy starts its own
+  listing, which Inventory's duplicate flag will name.
+- **Every price revised on eBay goes through `lib/price-change.js`.** The lab's
+  Inventory used to revise with no drastic-change guard and no
+  `ebay_price_changes` row; now both screens refuse a drastic change until
+  asked again, and both write the row EbayActivity shows and reverts.
+  Reverting a lab price from EbayActivity changes eBay and the mirror, not
+  `lab_listings.price_pence` — the lab shows its own figure until the next
+  change.
+- **Nightly jobs need `CRON_SECRET`.** Unset, they refuse with a 503 that says
+  so in the Vercel log. Set it on `comp-finder` before merging anything that
+  depends on the nightly sync.
+- **A condition read off a title is core's**, and `check-corebrowser.mjs`
+  fails on a panel screen deciding HP with its own `\bhp\b`.
+- **Paged reads of `ebay_listings` go through `pagedSelect`** — the portfolio
+  snapshot, Dashboard, Bulk pricing's stock check and My listings were each
+  paging without a total order.
+- **Every module with more than one screen carries the same tab strip**
+  (`SectionTabs.js`, CSS `.lh` in globals.css); LabHeader is that component
+  with the lab's four tabs. **The Lab is second in the menu**, after the
+  Dashboard.
+
+## Bulk pricing, Imports and Arbitrage were removed (2026-11-26)
+
+Asked for on 2026-11-26, on the condition that **the lab is not touched**.
+New stock is priced in the lab (Add copies and the pricing queue); one card
+in Quick Search. What went:
+
+- **Bulk pricing** (the Batch screen, ~3,500 lines inline in `Panel.js`),
+  its saved runs (`SavedBatches.js`, `lib/batch-store.js`), the bulk eBay
+  lister (`BulkListModal.js`), the eBay upload CSV (`lib/ebayexport.js`), the
+  house-rule adapter (`lib/house-rec.js`) and the search-depth ladder
+  (`lib/searchpasses.js`). `Panel.js` is the menu and screen switcher only.
+- **Imports** (`Imports.js`, `CardFields.js`, `lib/import-store.js`).
+- **Arbitrage** (`Arbitrage.js`, `/api/arbitrage/scan`).
+- On the Show Desk: **🏷 Price this pool** and **💷 Price these**, which
+  handed cards to Bulk pricing. A sticker is now set with **✎ £** or
+  **🏷 eBay price → sticker**.
+- The `/panel/batch/<id>`, `?pool`, `?import` and `?ids` URLs; an old link
+  opens the dashboard.
+
+What stayed, because the lab or another screen uses it: `/api/batch-comps`,
+`lib/batch-comps.js`, `lib/batch-price-core.js`, the pricing queue,
+`lib/house-pricing.js`, `lib/carduploader.js`, `lib/zero-price.js`,
+`lib/price-override.js`, `lib/showstock.js`, `lib/labelexport.js`, the
+feedback store (its `slimRec` moved to `lib/slim-rec.js`), Quick Search's
+`ListForm`, `PriceOverride` and `PriceFeedback`. **No table was dropped**:
+`price_batches`, `price_batch_items`, `card_imports` and `card_import_items`
+keep what is in them (the stack checker still reads a card's scan from
+`card_import_items`, and `scripts/dump-batch.mjs` can still read an old run).
+
+The sections of this file that described those screens were removed with
+them. Where a surviving section still says "the Batch screen", it is history:
+the rule it describes now lives on in Quick Search, the Show Desk or the lab.
 
 ## Gotchas that have already bitten
 

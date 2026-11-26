@@ -2,29 +2,25 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import LabOverview from "./LabOverview";
-import LabHeader, { LAB_HEADER_CSS } from "./LabHeader";
+import LabHeader from "./LabHeader";
 import { describeEvent } from "@/lib/lab-log.js";
-import CardUploaderCsv from "@/lib/carduploader.js";
-import { renderListing } from "@/lib/listing-template.js";
-import { groupsFromItems, pickList, listingForGroup, priceFromComps, listBlockers, PHOTO_PROMISE } from "@/lib/lab-copies.js";
+import { pickList } from "@/lib/lab-copies.js";
 
 /**
  * The lab's home: what the lab is, the four steps a batch goes through, where
  * every card is now (LabOverview), what eBay has told us about sales, picking
  * and the activity log in words (lib/lab-log.js). Batches are their own page
  * (/panel/lab/add), listings and copies the Inventory.
+ *
+ * This page used to carry a whole second Add copies — its own CSV reader,
+ * pricer (a third way of building a /api/batch-comps card) and List all —
+ * with nothing on screen reaching it. Removed 2026-11-26: Add copies is the
+ * one way a file enters the lab.
  */
 
-const SETTINGS_KEY = "cf-lab-settings";
 const box = { background: "var(--surface)", border: "1px solid var(--line)", borderRadius: 12, padding: 16, marginBottom: 16 };
 const row = { display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" };
 const small = { fontSize: 13, color: "var(--ink-soft)" };
-const gbp = (p) => (p == null ? "—" : `£${(p / 100).toFixed(2)}`);
-
-function loadSettings() {
-  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}") || {}; } catch { return {}; }
-}
-
 async function api(body) {
   const res = await fetch("/api/lab", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
   return res.json().catch(() => ({ ok: false, error: `The server answered ${res.status}.` }));
@@ -35,17 +31,6 @@ export default function LabCopies() {
   const [busy, setBusy] = useState(null);
   const [msg, setMsg] = useState(null);
   const [lastCheck, setLastCheck] = useState(null);
-  const [file, setFile] = useState(null); // { name, groups, refused }
-  const [prices, setPrices] = useState({});
-  const [comps, setComps] = useState({});
-  const [subtypes, setSubtypes] = useState({}); // group key → subtype // group key → { pence, confidence, n, flags, error }
-  const [progress, setProgress] = useState(null); // { label, done, total }
-  const [failures, setFailures] = useState([]); // [{ title, error }] from the last List all
-  const [preview, setPreview] = useState(null); // group key
-  const [settings, setSettings] = useState({ categoryId: "183454", postcode: "", shippingCost: "0", dispatchDays: "2", returnsDays: "14" });
-
-  useEffect(() => { setSettings((s) => ({ ...s, ...loadSettings() })); }, []);
-
   const reload = useCallback(async () => setLab(await api()), []);
   useEffect(() => { reload(); }, [reload]);
 
@@ -113,146 +98,6 @@ export default function LabCopies() {
     return r;
   }
 
-  function onFile(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const text = String(reader.result || "");
-        const items = CardUploaderCsv.extractItems(text);
-        // Finish and set code are in the file but not in extractItems' shape.
-        // Read them off the raw rows, filtered the same way so index i is the
-        // same card on both sides.
-        const raw = CardUploaderCsv.rowsToObjects(CardUploaderCsv.parseCsv(text))
-          .filter((r) => (r["*C:Card Name"] || "").trim() && (r["*C:Card Number"] || "").trim());
-        const extras = raw.map((r) => ({ finish: (r["*C:Finish"] || "").trim(), setCode: (r["*C:Set Code"] || r["C:Set Code"] || "").trim() }));
-        const { groups, refused } = groupsFromItems(items, extras.length === items.length ? extras : []);
-        setFile({ name: f.name, groups, refused, rows: items.length });
-        setPreview(null);
-      } catch (err) {
-        setFile({ name: f.name, groups: [], refused: [], error: err.message || "Couldn't read that file." });
-      }
-    };
-    reader.readAsText(f);
-    e.target.value = "";
-  }
-
-  function priceOf(key) {
-    const v = String(prices[key] || "").replace(/[£\s]/g, "");
-    if (!/^\d+(\.\d{1,2})?$/.test(v)) return null;
-    return Math.round(Number(v) * 100);
-  }
-
-  const joinOf = (g) => listingForGroup(lab?.listings || [], g);
-  /** What a new listing for this group will say — the same function the server lists with. */
-  const renderOf = (g) => renderListing({ ...settings, ...(lab?.listingSettingsSaved ? lab.listingSettings : {}) }, g, { subtype: subtypes[g.key] || "", pricePence: priceOf(g.key) });
-
-  /**
-   * Price every group from sold comps through /api/batch-comps — the app's
-   * own batch pricer, house rules and all, unchanged. One card per group (its
-   * head copy: the copies are the same card in the same condition), fifty to
-   * a request and one request at a time, as that route asks. A typed price is
-   * never overwritten; an unpriced group stays blank and blocks List all.
-   */
-  async function priceAll() {
-    const todo = (file?.groups || []).filter((g) => !joinOf(g));
-    if (!todo.length) return;
-    setBusy("price");
-    setMsg(null);
-    setProgress({ label: "Pricing from sold comps", done: 0, total: todo.length });
-    const next = {};
-    for (let i = 0; i < todo.length; i += 50) {
-      const chunk = todo.slice(i, i + 50);
-      const cards = chunk.map((g) => ({
-        sku: g.copies[0].sku, name: g.cardName, number: g.cardNumber, set: g.set, title: g.title, condition: g.condition, language: g.language
-      }));
-      try {
-        const res = await fetch("/api/batch-comps", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cards }) });
-        const j = await res.json();
-        if (!res.ok || !j.results) throw new Error(j.error || `Pricing answered ${res.status}.`);
-        const bySku = new Map(j.results.map((r) => [String(r.sku), r]));
-        for (const g of chunk) {
-          const r = bySku.get(String(g.copies[0].sku));
-          const flags = r?.flags ? Object.keys(r.flags).filter((k) => r.flags[k]) : [];
-          next[g.key] = { pence: priceFromComps(r), confidence: r?.confidence || null, n: r?.n_comps ?? null, flags };
-        }
-      } catch (e) {
-        for (const g of chunk) next[g.key] = { pence: null, error: e.message };
-      }
-      setProgress({ label: "Pricing from sold comps", done: Math.min(i + 50, todo.length), total: todo.length });
-    }
-    setComps((c) => ({ ...c, ...next }));
-    setPrices((p) => {
-      const out = { ...p };
-      for (const [k, v] of Object.entries(next)) if (!String(out[k] || "").trim() && v.pence != null) out[k] = (v.pence / 100).toFixed(2);
-      return out;
-    });
-    setProgress(null);
-    setBusy(null);
-  }
-
-  /** Every group in the file, one at a time: new listings and joins alike. */
-  async function listAll() {
-    const groups = file?.groups || [];
-    const blockers = listBlockers(groups.filter((g) => !joinOf(g)), priceOf);
-    if (blockers.length) {
-      setMsg({ bad: true, text: `No price yet for ${blockers.slice(0, 3).join(", ")}${blockers.length > 3 ? ` and ${blockers.length - 3} more` : ""}. Type one, or price from sold comps.` });
-      return;
-    }
-    const joins = groups.filter((g) => joinOf(g));
-    const fresh = groups.filter((g) => !joinOf(g));
-    const total = fresh.reduce((t, g) => t + priceOf(g.key) * g.copies.length, 0);
-    const ok = window.confirm(
-      `List ${groups.length} card${groups.length === 1 ? "" : "s"} on eBay — LIVE.\n\n` +
-      `${fresh.length} new listing${fresh.length === 1 ? "" : "s"} (${fresh.reduce((t, g) => t + g.copies.length, 0)} copies, ${gbp(total)} in all)\n` +
-      `${joins.length} joining a listing already live (its price stays)\n\nGo?`
-    );
-    if (!ok) return;
-    setBusy("listAll");
-    setMsg(null);
-    setFailures([]);
-    const failed = [];
-    const done = new Set();
-    for (let i = 0; i < groups.length; i++) {
-      const g = groups[i];
-      setProgress({ label: "Listing", done: i, total: groups.length });
-      const r = await api({ action: "create", group: g, pricePence: priceOf(g.key), subtype: subtypes[g.key] || "", marketPence: comps[g.key]?.pence ?? null, settings: { ...settings, shippingCost: Number(settings.shippingCost) || 0 } });
-      if (r.ok) done.add(g.key);
-      else failed.push({ title: g.title, error: r.error || "Failed." });
-    }
-    setProgress(null);
-    setBusy(null);
-    setFailures(failed);
-    setFile((f) => f && { ...f, groups: f.groups.filter((x) => !done.has(x.key)) });
-    setMsg(failed.length
-      ? { bad: true, text: `${done.size} listed, ${failed.length} failed — see below. The failed ones are still in the list to retry.` }
-      : { text: `All ${done.size} listed.` });
-    await reload();
-  }
-
-  async function list(g) {
-    const joining = joinOf(g);
-    const pence = joining ? joining.price_pence : priceOf(g.key);
-    if (pence == null) { setMsg({ bad: true, text: "Type a price first." }); return; }
-    const ok = window.confirm(joining
-      ? `Add ${g.copies.length} cop${g.copies.length === 1 ? "y" : "ies"} to "${joining.title}" (eBay ${joining.ebay_item_id})?\n\nIts quantity goes up by ${g.copies.length}; its price stays at ${gbp(joining.price_pence)}.`
-      : `List "${g.title}" on eBay — LIVE, real buyers can buy it.\n\n` +
-        `${g.condition} · quantity ${g.copies.length} · ${gbp(pence)} each\nShowing ${g.copies[0].sku}'s scans.\n\nList it?`
-    );
-    if (!ok) return;
-    await run(`list-${g.key}`, {
-      action: "create", group: g, pricePence: pence, subtype: subtypes[g.key] || "", marketPence: comps[g.key]?.pence ?? null,
-      settings: { ...settings, shippingCost: Number(settings.shippingCost) || 0 }
-    }, (r) => {
-      setMsg({ text: r.joined
-        ? `Added to eBay ${r.itemId}: quantity ${r.from ?? "?"} → ${r.to}.`
-        : `Listed — eBay item ${r.itemId}.${r.warnings?.length ? ` eBay warned: ${r.warnings.join(" ")}` : ""}` });
-      setFile((f) => f && { ...f, groups: f.groups.filter((x) => x.key !== g.key) });
-      setPreview(null);
-    });
-  }
-
   if (!lab) return <main style={{ maxWidth: 980, margin: "0 auto", padding: 16 }}>Loading the lab…</main>;
   if (lab.foldPending || lab.needsMove) {
     return (
@@ -293,24 +138,15 @@ export default function LabCopies() {
     );
   }
 
-  const previewGroup = file?.groups.find((g) => g.key === preview) || null;
-  const rank = (g) => {
-    if (joinOf(g)) return 3;
-    const c = comps[g.key];
-    if (priceOf(g.key) == null) return 0;
-    if (c && (c.confidence === "low" || c.confidence === "none" || (c.flags || []).length)) return 1;
-    return 2;
-  };
-
   const logRows = events.map((e) => ({ e, ...describeEvent(e) }));
   const problems = logRows.filter((x) => x.tone === "bad").length;
 
   return (
     <main style={{ maxWidth: 980, margin: "0 auto", padding: 16, color: "var(--ink)" }}>
-      <style>{LAB_HEADER_CSS + HOME_CSS}</style>
+      <style>{HOME_CSS}</style>
       <LabHeader current="overview" />
       <div style={{ ...row, justifyContent: "space-between" }}>
-        <h1 style={{ margin: 0 }}>Lab</h1>
+        <h1 style={{ margin: 0 }}>Lab overview</h1>
         <a className="btn btn-primary" href="/panel/lab/add?new=1">＋ New batch</a>
       </div>
       <p style={{ ...small, marginTop: 4 }}>
@@ -428,17 +264,3 @@ const HOME_CSS = `
 .lab-log.bad { color:var(--bad); } .lab-log.good span:last-child { color:var(--ink); }
 .lab-when { flex:0 0 auto; width:118px; color:var(--ink-faint); font-variant-numeric:tabular-nums; }
 `;
-
-/** What the sold comps said about one group, beside the price box. */
-function CompsNote({ c, typed }) {
-  if (c.error) return <div style={{ fontSize: 13, color: "var(--bad)" }}>Pricing failed: {c.error}</div>;
-  if (c.pence == null) return <div style={{ fontSize: 13, color: "var(--bad)" }}>No price from sold comps{c.n != null ? ` (${c.n} comps)` : ""}. Type one.</div>;
-  const thin = c.confidence === "low" || c.confidence === "none" || (c.flags || []).length;
-  return (
-    <div style={{ fontSize: 13, color: thin ? "var(--warn)" : "var(--ink-soft)" }}>
-      Sold comps: {gbp(c.pence)} · {c.n ?? "?"} comps · {c.confidence || "?"} confidence
-      {(c.flags || []).length ? ` · ${c.flags.join(", ").replace(/_/g, " ")}` : ""}
-      {typed != null && typed !== c.pence ? ` · you typed ${gbp(typed)}` : ""}
-    </div>
-  );
-}

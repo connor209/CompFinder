@@ -5,8 +5,13 @@ the same card, each with its **own scan**, its **own stack position** and its
 own internal SKU. A copy sells; the listing's picture becomes the next copy's
 scan; the app tells you which stack to walk to and how far to count.
 
-**Status: the logic is built and tested, the writes are built and untested
-against live eBay, there is no screen for it yet.** What that gets you is a
+**Status (26 Nov 2026): superseded by the lab for new stock.** The lab
+(`/panel/lab`, `docs/LAB_COPIES.md`, `docs/LAB_FOLD.md`) runs this method on
+real eBay with screens, sale-time reservation and its own queue order
+(`lib/lab-copies.js`), and never touches `copyqueue.js`'s
+`ebay_item_id`-keyed path, which applies to non-lab listings only. What
+follows was the original status: **the logic is built and tested, the writes
+are built and untested against live eBay, there is no screen for it yet.** What that gets you is a
 process you can run by hand, end to end, on one listing — which is the only
 thing worth having before the method has proved it is worth having.
 

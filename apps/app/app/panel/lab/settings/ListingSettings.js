@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import LabHeader, { LAB_HEADER_CSS } from "../LabHeader";
+import LabHeader from "../LabHeader";
 import { createClient } from "@/lib/supabase/client";
 import { resizeImage } from "@/lib/resizeImage";
 import {
@@ -106,7 +106,6 @@ export default function ListingSettings() {
 
   return (
     <main style={{ maxWidth: 980, margin: "0 auto", padding: 16, color: "var(--ink)" }}>
-      <style>{LAB_HEADER_CSS}</style>
       <LabHeader current="settings" />
       <div style={{ ...row, justifyContent: "space-between" }}>
         <div>

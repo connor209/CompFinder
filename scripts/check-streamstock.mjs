@@ -369,8 +369,8 @@ const store = file("apps/app/lib/storefront-store.js");
 ok("the storefront — a stranger's phone — serves show stock only", /storefrontStock\(showOnly\(/.test(store));
 ok("and reads the pool column to know", /POOL_COLUMN/.test(store) && /export const POOL_COLUMN = "pool"/.test(store));
 ok("Show history leaves stream sales out of a show's takings", /showOnly\(await pagedSelect/.test(file("apps/app/app/panel/ShowHistory.js")));
-const panel = file("apps/app/app/panel/Panel.js");
-ok("the show pool, saved stickers and sticker write-back all filter", (panel.match(/showOnly\(/g) || []).length >= 3);
+// The show pool, saved stickers and sticker write-back (Panel.js) went with
+// Bulk pricing, 2026-11-26; every remaining reader is covered by the walk above.
 
 const inv = file("apps/app/app/panel/Inventory.js");
 const deals = (inv.match(/<DealButton\b/g) || []).length;

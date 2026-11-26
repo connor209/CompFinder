@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken, reviseItemPrice } from "@/lib/ebay";
+import { isDrasticChange } from "@/lib/price-change";
 
 /**
  * Write-back Phase 2a — update a single listing's price on eBay.
@@ -50,7 +51,7 @@ export async function POST(request) {
 
   // Sanity guard against a bad comp match nuking a live price.
   const oldPrice = row.price_value != null ? Number(row.price_value) : null;
-  if (oldPrice && (price < oldPrice * 0.2 || price > oldPrice * 5) && !force) {
+  if (isDrasticChange(oldPrice, price) && !force) {
     return NextResponse.json({
       ok: false,
       needsConfirm: true,

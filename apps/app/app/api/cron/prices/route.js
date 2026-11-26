@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cronRefusal } from "@/lib/cron-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncPrices, prunePriceHistory } from "@/lib/pricesync";
 import { refreshEurGbp } from "@/lib/fx";
@@ -16,10 +17,8 @@ import { refreshEurGbp } from "@/lib/fx";
 export const maxDuration = 300;
 
 export async function GET(request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {
-    return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
-  }
+  const refused = cronRefusal(request);
+  if (refused) return NextResponse.json({ ok: false, error: refused.error }, { status: refused.status });
 
   let admin;
   try {

@@ -8,10 +8,10 @@ import Fold from "./Fold";
 
 const CONDITIONS = [
   { l: "Near mint or better", v: "400010" },
-  { l: "Lightly played", v: "400011" },
-  { l: "Moderately played", v: "400012" },
-  { l: "Heavily played", v: "400013" },
-  { l: "Damaged", v: "400014" }
+  { l: "Lightly played", v: "400015" },
+  { l: "Moderately played", v: "400016" },
+  { l: "Heavily played", v: "400017" }
+  // No "Damaged": eBay has no ungraded grade below Heavily played (lib/ebay-condition.js).
 ];
 const SHIPPING = [
   { l: "Royal Mail 2nd Class", v: "UK_RoyalMailSecondClassStandard" },

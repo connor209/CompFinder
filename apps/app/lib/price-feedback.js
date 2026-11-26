@@ -20,7 +20,7 @@
  * Pure and framework-free, so `scripts/check-feedback.mjs` loads it under bare
  * node. `feedback-store.js` is the only file naming the table.
  */
-import { slimRec } from "./batch-store.js";
+import { slimRec } from "./slim-rec.js";
 import { effectivePence } from "./price-override.js";
 import { ruleTagsFromComment, saleTagFromComment } from "./price-rules.js";
 

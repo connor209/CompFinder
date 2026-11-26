@@ -1,7 +1,6 @@
 "use client";
 
 import { Fragment, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { pagedSelect } from "@/lib/pagedSelect";
 import { liveRanks, stackDepths, positionLabel, locationsBySku } from "@/lib/stackpos.js";
@@ -27,7 +26,6 @@ import {
   binderSpreads, spreadIndexOf, turnSpread, BLANK_PAGE
 } from "@/lib/binder.js";
 import { recordWant, loadWants, deleteWant, wantsSummary } from "@/lib/wants-store.js";
-import { probePoolName } from "@/lib/batch-store";
 import { probeState, deskSetup, setupSummary } from "@/lib/desk-setup";
 import DealBar, { DealButton, DealTally, useDeal } from "./DealBar";
 import StorefrontPanel from "./StorefrontPanel";
@@ -271,7 +269,6 @@ export default function ShowDesk() {
   // (id -> text; untouched means the sticker) and an optional lot total.
   const [bulkSale, setBulkSale] = useState(null);
   const profileSettings = useRef({});
-  const router = useRouter();
 
   // `counterMode` is the LIST facing a customer and `binderMode` is the
   // binder; `customerMode` is the question every piece of desk chrome asks —
@@ -416,16 +413,13 @@ export default function ShowDesk() {
     (async () => {
       try {
         const sb = supabase();
-        // `stock_checkouts` is named here because this file already names it;
-        // `price_batches` is asked through batch-store.js, which owns it.
-        const [stickerErr, poolErr] = await Promise.all([
-          sb.from("stock_checkouts").select("sticker_pence").limit(0).then((r) => r.error || null, (e) => e),
-          probePoolName(sb)
-        ]);
+        // Only the sticker column (024) is asked about now: `price_batches`'
+        // pool_name went with Bulk pricing (2026-11-26), so poolName stays
+        // UNKNOWN and says nothing.
+        const stickerErr = await sb.from("stock_checkouts").select("sticker_pence").limit(0).then((r) => r.error || null, (e) => e);
         if (!live) return;
         setSetup(deskSetup({
-          stickers: probeState(stickerErr),
-          poolName: probeState(poolErr)
+          stickers: probeState(stickerErr)
           // Not the wants (026): asked to stop warning about it on 2026-11-01.
           // The want list still degrades quietly while it is pending.
         }));
@@ -1786,26 +1780,16 @@ export default function ShowDesk() {
     setMsg(`${rows.length} label${rows.length === 1 ? "" : "s"} exported for ${binder?.name || "the binder"}, with the eBay SKU and the binder SKU (B1-047) in the third and fourth columns.${gap}`);
   }
 
-  /** Price only the ticked cards — the pool route, narrowed by id. */
-  function priceSelected(ids) {
-    if (!ids.length) return;
-    router.push(`/panel/batch?pool=show&ids=${ids.map(encodeURIComponent).join(",")}`);
-  }
-
   /**
    * Set — or clear — the sticker price on one card, here at the desk.
    *
-   * The Batch screen's stickers are the normal way in: price the pool, and
-   * every card gets a cash-rounded number written back. This is the other
-   * half, and it is the half that happens on the day. A card the run held back
-   * (thin comps, no comps at all), a card added to the box after the run, or
-   * simply a price you have changed your mind about with the table in front of
-   * you — none of those are worth re-pricing 43 cards for.
+   * With Bulk pricing gone (2026-11-26) this and "eBay price → sticker" are
+   * the two ways a sticker is set: a card added to the box, a card with no
+   * eBay price, or a price you have changed your mind about with the table in
+   * front of you.
    *
-   * What you type here is NOT put through the cash ladder. Overriding a price
-   * on the Batch results is overriding an EBAY price, and the ladder turns
-   * that into cash; here you are writing the label itself, the same as the
-   * sticker box on the Batch screen's label panel.
+   * What you type here is NOT put through the cash ladder: you are writing
+   * the label itself.
    *
    * Whole pounds, for the same reason that box is: `labelPrice()` prints to
    * the pound, so a £7.50 sticker would come off the roll as £8 with nothing
@@ -2894,16 +2878,6 @@ export default function ShowDesk() {
           ? `${binder.cardCount} card${binder.cardCount === 1 ? "" : "s"}`
           : counterMode ? `${counter.shown} card${counter.shown === 1 ? "" : "s"}` : `${open.length} out`}
         actions={<>
-          {open.length > 0 && !customerMode ? (
-            <button
-              className="btn btn-ghost"
-              onClick={() => router.push("/panel/batch?pool=show")}
-              title="Price everything that's checked out and get a recommended sticker price for each"
-              disabled={busy}
-            >
-              🏷 Price this pool
-            </button>
-          ) : null}
           {/* Always offered, including with an empty box. Gated on there being
               stock out, it vanished exactly when someone wanted to find out what
               it did — and a control you can only discover while packing for a
@@ -3133,8 +3107,7 @@ export default function ShowDesk() {
                       disabled: soldTicked.length === 0,
                       title: soldTicked.length ? "Sticker the ticked cards at what we ask on eBay, rounded to the pound — they stay ticked, so Labels prints them next" : "Tick the cards to sticker first — this never applies to every card on screen",
                       onClick: () => applyEbayStickers(soldTicked)
-                    },
-                    { key: "price", label: `💷 Price these (${selCount})`, title: "Price just these cards on the Batch screen and get sticker prices for them, rather than the whole pool", onClick: () => priceSelected(selected.filter((o) => o.title).map((o) => o.id)) }
+                    }
                   ]}
                 />
                 <button
@@ -3149,10 +3122,8 @@ export default function ShowDesk() {
               </div>
               {labelGap.length > 0 ? (
                 <p className="hint hint-small" style={{ marginTop: 6 }}>
-                  <button className="sd-clear-all" onClick={() => priceSelected(labelGap)}>
-                    Price the {labelGap.length} without a sticker
-                  </button>
-                  {" "}— a run of just those cards, not the whole pool.
+                  {labelGap.length} ticked card{labelGap.length === 1 ? " has" : "s have"} no sticker yet, so no label —
+                  set one with ✎ £ on the row, or 🏷 eBay price → sticker.
                 </p>
               ) : null}
             </div>

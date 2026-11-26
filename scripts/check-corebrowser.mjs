@@ -98,6 +98,20 @@ eq("case does not matter", strip("Tyrogue REVERSE HOLO"), "Tyrogue REVERSE HOLO"
 eq("a second bare holo after a reverse one still goes", strip("Tyrogue Reverse Holo Holo"), "Tyrogue Reverse Holo");
 eq("holographic is not holo", strip("Charizard Holographic"), "Charizard Holographic");
 
+// --- 4. no screen reads a condition off a title by its own regex -----------
+// Panel.js held a copy once; Arbitrage.js held another until 2026-11-26, still
+// reading bare "hp" so "60 HP" priced a card as Heavily Played. A screen may
+// add words after core answers "Unknown", never decide HP itself.
+{
+  const { readdirSync, readFileSync: rf } = await import("node:fs");
+  const dir = new URL("../apps/app/app/panel/", import.meta.url);
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".js"))) {
+    const src = rf(new URL(f, dir), "utf8");
+    eq(`${f} decides HP through core, not a bare \\bhp\\b`, /\/heavily played\|\\bhp\\b\//.test(src), false);
+    if (/function inferCondition\(/.test(src)) eq(`${f}'s inferCondition delegates to core`, /SoldCompsApi\.inferCondition\(/.test(src), true);
+  }
+}
+
 if (failures) {
   console.error(`\ncheck-corebrowser: ${failures} failure(s)\n`);
   process.exit(1);

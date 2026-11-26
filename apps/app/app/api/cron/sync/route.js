@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cronRefusal } from "@/lib/cron-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncUserListings, syncUserSales } from "@/lib/ebay";
 import { snapshotUserPortfolio } from "@/lib/portfolio";
@@ -19,19 +20,15 @@ import { runStackImport } from "@/lib/stack-import.js";
  * from the Vercel logs. Each account is tried on its own, so one account's
  * failure never stops the next.
  *
- * Secured with CRON_SECRET when set: Vercel Cron sends
- * `Authorization: Bearer <CRON_SECRET>`. Set CRON_SECRET in the environment to
- * lock this route down.
+ * Secured with CRON_SECRET (lib/cron-auth.js): Vercel Cron sends
+ * `Authorization: Bearer <CRON_SECRET>`, and with the secret unset the route
+ * refuses rather than running for anyone.
  */
 export const maxDuration = 300;
 
 export async function GET(request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    if (request.headers.get("authorization") !== `Bearer ${secret}`) {
-      return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
-    }
-  }
+  const refused = cronRefusal(request);
+  if (refused) return NextResponse.json({ ok: false, error: refused.error }, { status: refused.status });
 
   let admin;
   try {

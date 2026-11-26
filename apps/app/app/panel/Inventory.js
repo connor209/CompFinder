@@ -511,21 +511,13 @@ export default function Inventory({ onDeepDive }) {
 
   async function loadListings() {
     const supabase = createClient();
-    // PostgREST caps a single select at 1000 rows — page through with .range().
-    const pageSize = 1000;
-    let from = 0;
-    let all = [];
-    for (;;) {
-      const { data, error } = await supabase
-        .from("ebay_listings")
-        .select("*")
-        .order("title", { ascending: true })
-        .range(from, from + pageSize - 1);
-      if (error || !data || data.length === 0) break;
-      all = all.concat(data);
-      if (data.length < pageSize) break;
-      from += pageSize;
-    }
+    // PostgREST caps a single select at 1000 rows. Paged by title, with the
+    // id appended by pagedSelect: titles tie (four copies of one card), and a
+    // tie at a page edge read one listing twice and dropped another.
+    const all = await pagedSelect(() => supabase
+      .from("ebay_listings")
+      .select("*")
+      .order("title", { ascending: true }));
     setListings(all);
   }
 

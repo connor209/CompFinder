@@ -2535,3 +2535,12 @@ svg.trend { width:100%; height:auto; display:block; overflow:visible; color:var(
    panel's own loading state (app/panel/loading.js) for a full page load. */
 .screen-loading { display:flex; align-items:center; gap:10px; padding:32px 16px; color:var(--ink-soft); font-size:14px; }
 .panel-loading { min-height:60vh; display:flex; align-items:center; justify-content:center; gap:10px; color:var(--ink-soft); font-size:14px; background:var(--bg, transparent); }
+
+/* ---- Section tabs (SectionTabs.js): every multi-screen module, the lab included ---- */
+.section-head { margin:0 0 14px; }
+.lh { display:flex; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; gap:4px; border-bottom:1px solid var(--line); margin:0; }
+.lh::-webkit-scrollbar { display:none; }
+.lh a { white-space:nowrap; padding:8px 12px; font-size:14px; color:var(--ink-soft); text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-1px; }
+.lh a:hover { color:var(--ink); }
+.lh a.on { color:var(--ink); font-weight:600; border-bottom-color:var(--accent); }
+.section-desc { margin:6px 2px 0; font-size:13px; color:var(--ink-soft); }

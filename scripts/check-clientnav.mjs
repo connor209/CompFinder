@@ -7,7 +7,7 @@
  * whole panel, and the lab's links reloaded the app outright. What it pins:
  *
  * - Which URLs may be switched in place, and which still need the server
- *   (a saved run, ?pool, ?import, ?ids, ?wish) — reading one of those in place
+ *   (?wish; a saved run, ?pool, ?import and ?ids went with Bulk pricing) — reading one of those in place
  *   would open the panel without the thing the URL names.
  * - Which clicks are left to the browser: another site, a new tab, a download,
  *   a modified click.
@@ -28,13 +28,13 @@ const eq = (label, got, want) => {
 const ok = (label, cond) => { if (!cond) fail(label); };
 
 // ---- which URLs need the server ----
-for (const u of ["/panel/stacks", "/panel/lab/add", "/panel/lab/add?batch=0b3c4c1e-8a1f-4f2e-9b1a-2c3d4e5f6a7b", "/panel/lab/add?new=1", "/panel/batch", "/panel"]) {
+for (const u of ["/panel/stacks", "/panel/lab/add", "/panel/lab/add?batch=0b3c4c1e-8a1f-4f2e-9b1a-2c3d4e5f6a7b", "/panel/lab/add?new=1", "/panel"]) {
   eq(`${u} is switched in place`, needsServer(u), false);
 }
-for (const u of ["/panel/batch/abc", "/panel/batch?pool=show", "/panel/batch?import=1", "/panel/batch?pool=show&ids=a,b", "/panel/shows?wish=x", "/settings", "/login", "/show/token"]) {
+for (const u of ["/panel/shows?wish=x", "/settings", "/login", "/show/token"]) {
   eq(`${u} needs the server`, needsServer(u), true);
 }
-eq("the server-only query keys", SERVER_QUERY_KEYS, ["pool", "import", "ids", "wish"]);
+eq("the server-only query keys", SERVER_QUERY_KEYS, ["wish"]);
 
 // ---- which clicks ----
 const origin = "https://app.example";
@@ -49,7 +49,7 @@ eq("a batch tile (relative)", inPlaceTarget(a("?batch=0b3c4c1e-8a1f-4f2e-9b1a-2c
 eq("a new tab is the browser's", inPlaceTarget(a("?batch=x", { target: "_blank" }), origin), null);
 eq("a download is the browser's", inPlaceTarget(a("/panel/stacks", { download: "" }), origin), null);
 eq("another site is the browser's", inPlaceTarget(a("https://www.ebay.co.uk/itm/1"), origin), null);
-eq("a saved run is the server's", inPlaceTarget(a("/panel/batch/abc"), origin), null);
+eq("a wish pickup is the server's", inPlaceTarget(a("/panel/shows?wish=x"), origin), null);
 eq("an in-page anchor is the browser's", inPlaceTarget(a("#top"), origin), null);
 eq("no anchor", inPlaceTarget(null, origin), null);
 const click = (o = {}) => ({ button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false, ...o });

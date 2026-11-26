@@ -164,7 +164,7 @@ const appFiles = walk("apps");
 const naming = appFiles.filter((f) => /["'`]price_feedback["'`]/.test(readFileSync(f, "utf8")));
 eq("price_feedback is named in one app file", naming, ["apps/app/lib/feedback-store.js"]);
 
-const pricing = [...walk("packages/core"), "apps/app/lib/house-pricing.js", "apps/app/lib/batch-comps.js", "apps/app/lib/house-rec.js", "apps/app/lib/searchpasses.js", "apps/app/lib/matching.js"];
+const pricing = [...walk("packages/core"), "apps/app/lib/house-pricing.js", "apps/app/lib/batch-comps.js", "apps/app/lib/matching.js"];
 for (const f of pricing) {
   if (/price-feedback|feedback-store/.test(readFileSync(f, "utf8"))) fail(`${f} reads feedback — a vote is evidence for a measured change, never an automatic one`);
 }
@@ -176,8 +176,6 @@ const css = readFileSync("apps/app/app/globals.css", "utf8");
 ok("the vote row wraps on a phone", /\.pf-row\s*\{[^}]*flex-wrap:\s*wrap/.test(css));
 ok("the reasons wrap on a phone", /\.pf-reasons\s*\{[^}]*flex-wrap:\s*wrap/.test(css));
 
-const panel = readFileSync("apps/app/app/panel/Panel.js", "utf8");
-ok("both Batch views carry the vote", (panel.match(/onVote=\{\(verdict, reason\) => voteFor\(origIndex, verdict, reason\)\}/g) || []).length === 2);
 ok("Quick Search carries the vote", /<PriceFeedback[^>]*send=\{voteOnCard\}/.test(readFileSync("apps/app/app/panel/QuickSearch.js", "utf8")));
 
 if (failures) {

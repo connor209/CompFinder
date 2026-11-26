@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import CompFinderPricing from "@compfinder/core/pricing.js";
 import { awayIndex, stockUnits } from "@/lib/stockcheck.js";
+import { pagedSelect } from "@/lib/pagedSelect";
 
 const pounds = (p) => (p == null ? "—" : CompFinderPricing.toPoundsStr(p));
 
@@ -125,19 +126,12 @@ export default function Dashboard({ onNavigate }) {
     if (!s.connected) return;
 
     // Page through listings.
-    let from = 0;
-    let all = [];
-    for (;;) {
-      const { data, error } = await supabase
-        .from("ebay_listings")
-        .select("ebay_item_id,sku,price_value,price_currency,quantity,extra")
-        .range(from, from + 999);
-      if (error || !data || data.length === 0) break;
-      all = all.concat(data);
-      if (data.length < 1000) break;
-      from += 1000;
-    }
-    const { data: costRows } = await supabase.from("listing_costs").select("ebay_item_id,cost_pence");
+    // Both reads in a total order (pagedSelect), and the costs paged too: a
+    // single select stops at 1,000 rows, so a bigger shop lost cost basis.
+    const all = await pagedSelect(() => supabase
+      .from("ebay_listings")
+      .select("id,ebay_item_id,sku,price_value,price_currency,quantity,extra"));
+    const costRows = await pagedSelect(() => supabase.from("listing_costs").select("ebay_item_id,cost_pence"), { orderBy: "ebay_item_id" });
     const costMap = new Map((costRows || []).map((r) => [r.ebay_item_id, r.cost_pence]));
 
     // A sold card stays in the ActiveList at quantity 0, so `all` holds shells
@@ -318,7 +312,7 @@ export default function Dashboard({ onNavigate }) {
           <div className="dash-actions">
             <button className="btn btn-primary" onClick={() => onNavigate?.("single")}>🔍 Price a card</button>
             <button className="btn btn-ghost" onClick={() => onNavigate?.("buy")}>🛒 Log a purchase</button>
-            <button className="btn btn-ghost" onClick={() => onNavigate?.("arbitrage")}>📊 Find arbitrage</button>
+            <button className="btn btn-ghost" onClick={() => onNavigate?.("labadd")}>🧪 Lab batches</button>
             <button className="btn btn-ghost" onClick={() => onNavigate?.("inventory")}>🏷️ My listings</button>
           </div>
         </div>

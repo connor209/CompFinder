@@ -260,6 +260,15 @@ way at all.
 
 ### What already exists, and what is new
 
+> **Status, 26 Nov 2026.** The three "New" items below are built — in the
+> lab, not on `copyqueue.js`: the reservation is `stack_cards.reserved_*`
+> (migration 042, `lib/lab-run.js`, the sale notification and the nightly
+> sweep), the pull sheet takes a lab card's RESERVED copy and never
+> `pullmatch.js`'s front-most rule (`check-labstacks.mjs`), and the screens are
+> `/panel/lab` (Overview, Batches, Inventory, Listing settings). See
+> `docs/LAB_FOLD.md` and `docs/PLATFORM_REVIEW.md`. The text is kept as the
+> plan it was.
+
 - **Built and tested, untested on live eBay:** the queue, its ordering, the
   desired quantity and photo, the reconcile, and the per-unit pull plan for a
   multi-quantity order (`copyqueue.js`, `check-copyqueue.mjs`). Also the photo

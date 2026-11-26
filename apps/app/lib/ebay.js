@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { conditionXml } from "./ebay-condition.js";
 import { shipKeyOf } from "./piles.js";
 
 /**
@@ -49,7 +50,7 @@ export function ebayConfigured() {
 
 // --- Application token (client-credentials) + public Browse search ---
 // Used by features that read the public marketplace rather than a specific
-// user's account (e.g. the arbitrage scanner). Cached across warm invocations.
+// user's account (the active-listings check). Cached across warm invocations.
 let appToken = null;
 let appTokenExp = 0;
 
@@ -70,7 +71,7 @@ export async function getAppAccessToken() {
 
 /**
  * Search the public marketplace for active listings. Defaults to newly-listed,
- * fixed-price items on eBay UK — the input the arbitrage scanner works from.
+ * fixed-price items on eBay UK; browseComps() below is its caller.
  */
 export async function browseActiveListings({ q, limit = 20, sort = "newlyListed", marketplace = "EBAY_GB", extraFilter } = {}) {
   const token = await getAppAccessToken();
@@ -647,7 +648,7 @@ export async function addFixedPriceListing(accessToken, L) {
     `<Currency>GBP</Currency><Country>GB</Country>` +
     `<Location>${escapeXml(L.location || L.postcode || "United Kingdom")}</Location>` +
     (L.postcode ? `<PostalCode>${escapeXml(L.postcode)}</PostalCode>` : "") +
-    (L.conditionId ? `<ConditionID>${escapeXml(L.conditionId)}</ConditionID>` : "") +
+    conditionXml(L.conditionId) +
     (pics ? `<PictureDetails>${pics}</PictureDetails>` : "") +
     (specifics ? `<ItemSpecifics>${specifics}</ItemSpecifics>` : "") +
     sellerProfiles +

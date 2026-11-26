@@ -693,7 +693,6 @@ for (const [title, number, want] of NUMBERED_CASES) {
   const readsFacts = (file) => /subjectFactsFrom\(/.test(readFileSync(new URL(`../${file}`, import.meta.url), "utf8"));
   for (const file of [
     "apps/app/lib/matching.js",
-    "apps/app/app/panel/Arbitrage.js",
     "apps/app/app/panel/Inventory.js",
     "apps/public/lib/settings.js"
   ]) {

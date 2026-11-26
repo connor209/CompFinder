@@ -105,6 +105,24 @@ eq("…as is one with no language", groupKey({ cardName: "Pikachu", cardNumber: 
 eq("a Japanese key is its own", groupKey({ cardName: "Pikachu", cardNumber: "25/102", set: "Base", condition: "NM", language: "Japanese" }), "pikachu|25/102|base|NM|japanese");
 eq("re-keying replaces the language, never stacks it", keyForLanguage(keyForLanguage("a|b|c|NM", "Japanese"), "Korean"), "a|b|c|NM|korean");
 eq("…and back to English drops it", keyForLanguage("a|b|c|NM|japanese", "English"), "a|b|c|NM");
+// ---- printing (2026-11-26): a reverse holo is never the plain copy's listing ------
+const card = (over) => ({ cardName: "Shedinja", cardNumber: "14/107", set: "Deoxys", condition: "NM", title: "Shedinja 14/107 Deoxys", ...over });
+eq("a plain key is unchanged by the printing part", groupKey(card({})), "shedinja|14/107|deoxys|NM");
+eq("a reverse holo read off the finish columns is its own listing", groupKey(card({ finish: "Reverse Holo" })), "shedinja|14/107|deoxys|NM|p:rev");
+eq("…and off the title when the finish is blank", groupKey(card({ title: "Shedinja 14/107 Deoxys Reverse Holo" })), "shedinja|14/107|deoxys|NM|p:rev");
+eq("…spelled 'Rev Holo' too", groupKey(card({ title: "Shedinja 14/107 Rev Holo" })), "shedinja|14/107|deoxys|NM|p:rev");
+eq("Reverse Valley is a card, not a printing", groupKey(card({ cardName: "Reverse Valley", title: "Reverse Valley 110/123 Holo" })).endsWith("p:rev"), false);
+eq("a Japanese reverse keeps both parts", groupKey(card({ finish: "Reverse Holo", language: "Japanese" })), "shedinja|14/107|deoxys|NM|japanese|p:rev");
+eq("re-keying the language never drops the printing", keyForLanguage("a|b|c|NM|japanese|p:rev", "English"), "a|b|c|NM|p:rev");
+eq("…nor stacks it", keyForLanguage(keyForLanguage("a|b|c|NM|p:rev", "Korean"), "Korean"), "a|b|c|NM|korean|p:rev");
+const mixed = groupsFromItems([
+  { sku: "P1", ...card({}), images: ["https://x/p1.jpg"] },
+  { sku: "R1", ...card({ finish: "Reverse Holo" }), images: ["https://x/r1.jpg"] },
+  { sku: "P2", ...card({}), images: ["https://x/p2.jpg"] }
+]).groups;
+eq("a plain and a reverse copy are two listings; two plain copies are one", mixed.map((g) => g.copies.map((c) => c.sku)), [["P1", "P2"], ["R1"]]);
+eq("…and the reverse listing's card says so", mixed[1].card.finish, "Reverse Holo");
+
 const item = (sku, language) => ({ sku, cardName: "Pikachu", cardNumber: "25/102", set: "Base", condition: "NM", title: "Pikachu", images: [`https://x/${sku}.jpg`], language });
 const en = groupsFromItems([item("E1", "English")]).groups;
 const ja = groupsFromItems([item("J1", "Japanese")]).groups;
@@ -180,6 +198,16 @@ eq("nothing picked prices nothing", evidencePrice(ev, []).suggestedPence, null);
 eq("picks that equal the counted set are not 'your picks'", [picksDiffer(ev, ["b", "a"]), picksDiffer(ev, ["a"]), picksDiffer(ev, null)], [false, true, false]);
 const many = evidenceFrom({ sales: [{ title: "k", price: 1, postage: 0, total: 1, item_id: "k" }], excluded: Array.from({ length: 300 }, (_, i) => ({ title: `x${i}`, price: 1, postage: 0, total: 1, item_id: `x${i}`, reason: "nameMismatch" })) });
 eq("capped, never cutting a counted sale", [many.length, many[0].id], [EVIDENCE_CAP, "k"]);
+// Piloswine 48/102 (TEST9, 2026-11-26): 200 Quagsire 48/64s from the widest
+// search came first and filled the cap, so the Piloswines turned away for the
+// seller's country were cut off the table. Nearest the card first.
+const pilo = evidenceFrom({ sales: [], excluded: [
+  ...Array.from({ length: 200 }, (_, i) => ({ title: `Quagsire 48/64 #${i}`, price: 1, postage: 0, total: 1, item_id: `q${i}`, reason: "setMismatch" })),
+  { title: "Piloswine 48/102 HGSS Triumphant", price: 3, postage: 1, total: 4, item_id: "p1", reason: "nonUkLocation" }
+] });
+eq("a sale of THIS card left out is shown before 200 other cards", [pilo.length, pilo[0].id], [EVIDENCE_CAP, "p1"]);
+eq("the line says the table was capped", evidenceSummary(pilo, 234).startsWith(`found 234, ${EVIDENCE_CAP} shown`), true);
+eq("…and nothing extra when it wasn't", evidenceSummary(ev, 5).startsWith("found 5 ·"), true);
 eq("a sale found twice is one row", evidenceFrom({ sales: [{ title: "a", total: 1, price: 1, item_id: "z" }], excluded: [{ title: "a", total: 1, price: 1, item_id: "z", reason: "duplicate" }] }).length, 1);
 const relangPicks = applyBulk([{ ...priced, picks: ["a"] }], ["p"], { op: "language", language: "Japanese", overseas: true });
 eq("changing language or sellers drops your picks with the old sales", [relangPicks[0].picks, relangPicks[0].overseas], [null, true]);

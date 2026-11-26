@@ -75,18 +75,38 @@ export function evidenceFrom(result) {
     all.push(e);
   }
   const keep = all.filter((e) => e.counted);
-  const rest = all.filter((e) => !e.counted).slice(0, Math.max(0, EVIDENCE_CAP - keep.length));
+  // Left out, nearest the card first. The route lists its own set filter's
+  // rejections before the engine's, so on a card whose widest search ("Piloswine
+  // 48") brings back two hundred other cards numbered 48, those filled the
+  // whole cap and every sale that WAS the card — turned away for postage, the
+  // seller's country, condition or printing — was cut off the table, which is
+  // exactly the sale you open this table to look at (Piloswine 48/102, TEST9,
+  // 2026-11-26). A stable sort, so each group keeps the route's order.
+  const rest = all.filter((e) => !e.counted)
+    .map((e, i) => ({ e, i, far: OTHER_CARD.has(e.reasonCode) ? 1 : 0 }))
+    .sort((a, b) => a.far - b.far || a.i - b.i)
+    .map((x) => x.e)
+    .slice(0, Math.max(0, EVIDENCE_CAP - keep.length));
   return [...keep, ...rest];
 }
 
-/** "found 14 · counted 5 · 4 other printing · 3 language not stated" — the row's one line. */
-export function evidenceSummary(evidence) {
+/** Reasons that say the sale was a DIFFERENT card, not this card turned away. */
+export const OTHER_CARD = new Set(["setMismatch", "wrongNumber", "nameMismatch", "notACard", "multiCardLot", "notThisLanguage"]);
+
+/**
+ * "found 14 · counted 5 · 4 other printing · 3 language not stated" — the
+ * row's one line. `fetched` is how many the searches found in all; when the
+ * table was capped below that it says so ("found 234, 120 shown"), because
+ * "found 120" read as the searches' answer when it was the table's limit.
+ */
+export function evidenceSummary(evidence, fetched = null) {
   const list = evidence || [];
   const counted = list.filter((e) => e.counted).length;
   const why = {};
   for (const e of list) if (!e.counted) { const k = e.reason.replace(/\s*\(.*$/, ""); why[k] = (why[k] || 0) + 1; }
   const top = Object.entries(why).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => `${n} ${k}`);
-  return [`found ${list.length}`, `counted ${counted}`, ...top].join(" · ");
+  const found = Number.isFinite(fetched) && fetched > list.length ? `found ${fetched}, ${list.length} shown` : `found ${list.length}`;
+  return [found, `counted ${counted}`, ...top].join(" · ");
 }
 
 /** Which sales a price is run over: what you ticked, else what the filter counted. */
