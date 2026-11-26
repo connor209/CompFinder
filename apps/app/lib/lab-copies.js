@@ -28,7 +28,11 @@ export const MAX_SCANS = 12;
  * already sends; DMG has no eBay grade below "heavily played", so it is
  * refused rather than listed under a better one.
  */
-export const CONDITION_DESCRIPTOR = { NM: "400010", LP: "400011", MP: "400012", HP: "400013" };
+// CCG Individual Cards (183454) takes 400015/400016/400017 for LP/MP/HP;
+// 400011-400013 are eBay's SPORTS-card values and are refused here ("value
+// 400011 is not valid for condition descriptor 40001" on every LP card of
+// TEST10, 2026-11-26). Only NM (400010) is shared between the two ladders.
+export const CONDITION_DESCRIPTOR = { NM: "400010", LP: "400015", MP: "400016", HP: "400017" };
 export const LISTABLE_CONDITIONS = Object.keys(CONDITION_DESCRIPTOR);
 
 /** What the listing says about the photo — one wording, owned by the template module. */
