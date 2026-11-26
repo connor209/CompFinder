@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import CompFinderPricing from "@compfinder/core/pricing.js";
+import SoldCompsApi from "@compfinder/core/soldcomps.js";
 import { APP_SETTINGS } from "@/lib/matching";
 
 const settings = APP_SETTINGS;
@@ -15,13 +16,21 @@ function pounds(pence) {
 // listing's condition and scale the expected resale down accordingly.
 const CONDITION_MULT = { NM: 1.0, LP: 0.82, MP: 0.65, HP: 0.5, DMG: 0.4 };
 const CONDITION_LABEL = { NM: "Near-mint", LP: "Lightly played", MP: "Moderately played", HP: "Heavily played", DMG: "Damaged" };
+/**
+ * The listing's condition. The reading is core's inferCondition — the one the
+ * pricing engine splits its comps on — so "60 HP" is a stat and not Heavily
+ * Played here either (this was a fifth hand-written copy that still read bare
+ * "hp", the bug CLAUDE.md's Gotchas section records). Only when core finds
+ * nothing does this add the few words a resale estimate wants to be cautious
+ * about: "dmg"/"poor", "light play", and a bare "played".
+ */
 function inferCondition(title) {
+  const code = SoldCompsApi.inferCondition(title || "");
+  if (code !== "Unknown") return code;
   const t = (title || "").toLowerCase();
-  if (/\b(dmg|damaged|poor)\b/.test(t)) return "DMG";
-  if (/heavily played|\bhp\b/.test(t)) return "HP";
-  if (/moderately played|\bmp\b|\bplayed\b/.test(t)) return "MP";
-  if (/lightly played|light play|\blp\b/.test(t)) return "LP";
-  if (/near.?mint|\bnm\b|\bmint\b|\bm\/nm\b|gem/.test(t)) return "NM";
+  if (/\b(dmg|poor)\b/.test(t)) return "DMG";
+  if (/\blight play/.test(t)) return "LP";
+  if (/\bplayed\b/.test(t)) return "MP";
   return null;
 }
 

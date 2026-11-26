@@ -11,8 +11,8 @@ const CONDITIONS = [
   { l: "Near Mint", v: "400010" },
   { l: "Lightly Played", v: "400011" },
   { l: "Moderately Played", v: "400012" },
-  { l: "Heavily Played", v: "400013" },
-  { l: "Damaged", v: "400014" }
+  { l: "Heavily Played", v: "400013" }
+  // No "Damaged": eBay has no ungraded grade below Heavily played (lib/ebay-condition.js).
 ];
 const CONDITION_LABEL = Object.fromEntries(CONDITIONS.map((c) => [c.v, c.l]));
 const SHIPPING = [

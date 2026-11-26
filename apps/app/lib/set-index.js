@@ -32,7 +32,10 @@ export async function readSetRows(supabase) {
   const rows = [];
   try {
     for (let from = 0; ; from += 1000) {
-      const { data, error } = await supabase.from("cm_sets").select("game,set_name,set_code").range(from, from + 999);
+      // The view's grouping columns are its key — the total order a paged read
+      // needs (pagedSelect.js), or a set at a page edge goes missing.
+      const { data, error } = await supabase.from("cm_sets").select("game,set_name,set_code")
+        .order("game").order("set_name").order("set_code").range(from, from + 999);
       if (error) return null;
       if (!data || data.length === 0) break;
       rows.push(...data);

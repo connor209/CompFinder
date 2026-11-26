@@ -8,19 +8,7 @@
  */
 
 import { awayIndex, stockUnits } from "./stockcheck.js";
-
-async function pageAll(makeQuery, pageSize = 1000) {
-  let from = 0;
-  let all = [];
-  for (;;) {
-    const { data, error } = await makeQuery().range(from, from + pageSize - 1);
-    if (error || !data || data.length === 0) break;
-    all = all.concat(data);
-    if (data.length < pageSize) break;
-    from += pageSize;
-  }
-  return all;
-}
+import { pagedSelect } from "./pagedSelect.js";
 
 /**
  * Compute today's portfolio totals for a user and upsert a snapshot for the
@@ -28,7 +16,9 @@ async function pageAll(makeQuery, pageSize = 1000) {
  * computed totals. Idempotent per day — re-running overwrites the same row.
  */
 export async function snapshotUserPortfolio(db, userId, dateStr) {
-  const listings = await pageAll(() =>
+  // pagedSelect puts every page in a total order: without one, a valuation
+  // over a few thousand listings counted some twice and missed others.
+  const listings = await pagedSelect(() =>
     db.from("ebay_listings").select("ebay_item_id,sku,price_value,quantity").eq("user_id", userId)
   );
   // Open checkouts, to tell a card we zeroed for a show or the stream box
@@ -45,9 +35,9 @@ export async function snapshotUserPortfolio(db, userId, dateStr) {
       .is("resolved_at", null);
     if (!error) away = awayIndex(data || []);
   } catch { /* away stays null */ }
-  const costRows = await pageAll(() =>
+  const costRows = await pagedSelect(() =>
     db.from("listing_costs").select("ebay_item_id,cost_pence").eq("user_id", userId)
-  );
+  , { orderBy: "ebay_item_id" });
   const costMap = new Map((costRows || []).map((r) => [r.ebay_item_id, r.cost_pence]));
 
   let value = 0;

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cronRefusal } from "@/lib/cron-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getValidUserAccessToken } from "@/lib/ebay";
 import { usersWithLiveListings, logEvent } from "@/lib/lab-store";
@@ -18,10 +19,8 @@ import { runCheck } from "@/lib/lab-run";
 export const maxDuration = 300;
 
 export async function GET(request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get("authorization") !== `Bearer ${secret}`) {
-    return NextResponse.json({ ok: false, error: "Unauthorized." }, { status: 401 });
-  }
+  const refused = cronRefusal(request);
+  if (refused) return NextResponse.json({ ok: false, error: refused.error }, { status: refused.status });
   const admin = createAdminClient();
   let users;
   try {

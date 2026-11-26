@@ -1,4 +1,5 @@
 import { XMLParser } from "fast-xml-parser";
+import { conditionXml } from "./ebay-condition.js";
 import { shipKeyOf } from "./piles.js";
 
 /**
@@ -647,7 +648,7 @@ export async function addFixedPriceListing(accessToken, L) {
     `<Currency>GBP</Currency><Country>GB</Country>` +
     `<Location>${escapeXml(L.location || L.postcode || "United Kingdom")}</Location>` +
     (L.postcode ? `<PostalCode>${escapeXml(L.postcode)}</PostalCode>` : "") +
-    (L.conditionId ? `<ConditionID>${escapeXml(L.conditionId)}</ConditionID>` : "") +
+    conditionXml(L.conditionId) +
     (pics ? `<PictureDetails>${pics}</PictureDetails>` : "") +
     (specifics ? `<ItemSpecifics>${specifics}</ItemSpecifics>` : "") +
     sellerProfiles +
