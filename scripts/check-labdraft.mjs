@@ -105,6 +105,24 @@ eq("…as is one with no language", groupKey({ cardName: "Pikachu", cardNumber: 
 eq("a Japanese key is its own", groupKey({ cardName: "Pikachu", cardNumber: "25/102", set: "Base", condition: "NM", language: "Japanese" }), "pikachu|25/102|base|NM|japanese");
 eq("re-keying replaces the language, never stacks it", keyForLanguage(keyForLanguage("a|b|c|NM", "Japanese"), "Korean"), "a|b|c|NM|korean");
 eq("…and back to English drops it", keyForLanguage("a|b|c|NM|japanese", "English"), "a|b|c|NM");
+// ---- printing (2026-11-26): a reverse holo is never the plain copy's listing ------
+const card = (over) => ({ cardName: "Shedinja", cardNumber: "14/107", set: "Deoxys", condition: "NM", title: "Shedinja 14/107 Deoxys", ...over });
+eq("a plain key is unchanged by the printing part", groupKey(card({})), "shedinja|14/107|deoxys|NM");
+eq("a reverse holo read off the finish columns is its own listing", groupKey(card({ finish: "Reverse Holo" })), "shedinja|14/107|deoxys|NM|p:rev");
+eq("…and off the title when the finish is blank", groupKey(card({ title: "Shedinja 14/107 Deoxys Reverse Holo" })), "shedinja|14/107|deoxys|NM|p:rev");
+eq("…spelled 'Rev Holo' too", groupKey(card({ title: "Shedinja 14/107 Rev Holo" })), "shedinja|14/107|deoxys|NM|p:rev");
+eq("Reverse Valley is a card, not a printing", groupKey(card({ cardName: "Reverse Valley", title: "Reverse Valley 110/123 Holo" })).endsWith("p:rev"), false);
+eq("a Japanese reverse keeps both parts", groupKey(card({ finish: "Reverse Holo", language: "Japanese" })), "shedinja|14/107|deoxys|NM|japanese|p:rev");
+eq("re-keying the language never drops the printing", keyForLanguage("a|b|c|NM|japanese|p:rev", "English"), "a|b|c|NM|p:rev");
+eq("…nor stacks it", keyForLanguage(keyForLanguage("a|b|c|NM|p:rev", "Korean"), "Korean"), "a|b|c|NM|korean|p:rev");
+const mixed = groupsFromItems([
+  { sku: "P1", ...card({}), images: ["https://x/p1.jpg"] },
+  { sku: "R1", ...card({ finish: "Reverse Holo" }), images: ["https://x/r1.jpg"] },
+  { sku: "P2", ...card({}), images: ["https://x/p2.jpg"] }
+]).groups;
+eq("a plain and a reverse copy are two listings; two plain copies are one", mixed.map((g) => g.copies.map((c) => c.sku)), [["P1", "P2"], ["R1"]]);
+eq("…and the reverse listing's card says so", mixed[1].card.finish, "Reverse Holo");
+
 const item = (sku, language) => ({ sku, cardName: "Pikachu", cardNumber: "25/102", set: "Base", condition: "NM", title: "Pikachu", images: [`https://x/${sku}.jpg`], language });
 const en = groupsFromItems([item("E1", "English")]).groups;
 const ja = groupsFromItems([item("J1", "Japanese")]).groups;

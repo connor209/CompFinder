@@ -3,20 +3,18 @@
  * N, showing the scans of the copy that goes next, with that copy reserved the
  * moment it sells. See docs/LAB_COPIES.md for the test this exists to run.
  *
- * A SIDE BUILD, on purpose. Nothing here reads or writes `stack_cards`,
- * `stock_checkouts` or `listing_copy_state`, and nothing outside the lab
- * imports this file. The lab's copies are its own rows (`lab_copies`), so the
- * pull sheet, Reconcile, the Show Desk and the nightly import never see them
- * as stack cards. The one thing the rest of the app CAN see is the eBay
- * listing itself, which the nightly sync stores like any other; it carries no
- * Custom Label, so the stack import skips it, and its orders reach the pull
- * sheet as loose picks with no stack card behind them.
+ * Since migration 042 a lab copy is an ordinary `stack_cards` row carrying
+ * `lab_listing_id` (docs/LAB_FOLD.md): Stacks and the pull sheet see it where
+ * it is, and the screens that move stock (shows, the stream box, deals) leave
+ * it to the lab. This file still names no table.
  *
  * Pure: no I/O. lab-store.js reads and writes, app/api/lab does the eBay
  * calls, and every decision about which copy is which is made here.
  */
 
 import { reconcile } from "./copyqueue.js";
+import { isReversePrinting } from "./card-identity.js";
+import { CONDITION_DESCRIPTOR } from "./ebay-condition.js";
 import { arrangePictures } from "./listing-template.js";
 
 /** eBay allows 24; a card needs a front, a back and a couple of close-ups. */
@@ -24,11 +22,11 @@ export const MAX_SCANS = 12;
 
 /**
  * Ungraded card condition, as eBay's trading-card category takes it:
- * ConditionID 4000 with descriptor 40001. The values are the ones ListForm
- * already sends; DMG has no eBay grade below "heavily played", so it is
- * refused rather than listed under a better one.
+ * ConditionID 4000 with descriptor 40001 — one table, in ebay-condition.js,
+ * shared with the older listing forms. DMG has no eBay grade below "heavily
+ * played", so it is refused rather than listed under a better one.
  */
-export const CONDITION_DESCRIPTOR = { NM: "400010", LP: "400011", MP: "400012", HP: "400013" };
+export { CONDITION_DESCRIPTOR };
 export const LISTABLE_CONDITIONS = Object.keys(CONDITION_DESCRIPTOR);
 
 /** What the listing says about the photo — one wording, owned by the template module. */
@@ -36,20 +34,36 @@ export { PHOTO_PROMISE } from "./listing-template.js";
 
 const norm = (s) => String(s || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
-/** One listing's key: the card, then its condition. Two conditions are two listings. */
+/**
+ * One listing's key: the card, then its condition. Two conditions are two
+ * listings, and so are two PRINTINGS: a reverse holo and a plain copy of the
+ * same card in the same condition are different cards at different prices,
+ * so a reverse copy gets a `p:rev` part (read by `isReversePrinting()`, the
+ * identity key's own reading, off the finish columns and the title). A plain
+ * card adds nothing, so every plain key is what it always was and keeps
+ * joining its live listing.
+ */
 export function groupKey(item) {
-  return keyForLanguage([norm(item?.cardName), norm(item?.cardNumber), norm(item?.set), String(item?.condition || "").toUpperCase()].join("|"), item?.language);
+  const base = [norm(item?.cardName), norm(item?.cardNumber), norm(item?.set), String(item?.condition || "").toUpperCase()].join("|");
+  const printing = isReversePrinting({ finish: item?.finish, title: item?.title }) ? `${base}|${PRINTING_REV}` : base;
+  return keyForLanguage(printing, item?.language);
 }
+
+/** The printing part of a key. Prefixed, so it can never be read as a language. */
+const PRINTING_REV = "p:rev";
 
 /**
  * A card's key in a given language. English adds nothing, so every listing
  * keyed before languages existed keeps its key; any other language is a
  * fifth part, so a Japanese Pikachu 25/102 never joins the English listing.
+ * A printing part rides through untouched, after the language.
  */
 export function keyForLanguage(key, language) {
-  const base = String(key || "").split("|").slice(0, 4).join("|");
+  const parts = String(key || "").split("|");
+  const base = parts.slice(0, 4).join("|");
+  const printing = parts.slice(4).filter((p) => p.startsWith("p:"));
   const lang = norm(language);
-  return lang && lang !== "english" ? `${base}|${lang}` : base;
+  return [lang && lang !== "english" ? `${base}|${lang}` : base, ...printing].join("|");
 }
 
 /**
@@ -93,7 +107,7 @@ const isCuSku = (sku) => /^cs-[a-z0-9]+(?:_[a-z0-9]+)?$/i.test(String(sku || "")
 function cardOf(it, extra = {}) {
   return {
     name: it.cardName || "", number: it.cardNumber || "", set: it.set || "", setCode: extra.setCode || "",
-    rarity: it.rarity || "", finish: extra.finish || "", language: it.language || "", game: it.game || "",
+    rarity: it.rarity || "", finish: extra.finish || it.finish || "", language: it.language || "", game: it.game || "",
     year: it.year || "", illustrator: it.illustrator || "", type: it.cardType || "", stage: it.stage || ""
   };
 }
