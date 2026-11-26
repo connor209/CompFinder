@@ -26,7 +26,7 @@ export const MAX_SCANS = 12;
  * shared with the older listing forms. DMG has no eBay grade below "heavily
  * played", so it is refused rather than listed under a better one.
  */
-export { CONDITION_DESCRIPTOR };
+export { CONDITION_DESCRIPTOR }; // 400010 / 400015–400017, in ebay-condition.js
 export const LISTABLE_CONDITIONS = Object.keys(CONDITION_DESCRIPTOR);
 
 /** What the listing says about the photo — one wording, owned by the template module. */
