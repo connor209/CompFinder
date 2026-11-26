@@ -1138,7 +1138,7 @@ export default function LabAdd() {
                         {r.comps && !r.comps.error && <small className={isThin(r) && st !== "checked" ? "li-warn" : ""}>{cs.n ?? "?"} sale{cs.n === 1 ? "" : "s"}{r.comps.decision ? ` · ${DECISION_TEXT[r.comps.decision] || r.comps.decision}` : ` · ${r.comps.confidence || "?"}`}</small>}
                         {r.comps?.decision && r.comps.decision !== "apply" && r.comps.reason && <small className="li-warn" style={{ whiteSpace: "normal", maxWidth: 200 }}>{r.comps.reason}</small>}
                         {r.comps?.flags?.includes("in_hand_check") && <small className="li-warn">check in hand</small>}
-                        {r.comps?.evidence && <small className="li-dim" style={{ whiteSpace: "normal", maxWidth: 220 }}>{evidenceSummary(r.comps.evidence)}</small>}
+                        {r.comps?.evidence && <small className="li-dim" style={{ whiteSpace: "normal", maxWidth: 220 }}>{evidenceSummary(r.comps.evidence, r.comps.fetched)}</small>}
                         <CmLine cm={r.cm} rate={cmRate} />
                         {r.comps?.evidence?.length > 0 && (
                           <button className="li-link" onClick={() => setOpen((o) => new Set(o).add(r.id))}>
@@ -1364,7 +1364,7 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, onNote, rule, status
     <div className="la-sales">
       <div className="la-sales-head">
         <b>Sales found</b>
-        <span className="li-dim">{evidenceSummary(ev)}</span>
+        <span className="li-dim">{evidenceSummary(ev, row.comps.fetched)}</span>
         {row.cm?.pence != null && (
           <span className="la-cm">Cardmarket {row.cm.reverse ? "reverse " : ""}trend <b>{gbp(row.cm.pence)}</b>
             {row.cm.avg7Pence != null ? ` · 7d ${gbp(row.cm.avg7Pence)}` : ""}{row.cm.avg30Pence != null ? ` · 30d ${gbp(row.cm.avg30Pence)}` : ""}{row.cm.lowPence != null ? ` · low ${gbp(row.cm.lowPence)}` : ""}</span>

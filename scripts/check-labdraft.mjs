@@ -198,6 +198,16 @@ eq("nothing picked prices nothing", evidencePrice(ev, []).suggestedPence, null);
 eq("picks that equal the counted set are not 'your picks'", [picksDiffer(ev, ["b", "a"]), picksDiffer(ev, ["a"]), picksDiffer(ev, null)], [false, true, false]);
 const many = evidenceFrom({ sales: [{ title: "k", price: 1, postage: 0, total: 1, item_id: "k" }], excluded: Array.from({ length: 300 }, (_, i) => ({ title: `x${i}`, price: 1, postage: 0, total: 1, item_id: `x${i}`, reason: "nameMismatch" })) });
 eq("capped, never cutting a counted sale", [many.length, many[0].id], [EVIDENCE_CAP, "k"]);
+// Piloswine 48/102 (TEST9, 2026-11-26): 200 Quagsire 48/64s from the widest
+// search came first and filled the cap, so the Piloswines turned away for the
+// seller's country were cut off the table. Nearest the card first.
+const pilo = evidenceFrom({ sales: [], excluded: [
+  ...Array.from({ length: 200 }, (_, i) => ({ title: `Quagsire 48/64 #${i}`, price: 1, postage: 0, total: 1, item_id: `q${i}`, reason: "setMismatch" })),
+  { title: "Piloswine 48/102 HGSS Triumphant", price: 3, postage: 1, total: 4, item_id: "p1", reason: "nonUkLocation" }
+] });
+eq("a sale of THIS card left out is shown before 200 other cards", [pilo.length, pilo[0].id], [EVIDENCE_CAP, "p1"]);
+eq("the line says the table was capped", evidenceSummary(pilo, 234).startsWith(`found 234, ${EVIDENCE_CAP} shown`), true);
+eq("…and nothing extra when it wasn't", evidenceSummary(ev, 5).startsWith("found 5 ·"), true);
 eq("a sale found twice is one row", evidenceFrom({ sales: [{ title: "a", total: 1, price: 1, item_id: "z" }], excluded: [{ title: "a", total: 1, price: 1, item_id: "z", reason: "duplicate" }] }).length, 1);
 const relangPicks = applyBulk([{ ...priced, picks: ["a"] }], ["p"], { op: "language", language: "Japanese", overseas: true });
 eq("changing language or sellers drops your picks with the old sales", [relangPicks[0].picks, relangPicks[0].overseas], [null, true]);
