@@ -357,16 +357,32 @@ export function applyBulk(rows, ids, action) {
 
 export const FILTERS = [
   ["all", "All"], ["needsprice", "Needs a price"], ["thin", "Check first (Terapeak / thin)"], ["checked", "Checked"], ["joins", "Joins a live listing"],
-  ["ready", "Ready"], ["failed", "Failed"], ["listed", "Listed"], ["excluded", "Left out"]
+  ["ready", "Ready"], ["failed", "Failed"], ["listed", "Listed"], ["excluded", "Left out"], ["rule", "Has a rule"]
 ];
 
+/**
+ * The rule in force on a row's card: a saved rule (`rules`, Map ruleKey →
+ * rule, migration 050) first, else the one the row was last filtered with.
+ * Null when there is none, so a badge is never drawn for an empty rule.
+ */
+export function ruleOfRow(row, rules = null) {
+  const r = (rules && rules.get ? rules.get(ruleKeyFor(row || {})) : null) || row?.comps?.rule || null;
+  return isEmptyRule(r) ? null : r;
+}
+
+/** How many of a row's found sales your rule left out. */
+export function ruleTookOut(row) {
+  return (row?.comps?.evidence || []).filter((e) => e.reasonCode === "yourRule").length;
+}
+
 /** Filter and search. `joinsOf(row)` answers whether a row joins a live listing. */
-export function filterRows(rows, { filter = "all", q = "", file = "" } = {}, joinsOf = () => null) {
+export function filterRows(rows, { filter = "all", q = "", file = "", rules = null } = {}, joinsOf = () => null) {
   const words = String(q || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "").split(/\s+/).filter(Boolean);
   return (rows || []).filter((r) => {
     const st = rowStatus(r, joinsOf(r));
     if (file && r.file !== file) return false;
-    if (filter === "joins" ? !joinsOf(r)
+    if (filter === "rule" ? !ruleOfRow(r, rules)
+      : filter === "joins" ? !joinsOf(r)
       : filter === "ready" ? st !== "ready"
       : filter === "thin" ? !(st === "thin" || (isThin(r) && st !== "listed" && st !== "checked"))
       : filter !== "all" && filter !== st) return false;

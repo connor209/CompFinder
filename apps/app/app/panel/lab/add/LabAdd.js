@@ -7,7 +7,7 @@ import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
   DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
-  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown, applyCardRule, ruleFeedbackArgs
+  LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown, applyCardRule, ruleFeedbackArgs, ruleOfRow, ruleTookOut
 } from "@/lib/lab-draft.js";
 import { RULE_KINDS, ruleKeyFor, normaliseRule, isEmptyRule, describeRule, saleBreaksRule, ruleComment, SALE_REASONS, saleReasonLabel, ruleKindForReason, normaliseSaleNote, saleComment } from "@/lib/price-rules.js";
 import { listRules, saveRule } from "@/lib/price-rules-store.js";
@@ -426,9 +426,9 @@ export default function LabAdd() {
   const subtypes = settings?.subtypes || [];
   const joinsOf = useCallback((r) => (r.result?.ok ? null : listingForGroup(listings, r)), [listings]);
   const shownIds = useMemo(
-    () => sortRows(filterRows(rows, { filter, q, file }, joinsOf), sort, joinsOf).map((r) => r.id),
+    () => sortRows(filterRows(rows, { filter, q, file, rules: cardRules }, joinsOf), sort, joinsOf).map((r) => r.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filter, q, file, sort, viewKey, rows.length, joinsOf]
+    [filter, q, file, sort, viewKey, rows.length, joinsOf, cardRules]
   );
   const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const shown = useMemo(() => shownIds.map((id) => byId.get(id)).filter(Boolean), [shownIds, byId]);
@@ -789,6 +789,7 @@ export default function LabAdd() {
   }
 
   const s = totals.byStatus;
+  const ruledCount = rows.filter((r) => ruleOfRow(r, cardRules)).length;
 
   const css = LAB_TABLE_CSS + EXTRA_CSS + LAB_HEADER_CSS + BATCH_HOME_CSS + NEW_BATCH_CSS + BATCH_STEPS_CSS;
   const legacyBanner = legacy.length > 0 ? (
@@ -966,7 +967,7 @@ export default function LabAdd() {
       <div className="li-toolbar" ref={tableRef}>
         <input className="li-search" placeholder="Search name, set, SKU…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select className="li-select" value={filter} onChange={(e) => setFilter(e.target.value)}>
-          {FILTERS.map(([k, l]) => <option key={k} value={k}>{l}{k !== "all" && k !== "joins" && s[k] ? ` (${s[k]})` : ""}</option>)}
+          {FILTERS.map(([k, l]) => { const n = k === "rule" ? ruledCount : s[k]; return <option key={k} value={k}>{l}{k !== "all" && k !== "joins" && n ? ` (${n})` : ""}</option>; })}
         </select>
         {files.length > 1 && (
           <select className="li-select" value={file} onChange={(e) => setFile(e.target.value)}>
@@ -1110,6 +1111,18 @@ export default function LabAdd() {
                           <span className="li-thumb">{live[0]?.scans?.[0] || r.copies[0]?.scans?.[0] ? <img src={live[0]?.scans?.[0] || r.copies[0].scans[0]} alt="" referrerPolicy="no-referrer" /> : null}</span>
                           <span>
                             <b>{t.text}</b>
+                            {(() => {
+                              // A rule saved on this card earlier — in this batch or any other —
+                              // is in force here, so say so on the row itself.
+                              const rr = ruleOfRow(r, cardRules);
+                              if (!rr) return null;
+                              const out = ruleTookOut(r);
+                              return (
+                                <span className="la-rule-badge" title={rr.note ? `Your note: ${rr.note}` : "A rule you set on this card — open 🔍 see sales to edit it"}>
+                                  📏 Rule: {describeRule(rr)}{r.comps ? (out ? ` · took out ${out} sale${out === 1 ? "" : "s"}` : " · took out none") : ""}
+                                </span>
+                              );
+                            })()}
                             <small>
                               {[r.set, r.cardNumber, r.subtype, r.language && r.language !== "English" ? r.language : "", r.anyLanguage ? "every language" : "", r.overseas ? "overseas sellers" : ""].filter(Boolean).join(" · ")}
                               {t.own ? " · your title" : ""}{t.cut ? <span className="li-warn"> · cut at 80</span> : null}
@@ -1579,6 +1592,7 @@ const EXTRA_CSS = `
 .la-cm { color: var(--ink-soft); }
 .la-cm b { color: var(--ink); }
 .la-sales { border: 1px solid var(--line); border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--surface); }
+.la-rule-badge { display: inline-block; margin: 2px 0; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: var(--accent); background: var(--accent-soft, rgba(45,190,170,.12)); border: 1px solid var(--accent); cursor: help; }
 .la-rule { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 13px; padding: 6px 8px; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.06)); }
 .la-rule.open { flex-direction: column; align-items: stretch; }
 .la-rule.open .li-check { margin-right: 10px; }
