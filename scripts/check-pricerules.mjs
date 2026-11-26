@@ -148,6 +148,8 @@ ok("notes never go to eBay", !("saleNotes" in groupToSend({ ...r1, copies: [], s
 const page = readFileSync("apps/app/app/panel/lab/add/LabAdd.js", "utf8");
 ok("an unticked, noted or ruled-out sale stays in the table", /e\.reasonCode === "yourRule" \|\| notes\[String\(e\.id\)\]/.test(page));
 ok("every sale offers a note, not only an unticked one", /unticked \? "✎ why not\?" : "✎ add a note"/.test(page));
+ok("the sales list inside a card still scrolls up and down (clip on one axis turns the other off)", /\.la-open \.li-scroll \{[^}]*overflow-x: hidden; overflow-y: auto;/.test(page) && !/\.la-open \.li-scroll \{[^}]*clip/.test(page));
+ok("a hidden column is shrunk, never removed (the open card's colSpan would make a ghost column)", /\.li-table\.la-table \.md-hide \{ display: table-cell; width: 0;/.test(page) && /\.li-table\.la-table \.sm-hide \{ display: table-cell; width: 0;/.test(page));
 ok("the Add copies table never scrolls sideways", /\.la-fit \{ overflow-x: clip; \}/.test(page) && /\.la-table \{ table-layout: fixed; \}/.test(page) && /<div className="la-fit">\s*<table className="li-table la-table">/.test(page));
 
 // ---- greps ----
