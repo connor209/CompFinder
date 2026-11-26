@@ -13,7 +13,7 @@ import { applyComps } from "../apps/app/lib/lab-pricing.js";
 import { groupKey, keyForLanguage, groupsFromItems } from "../apps/app/lib/lab-copies.js";
 import { readFileSync } from "node:fs";
 import { labOverview, PRICING_STALE_MS, JOB_STALE_MS } from "../apps/app/lib/lab-overview.js";
-import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer, EVIDENCE_CAP } from "../apps/app/lib/lab-evidence.js";
+import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer, EVIDENCE_CAP, searchEvidence } from "../apps/app/lib/lab-evidence.js";
 
 let failed = 0;
 let n = 0;
@@ -208,6 +208,17 @@ const pilo = evidenceFrom({ sales: [], excluded: [
 eq("a sale of THIS card left out is shown before 200 other cards", [pilo.length, pilo[0].id], [EVIDENCE_CAP, "p1"]);
 eq("the line says the table was capped", evidenceSummary(pilo, 234).startsWith(`found 234, ${EVIDENCE_CAP} shown`), true);
 eq("…and nothing extra when it wasn't", evidenceSummary(ev, 5).startsWith("found 5 ·"), true);
+// Searching the sales found (asked for 2026-11-26: Pansear 16/101 Noble
+// Victories under fifty Ponyta 16/114 Steam Siege).
+const found = [
+  { id: "a", title: "Ponyta 16/114 Steam Siege Reverse Holo", counted: false },
+  { id: "b", title: "Pansear 16/101 Noble Victories Pokémon", counted: false },
+  { id: "c", title: "NOBLE VICTORIES pansear holo", counted: true }
+];
+eq("every word, any order, any case, counted and left out alike", searchEvidence(found, "victories noble").map((e) => e.id), ["b", "c"]);
+eq("accents don't matter", searchEvidence(found, "pokemon").map((e) => e.id), ["b"]);
+eq("blank narrows nothing", searchEvidence(found, "  ").length, 3);
+eq("no match is none", searchEvidence(found, "evolving skies"), []);
 eq("a sale found twice is one row", evidenceFrom({ sales: [{ title: "a", total: 1, price: 1, item_id: "z" }], excluded: [{ title: "a", total: 1, price: 1, item_id: "z", reason: "duplicate" }] }).length, 1);
 const relangPicks = applyBulk([{ ...priced, picks: ["a"] }], ["p"], { op: "language", language: "Japanese", overseas: true });
 eq("changing language or sellers drops your picks with the old sales", [relangPicks[0].picks, relangPicks[0].overseas], [null, true]);

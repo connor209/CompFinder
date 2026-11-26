@@ -144,3 +144,19 @@ export function picksDiffer(evidence, picks) {
   for (const x of a) if (!b.has(x)) return true;
   return false;
 }
+
+const fold = (s) => String(s || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/**
+ * The sales whose title has every word typed, in any order, accents and case
+ * ignored — "noble victories" over a Pansear 16/101 whose widest search came
+ * back as fifty Ponyta 16/114 Steam Siege (asked for 2026-11-26). Counted
+ * and left out alike: the point is finding the card among what was turned
+ * away. Blank finds nothing to narrow, so it hands the list back.
+ */
+export function searchEvidence(evidence, q) {
+  const list = evidence || [];
+  const words = fold(q).split(/\s+/).filter(Boolean);
+  if (!words.length) return list;
+  return list.filter((e) => { const t = fold(e.title); return words.every((w) => t.includes(w)); });
+}
