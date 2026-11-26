@@ -25,7 +25,7 @@ eq("the lab reads the same table", LAB, CONDITION_DESCRIPTOR);
 
 const ebay = readFileSync(new URL("../apps/app/lib/ebay.js", import.meta.url), "utf8");
 eq("addFixedPriceListing writes the condition through conditionXml", /conditionXml\(L\.conditionId\)/.test(ebay) && !/<ConditionID>\$\{escapeXml\(L\.conditionId\)\}/.test(ebay), true);
-for (const f of ["BulkListModal.js", "ListForm.js"]) {
+for (const f of ["ListForm.js"]) {
   const src = readFileSync(new URL(`../apps/app/app/panel/${f}`, import.meta.url), "utf8");
   eq(`${f} offers no Damaged grade`, /v: "400014"/.test(src), false);
 }

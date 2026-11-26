@@ -32,8 +32,7 @@ import {
   MAX_OVERRIDE_PENCE
 } from "../apps/app/lib/price-override.js";
 import { stickerFor, stickerRows, stickerSummary } from "../apps/app/lib/showstock.js";
-import { pricedSkuMap } from "../apps/app/lib/ebayexport.js";
-import { slimRec, restoreResults, batchRows } from "../apps/app/lib/batch-store.js";
+import { slimRec } from "../apps/app/lib/slim-rec.js";
 import { reviewVerdict } from "../apps/app/lib/matching.js";
 
 let failures = 0;
@@ -104,7 +103,7 @@ eq("an override is loud enough to test for", isOverridden(withOverride(rec(), 40
 // in every export from then on.
 eq("typing the same number clears rather than records", isOverridden(withOverride(rec(), 83500)), false);
 
-// Panel.js and QuickSearch.js both lean on the IDENTITY of the returned rec to
+// QuickSearch.js leans on the IDENTITY of the returned rec to
 // tell a real edit from confirming a box unchanged. Without it, tabbing through
 // a run would put a duplicate row in your price history for every card.
 const untouched = rec();
@@ -183,31 +182,14 @@ eq("the sticker typed on the label wins over the one typed on the result",
 eq("and both are still visible as hand-set",
   { onTheResult: both[0].pricedByHand, onTheLabel: both[0].edited }, { onTheResult: true, onTheLabel: true });
 
-// --- 4. what leaves the building -------------------------------------------
-eq("the eBay upload file carries your price, not the one you rejected",
-  [...pricedSkuMap([{ sku: "AB11", rec: withOverride(rec(), 4000) }]).entries()], [["AB11", 4000]]);
-eq("a card the app couldn't price is uploadable once you name a price",
-  [...pricedSkuMap([{ sku: "AB13", rec: withOverride(null, 500) }]).entries()], [["AB13", 500]]);
-// It used to stay OUT of the file, which meant the row kept whatever price
-// CardUploader had put there — £2.49, indistinguishable from the engine's
-// floor. It goes in at zero instead, and check-zeroprice.mjs owns why.
-eq("and until you do it is in the file at zero, not quietly at its old price",
-  [...pricedSkuMap([{ sku: "AB13", rec: null }]).entries()], [["AB13", 0]]);
-
-// --- 5. a saved run remembers it -------------------------------------------
-// A run is re-opened days later precisely to list from, so a correction that
-// doesn't survive the round trip is a correction that gets un-made by the
-// person trusting the screen.
+// --- 4. & 5. the eBay upload file and saved runs went with Bulk pricing
+// (2026-11-26). What a price you typed looks like once kept — in a feedback
+// row, through slimRec — is still pinned:
 const saved = slimRec(withOverride(rec(), 4000));
-eq("the saved shape keeps both numbers",
+eq("the kept shape keeps both numbers",
   { final: saved.finalPence, over: saved.overridePence }, { final: 83500, over: 4000 });
-eq("a run with no override stores a null rather than a missing key",
+eq("a rec with no override stores a null rather than a missing key",
   slimRec(rec()).overridePence, null);
-const roundTripped = restoreResults(batchRows([{ title: "Umbreon VMAX", sku: "AB11", rec: withOverride(rec(), 4000) }]));
-eq("and it comes back as an override, not as a number in a field nobody reads",
-  effectivePence(roundTripped.results[0].rec), 4000);
-eq("re-opened, the engine's figure is still there to go back to",
-  overriddenFromPence(roundTripped.results[0].rec), 83500);
 
 // --- 6. the review queue -------------------------------------------------
 // The queue asks "do you agree with this price?". A row carrying your own
@@ -227,7 +209,6 @@ eq("your price on that one does not either",
 // says nothing about it anywhere.
 const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
 const MONEY_OUT = [
-  ["apps/app/lib/ebayexport.js", "the eBay upload file"],
   ["apps/app/lib/showstock.js", "the sticker ladder"]
 ];
 for (const [file, what] of MONEY_OUT) {
@@ -245,26 +226,6 @@ for (const [file, what] of MONEY_OUT) {
   }
 }
 
-// The batch screen is the one that lists, exports, stickers and records, and
-// it is 2,500 lines long: the specific call sites are named rather than the
-// file, because a grep over the whole of it would fail on the places that
-// legitimately show the engine's number beside yours.
-const panel = read("apps/app/app/panel/Panel.js");
-const PANEL_MUST = [
-  ["pricePence: effectivePence(r.rec)", "the bulk lister would list at the price you overrode"],
-  // exportPence is effectivePence with the unpriced case written as 0.00 —
-  // see lib/zero-price.js. A bare finalPence here would print the price you
-  // overrode; either of these prints the one you went with.
-  ["const pence = exportPence(r.rec);", "Export CSV would print the price you overrode"],
-  ["recommended_pence: effectivePence(rec)", "price history would record a price you didn't go with"],
-  ["effectivePence(r.rec) != null).length", "the List-on-eBay count would ignore hand-priced cards"],
-  ["updateItemRec(", "a saved run would not learn about a price set after it was saved"]
-];
-for (const [needle, why] of PANEL_MUST) {
-  if (!panel.includes(needle)) fail(`Panel.js: ${why} (looking for \`${needle}\`)`);
-}
-if (!panel.includes("<PriceOverride")) fail("Panel.js no longer renders the override control — there is no way to set a price");
-
 const quick = read("apps/app/app/panel/QuickSearch.js");
 if (!quick.includes("suggestedPence={effectivePence(view.rec)}")) {
   fail("QuickSearch.js hands ListForm the recommendation — a deep-dive override wouldn't reach the listing");
@@ -275,7 +236,7 @@ if (!quick.includes("recommended_pence: effectivePence(rec)")) {
 
 // One control, three screens. Two would drift, and a price control that reads
 // differently depending on the screen is one you have to check twice.
-for (const [file, screen] of [["apps/app/app/panel/Panel.js", "the batch screen"], ["apps/app/app/panel/QuickSearch.js", "a deep dive"]]) {
+for (const [file, screen] of [["apps/app/app/panel/QuickSearch.js", "a deep dive"]]) {
   if (!read(file).includes('from "./PriceOverride"')) {
     fail(`${screen} has stopped using the shared override control`);
   }

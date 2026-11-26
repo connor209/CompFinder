@@ -218,3 +218,13 @@ the umbrella, with box, divider, binder and pile as kinds of stack.
 - **Graded and Damaged cards:** do they belong in the lab, or stay on another
   path? eBay has no ungraded grade below Heavily played.
 - **A seeded demo account for pitching:** worth building?
+
+## Addendum, same day: removed
+
+Decided after the review: **Bulk pricing, Imports and Arbitrage are removed**,
+with the lab left untouched. That retires the first rows of "Can go once the
+lab covers them" outright, rather than waiting for the lab to cover them, and
+takes the Show Desk's "Price this pool" / "Price these" with it (stickers are
+set with ✎ £ or eBay price → sticker). The Imports decision above is settled
+by it: an uploaded file lives in `lab_batches`. CLAUDE.md's "Bulk pricing,
+Imports and Arbitrage were removed" lists what went and what stayed.

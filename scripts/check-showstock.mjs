@@ -41,7 +41,6 @@ import {
   recPriceBand,
   inPriceBand
 } from "../apps/app/lib/showstock.js";
-import { batchColumns, isMissingPoolName } from "../apps/app/lib/batch-store.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -261,22 +260,8 @@ for (const [bad, why] of [[0, "zero"], [null, "null"], [-500, "negative"], ["nop
 // number in the CSV all come through stickerRows(). A second call to the
 // ladder anywhere else is how they start disagreeing, and the disagreement
 // would be invisible: every one of them looks like a plausible price.
-const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
-if (!panel.includes("stickerRows(")) {
-  fail("Panel.js no longer goes through stickerRows() — the screen can now disagree with the label");
-}
-if (/\bstickerPence\s*\(/.test(panel)) {
-  fail("Panel.js calls the ladder directly — it should read the sticker off stickerRows(), not round its own");
-}
-// Every caller has to hand over the SAME listing prices, because on a graded
-// card the listing price IS the sticker. A stickerRows() call that forgets
-// `listed` doesn't fail — it quietly reverts that one caller to the comps
-// figure, so the screen shows £200 and the printed label says £840.
-for (const call of panel.match(/stickerRows\([^)]*\)/g) || []) {
-  if (!/\blisted\b/.test(call)) {
-    fail(`Panel.js calls ${call} without the listing prices — the screen and the label can now disagree on a graded card`);
-  }
-}
+// The Bulk pricing screen was the other caller, and went on 2026-11-26; the
+// label file (below) and the Show Desk are what is left of the sticker path.
 const labels = readFileSync(new URL("../apps/app/lib/labelexport.js", import.meta.url), "utf8");
 if (!/stickerRows\(results,\s*opts\)/.test(labels)) {
   fail("labelexport.js no longer passes its options straight through — the label file can now round differently from the screen");
@@ -286,36 +271,8 @@ if (/^\s*import\s+.*from\s+["']@\//m.test(showstock)) {
   fail("showstock.js has picked up an app-aliased import — it has to stay loadable under bare node for this check");
 }
 
-// The Show Desk is the only way into the pool, and the pool is named in the
-// URL rather than handed over in state — state is exactly what a slug change
-// throws away (see the note in app/panel/[[...slug]]/page.js).
+// --- 6. (saved runs' pool_name) went with Bulk pricing, 2026-11-26 -----------
 const desk = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
-if (!desk.includes("pool=show")) {
-  fail("ShowDesk.js no longer links to the pool — there is no way to price a show's stock");
-}
-
-// --- 6. a deployed column that isn't there yet -----------------------------
-// Migrations here are applied by hand, so the code always ships before the
-// column exists. Postgres rejects a whole statement that names a missing
-// column, so a required pool_name would take the saved-runs list and every
-// save down with it — including runs that have nothing to do with a show.
-eq("pool_name is read while it's believed to exist", batchColumns().includes("pool_name"), true);
-eq("Postgres refusing pool_name is recognised",
-  isMissingPoolName({ message: 'column price_batches.pool_name does not exist' }), true);
-eq("it's also recognised from the details field",
-  isMissingPoolName({ details: "Could not find the 'pool_name' column of 'price_batches'" }), true);
-eq("an unrelated failure is not mistaken for it",
-  isMissingPoolName({ message: "duplicate key value violates unique constraint" }), false);
-eq("no error is not a missing column", isMissingPoolName(null), false);
-
-const store = readFileSync(new URL("../apps/app/lib/batch-store.js", import.meta.url), "utf8");
-for (const fn of ["saveBatch", "loadBatch", "listBatches"]) {
-  const body = store.slice(store.indexOf(`export async function ${fn}`));
-  const next = body.slice(1).search(/\nexport (async )?function/);
-  if (!/isMissingPoolName/.test(next === -1 ? body : body.slice(0, next))) {
-    fail(`${fn}() does not retry without pool_name — it breaks entirely until migration 024 is applied`);
-  }
-}
 
 // --- 7. the column the sticker is written to -------------------------------
 const migration = readFileSync(new URL("../supabase/migrations/024_show_stickers.sql", import.meta.url), "utf8");

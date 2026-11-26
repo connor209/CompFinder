@@ -9,10 +9,11 @@
  * router: usePathname follows, and Back restores without a fetch) plus a
  * state change.
  *
- * Some URLs still need the server, because the page reads them on the way in
- * and hands them to the panel as props: a saved run (/panel/batch/<id>), and
- * the pool, import, ids and wish query strings. `needsServer()` is the one list
- * of those; anything else under /panel is switched in place.
+ * Some URLs still need the server, because the page reads them on the way in:
+ * the wish query string the Show Desk's wish pickup opens with. `needsServer()`
+ * is the one list of those; anything else under /panel is switched in place.
+ * (A saved Bulk pricing run, ?pool, ?import and ?ids were on it until that
+ * screen was removed, 2026-11-26.)
  *
  * Pure apart from `navigate`, so scripts/check-clientnav.mjs can pin it.
  */
@@ -21,13 +22,12 @@
 export const NAV_EVENT = "cf-nav";
 
 /** Query keys the panel only reads at mount, from the server page's props. */
-export const SERVER_QUERY_KEYS = ["pool", "import", "ids", "wish"];
+export const SERVER_QUERY_KEYS = ["wish"];
 
 /** Does this URL need a real page load to mean what it says? */
 export function needsServer(url) {
   const u = typeof url === "string" ? new URL(url, "http://x") : url;
   if (!/^\/panel(\/|$)/.test(u.pathname)) return true;
-  if (/^\/panel\/batch\/[^/]+/.test(u.pathname)) return true;
   return SERVER_QUERY_KEYS.some((k) => u.searchParams.has(k));
 }
 

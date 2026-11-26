@@ -216,12 +216,11 @@ eq("and the file carries every priced card the panel shows",
   eq("a card with no sticker is handed back, not dropped", unpriced.map((c) => c.id), ["b", "d"]);
 }
 
-const panel = readFileSync(new URL("../apps/app/app/panel/Panel.js", import.meta.url), "utf8");
-if (!panel.includes("labelFile(")) {
-  fail("Panel.js no longer builds the label file through labelFile()");
-}
-if (/\blabelName\s*\(/.test(panel)) {
-  fail("Panel.js cuts names itself — it should read `label` off stickerRows(), or the preview and the print diverge");
+// The Show Desk is the label file's caller now (Bulk pricing went 2026-11-26):
+// it cuts no names of its own either.
+const deskSrc = readFileSync(new URL("../apps/app/app/panel/ShowDesk.js", import.meta.url), "utf8");
+if (/\blabelName\s*\(/.test(deskSrc)) {
+  fail("ShowDesk.js cuts names itself — it should go through labelexport.js, or the preview and the print diverge");
 }
 const exporter = readFileSync(new URL("../apps/app/lib/labelexport.js", import.meta.url), "utf8");
 if (/^\s*import\s+.*from\s+["']@\//m.test(exporter)) {

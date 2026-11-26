@@ -33,7 +33,6 @@ import {
   exportGuard
 } from "../apps/app/lib/zero-price.js";
 import { withOverride } from "../apps/app/lib/price-override.js";
-import { pricedSkuMap, repriceCardUploaderCsv } from "../apps/app/lib/ebayexport.js";
 
 let failures = 0;
 const fail = (msg) => { console.error(`  ${msg}`); failures++; };
@@ -134,72 +133,12 @@ if (/1 cards\b/.test(one.message) || /\bhave no price\b/.test(one.message)) {
   fail(`the one-card refusal doesn't read as English: ${one.message}`);
 }
 
-// --- 3. what actually reaches eBay -----------------------------------------
-// The upload file is the path the £2.49 went out on, so this is the case the
-// whole file exists for: the row is IN the map, at zero.
-eq("an unpriced row is in the upload map at zero rather than missing from it",
-  [...pricedSkuMap(RUN).entries()],
-  [["AB11", 4249], ["AB12", 0], ["AB13", 0], ["AB14", 900], ["AB15", 0]]);
-eq("a row with no SKU can't be matched to a line and stays out",
-  [...pricedSkuMap([{ sku: "", title: "pasted title", rec: null }]).entries()], []);
-
-// A real CardUploader shape, with the placeholder price that caused all this.
-const CSV =
-  "*Action(SiteID=UK|Country=GB),CustomLabel,*Title,*StartPrice\r\n" +
-  "Add,AB11,Umbreon VMAX 215/203,2.49\r\n" +
-  "Add,AB12,Charizard V 154/185,2.49\r\n" +
-  "Add,AB99,A card this run never saw,2.49\r\n";
-
-const out = repriceCardUploaderCsv(CSV, pricedSkuMap(RUN));
-const lines = out.csv.trim().split("\r\n");
-eq("the priced row gets its price", lines[1], "Add,AB11,Umbreon VMAX 215/203,42.49");
-eq("the unpriced row is overwritten with 0.00, NOT left at the file's £2.49",
-  lines[2], "Add,AB12,Charizard V 154/185,0.00");
-eq("a row this run never saw keeps what it had — the run has no opinion about it",
-  lines[3], "Add,AB99,A card this run never saw,2.49");
-eq("and the counts say which happened to how many",
-  { updated: out.updated, zeroed: out.zeroed, skipped: out.skipped }, { updated: 1, zeroed: 1, skipped: 1 });
-eq("a priced SKU that isn't in the file is still reported rather than lost",
-  out.missing.sort(), ["AB13", "AB14", "AB15"]);
+// --- 3. the eBay upload file went with Bulk pricing (2026-11-26) -----------
+// The CSV writer that the £2.49 went out on is gone; /api/batch-comps still
+// writes an unpriced card as 0.00 (check-batchcomps.mjs pins that).
 
 // --- 4. the greps ----------------------------------------------------------
 const read = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
-
-// The zero and the guard only mean anything together. Each of these buttons
-// spends money, and each one used to have its own quiet way of handling a card
-// with no price — the CSV kept the old number, the bulk lister filtered the row
-// out and said nothing.
-const panel = read("apps/app/app/panel/Panel.js");
-const PANEL_MUST = [
-  ['exportGuard(results, "The eBay upload CSV")',
-    "the eBay upload CSV could go out with a card nothing priced in it"],
-  ['exportGuard(results, "Listing on eBay")',
-    "the bulk lister would silently drop the unpriced rows again"],
-  ["const pence = exportPence(r.rec);",
-    "Export CSV would print a blank where a zero belongs, and the two sheets would disagree"],
-  ["isUnpriced(r.rec)",
-    "the screen would not count the zeros it is refusing on"]
-];
-for (const [needle, why] of PANEL_MUST) {
-  if (!panel.includes(needle)) fail(`Panel.js: ${why} (looking for \`${needle}\`)`);
-}
-
-// A second definition of "no price" is the thing that rots: the banner would
-// count rows the button doesn't refuse on, and the run you could not export
-// would be the run the screen called clean.
-const guardCalls = (panel.match(/exportGuard\(/g) || []).length;
-if (guardCalls < 2) fail(`Panel.js calls exportGuard ${guardCalls} time(s) — every money-out button needs it`);
-if (/\brec\??\.finalPence\s*\?\?\s*0\b/.test(panel) || /effectivePence\([^)]*\)\s*\?\?\s*0\b/.test(panel)) {
-  fail("Panel.js defaults a price to zero on its own — the whole rule is that zero-price.js owns where the zero comes from");
-}
-
-const ebay = read("apps/app/lib/ebayexport.js");
-if (!ebay.includes("exportPence")) {
-  fail("ebayexport.js no longer writes the zero — an unpriced row would keep the file's placeholder price again");
-}
-if (!ebay.includes('"0.00"')) {
-  fail("ebayexport.js no longer writes 0.00 into the price column");
-}
 
 // The engine is shared with Last Comp, where a card with no price has to stay
 // NULL: a public page rendering "£0.00" is the site quoting a price it does
