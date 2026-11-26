@@ -5,7 +5,7 @@ import CardUploaderCsv from "@/lib/carduploader.js";
 import { groupsFromItems, listingForGroup, priceFromComps } from "@/lib/lab-copies.js";
 import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
-  DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
+  DRAFT_KEY, repairDateNumbers, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
   LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown, applyCardRule, ruleFeedbackArgs
 } from "@/lib/lab-draft.js";
@@ -14,7 +14,7 @@ import { listRules, saveRule } from "@/lib/price-rules-store.js";
 import { recordFeedback } from "@/lib/feedback-store.js";
 import { LAB_TABLE_CSS } from "../labTableCss";
 import { PRICING_KEY } from "@/lib/lab-overview.js";
-import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer } from "@/lib/lab-evidence.js";
+import { evidenceFrom, evidenceSummary, evidencePrice, chosenSales, picksDiffer, searchEvidence } from "@/lib/lab-evidence.js";
 import { parseCostPence } from "@/lib/card-costs.js";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -228,6 +228,9 @@ export default function LabAdd() {
           revRef.current = b.rev;
           MEM.rev.set(b.id, b.rev);
           savedRef.current = JSON.stringify(b.rows);
+          // A card number Excel made a date ("06-Dec") is mended on open; the
+          // rows then differ from what was saved, so the batch saves itself.
+          startRows = repairDateNumbers(startRows);
           rememberOpen(b.id, { batch: { id: b.id, name: b.name, updated_at: b.updated_at }, rows: startRows, rev: b.rev, savedJson: savedRef.current });
           setRows(startRows);
         } else {
@@ -379,7 +382,7 @@ export default function LabAdd() {
     MEM.rev.set(got.batch.id, got.batch.rev);
     savedRef.current = JSON.stringify(got.batch.rows);
     conflictRef.current = false;
-    setRows(got.batch.rows);
+    setRows(repairDateNumbers(got.batch.rows));
     setSaveState("saved");
     refreshView();
   }
@@ -1347,6 +1350,7 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, onNote, rule, status
   const notes = row.saleNotes || {};
   const [showOut, setShowOut] = useState(false);
   const [showSearches, setShowSearches] = useState(false);
+  const [find, setFind] = useState("");
   const ev = row.comps.evidence;
   const chosen = new Set(chosenSales(ev, row.picks).map((e) => String(e.id)));
   const toggle = (id, on) => {
@@ -1358,7 +1362,11 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, onNote, rule, status
   const changed = picksDiffer(ev, row.picks);
   // A sale you've unticked, noted, or taken out with your rule stays where it
   // was — it is the one you're about to say something about.
-  const shown = ev.filter((e) => showOut || e.counted || chosen.has(String(e.id)) || e.reasonCode === "yourRule" || notes[String(e.id)]);
+  // A search looks through everything found, left out included.
+  const shown = find.trim()
+    ? searchEvidence(ev, find)
+    : ev.filter((e) => showOut || e.counted || chosen.has(String(e.id)) || e.reasonCode === "yourRule" || notes[String(e.id)]);
+  const untickedShown = find.trim() ? shown.filter((e) => !chosen.has(String(e.id))) : [];
   const outCount = ev.filter((e) => !e.counted).length;
   return (
     <div className="la-sales">
@@ -1379,6 +1387,12 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, onNote, rule, status
         </div>
       )}
       {onRule && <CardRule row={row} rule={rule} onSave={onRule} disabled={disabled} />}
+      <div className="la-sales-find">
+        <input className="li-search" type="search" value={find} onChange={(e) => setFind(e.target.value)}
+          placeholder="Search these sales — e.g. noble victories" aria-label="Search the sales found" />
+        {find.trim() && <span className="li-dim">{shown.length} of {ev.length} match{shown.length === 1 ? "es" : ""}, counted and left out</span>}
+        {untickedShown.length > 0 && <button className="li-btn" disabled={disabled} onClick={() => onPicks([...new Set([...chosen, ...untickedShown.map((e) => String(e.id))])])}>✓ Use these {untickedShown.length}</button>}
+      </div>
       <div className="li-scroll" style={{ maxHeight: 360 }}>
         <table className="li-table la-sales-table">
           <thead><tr><th className="li-cb">Use</th><th>Sold listing</th><th className="r">Total</th><th className="sm-hide">Sold</th><th className="sm-hide">Filter</th></tr></thead>
@@ -1410,7 +1424,7 @@ function SalesFound({ row, onPicks, onUse, onCheck, onRule, onNote, rule, status
               </Fragment>
               );
             })}
-            {shown.length === 0 && <tr><td colSpan={5} className="li-empty">Nothing counted. Tick &quot;show the left out&quot; to pick from what was found.</td></tr>}
+            {shown.length === 0 && <tr><td colSpan={5} className="li-empty">{find.trim() ? `No sale found says "${find.trim()}".` : <>Nothing counted. Tick &quot;show the left out&quot; to pick from what was found.</>}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1585,6 +1599,8 @@ const EXTRA_CSS = `
 .la-rule-fields { display: flex; flex-wrap: wrap; gap: 6px; }
 .la-rule-fields .li-search { flex: 1 1 240px; min-width: 0; }
 .la-sales-head, .la-sales-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; }
+.la-sales-find { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; font-size: 13px; margin: 6px 0; }
+.la-sales-find .li-search { flex: 1 1 260px; max-width: 420px; }
 .la-sales-table td, .la-sales-table th { font-size: 12.5px; }
 .la-sales-table tr.ended td { opacity: .55; }
 .la-copy { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 104px; font-size: 12px; text-align: center; }

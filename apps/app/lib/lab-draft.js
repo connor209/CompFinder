@@ -27,6 +27,7 @@
  */
 
 import { keyForLanguage } from "./lab-copies.js";
+import CardUploaderCsv from "./carduploader.js";
 import { splitLotCost } from "./card-costs.js";
 import { evidencePrice, picksDiffer } from "./lab-evidence.js";
 import { ruleKeyFor, saleBreaksRule, isEmptyRule } from "./price-rules.js";
@@ -65,6 +66,41 @@ export function mergeGroups(existing, groups, file, { anyLanguage = false, overs
     });
   }
   return { rows: list, refused, added };
+}
+
+/**
+ * Rows saved with a card number Excel had turned into a date ("06-Dec" for
+ * 6/12), put right — the number, the title, the card the listing is written
+ * from and the listing key (its number part). Their sold comps came from a
+ * search for "06-Dec" and go, as on a language change, with any price that
+ * only came from them; a typed price stays. A listed row is never touched.
+ *
+ * Run when a batch is opened, so a batch loaded before the reader learned
+ * the day-first shape (2026-11-26, the DP Trainer Kit cards) mends itself
+ * instead of needing its cards reloaded — which Add copies refuses anyway,
+ * since the SKUs are already in it. Returns the SAME array when nothing
+ * needed mending, so opening a clean batch saves nothing.
+ */
+export function repairDateNumbers(rows) {
+  let changed = false;
+  const out = (rows || []).map((r) => {
+    if (!r || r.result?.ok || !r.cardNumber) return r;
+    const fixed = CardUploaderCsv.repairExcelDateMangling(r.cardNumber);
+    if (fixed === r.cardNumber) return r;
+    changed = true;
+    const parts = String(r.key || "").split("|");
+    if (parts.length >= 4) parts[1] = fixed.toLowerCase();
+    const fromComps = r.comps?.pence != null && r.pricePence === r.comps.pence;
+    return {
+      ...r,
+      cardNumber: fixed,
+      title: CardUploaderCsv.repairTitle(r.title, r.cardNumber, fixed),
+      card: r.card ? { ...r.card, number: fixed } : r.card,
+      key: parts.length >= 4 ? parts.join("|") : r.key,
+      comps: null, picks: null, checkedAt: null, pricePence: fromComps ? null : r.pricePence
+    };
+  });
+  return changed ? out : rows;
 }
 
 /**
