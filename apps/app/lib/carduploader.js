@@ -41,18 +41,41 @@ const CardUploaderCsv = (() => {
 
   /**
    * Reverses Excel/Sheets' date auto-conversion of a bare "N/NN"-style card
-   * number into "Mmm-NN" (e.g. "4/99" -> "Apr-99"). Only fires on an exact,
-   * confident match — a genuinely different value that happens to look like
-   * "Mmm-NN" for some other reason is very unlikely in this context (card
-   * numbers don't naturally take that shape), but this stays conservative
-   * on purpose rather than guessing on anything looser.
+   * number. Excel writes it back one of two ways, and both are reversed:
+   *
+   *  - "Mmm-NN" when the second number can't be a day: "4/99" -> "Apr-99",
+   *    read as April 1999.
+   *  - "DD-Mmm" when both could be a day and a month: "6/12" -> "06-Dec",
+   *    read UK-style (day first) as 6 December, so the numerator is the day
+   *    and the denominator the month. Found on 2026-11-26 in the DP Trainer
+   *    Kit cards (Riolu 6/12, Geodude 1/11, Graveler 2/11), which came through
+   *    as "06-Dec", "01-Nov", "02-Nov" and found no sales at all. Day-first
+   *    because this business's Excel is en-GB; a US Excel would have written
+   *    "12-Jun" for the same card, which this would read as 12/6.
+   *
+   * Only an exact match is touched — a card number never naturally takes
+   * either shape, and anything looser is left as it came.
    */
   function repairExcelDateMangling(cardNumber) {
-    const m = /^([A-Za-z]{3})-(\d{1,4})$/.exec((cardNumber || "").trim());
-    if (!m) return cardNumber;
-    const monthIndex = MONTHS.indexOf(m[1].toLowerCase());
-    if (monthIndex === -1) return cardNumber;
-    return `${monthIndex + 1}/${m[2]}`;
+    const v = (cardNumber || "").trim();
+    let m = /^([A-Za-z]{3})-(\d{1,4})$/.exec(v);
+    if (m) {
+      const monthIndex = MONTHS.indexOf(m[1].toLowerCase());
+      return monthIndex === -1 ? cardNumber : `${monthIndex + 1}/${m[2]}`;
+    }
+    m = /^(\d{1,2})-([A-Za-z]{3})$/.exec(v);
+    if (m) {
+      const monthIndex = MONTHS.indexOf(m[2].toLowerCase());
+      return monthIndex === -1 ? cardNumber : `${Number(m[1])}/${monthIndex + 1}`;
+    }
+    return cardNumber;
+  }
+
+  /** The same repair inside a title: the mangled number as a whole word, once. */
+  function repairTitle(title, raw, repaired) {
+    if (!title || !raw || raw === repaired) return title;
+    const esc = raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return title.replace(new RegExp(`(^|\\s)${esc}(?=\\s|$)`), `$1${repaired}`);
   }
 
   // ---- RFC4180-ish CSV parser (handles quoted fields, embedded commas,
@@ -186,7 +209,7 @@ const CardUploaderCsv = (() => {
         const str = (key) => (r[key] || "").trim();
         return {
           sku: r["CustomLabel"] || "",
-          title: r["*Title"] || "",
+          title: repairTitle(r["*Title"] || "", rawCardNumber, cardNumber),
           cardName: (r["*C:Card Name"] || "").trim(),
           cardNumber,
           cardNumberRepaired: cardNumber !== rawCardNumber,
@@ -345,7 +368,7 @@ const CardUploaderCsv = (() => {
     return { query, nameTokens, wantsReverseHolo, stamped: !!CompFinderPricing.subjectStampFrom(item.title || ""), set: setIsUsable ? item.set : null };
   }
 
-  return { parseCsv, rowsToObjects, mapConditionLabel, extractItems, splitPicUrls, itemSpecifics, buildQueryFromItem, languageInTitle, GENERIC_SET_VALUES };
+  return { parseCsv, rowsToObjects, mapConditionLabel, extractItems, repairExcelDateMangling, repairTitle, splitPicUrls, itemSpecifics, buildQueryFromItem, languageInTitle, GENERIC_SET_VALUES };
 })();
 
 export default CardUploaderCsv;

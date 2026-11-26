@@ -429,6 +429,13 @@ stream` (the relay, only while streaming).
   listing path, never the descriptor value as the ConditionID, and no Damaged
   grade eBay doesn't have.
 
+- `scripts/check-exceldates.mjs` — a card number Excel made a date: both
+  shapes reversed ("Apr-99" is 4/99, and day-first "06-Dec" is 6/12, the DP
+  Trainer Kit cards of 2026-11-26), the title mended with it, real numbers and
+  codes untouched, and a batch saved before the fix mended when Add copies
+  opens it — number, title, key, its wrong-search comps dropped, a typed price
+  and a listed row kept.
+
 Every case in the first two is a real expansion code or a real sold-listing title. The
 false-positive cases matter more than the true ones: each is something a draft
 rule wrongly excluded, kept so a later "obvious" widening of a pattern fails

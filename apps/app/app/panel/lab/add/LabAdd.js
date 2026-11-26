@@ -5,7 +5,7 @@ import CardUploaderCsv from "@/lib/carduploader.js";
 import { groupsFromItems, listingForGroup, priceFromComps } from "@/lib/lab-copies.js";
 import { renderListing, TITLE_MAX } from "@/lib/listing-template.js";
 import {
-  DRAFT_KEY, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
+  DRAFT_KEY, repairDateNumbers, mergeGroups, liveCopies, groupToSend, rowStatus, STATUS_TEXT, LISTABLE, applyBulk, parsePrice,
   FILTERS, filterRows, sortRows, tickedOnScreen, draftTotals, serialiseDraft, restoreDraft, isThin,
   LANGUAGES, DECISION_TEXT, unreadableRows, settleSent, compsShown, applyCardRule, ruleFeedbackArgs
 } from "@/lib/lab-draft.js";
@@ -228,6 +228,9 @@ export default function LabAdd() {
           revRef.current = b.rev;
           MEM.rev.set(b.id, b.rev);
           savedRef.current = JSON.stringify(b.rows);
+          // A card number Excel made a date ("06-Dec") is mended on open; the
+          // rows then differ from what was saved, so the batch saves itself.
+          startRows = repairDateNumbers(startRows);
           rememberOpen(b.id, { batch: { id: b.id, name: b.name, updated_at: b.updated_at }, rows: startRows, rev: b.rev, savedJson: savedRef.current });
           setRows(startRows);
         } else {
@@ -379,7 +382,7 @@ export default function LabAdd() {
     MEM.rev.set(got.batch.id, got.batch.rev);
     savedRef.current = JSON.stringify(got.batch.rows);
     conflictRef.current = false;
-    setRows(got.batch.rows);
+    setRows(repairDateNumbers(got.batch.rows));
     setSaveState("saved");
     refreshView();
   }
