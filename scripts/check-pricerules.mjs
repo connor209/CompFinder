@@ -24,7 +24,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { ruleKeyFor, normaliseRule, saleBreaksRule, isEmptyRule, describeRule, rulesByKey, ruleComment, ruleTagsFromComment, normaliseSaleNote, saleComment, saleTagFromComment, ruleKindForReason } from "../apps/app/lib/price-rules.js";
 import { normaliseCard, planCard, evaluateCard } from "../apps/app/lib/batch-comps.js";
-import { applyCardRule, ruleFeedbackArgs, compsShown, groupToSend } from "../apps/app/lib/lab-draft.js";
+import { applyCardRule, ruleFeedbackArgs, compsShown, groupToSend, ruleOfRow, ruleTookOut, filterRows } from "../apps/app/lib/lab-draft.js";
 import { evidencePrice } from "../apps/app/lib/lab-evidence.js";
 import { feedbackRecord, feedbackSummary } from "../apps/app/lib/price-feedback.js";
 
@@ -121,6 +121,17 @@ eq("…and the figure is the original", back.comps.pence, startPence);
 const listed = { ...r1, result: { ok: true } };
 ok("a listed row is left alone", applyCardRule([listed], ruleKeyFor(row), stamped)[0] === listed);
 
+// ---- a rule carried into a new batch is said on the row ----
+const saved = new Map([[ruleKeyFor(row), stamped]]);
+const fresh = { ...row, id: 9, title: "Shedinja", copies: [], comps: null };
+eq("a saved rule is found for the same card in a new batch, before it is priced", ruleOfRow(fresh, saved), stamped);
+eq("…and for the same card in another condition", ruleOfRow({ ...fresh, condition: "MP" }, saved), stamped);
+eq("another card has none", ruleOfRow({ ...fresh, cardNumber: "15/107" }, saved), null);
+eq("an empty rule is no rule", ruleOfRow(fresh, new Map([[ruleKeyFor(row), { kinds: [], words: [], note: "x" }]])), null);
+eq("the rule a row was filtered with counts too, with no saved rules", ruleOfRow(a1, null), stamped);
+eq("what it took out is counted off the sales", [ruleTookOut(a1), ruleTookOut(fresh)], [1, 0]);
+eq("Has a rule lists just those", filterRows([fresh, { ...fresh, id: 10, cardNumber: "15/107" }], { filter: "rule", rules: saved }).map((r) => r.id), [9]);
+
 // ---- feedback ----
 const comment = ruleComment(normaliseRule({ kinds: ["stamped"], words: ["shadowless"], note: "no stamp on this one" }));
 eq("the comment carries the rule", comment, "[rule: stamped, word:shadowless] no stamp on this one");
@@ -147,6 +158,7 @@ eq("the export tallies why sales were unticked", feedbackSummary({ votes: [sf] }
 ok("notes never go to eBay", !("saleNotes" in groupToSend({ ...r1, copies: [], saleNotes: { a: note } })));
 const page = readFileSync("apps/app/app/panel/lab/add/LabAdd.js", "utf8");
 ok("an unticked, noted or ruled-out sale stays in the table", /e\.reasonCode === "yourRule" \|\| notes\[String\(e\.id\)\]/.test(page));
+ok("the row says a rule is in force", /className="la-rule-badge"/.test(page) && /ruleOfRow\(r, cardRules\)/.test(page) && /rules: cardRules/.test(page));
 ok("every sale offers a note, not only an unticked one", /unticked \? "✎ why not\?" : "✎ add a note"/.test(page));
 ok("the sales list inside a card still scrolls up and down (clip on one axis turns the other off)", /\.la-open \.li-scroll \{[^}]*overflow-x: hidden; overflow-y: auto;/.test(page) && !/\.la-open \.li-scroll \{[^}]*clip/.test(page));
 ok("a hidden column is shrunk, never removed (the open card's colSpan would make a ghost column)", /\.li-table\.la-table \.md-hide \{ display: table-cell; width: 0;/.test(page) && /\.li-table\.la-table \.sm-hide \{ display: table-cell; width: 0;/.test(page));

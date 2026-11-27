@@ -1515,6 +1515,13 @@ only file naming `card_price_rules` (migration 050).
   and — when the reason is a rule kind and you tick it — made this card's rule
   in the same step. A rule keeps your picks, less what it took out.
 
+- **A rule in force is said on the row** (asked for 2026-11-26): a card
+  with a saved rule — set in this batch or any other — shows **📏 Rule: no
+  stamped · took out 3 sales** under its name, hover for your note, and
+  **Has a rule** filters to them (`ruleOfRow()`, `ruleTookOut()` in
+  `lab-draft.js`). It shows before the card is priced too, so a rule carried
+  into a new batch is never silent.
+
 **The app is 1600px wide, not 1080** (2026-11-25), and **the Add copies table
 never scrolls sideways**: fixed column widths, text wraps, File hides under
 1200px. Scrolled sideways, the tick column went off the left edge and rows
